@@ -5,13 +5,11 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: [
-          "Pretendard Variable",
-          "Pretendard",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "system-ui",
-          "sans-serif",
+        serif: [
+          "Nanum Myeongjo",
+          "Noto Serif KR",
+          "Batang",
+          "serif",
         ],
       },
       colors: {

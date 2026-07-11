@@ -87,7 +87,7 @@ export default function ResultStage({ result, onBack, onRestart }: Props) {
         className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
       >
         <div
-          className="font-sans leading-relaxed text-ink"
+          className="font-serif leading-relaxed text-ink"
           style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
           dangerouslySetInnerHTML={{ __html: html }}
         />

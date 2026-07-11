@@ -1,4 +1,5 @@
-@import "pretendard/dist/web/variable/pretendardvariable.css";
+@import "@fontsource/nanum-myeongjo/korean-400.css";
+@import "@fontsource/nanum-myeongjo/korean-700.css";
 @import "katex/dist/katex.min.css";
 
 @tailwind base;

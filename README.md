@@ -61,8 +61,9 @@ MATHPIX_APP_KEY=...
 
 ## 가독성 관련 선택
 
-- 본문 폰트는 한글/영문 모두 가독성이 좋은 **Pretendard Variable**을
-  사용합니다.
+- 본문 폰트는 시험지/문제집 느낌의 가독성 좋은 명조체인
+  **나눔명조(Nanum Myeongjo)**를 사용합니다(`@fontsource/nanum-myeongjo`로
+  자체 호스팅, 외부 CDN 호출 없음).
 - 수식은 **KaTeX**로 렌더링하며, 결과 화면에서 폰트 크기(보통/크게/아주
   크게)를 즉시 조절할 수 있습니다.
 - 필요하면 `tailwind.config.ts`의 `fontFamily`나
