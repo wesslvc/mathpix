@@ -1,0 +1,16 @@
+@import "pretendard/dist/web/variable/pretendardvariable.css";
+@import "katex/dist/katex.min.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  background-color: #f5f6f8;
+}
+
+/* KaTeX 수식이 본문 텍스트와 잘 어우러지도록 여백을 살짝 조정 */
+.katex-display {
+  margin: 0.75em 0;
+}
