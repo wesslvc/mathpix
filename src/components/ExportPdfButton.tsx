@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
 
 type Props = {
   source: string;
@@ -10,8 +10,14 @@ type Props = {
 
 const PAGE_WIDTH = 595.28; // A4 (pt)
 const PAGE_HEIGHT = 841.89;
-const MARGIN = 40;
-const SOURCE_AREA_HEIGHT = 40;
+const MARGIN_X = 34;
+const MARGIN_TOP = 34;
+const MARGIN_BOTTOM = 34;
+const COLUMN_GAP = 16; // 가운데 구분선 양옆 여백
+const LABEL_GAP = 12; // 출처 라벨과 문제 이미지 사이 간격
+
+// 시험지처럼 왼쪽 컬럼에 문제를 배치한다. 컬럼 폭 = 페이지 절반 - 여백.
+const COLUMN_WIDTH = PAGE_WIDTH / 2 - COLUMN_GAP - MARGIN_X;
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -35,16 +41,15 @@ async function fetchArrayBuffer(url: string, label: string): Promise<ArrayBuffer
 /**
  * 출처 표기 텍스트를 브라우저 canvas로 그려 PNG data URL로 반환한다.
  * pdf-lib에 한글 폰트를 직접 임베드하면 fontkit이 서브셋 폰트의 글리프
- * 폭 계산에서 "Trying to access beyond buffer length" 에러를 던지므로,
- * 브라우저가 네이티브로 렌더링한 텍스트 이미지를 대신 삽입한다.
+ * 폭 계산에서 에러를 던지므로, 브라우저가 네이티브로 렌더링한 텍스트
+ * 이미지를 대신 삽입한다.
  */
-function renderSourceLabel(source: string): {
+function renderSourceLabel(text: string): {
   dataUrl: string;
   width: number;
   height: number;
 } {
-  const text = `출처: ${source}`;
-  const fontSizePt = 10;
+  const fontSizePt = 9;
   const scale = 3; // 선명도를 위해 3배 해상도로 그린다.
   const fontPx = fontSizePt * scale;
 
@@ -63,7 +68,7 @@ function renderSourceLabel(source: string): {
 
   // 캔버스 크기를 바꾸면 컨텍스트가 초기화되므로 폰트를 다시 지정한다.
   ctx.font = `${fontPx}px ${fontFamily}`;
-  ctx.fillStyle = "#666666";
+  ctx.fillStyle = "#333333";
   ctx.textBaseline = "middle";
   ctx.fillText(text, 0, canvasHeight / 2);
 
@@ -88,12 +93,9 @@ export default function ExportPdfButton({ source, imageUrls }: Props) {
       if (document.fonts?.ready) {
         await document.fonts.ready;
       }
-      const label = renderSourceLabel(source);
+      const label = renderSourceLabel(`문항 출처 : ${source}`);
       const labelBytes = await (await fetch(label.dataUrl)).arrayBuffer();
       const labelImage = await pdfDoc.embedPng(labelBytes);
-
-      const availableWidth = PAGE_WIDTH - MARGIN * 2;
-      const availableHeight = PAGE_HEIGHT - MARGIN * 2 - SOURCE_AREA_HEIGHT;
 
       const skipped: number[] = [];
 
@@ -114,27 +116,43 @@ export default function ExportPdfButton({ source, imageUrls }: Props) {
           continue;
         }
 
+        const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+
+        // 가운데 세로 구분선 (시험지 느낌)
+        page.drawLine({
+          start: { x: PAGE_WIDTH / 2, y: MARGIN_BOTTOM },
+          end: { x: PAGE_WIDTH / 2, y: PAGE_HEIGHT - MARGIN_TOP },
+          thickness: 0.7,
+          color: rgb(0.75, 0.75, 0.75),
+        });
+
+        // 출처 라벨: 왼쪽 컬럼 상단
+        const labelTop = PAGE_HEIGHT - MARGIN_TOP;
+        page.drawImage(labelImage, {
+          x: MARGIN_X,
+          y: labelTop - label.height,
+          width: label.width,
+          height: label.height,
+        });
+
+        // 문제 이미지: 출처 아래, 왼쪽 정렬. 저장된 이미지는 2배 해상도(PNG)라
+        // 절반 크기가 자연 크기다. 컬럼 폭/남은 높이를 넘으면 함께 축소한다.
+        const maxImgHeight =
+          labelTop - label.height - LABEL_GAP - MARGIN_BOTTOM;
         const scale = Math.min(
-          availableWidth / image.width,
-          availableHeight / image.height,
-          1,
+          COLUMN_WIDTH / image.width,
+          maxImgHeight / image.height,
+          0.5,
         );
         const drawWidth = image.width * scale;
         const drawHeight = image.height * scale;
+        const imgTop = labelTop - label.height - LABEL_GAP;
 
-        const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
         page.drawImage(image, {
-          x: (PAGE_WIDTH - drawWidth) / 2,
-          y: PAGE_HEIGHT - MARGIN - drawHeight,
+          x: MARGIN_X,
+          y: imgTop - drawHeight,
           width: drawWidth,
           height: drawHeight,
-        });
-
-        page.drawImage(labelImage, {
-          x: (PAGE_WIDTH - label.width) / 2,
-          y: MARGIN / 2,
-          width: label.width,
-          height: label.height,
         });
       }
 
