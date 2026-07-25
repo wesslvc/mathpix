@@ -74,12 +74,23 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
       .upload(path, blob, { contentType: "image/png" });
     if (uploadError) throw uploadError;
 
+    // 새 오답은 목록 맨 뒤에 오도록 기존 최대 sort_order + 1을 준다.
+    const { data: maxRow } = await supabase
+      .from("problems")
+      .select("sort_order")
+      .eq("category_id", categoryId)
+      .order("sort_order", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+    const nextOrder = (maxRow?.sort_order ?? 0) + 1;
+
     const { error: insertError } = await supabase.from("problems").insert({
       category_id: categoryId,
       user_id: user.id,
       image_path: path,
       latex: result?.latex ?? null,
       text_content: result?.text ?? null,
+      sort_order: nextOrder,
     });
     if (insertError) {
       // 실패 시 업로드한 이미지도 함께 정리한다.
