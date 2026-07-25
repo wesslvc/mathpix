@@ -28,6 +28,7 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   이메일/비밀번호 방식 유지.)
 - PDF는 **한 페이지에 문제 1개, 하단에 출처 표기**.
 - 원본 사진은 저장하지 않고 변환 결과만 저장.
+- 저장된 오답 이미지는 **삭제도 가능**해야 함(DeleteProblemButton).
 
 ## 이미 끝난 것
 
@@ -38,10 +39,10 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 - 앱 이름 "수학오답프린트 제작"
 - Supabase 연동 코드 전체: **이메일/비밀번호 로그인+회원가입**(`src/app/login/page.tsx`),
   이메일 확인 콜백(`src/app/auth/callback/route.ts`), 미들웨어 인증 가드,
-  대시보드(실모 목록), 실모추가 폼, 카테고리 상세(오답추가 + 저장),
+  대시보드(실모 목록), 실모추가 폼, 카테고리 상세(오답추가 + 저장 + 삭제),
   PDF 내보내기(`pdf-lib`)
 - DB 스키마 SQL: `supabase/migrations/0001_init.sql`
-  (categories / problems 테이블 + RLS + `problem-images` 비공개 버킷)
+  (categories / problems 테이블 + RLS + `problem-images` 비공개 버킷, delete 정책 포함)
 - 키가 없으면 앱이 죽지 않고 안내 메시지만 표시하도록 처리 (Mathpix mock, Supabase 안내)
 
 ### 과거에 해결한 버그 (재발 시 참고)
@@ -56,6 +57,14 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 - `main` 브랜치가 원격에서 통째로 삭제된 적이 있음(원인 불명). 커밋은 GitHub에
   GC되지 않고 SHA로 남아 있어서 `git fetch origin <sha>`로 복구 가능했음. 브랜치가
   안 보이면 먼저 Vercel 배포 메타데이터의 `githubCommitSha`로 마지막 커밋을 찾아볼 것.
+- **Vercel 프로젝트 `mathocr`의 git 웹훅이 이 세션의 로컬 git 프록시를 통한 push에는
+  반응하지 않음** (GitHub API로는 정상 반영되는데도 자동 배포가 안 트리거됨). 그래서
+  `deploy_to_vercel`로 파일을 직접 올려 배포했는데, 업로드 용량 문제로
+  `public/fonts/NanumMyeongjo-Regular.woff`(930KB)를 제외하고 배포한 적이 있음 →
+  PDF 내보내기 시 pdf-lib/fontkit이 404 HTML을 폰트로 파싱하려다
+  "Trying to access beyond buffer length" 에러 발생. **폰트 파일은 반드시 포함해서
+  배포해야 함.** 이 커밋은 GitHub REST API(`create_or_update_file`)로 직접 만든
+  것인데, 이것도 웹훅을 트리거하는지 테스트 중.
 
 ## 남은 작업 (여기서부터 이어서)
 
@@ -68,14 +77,17 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 3. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
    `MATHPIX_APP_ID`, `MATHPIX_APP_KEY`가 들어있는지 확인.
-4. **실제 동작 검증** — 회원가입 → 이메일 확인 → 로그인 → 실모추가 → 오답추가 →
-   PDF 내보내기 전 과정.
+4. **폰트 파일 포함 재배포** — PDF 내보내기가 정상 동작하도록 font까지 포함해서
+   배포를 완료할 것.
+5. **실제 동작 검증** — 회원가입 → 이메일 확인 → 로그인 → 실모추가 → 오답추가 →
+   오답 삭제 → PDF 내보내기 전 과정.
 
 ## 주의할 점
 
 - **Vercel 프로젝트 `mathpix`의 Production Branch는 `main`을 따라가지 않는다.**
   실제 서비스 중인 배포는 `mathocr` 프로젝트 쪽이며, 그쪽은 Production Branch가
-  `main`으로 정상 연결되어 있어 `main`에 push하면 자동으로 재배포된다.
+  `main`으로 정상 연결되어 있어야 하지만 이 세션에서는 자동 배포가 트리거되지 않았다
+  (원인 불명, 위 참고).
 - `main`에 직접 push하는 것이 이 저장소의 관행이었음(PR 없이). 다만 세션 지침에서
   특정 작업 브랜치를 지정한 경우 그 브랜치에서 작업하고, `main`에 반영할 때는
   사용자에게 확인받을 것.
