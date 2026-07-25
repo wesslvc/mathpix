@@ -5,7 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { categoryLabel, type Category, type Problem } from "@/lib/supabase/types";
 import AddProblemFlow from "@/components/AddProblemFlow";
 import ExportPdfButton from "@/components/ExportPdfButton";
-import DeleteProblemButton from "@/components/DeleteProblemButton";
+import ProblemGallery, {
+  type GalleryProblem,
+} from "@/components/ProblemGallery";
 
 export default async function CategoryPage({
   params,
@@ -40,7 +42,8 @@ export default async function CategoryPage({
     .from("problems")
     .select("*")
     .eq("category_id", id)
-    .order("created_at", { ascending: false })
+    .order("sort_order", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: true })
     .returns<Problem[]>();
 
   const paths = (problems ?? []).map((p) => p.image_path);
@@ -62,6 +65,20 @@ export default async function CategoryPage({
     .map((p) => signedUrlByPath.get(p.image_path))
     .filter((url): url is string => Boolean(url));
 
+  const galleryProblems: GalleryProblem[] = (problems ?? [])
+    .map((p) => {
+      const imageUrl = signedUrlByPath.get(p.image_path);
+      if (!imageUrl) return null;
+      return {
+        id: p.id,
+        imageUrl,
+        imagePath: p.image_path,
+        text: p.text_content || p.latex || "",
+        sortOrder: p.sort_order,
+      };
+    })
+    .filter((p): p is GalleryProblem => p !== null);
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
       <header className="flex items-start justify-between gap-4">
@@ -81,32 +98,7 @@ export default async function CategoryPage({
 
       <AddProblemFlow categoryId={category.id} />
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        {(problems ?? []).map((problem) => {
-          const url = signedUrlByPath.get(problem.image_path);
-          if (!url) return null;
-          return (
-            <div key={problem.id} className="relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={url}
-                alt="저장된 오답"
-                className="w-full rounded-lg border border-slate-200 bg-white object-contain shadow-sm"
-              />
-              <DeleteProblemButton
-                problemId={problem.id}
-                imagePath={problem.image_path}
-              />
-            </div>
-          );
-        })}
-      </div>
-
-      {(problems ?? []).length === 0 && (
-        <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
-          아직 저장된 오답이 없습니다. 위에서 오답을 추가해보세요.
-        </p>
-      )}
+      <ProblemGallery problems={galleryProblems} />
     </main>
   );
 }

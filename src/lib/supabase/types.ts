@@ -15,6 +15,7 @@ export type Problem = {
   image_path: string;
   latex: string | null;
   text_content: string | null;
+  sort_order: number | null;
   created_at: string;
 };
 
