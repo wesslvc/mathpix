@@ -50,6 +50,12 @@ export default function Home() {
     setStage("upload");
   }
 
+  function handleImageError(message: string) {
+    setError(message);
+    setImageSrc(null);
+    setStage("upload");
+  }
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
       <header>
@@ -67,7 +73,10 @@ export default function Home() {
       )}
 
       {stage === "upload" && (
-        <ImageUploader onImageSelected={handleImageSelected} />
+        <ImageUploader
+          onImageSelected={handleImageSelected}
+          onError={handleImageError}
+        />
       )}
 
       {stage === "crop" && imageSrc && (
@@ -75,6 +84,7 @@ export default function Home() {
           imageSrc={imageSrc}
           onConfirm={handleCropConfirm}
           onCancel={handleRestart}
+          onError={handleImageError}
         />
       )}
 

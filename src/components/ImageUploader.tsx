@@ -4,9 +4,12 @@ import { useCallback, useRef, useState } from "react";
 
 type Props = {
   onImageSelected: (file: File) => void;
+  onError: (message: string) => void;
 };
 
-export default function ImageUploader({ onImageSelected }: Props) {
+const HEIC_PATTERN = /\.(heic|heif)$/i;
+
+export default function ImageUploader({ onImageSelected, onError }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -14,10 +17,22 @@ export default function ImageUploader({ onImageSelected }: Props) {
     (files: FileList | null) => {
       const file = files?.[0];
       if (!file) return;
+
+      if (
+        file.type === "image/heic" ||
+        file.type === "image/heif" ||
+        HEIC_PATTERN.test(file.name)
+      ) {
+        onError(
+          "HEIC/HEIF 형식은 브라우저에서 열 수 없습니다. 아이폰 설정 > 카메라 > 포맷을 '호환 우선'으로 바꾸거나, 사진 공유 시 JPG로 변환해서 다시 시도해주세요.",
+        );
+        return;
+      }
+
       if (!file.type.startsWith("image/")) return;
       onImageSelected(file);
     },
-    [onImageSelected],
+    [onImageSelected, onError],
   );
 
   return (

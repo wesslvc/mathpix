@@ -11,6 +11,7 @@ type Props = {
   imageSrc: string;
   onConfirm: (croppedDataUrl: string) => void;
   onCancel: () => void;
+  onError: (message: string) => void;
 };
 
 function rectToPercentCrop(rect: CropRect, naturalWidth: number, naturalHeight: number): Crop {
@@ -23,10 +24,16 @@ function rectToPercentCrop(rect: CropRect, naturalWidth: number, naturalHeight: 
   };
 }
 
-export default function CropStage({ imageSrc, onConfirm, onCancel }: Props) {
+export default function CropStage({ imageSrc, onConfirm, onCancel, onError }: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [crop, setCrop] = useState<Crop>();
   const [autoDetected, setAutoDetected] = useState(false);
+
+  function handleImageError() {
+    onError(
+      "이미지를 불러올 수 없습니다. 이 브라우저가 지원하지 않는 형식(HEIC 등)일 수 있으니 JPG/PNG로 다시 시도해주세요.",
+    );
+  }
 
   function handleImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
     const img = e.currentTarget;
@@ -91,6 +98,7 @@ export default function CropStage({ imageSrc, onConfirm, onCancel }: Props) {
             src={imageSrc}
             alt="업로드한 문제 이미지"
             onLoad={handleImageLoad}
+            onError={handleImageError}
             className="max-h-[70vh] w-auto"
           />
         </ReactCrop>
