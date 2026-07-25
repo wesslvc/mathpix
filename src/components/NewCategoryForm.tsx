@@ -56,7 +56,15 @@ export default function NewCategoryForm() {
       router.push(`/categories/${data.id}`);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "실모 추가에 실패했습니다.");
+      // Supabase 에러는 Error 인스턴스가 아니라 { message, ... } 객체라
+      // instanceof만 보면 원인이 묻힌다. message 필드를 직접 꺼내 보여준다.
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "object" && err !== null && "message" in err
+            ? String((err as { message: unknown }).message)
+            : "실모 추가에 실패했습니다.";
+      setError(message);
     } finally {
       setIsSubmitting(false);
     }
