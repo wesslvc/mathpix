@@ -14,6 +14,21 @@ const PAGE_HEIGHT = 841.89;
 const MARGIN = 40;
 const SOURCE_AREA_HEIGHT = 40;
 
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function isPng(bytes: ArrayBuffer): boolean {
+  const head = new Uint8Array(bytes.slice(0, 8));
+  return PNG_SIGNATURE.every((byte, i) => head[i] === byte);
+}
+
+async function fetchArrayBuffer(url: string, label: string): Promise<ArrayBuffer> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`${label}을(를) 불러오지 못했습니다 (HTTP ${res.status}).`);
+  }
+  return res.arrayBuffer();
+}
+
 export default function ExportPdfButton({ source, imageUrls }: Props) {
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,16 +40,26 @@ export default function ExportPdfButton({ source, imageUrls }: Props) {
       const pdfDoc = await PDFDocument.create();
       pdfDoc.registerFontkit(fontkit);
 
-      const fontBytes = await fetch("/fonts/NanumMyeongjo-Regular.woff").then((r) =>
-        r.arrayBuffer(),
+      const fontBytes = await fetchArrayBuffer(
+        "/fonts/NanumMyeongjo-Regular.woff",
+        "출처 표기용 폰트",
       );
       const koreanFont = await pdfDoc.embedFont(fontBytes);
 
       const availableWidth = PAGE_WIDTH - MARGIN * 2;
       const availableHeight = PAGE_HEIGHT - MARGIN * 2 - SOURCE_AREA_HEIGHT;
 
-      for (const url of imageUrls) {
-        const imageBytes = await fetch(url).then((r) => r.arrayBuffer());
+      const skipped: number[] = [];
+
+      for (let i = 0; i < imageUrls.length; i++) {
+        const url = imageUrls[i];
+        const imageBytes = await fetchArrayBuffer(url, `${i + 1}번째 오답 이미지`);
+
+        if (!isPng(imageBytes)) {
+          skipped.push(i + 1);
+          continue;
+        }
+
         const image = await pdfDoc.embedPng(imageBytes);
 
         const scale = Math.min(
@@ -65,6 +90,12 @@ export default function ExportPdfButton({ source, imageUrls }: Props) {
         });
       }
 
+      if (pdfDoc.getPageCount() === 0) {
+        throw new Error(
+          `저장된 오답 이미지를 모두 불러오지 못해 PDF를 만들 수 없습니다 (${skipped.length}개 실패).`,
+        );
+      }
+
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes as BlobPart], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
@@ -73,6 +104,12 @@ export default function ExportPdfButton({ source, imageUrls }: Props) {
       link.download = `${source.replace(/[\\/:*?"<>|]/g, "_")}.pdf`;
       link.click();
       URL.revokeObjectURL(url);
+
+      if (skipped.length > 0) {
+        setError(
+          `${skipped.join(", ")}번째 이미지는 손상되어 PDF에서 제외했습니다.`,
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "PDF 내보내기에 실패했습니다.");
     } finally {
