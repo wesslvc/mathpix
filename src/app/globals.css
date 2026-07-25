@@ -15,3 +15,26 @@ body {
 .katex-display {
   margin: 0.75em 0;
 }
+
+.mmd-paragraph {
+  margin: 0 0 1.1em;
+}
+
+.mmd-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+.mmd-problem-number {
+  font-size: 1.15em;
+}
+
+.mmd-box {
+  margin: 1.1em 0;
+  padding: 1.1em 1.4em;
+  border: 1.5px solid #94a3b8;
+  border-radius: 4px;
+}
+
+.mmd-box:last-child {
+  margin-bottom: 0;
+}

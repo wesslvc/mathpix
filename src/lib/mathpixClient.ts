@@ -7,7 +7,13 @@ const MOCK_RESPONSE: RecognizeResponse = {
   confidence: 0.5,
   latex: "\\int_0^1 x^2 \\,dx = \\dfrac{1}{3}",
   text:
-    "(Mathpix API 키가 아직 설정되지 않아 예시 결과를 표시합니다.)\n\n1. 다음 정적분의 값을 구하시오.\n\n$$\\int_0^1 x^2 \\,dx = \\dfrac{1}{3}$$",
+    "(Mathpix API 키가 아직 설정되지 않아 예시 결과를 표시합니다.)\n\n" +
+    "21. 함수 $f(x)$가 다음 조건을 만족시킨다.\n\n" +
+    "> 모든 실수 $x$에 대하여\n" +
+    "> $$f(x) = \\int_0^x (t^2 - 2t) \\, dt$$\n" +
+    "> 이다.\n\n" +
+    "$f(2)$의 값을 구하시오. [4점]\n\n" +
+    "$$\\int_0^1 x^2 \\,dx = \\dfrac{1}{3}$$",
 };
 
 type RecognizeOptions = {

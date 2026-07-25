@@ -1,107 +1,85 @@
-"use client";
+import Link from "next/link";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { createClient } from "@/lib/supabase/server";
+import type { Category } from "@/lib/supabase/types";
+import NewCategoryForm from "@/components/NewCategoryForm";
+import LogoutButton from "@/components/LogoutButton";
 
-import { useState } from "react";
-import ImageUploader from "@/components/ImageUploader";
-import CropStage from "@/components/CropStage";
-import ResultStage from "@/components/ResultStage";
-import type { RecognizeResponse } from "@/lib/types";
-
-type Stage = "upload" | "crop" | "loading" | "result";
-
-export default function Home() {
-  const [stage, setStage] = useState<Stage>("upload");
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [result, setResult] = useState<RecognizeResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  function handleImageSelected(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImageSrc(reader.result as string);
-      setError(null);
-      setStage("crop");
-    };
-    reader.readAsDataURL(file);
+export default async function DashboardPage() {
+  if (!isSupabaseConfigured()) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
+        <h1 className="text-xl font-bold text-ink">수학오답프린트 제작</h1>
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Supabase 설정이 아직 완료되지 않아 로그인/저장 기능을 사용할 수
+          없습니다. <code>NEXT_PUBLIC_SUPABASE_URL</code>,{" "}
+          <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>를 설정해주세요.
+        </p>
+      </main>
+    );
   }
 
-  async function handleCropConfirm(croppedDataUrl: string) {
-    setStage("loading");
-    setError(null);
-    try {
-      const res = await fetch("/api/mathpix", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: croppedDataUrl }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "인식에 실패했습니다.");
-      setResult(json as RecognizeResponse);
-      setStage("result");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "알 수 없는 오류");
-      setStage("crop");
-    }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 text-center">
+        <p className="text-sm text-slate-500">
+          로그인이 필요합니다.{" "}
+          <Link href="/login" className="text-blue-600 underline">
+            로그인 페이지로 이동
+          </Link>
+        </p>
+      </main>
+    );
   }
 
-  function handleRestart() {
-    setImageSrc(null);
-    setResult(null);
-    setError(null);
-    setStage("upload");
-  }
-
-  function handleImageError(message: string) {
-    setError(message);
-    setImageSrc(null);
-    setStage("upload");
-  }
+  const { data: categories } = await supabase
+    .from("categories")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .returns<Category[]>();
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
-      <header>
-        <h1 className="text-2xl font-bold text-ink">문제 이미지 재구성기</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          사진을 올리면 문제 영역을 자동으로 찾아주고, 최종 확인 후 Mathpix로
-          인식해 가독성 좋은 이미지로 다시 만들어 드립니다.
-        </p>
+      <header className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-ink">수학오답프린트 제작</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            실모(출처)별로 오답을 모아두고, 나중에 한 번에 PDF로 인쇄하세요.
+          </p>
+        </div>
+        <LogoutButton />
       </header>
 
-      {error && (
-        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      <NewCategoryForm />
 
-      {stage === "upload" && (
-        <ImageUploader
-          onImageSelected={handleImageSelected}
-          onError={handleImageError}
-        />
-      )}
+      <div className="flex flex-col gap-3">
+        {(!categories || categories.length === 0) && (
+          <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+            아직 등록된 실모가 없습니다. 위에서 실모를 추가해보세요.
+          </p>
+        )}
 
-      {stage === "crop" && imageSrc && (
-        <CropStage
-          imageSrc={imageSrc}
-          onConfirm={handleCropConfirm}
-          onCancel={handleRestart}
-          onError={handleImageError}
-        />
-      )}
-
-      {stage === "loading" && (
-        <div className="flex flex-col items-center gap-3 py-20 text-slate-500">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
-          <p>Mathpix로 문제를 인식하는 중입니다...</p>
-        </div>
-      )}
-
-      {stage === "result" && result && (
-        <ResultStage
-          result={result}
-          onBack={() => setStage("crop")}
-          onRestart={handleRestart}
-        />
-      )}
+        {categories?.map((category) => (
+          <Link
+            key={category.id}
+            href={`/categories/${category.id}`}
+            className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm hover:border-blue-400"
+          >
+            <div>
+              <p className="font-semibold text-ink">{category.source}</p>
+              <p className="text-xs text-slate-400">
+                {new Date(category.created_at).toLocaleDateString("ko-KR")} 생성
+              </p>
+            </div>
+            <span className="text-sm text-blue-600">열기 →</span>
+          </Link>
+        ))}
+      </div>
     </main>
   );
 }

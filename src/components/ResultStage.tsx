@@ -9,6 +9,8 @@ type Props = {
   result: RecognizeResponse;
   onBack: () => void;
   onRestart: () => void;
+  /** 지정하면 "오답으로 저장" 버튼이 나타나고, PNG data URL을 인자로 호출된다. */
+  onSaveToCategory?: (pngDataUrl: string) => Promise<void>;
 };
 
 const FONT_SIZES = [
@@ -17,11 +19,19 @@ const FONT_SIZES = [
   { label: "아주 크게", px: 30 },
 ] as const;
 
-export default function ResultStage({ result, onBack, onRestart }: Props) {
+export default function ResultStage({
+  result,
+  onBack,
+  onRestart,
+  onSaveToCategory,
+}: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [fontSizeIdx, setFontSizeIdx] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   const html = useMemo(
     () => renderMathText(result.text || result.latex),
@@ -42,6 +52,24 @@ export default function ResultStage({ result, onBack, onRestart }: Props) {
       link.click();
     } finally {
       setIsExporting(false);
+    }
+  }
+
+  async function handleSaveToCategory() {
+    if (!cardRef.current || !onSaveToCategory) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const dataUrl = await toPng(cardRef.current, {
+        pixelRatio: 2,
+        backgroundColor: "#ffffff",
+      });
+      await onSaveToCategory(dataUrl);
+      setSaved(true);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "저장에 실패했습니다.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -99,7 +127,23 @@ export default function ResultStage({ result, onBack, onRestart }: Props) {
         </p>
       )}
 
+      {saveError && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {saveError}
+        </div>
+      )}
+
       <div className="flex flex-wrap justify-end gap-2">
+        {onSaveToCategory && (
+          <button
+            type="button"
+            onClick={handleSaveToCategory}
+            disabled={isSaving || saved}
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {saved ? "저장됨!" : isSaving ? "저장 중..." : "오답으로 저장"}
+          </button>
+        )}
         <button
           type="button"
           onClick={onRestart}

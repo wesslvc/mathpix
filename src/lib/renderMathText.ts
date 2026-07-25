@@ -9,7 +9,7 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function textToHtml(str: string): string {
+function textToInlineHtml(str: string): string {
   return escapeHtml(str).replace(/\n/g, "<br />");
 }
 
@@ -33,29 +33,18 @@ function normalizeDelimiters(input: string): string {
 }
 
 const LOOKS_LIKE_BARE_LATEX = /\\[a-zA-Z]+/;
+const PROBLEM_NUMBER = /^(\d{1,3}\s*\.)(\s*)/;
 
-/**
- * Mathpix의 mmd(마크다운+수식) 형식 텍스트를 안전한 HTML로 변환한다.
- * "$$...$$"는 블록 수식, "$...$"는 인라인 수식으로, 나머지는 일반 텍스트로 렌더링한다.
- * 델리미터가 전혀 없는데 LaTeX 명령어(백슬래시)만 있는 경우(예: latex_styled를
- * 그대로 받은 경우)는 전체를 블록 수식 하나로 간주해 렌더링한다.
- */
-export function renderMathText(input: string): string {
-  const normalized = normalizeDelimiters(input);
-
-  if (!normalized.includes("$") && LOOKS_LIKE_BARE_LATEX.test(normalized)) {
-    return renderMath(normalized.trim(), true);
-  }
-
+/** 한 문단(블록) 안의 "$$...$$"/"$...$" 수식과 일반 텍스트를 인라인 HTML로 변환한다. */
+function renderInline(text: string): string {
   const pattern = /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
 
   let lastIndex = 0;
   let html = "";
   let match: RegExpExecArray | null;
 
-  while ((match = pattern.exec(normalized)) !== null) {
-    const plain = normalized.slice(lastIndex, match.index);
-    html += textToHtml(plain);
+  while ((match = pattern.exec(text)) !== null) {
+    html += textToInlineHtml(text.slice(lastIndex, match.index));
 
     if (match[1] !== undefined) {
       html += renderMath(match[1].trim(), true);
@@ -66,7 +55,49 @@ export function renderMathText(input: string): string {
     lastIndex = pattern.lastIndex;
   }
 
-  html += textToHtml(normalized.slice(lastIndex));
+  html += textToInlineHtml(text.slice(lastIndex));
 
   return html;
+}
+
+/** 블록의 모든 줄이 ">"로 시작하면(조건 박스 등) 테두리 박스로 렌더링한다. */
+function renderBlock(block: string, isFirst: boolean): string {
+  const lines = block.split("\n");
+  const isBoxed = lines.every((line) => /^\s*>/.test(line));
+
+  if (isBoxed) {
+    const content = lines.map((line) => line.replace(/^\s*>\s?/, "")).join("\n");
+    return `<div class="mmd-box">${renderInline(content)}</div>`;
+  }
+
+  if (isFirst) {
+    const m = block.match(PROBLEM_NUMBER);
+    if (m) {
+      const rest = block.slice(m[0].length);
+      return `<p class="mmd-paragraph"><strong class="mmd-problem-number">${escapeHtml(
+        m[1],
+      )}</strong> ${renderInline(rest)}</p>`;
+    }
+  }
+
+  return `<p class="mmd-paragraph">${renderInline(block)}</p>`;
+}
+
+/**
+ * Mathpix의 mmd(마크다운+수식) 형식 텍스트를 안전한 HTML로 변환한다.
+ * 빈 줄로 구분된 블록마다 문단으로 나누고, ">"로 시작하는 블록은 테두리 박스로,
+ * 첫 블록 맨 앞의 "21." 같은 문제 번호는 굵게 강조해 실제 문제집처럼 보이게 한다.
+ * 델리미터가 전혀 없는데 LaTeX 명령어(백슬래시)만 있는 경우(예: latex_styled를
+ * 그대로 받은 경우)는 전체를 블록 수식 하나로 간주해 렌더링한다.
+ */
+export function renderMathText(input: string): string {
+  const normalized = normalizeDelimiters(input);
+
+  if (!normalized.includes("$") && LOOKS_LIKE_BARE_LATEX.test(normalized)) {
+    return renderMath(normalized.trim(), true);
+  }
+
+  const blocks = normalized.trim().split(/\n\s*\n+/);
+
+  return blocks.map((block, idx) => renderBlock(block, idx === 0)).join("");
 }
