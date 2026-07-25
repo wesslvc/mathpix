@@ -13,9 +13,42 @@ function textToInlineHtml(str: string): string {
   return escapeHtml(str).replace(/\n/g, "<br />");
 }
 
+// 첨자가 옆이 아니라 위/아래로 붙어야 자연스러운 큰 연산자들.
+const LIMIT_OPERATORS = [
+  "sum",
+  "prod",
+  "coprod",
+  "bigcup",
+  "bigcap",
+  "bigsqcup",
+  "bigvee",
+  "bigwedge",
+  "bigodot",
+  "bigotimes",
+  "bigoplus",
+  "biguplus",
+];
+
+/**
+ * Mathpix가 준 LaTeX를 보기 좋게 자동 보정한다.
+ * - ∑, ∏ 같은 큰 연산자는 첨자(n=1, k 등)가 옆이 아니라 위/아래로 붙도록
+ *   `\limits`를 강제한다. (이미 \limits/\nolimits가 있으면 건드리지 않는다.)
+ */
+function enhanceLatex(latex: string): string {
+  const ops = LIMIT_OPERATORS.join("|");
+  const opPattern = new RegExp(
+    "\\\\(" + ops + ")(?![a-zA-Z])(?!\\s*\\\\(?:no)?limits)",
+    "g",
+  );
+  return latex.replace(opPattern, "\\$1\\limits");
+}
+
 function renderMath(latex: string, displayMode: boolean): string {
+  // displaystyle을 강제해 인라인 수식에서도 적분·분수·시그마가 큰직하게
+  // (교과서처럼) 렌더링되도록 한다.
+  const enhanced = `\\displaystyle ${enhanceLatex(latex)}`;
   try {
-    return katex.renderToString(latex, {
+    return katex.renderToString(enhanced, {
       throwOnError: false,
       displayMode,
       strict: "ignore",

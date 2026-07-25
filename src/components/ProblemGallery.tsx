@@ -14,6 +14,12 @@ export type GalleryProblem = {
   sortOrder: number | null;
 };
 
+/** 같은 폴더 안에 새 파일명을 만든다. (덮어쓰기 대신 새 오브젝트로 저장) */
+function siblingPath(imagePath: string): string {
+  const dir = imagePath.split("/").slice(0, -1).join("/");
+  return `${dir}/${crypto.randomUUID()}.png`;
+}
+
 type Props = {
   problems: GalleryProblem[];
 };
@@ -114,19 +120,32 @@ export default function ProblemGallery({ problems }: Props) {
       const supabase = createClient();
       const blob = await renderTextToPng(editText);
 
+      // 스토리지 버킷에 UPDATE 정책이 없어 덮어쓰기(upsert)는 RLS에 막힌다.
+      // 새 경로에 업로드하고 image_path를 바꿘 뒤 예전 파일을 지운다.
+      const newPath = siblingPath(editing.imagePath);
       const { error: upErr } = await supabase.storage
         .from("problem-images")
-        .upload(editing.imagePath, blob, {
-          contentType: "image/png",
-          upsert: true,
-        });
+        .upload(newPath, blob, { contentType: "image/png" });
       if (upErr) throw upErr;
 
       const { error: dbErr } = await supabase
         .from("problems")
-        .update({ text_content: editText, latex: editText })
+        .update({
+          image_path: newPath,
+          text_content: editText,
+          latex: editText,
+        })
         .eq("id", editing.id);
-      if (dbErr) throw dbErr;
+      if (dbErr) {
+        // DB 갱신 실패 시 방금 올린 파일을 정리한다.
+        await supabase.storage.from("problem-images").remove([newPath]);
+        throw dbErr;
+      }
+
+      // 예전 이미지는 정리(실패해도 치명적이지 않으므로 무시).
+      await supabase.storage
+        .from("problem-images")
+        .remove([editing.imagePath]);
 
       setEditing(null);
       router.refresh();
