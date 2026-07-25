@@ -80,7 +80,13 @@ export default function ExportPdfButton({ source, imageUrls }: Props) {
           continue;
         }
 
-        const image = await pdfDoc.embedPng(imageBytes);
+        let image;
+        try {
+          image = await pdfDoc.embedPng(imageBytes);
+        } catch {
+          skipped.push(i + 1);
+          continue;
+        }
 
         const scale = Math.min(
           availableWidth / image.width,
