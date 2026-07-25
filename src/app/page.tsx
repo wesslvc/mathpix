@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import type { Category } from "@/lib/supabase/types";
+import { categoryLabel, type Category } from "@/lib/supabase/types";
 import NewCategoryForm from "@/components/NewCategoryForm";
 import LogoutButton from "@/components/LogoutButton";
+import DeleteCategoryButton from "@/components/DeleteCategoryButton";
 
 export default async function DashboardPage() {
   if (!isSupabaseConfigured()) {
@@ -71,12 +72,25 @@ export default async function DashboardPage() {
             className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm hover:border-blue-400"
           >
             <div>
-              <p className="font-semibold text-ink">{category.source}</p>
+              <p className="font-semibold text-ink">
+                {categoryLabel(category)}
+                {category.is_exam && (
+                  <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
+                    실모
+                  </span>
+                )}
+              </p>
               <p className="text-xs text-slate-400">
                 {new Date(category.created_at).toLocaleDateString("ko-KR")} 생성
               </p>
             </div>
-            <span className="text-sm text-blue-600">열기 →</span>
+            <div className="flex items-center gap-3">
+              <DeleteCategoryButton
+                categoryId={category.id}
+                label={categoryLabel(category)}
+              />
+              <span className="text-sm text-blue-600">열기 →</span>
+            </div>
           </Link>
         ))}
       </div>

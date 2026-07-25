@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import type { Category, Problem } from "@/lib/supabase/types";
+import { categoryLabel, type Category, type Problem } from "@/lib/supabase/types";
 import AddProblemFlow from "@/components/AddProblemFlow";
 import ExportPdfButton from "@/components/ExportPdfButton";
 import DeleteProblemButton from "@/components/DeleteProblemButton";
@@ -69,12 +69,14 @@ export default async function CategoryPage({
           <Link href="/" className="text-sm text-blue-600 underline">
             ← 목록으로
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-ink">{category.source}</h1>
+          <h1 className="mt-1 text-2xl font-bold text-ink">
+            {categoryLabel(category)}
+          </h1>
           <p className="text-sm text-slate-500">
             문제 {problems?.length ?? 0}개 저장됨
           </p>
         </div>
-        <ExportPdfButton source={category.source} imageUrls={imageUrls} />
+        <ExportPdfButton source={categoryLabel(category)} imageUrls={imageUrls} />
       </header>
 
       <AddProblemFlow categoryId={category.id} />
