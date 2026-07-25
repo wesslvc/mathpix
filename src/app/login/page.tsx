@@ -1,12 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/client";
 
+type Mode = "login" | "signup";
+
 export default function LoginPage() {
+  const router = useRouter();
+  const [mode, setMode] = useState<Mode>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   if (!isSupabaseConfigured()) {
     return (
@@ -22,26 +30,46 @@ export default function LoginPage() {
     );
   }
 
-  async function handleGoogleLogin() {
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setIsLoading(true);
     setError(null);
-    try {
-      const supabase = createClient();
-      const { error: signInError } = await supabase.auth.signInWithOAuth({
-        provider: "google",
+    setNotice(null);
+
+    const supabase = createClient();
+
+    if (mode === "login") {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) {
+        setError(error.message);
+      } else {
+        router.push("/");
+        router.refresh();
+        return;
+      }
+    } else {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       });
-      if (signInError) throw signInError;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "로그인에 실패했습니다.");
-      setIsLoading(false);
+      if (error) {
+        setError(error.message);
+      } else {
+        setNotice("가입 확인 메일을 보냈습니다. 메일함을 확인해주세요.");
+      }
     }
+
+    setIsLoading(false);
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-4 text-center">
+    <main className="mx-auto flex min-h-screen max-w-sm flex-col items-center justify-center gap-6 px-4 text-center">
       <div>
         <h1 className="text-2xl font-bold text-ink">수학오답프린트 제작</h1>
         <p className="mt-2 text-sm text-slate-500">
@@ -49,19 +77,49 @@ export default function LoginPage() {
         </p>
       </div>
 
-      {error && (
-        <div className="w-full rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      <form onSubmit={handleSubmit} className="flex w-full flex-col gap-3">
+        <input
+          type="email"
+          required
+          placeholder="이메일"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+        />
+        <input
+          type="password"
+          required
+          minLength={6}
+          placeholder="비밀번호 (6자 이상)"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+        />
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {notice && <p className="text-sm text-emerald-600">{notice}</p>}
+
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="mt-1 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {isLoading ? "처리 중..." : mode === "login" ? "로그인" : "회원가입"}
+        </button>
+      </form>
 
       <button
         type="button"
-        onClick={handleGoogleLogin}
-        disabled={isLoading}
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-ink shadow-sm hover:bg-slate-50 disabled:opacity-50"
+        onClick={() => {
+          setMode(mode === "login" ? "signup" : "login");
+          setError(null);
+          setNotice(null);
+        }}
+        className="text-sm text-slate-500 hover:text-slate-700"
       >
-        {isLoading ? "이동 중..." : "Google로 로그인"}
+        {mode === "login"
+          ? "계정이 없으신가요? 회원가입"
+          : "이미 계정이 있으신가요? 로그인"}
       </button>
     </main>
   );

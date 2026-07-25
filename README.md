@@ -6,7 +6,7 @@
 2. 사용자가 크롭 범위를 최종 확인/조정한 뒤
 3. Mathpix OCR API로 텍스트/LaTeX를 인식하고
 4. 가독성 좋은 폰트(나눔명조 + KaTeX)로 문제번호·조건 박스까지 재구성해
-5. Google 로그인한 계정에 **변환 결과 이미지만**(원본 사진은 저장하지 않음)
+5. 로그인한 계정에 **변환 결과 이미지만**(원본 사진은 저장하지 않음)
    실전모의고사(실모) 단위로 계속 모아두었다가
 6. 실모별로 출처가 표시된 PDF로 한 번에 내보낼 수 있는 Next.js 앱입니다.
 
@@ -45,12 +45,16 @@ MATHPIX_APP_KEY=...
 ## Supabase 연동 (로그인 / 저장 / PDF)
 
 1. https://supabase.com/dashboard 에서 프로젝트를 생성합니다.
-2. **Authentication > Providers**에서 Google OAuth를 활성화합니다.
+2. 로그인은 이메일/비밀번호 방식이며, Supabase 프로젝트에는 **Email** 프로바이더가
+   기본으로 켜져 있어 별도 설정이 필요 없습니다.
 3. **SQL Editor**에서 `supabase/migrations/0001_init.sql`을 그대로 실행해
    `categories`(실모), `problems`(오답) 테이블과 `problem-images`
    스토리지 버킷, RLS 정책을 만듭니다.
 4. **Project Settings > API**에서 URL과 anon key를 확인해 `.env.local`에
    채웁니다.
+5. **Authentication > URL Configuration**의 Redirect URLs에
+   `{배포 주소}/auth/callback`(로컬 테스트는 `http://localhost:3000/auth/callback`)을
+   추가해야 회원가입 확인 메일의 링크가 정상 동작합니다.
 
 ```
 NEXT_PUBLIC_SUPABASE_URL=...
@@ -63,7 +67,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 ## 폴더 구조 / 핵심 로직
 
 - `src/app/page.tsx` — 대시보드: 로그인한 사용자의 실모(카테고리) 목록
-- `src/app/login/page.tsx` — Google 로그인
+- `src/app/login/page.tsx` — 이메일/비밀번호 로그인·회원가입
 - `src/app/auth/callback/route.ts` — Supabase OAuth 콜백(코드 → 세션 교환)
 - `src/middleware.ts` — 세션 갱신 + 미로그인 시 `/login`으로 리다이렉트
 - `src/app/categories/[id]/page.tsx` — 실모 상세: 저장된 오답 목록,
