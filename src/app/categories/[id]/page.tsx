@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Category, Problem } from "@/lib/supabase/types";
 import AddProblemFlow from "@/components/AddProblemFlow";
 import ExportPdfButton from "@/components/ExportPdfButton";
+import DeleteProblemButton from "@/components/DeleteProblemButton";
 
 export default async function CategoryPage({
   params,
@@ -83,13 +84,18 @@ export default async function CategoryPage({
           const url = signedUrlByPath.get(problem.image_path);
           if (!url) return null;
           return (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={problem.id}
-              src={url}
-              alt="저장된 오답"
-              className="w-full rounded-lg border border-slate-200 bg-white object-contain shadow-sm"
-            />
+            <div key={problem.id} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={url}
+                alt="저장된 오답"
+                className="w-full rounded-lg border border-slate-200 bg-white object-contain shadow-sm"
+              />
+              <DeleteProblemButton
+                problemId={problem.id}
+                imagePath={problem.image_path}
+              />
+            </div>
           );
         })}
       </div>
