@@ -13,13 +13,6 @@ function escapeHtml(str: string): string {
 // 단, 한글/알파벳에 붙은 숫자("2점", "x1", "22.")는 건드리지 않는다.
 const WORDISH = /[\wㄱ-ㅎ가-힣]/;
 
-function isTallMath(latex: string): boolean {
-  // 명령 뒤에 알파벳이 이어지지 않을 때만(예: \int_ 는 잡고 \into 는 제외).
-  return /\\(d?frac|tfrac|int|iint|oint|sum|prod|coprod|lim|limsup|liminf|binom|begin|over|substack)(?![a-zA-Z])/.test(
-    latex,
-  );
-}
-
 /**
  * 일반 텍스트를 HTML로 변환하되, 홀로 떨어진 숫자는 수식으로 렌더링한다.
  */
@@ -77,9 +70,8 @@ function renderMath(latex: string, displayMode: boolean): string {
   // displaystyle을 강제해 인라인 수식에서도 적분·분수·시그마가 큼직하게
   // (교과서처럼) 렌더링되도록 한다.
   const enhanced = `\\displaystyle ${enhanceLatex(latex)}`;
-  let html: string;
   try {
-    html = katex.renderToString(enhanced, {
+    return katex.renderToString(enhanced, {
       throwOnError: false,
       displayMode,
       strict: "ignore",
@@ -87,13 +79,6 @@ function renderMath(latex: string, displayMode: boolean): string {
   } catch {
     return `<span class="text-red-500">${escapeHtml(latex)}</span>`;
   }
-
-  // 키 큰 수식(분수/적분/시그마 등)은 인라인이라도 한 줄을 통째로 차지하게 해
-  // 위아래 줄과 겹치지 않도록 자동으로 줄바꿈한다.
-  if (!displayMode && isTallMath(latex)) {
-    return `<span class="mmd-tall">${html}</span>`;
-  }
-  return html;
 }
 
 // Mathpix는 응답 버전에 따라 "\[ \]"/"\( \)" 델리미터를 쓰기도 하므로 "$"/"$$"로 통일한다.
@@ -120,12 +105,39 @@ function isBareMathBlock(s: string): boolean {
   );
 }
 
-/** 한 조각의 텍스트를 렌더링한다. 순수 수식이면 통째로, 아니면 "$...$" 단위로. */
-function renderContent(text: string): string {
-  if (isBareMathBlock(text)) {
-    return renderMath(text.trim(), true);
+/** 한 줄(내부 줄바꿈 없음)을 렌더링한다. 순수 수식이면 통째로, 아니면 "$...$" 단위로. */
+function renderLineContent(line: string): string {
+  if (isBareMathBlock(line)) {
+    return renderMath(line.trim(), true);
   }
-  return renderInline(text);
+  return renderInline(line);
+}
+
+/**
+ * 블록 안의 각 줄을 "이미 줄바꿈된" 단위로 보고 한 줄씩 렌더링한다.
+ * 원본에 줄바꿈이 있던 자리에만 여백(.mmd-line)을 줘서 위아래 수식이 너무
+ * 붙지 않게 하고, 한 줄 안의 띄어쓰기는 그대로 둔다(새 줄바꿈을 만들지 않음).
+ */
+function renderLines(lines: string[], firstLineHasNumber: boolean): string {
+  return lines
+    .map((line, i) => {
+      let inner: string;
+      if (firstLineHasNumber && i === 0) {
+        const m = line.match(PROBLEM_NUMBER);
+        if (m) {
+          const rest = line.slice(m[0].length);
+          inner = `<strong class="mmd-problem-number">${escapeHtml(
+            m[1],
+          )}</strong> ${renderLineContent(rest)}`;
+        } else {
+          inner = renderLineContent(line);
+        }
+      } else {
+        inner = renderLineContent(line);
+      }
+      return `<span class="mmd-line">${inner}</span>`;
+    })
+    .join("");
 }
 
 /** 한 문단(블록) 안의 "$$...$$"/"$...$" 수식과 일반 텍스트를 인라인 HTML로 변환한다. */
@@ -159,21 +171,11 @@ function renderBlock(block: string, isFirst: boolean): string {
   const isBoxed = lines.every((line) => /^\s*>/.test(line));
 
   if (isBoxed) {
-    const content = lines.map((line) => line.replace(/^\s*>\s?/, "")).join("\n");
-    return `<div class="mmd-box">${renderContent(content)}</div>`;
+    const content = lines.map((line) => line.replace(/^\s*>\s?/, ""));
+    return `<div class="mmd-box">${renderLines(content, false)}</div>`;
   }
 
-  if (isFirst) {
-    const m = block.match(PROBLEM_NUMBER);
-    if (m) {
-      const rest = block.slice(m[0].length);
-      return `<p class="mmd-paragraph"><strong class="mmd-problem-number">${escapeHtml(
-        m[1],
-      )}</strong> ${renderContent(rest)}</p>`;
-    }
-  }
-
-  return `<p class="mmd-paragraph">${renderContent(block)}</p>`;
+  return `<p class="mmd-paragraph">${renderLines(lines, isFirst)}</p>`;
 }
 
 /**
