@@ -5,6 +5,8 @@ import type { Category } from "@/lib/supabase/types";
 import NewCategoryForm from "@/components/NewCategoryForm";
 import LogoutButton from "@/components/LogoutButton";
 import CategoryList from "@/components/CategoryList";
+import BillingStatus from "@/components/BillingStatus";
+import { getAccessState, isCheckoutReady } from "@/lib/billing";
 
 export default async function DashboardPage() {
   if (!isSupabaseConfigured()) {
@@ -44,6 +46,8 @@ export default async function DashboardPage() {
     .order("created_at", { ascending: false })
     .returns<Category[]>();
 
+  const access = await getAccessState(supabase);
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
       <header className="flex items-start justify-between">
@@ -55,6 +59,13 @@ export default async function DashboardPage() {
         </div>
         <LogoutButton />
       </header>
+
+      <BillingStatus
+        paid={access.paid}
+        remaining={access.remaining}
+        limit={access.limit}
+        checkoutReady={isCheckoutReady()}
+      />
 
       <NewCategoryForm />
 

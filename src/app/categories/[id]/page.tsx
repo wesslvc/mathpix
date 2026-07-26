@@ -7,6 +7,8 @@ import AddProblemFlow from "@/components/AddProblemFlow";
 import ProblemGallery, {
   type GalleryProblem,
 } from "@/components/ProblemGallery";
+import BillingStatus from "@/components/BillingStatus";
+import { getAccessState, isCheckoutReady } from "@/lib/billing";
 
 export default async function CategoryPage({
   params,
@@ -74,6 +76,8 @@ export default async function CategoryPage({
     })
     .filter((p): p is GalleryProblem => p !== null);
 
+  const access = await getAccessState(supabase);
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
       <header className="flex items-start justify-between gap-4">
@@ -96,7 +100,16 @@ export default async function CategoryPage({
         </Link>
       </header>
 
-      <AddProblemFlow categoryId={category.id} />
+      {!access.paid && (
+        <BillingStatus
+          paid={access.paid}
+          remaining={access.remaining}
+          limit={access.limit}
+          checkoutReady={isCheckoutReady()}
+        />
+      )}
+
+      <AddProblemFlow categoryId={category.id} canAdd={access.canUse} />
 
       <ProblemGallery problems={galleryProblems} />
     </main>

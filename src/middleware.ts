@@ -7,6 +7,12 @@ const PUBLIC_PATHS = ["/login", "/auth/callback"];
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
+  // 그로블 웹훅은 로그인 없이 외부에서 POST로 들어온다. 인증 리다이렉트(3xx)를
+  // 하면 그로블이 최종 실패로 처리하므로, 인증 체크 전에 그대로 통과시킨다.
+  if (request.nextUrl.pathname.startsWith("/api/groble/webhook")) {
+    return response;
+  }
+
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     // Supabase가 아직 설정되지 않았다면 인증 체크 없이 통과시키고,
     // 각 페이지에서 안내 메시지를 보여준다.
