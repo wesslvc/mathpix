@@ -9,8 +9,8 @@ type Props = {
   result: RecognizeResponse;
   onBack: () => void;
   onRestart: () => void;
-  /** 지정하면 "오답으로 저장" 버튼이 나타나고, PNG data URL을 인자로 호출된다. */
-  onSaveToCategory?: (pngDataUrl: string) => Promise<void>;
+  /** 지정하면 "오답으로 저장" 버튼이 나타나고, PNG data URL과 정답을 인자로 호출된다. */
+  onSaveToCategory?: (pngDataUrl: string, answer: string) => Promise<void>;
   /** 복수 업로드 시 아직 처리하지 않은 이미지 수. */
   remainingCount?: number;
   /** 다음 대기 이미지로 넘어간다. */
@@ -38,6 +38,7 @@ export default function ResultStage({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [answer, setAnswer] = useState("");
 
   const html = useMemo(
     () => renderMathText(result.text || result.latex),
@@ -70,7 +71,7 @@ export default function ResultStage({
         pixelRatio: 2,
         backgroundColor: "#ffffff",
       });
-      await onSaveToCategory(dataUrl);
+      await onSaveToCategory(dataUrl, answer.trim());
       setSaved(true);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "저장에 실패했습니다.");
@@ -137,6 +138,19 @@ export default function ResultStage({
         <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
           {saveError}
         </div>
+      )}
+
+      {onSaveToCategory && (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <span className="shrink-0 font-medium">정답</span>
+          <input
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            disabled={saved}
+            placeholder="예: ③, 5, 12 (PDF 맨 뒤 정답표에 표기됩니다)"
+            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100"
+          />
+        </label>
       )}
 
       <div className="flex flex-wrap justify-end gap-2">

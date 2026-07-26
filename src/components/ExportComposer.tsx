@@ -8,6 +8,7 @@ export type ComposerProblem = {
   imageUrl: string;
   source: string;
   origNumber: number | null;
+  answer: string;
 };
 
 type Props = {
@@ -72,6 +73,95 @@ function formatDate(iso: string): string {
   return `${y}. ${Number(m)}. ${Number(d)}.`;
 }
 
+/**
+ * 정답표를 canvas로 그려 PNG data URL과 pt 크기를 돌려준다.
+ * 문제 수가 많으면 2열로 배치한다. 한글은 canvas로 그려 폰트 임베드를 피한다.
+ */
+function renderAnswerTableCanvas(
+  rows: { label: string; answer: string }[],
+): { dataUrl: string; width: number; height: number } {
+  const scale = 3;
+  const fontPt = 12;
+  const titlePt = 18;
+  const rowHpt = fontPt * 2;
+  const titleGapPt = titlePt * 2;
+  const innerGapPt = 22; // 번호와 정답 사이
+  const colGapPt = 44; // 열과 열 사이
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("캔버스를 생성할 수 없습니다.");
+
+  const bodyFont = `${fontPt * scale}px "Nanum Myeongjo", serif`;
+  const titleFont = `700 ${titlePt * scale}px "Nanum Myeongjo", serif`;
+
+  const n = rows.length;
+  const cols = n > 14 ? 2 : 1;
+  const rowsPerCol = Math.ceil(n / cols);
+
+  // 각 열의 번호/정답 최대 너비를 재서 정답을 세로로 정렬한다.
+  ctx.font = bodyFont;
+  const labelWpx: number[] = [];
+  const answerWpx: number[] = [];
+  for (let c = 0; c < cols; c++) {
+    let lw = 0;
+    let aw = 0;
+    for (let r = 0; r < rowsPerCol; r++) {
+      const idx = c * rowsPerCol + r;
+      if (idx >= n) break;
+      lw = Math.max(lw, ctx.measureText(rows[idx].label).width);
+      aw = Math.max(aw, ctx.measureText(rows[idx].answer || "-").width);
+    }
+    labelWpx.push(lw);
+    answerWpx.push(aw);
+  }
+  const innerGapPx = innerGapPt * scale;
+  const colGapPx = colGapPt * scale;
+  const colWidthsPx = labelWpx.map((lw, c) => lw + innerGapPx + answerWpx[c]);
+  const contentWidthPx =
+    colWidthsPx.reduce((a, b) => a + b, 0) + colGapPx * (cols - 1);
+
+  ctx.font = titleFont;
+  const titleWidthPx = ctx.measureText("정답표").width;
+
+  const widthPx = Math.ceil(Math.max(contentWidthPx, titleWidthPx)) + 4;
+  const titleGapPx = titleGapPt * scale;
+  const rowHpx = rowHpt * scale;
+  const heightPx = Math.ceil(titleGapPx + rowsPerCol * rowHpx) + 4;
+
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, widthPx, heightPx);
+
+  ctx.textBaseline = "middle";
+  ctx.font = titleFont;
+  ctx.fillStyle = "#111111";
+  ctx.fillText("정답표", 0, titleGapPx / 2);
+
+  ctx.font = bodyFont;
+  let x = 0;
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < rowsPerCol; r++) {
+      const idx = c * rowsPerCol + r;
+      if (idx >= n) break;
+      const y = titleGapPx + r * rowHpx + rowHpx / 2;
+      ctx.fillStyle = "#555555";
+      ctx.fillText(rows[idx].label, x, y);
+      ctx.fillStyle = "#111111";
+      ctx.fillText(rows[idx].answer || "-", x + labelWpx[c] + innerGapPx, y);
+    }
+    x += colWidthsPx[c] + colGapPx;
+  }
+
+  return {
+    dataUrl: canvas.toDataURL("image/png"),
+    width: widthPx / scale,
+    height: heightPx / scale,
+  };
+}
+
 export default function ExportComposer({
   multi,
   defaultTitle,
@@ -91,12 +181,14 @@ export default function ExportComposer({
     setOrder(next);
   }
 
-  /** 각 문제 라벨: 단일이면 원래 번호, 복수 선택이면 1번부터 다시 매긴다. */
+  /** 각 문제 번호: 단일이면 원래 번호, 복수 선택이면 1번부터 다시 매긴다. */
+  function numberFor(problem: ComposerProblem, index: number): number {
+    return multi ? index + 1 : (problem.origNumber ?? index + 1);
+  }
+
+  /** 각 문제 라벨 (예: "강대2회(96/100) 3번"). */
   function labelFor(problem: ComposerProblem, index: number): string {
-    const num = multi
-      ? index + 1
-      : (problem.origNumber ?? index + 1);
-    return `${problem.source} ${num}번`;
+    return `${problem.source} ${numberFor(problem, index)}번`;
   }
 
   async function generate() {
@@ -231,6 +323,34 @@ export default function ExportComposer({
 
       if (pdfDoc.getPageCount() === 0) {
         throw new Error("출력할 오답 이미지를 하나도 불러오지 못했습니다.");
+      }
+
+      // 맨 마지막 페이지에 정답표 — 정답이 입력된 문제만 모은다.
+      const answerRows = order
+        .map((problem, i) => ({
+          label: `${numberFor(problem, i)}번`,
+          answer: (problem.answer ?? "").trim(),
+        }))
+        .filter((row) => row.answer !== "");
+
+      if (answerRows.length > 0) {
+        const table = renderAnswerTableCanvas(answerRows);
+        const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+        const contentTop = PAGE_HEIGHT - MARGIN_TOP;
+        const availW = PAGE_WIDTH - MARGIN_X * 2;
+        const availH = contentTop - MARGIN_BOTTOM;
+        const s = Math.min(availW / table.width, availH / table.height, 1);
+        const w = table.width * s;
+        const h = table.height * s;
+        const tImg = await pdfDoc.embedPng(
+          await (await fetch(table.dataUrl)).arrayBuffer(),
+        );
+        page.drawImage(tImg, {
+          x: (PAGE_WIDTH - w) / 2,
+          y: contentTop - h,
+          width: w,
+          height: h,
+        });
       }
 
       const pdfBytes = await pdfDoc.save();

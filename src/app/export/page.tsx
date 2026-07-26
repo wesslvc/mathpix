@@ -86,6 +86,7 @@ export default async function ExportPage({
         imageUrl,
         source: cat ? categoryLabel(cat) : "출처",
         origNumber: parseProblemNumber(p.text_content || p.latex || ""),
+        answer: p.answer ?? "",
       };
     })
     .filter((p): p is ComposerProblem => p !== null);
