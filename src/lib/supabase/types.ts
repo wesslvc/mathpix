@@ -5,6 +5,7 @@ export type Category = {
   title: string | null;
   is_exam: boolean;
   score: number | null;
+  exam_date: string | null;
   created_at: string;
 };
 
@@ -27,7 +28,7 @@ export function categoryLabel(
   category: Pick<Category, "source" | "is_exam" | "score">,
 ): string {
   if (category.is_exam && category.score != null) {
-    return `${category.source}(${category.score})`;
+    return `${category.source}(${category.score}/100)`;
   }
   return category.source;
 }

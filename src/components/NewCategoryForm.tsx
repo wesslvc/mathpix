@@ -4,12 +4,19 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
+function todayString(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 export default function NewCategoryForm() {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [source, setSource] = useState("");
   const [isExam, setIsExam] = useState(false);
   const [score, setScore] = useState("");
+  const [examDate, setExamDate] = useState(todayString());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,6 +24,7 @@ export default function NewCategoryForm() {
     setSource("");
     setIsExam(false);
     setScore("");
+    setExamDate(todayString());
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -45,6 +53,7 @@ export default function NewCategoryForm() {
           source: source.trim(),
           is_exam: isExam,
           score: parsedScore,
+          exam_date: examDate || null,
         })
         .select("id")
         .single();
@@ -116,14 +125,25 @@ export default function NewCategoryForm() {
               placeholder="예: 96"
               className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
             />
+            <span className="text-slate-400">/ 100</span>
           </label>
         )}
+
+        <label className="flex items-center gap-1.5 text-sm text-slate-700">
+          시행일
+          <input
+            type="date"
+            value={examDate}
+            onChange={(e) => setExamDate(e.target.value)}
+            className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+          />
+        </label>
       </div>
 
       {isExam && score.trim() !== "" && (
         <p className="text-xs text-slate-400">
           출처는 <span className="font-medium text-slate-600">
-            {source.trim() || "출처"}({score.trim()})
+            {source.trim() || "출처"}({score.trim()}/100)
           </span> 로 표시됩니다.
         </p>
       )}

@@ -1,39 +1,77 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Props = {
-  onImageSelected: (file: File) => void;
+  onImagesSelected: (files: File[]) => void;
   onError: (message: string) => void;
 };
 
 const HEIC_PATTERN = /\.(heic|heif)$/i;
 
-export default function ImageUploader({ onImageSelected, onError }: Props) {
+function isHeic(file: File): boolean {
+  return (
+    file.type === "image/heic" ||
+    file.type === "image/heif" ||
+    HEIC_PATTERN.test(file.name)
+  );
+}
+
+export default function ImageUploader({ onImagesSelected, onError }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const handleFiles = useCallback(
-    (files: FileList | null) => {
-      const file = files?.[0];
-      if (!file) return;
+    (fileList: FileList | File[] | null) => {
+      if (!fileList) return;
+      const files = Array.from(fileList);
+      if (files.length === 0) return;
 
-      if (
-        file.type === "image/heic" ||
-        file.type === "image/heif" ||
-        HEIC_PATTERN.test(file.name)
-      ) {
-        onError(
-          "HEIC/HEIF 형식은 브라우저에서 열 수 없습니다. 아이폰 설정 > 카메라 > 포맷을 '호환 우선'으로 바꾸거나, 사진 공유 시 JPG로 변환해서 다시 시도해주세요.",
-        );
+      // HEIC/HEIF는 브라우저에서 못 여니 하나라도 있으면 안내하고 나머지만 처리.
+      const hasHeic = files.some(isHeic);
+      const images = files.filter(
+        (f) => !isHeic(f) && f.type.startsWith("image/"),
+      );
+
+      if (images.length === 0) {
+        if (hasHeic) {
+          onError(
+            "HEIC/HEIF 형식은 브라우저에서 열 수 없습니다. 아이폰 설정 > 카메라 > 포맷을 '호환 우선'으로 바꾸거나, 사진 공유 시 JPG로 변환해서 다시 시도해주세요.",
+          );
+        }
         return;
       }
 
-      if (!file.type.startsWith("image/")) return;
-      onImageSelected(file);
+      if (hasHeic) {
+        onError(
+          "HEIC/HEIF 사진 일부는 제외했습니다. 나머지 사진만 불러옵니다.",
+        );
+      }
+      onImagesSelected(images);
     },
-    [onImageSelected, onError],
+    [onImagesSelected, onError],
   );
+
+  // 붙여넣기(Ctrl+V)로 클립보드의 이미지를 바로 넣을 수 있게 한다.
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (const item of Array.from(items)) {
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const f = item.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        handleFiles(files);
+      }
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [handleFiles]);
 
   return (
     <div
@@ -61,13 +99,21 @@ export default function ImageUploader({ onImageSelected, onError }: Props) {
         문제 이미지를 여기에 끌어다 놓거나 클릭해서 선택하세요
       </p>
       <p className="text-sm text-slate-500">
-        JPG, PNG 등 사진 한 장이면 충분합니다. 문제 영역은 자동으로
-        인식됩니다.
+        여러 장을 한 번에 선택하거나, 캡처한 사진을{" "}
+        <kbd className="rounded border border-slate-300 bg-slate-50 px-1 text-xs">
+          Ctrl
+        </kbd>
+        +
+        <kbd className="rounded border border-slate-300 bg-slate-50 px-1 text-xs">
+          V
+        </kbd>{" "}
+        로 붙여넣어도 됩니다. 문제 영역은 자동으로 인식됩니다.
       </p>
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
+        multiple
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
       />

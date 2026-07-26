@@ -16,15 +16,46 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [result, setResult] = useState<RecognizeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 여러 장을 한 번에 올리면 첫 장부터 크롭→인식→저장하고, 나머지는 여기 대기.
+  const [queue, setQueue] = useState<string[]>([]);
 
-  function handleImageSelected(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImageSrc(reader.result as string);
+  function readAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("이미지를 읽지 못했습니다."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleImagesSelected(files: File[]) {
+    try {
+      const dataUrls = await Promise.all(files.map(readAsDataUrl));
+      if (dataUrls.length === 0) return;
+      const [first, ...rest] = dataUrls;
+      setImageSrc(first);
+      setQueue(rest);
       setError(null);
       setStage("crop");
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      handleImageError(
+        err instanceof Error ? err.message : "이미지를 읽지 못했습니다.",
+      );
+    }
+  }
+
+  // 저장 후 대기열에 남은 다음 이미지로 넘어간다. 없으면 처음 화면으로.
+  function advanceQueue() {
+    setResult(null);
+    setError(null);
+    if (queue.length > 0) {
+      const [next, ...rest] = queue;
+      setQueue(rest);
+      setImageSrc(next);
+      setStage("crop");
+    } else {
+      handleReset();
+    }
   }
 
   async function handleCropConfirm(croppedDataUrl: string) {
@@ -50,12 +81,14 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
     setImageSrc(null);
     setResult(null);
     setError(null);
+    setQueue([]);
     setStage("idle");
   }
 
   function handleImageError(message: string) {
     setError(message);
     setImageSrc(null);
+    setQueue([]);
     setStage("idle");
   }
 
@@ -121,9 +154,15 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
 
       {stage === "upload" && (
         <ImageUploader
-          onImageSelected={handleImageSelected}
+          onImagesSelected={handleImagesSelected}
           onError={handleImageError}
         />
+      )}
+
+      {queue.length > 0 && (stage === "crop" || stage === "loading") && (
+        <p className="text-sm text-slate-500">
+          이 문제를 저장하면 다음 이미지로 넘어갑니다 · {queue.length}장 남음
+        </p>
       )}
 
       {stage === "crop" && imageSrc && (
@@ -148,6 +187,8 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
           onBack={() => setStage("crop")}
           onRestart={handleReset}
           onSaveToCategory={handleSaveToCategory}
+          remainingCount={queue.length}
+          onNext={advanceQueue}
         />
       )}
     </div>

@@ -9,8 +9,38 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// 독립적으로 떨어진 숫자(예: "1", "3.5")는 본문 글자가 아니라 수식 폰트로 보여준다.
+// 단, 한글/알파벳에 붙은 숫자("2점", "x1", "22.")는 건드리지 않는다.
+const WORDISH = /[\wㄱ-ㅎ가-힣]/;
+
+function isTallMath(latex: string): boolean {
+  // 명령 뒤에 알파벳이 이어지지 않을 때만(예: \int_ 는 잡고 \into 는 제외).
+  return /\\(d?frac|tfrac|int|iint|oint|sum|prod|coprod|lim|limsup|liminf|binom|begin|over|substack)(?![a-zA-Z])/.test(
+    latex,
+  );
+}
+
+/**
+ * 일반 텍스트를 HTML로 변환하되, 홀로 떨어진 숫자는 수식으로 렌더링한다.
+ */
 function textToInlineHtml(str: string): string {
-  return escapeHtml(str).replace(/\n/g, "<br />");
+  const tokens = str.split(/(\d+(?:\.\d+)?)/);
+  let html = "";
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (i % 2 === 1) {
+      // 숫자 토큰: 앞뒤가 글자(한글/영문)에 붙어 있지 않으면 수식으로.
+      const prevCh = (tokens[i - 1] ?? "").slice(-1);
+      const nextCh = (tokens[i + 1] ?? "").slice(0, 1);
+      const attached = WORDISH.test(prevCh) || WORDISH.test(nextCh);
+      if (!attached) {
+        html += renderMath(token, false);
+        continue;
+      }
+    }
+    html += escapeHtml(token).replace(/\n/g, "<br />");
+  }
+  return html;
 }
 
 // 첨자가 옆이 아니라 위/아래로 붙어야 자연스러운 큰 연산자들.
@@ -47,8 +77,9 @@ function renderMath(latex: string, displayMode: boolean): string {
   // displaystyle을 강제해 인라인 수식에서도 적분·분수·시그마가 큼직하게
   // (교과서처럼) 렌더링되도록 한다.
   const enhanced = `\\displaystyle ${enhanceLatex(latex)}`;
+  let html: string;
   try {
-    return katex.renderToString(enhanced, {
+    html = katex.renderToString(enhanced, {
       throwOnError: false,
       displayMode,
       strict: "ignore",
@@ -56,6 +87,13 @@ function renderMath(latex: string, displayMode: boolean): string {
   } catch {
     return `<span class="text-red-500">${escapeHtml(latex)}</span>`;
   }
+
+  // 키 큰 수식(분수/적분/시그마 등)은 인라인이라도 한 줄을 통째로 차지하게 해
+  // 위아래 줄과 겹치지 않도록 자동으로 줄바꿈한다.
+  if (!displayMode && isTallMath(latex)) {
+    return `<span class="mmd-tall">${html}</span>`;
+  }
+  return html;
 }
 
 // Mathpix는 응답 버전에 따라 "\[ \]"/"\( \)" 델리미터를 쓰기도 하므로 "$"/"$$"로 통일한다.

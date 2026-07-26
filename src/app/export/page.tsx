@@ -91,10 +91,15 @@ export default async function ExportPage({
     .filter((p): p is ComposerProblem => p !== null);
 
   const multi = idList.length > 1;
+  const firstCategory = categories?.find((c) => c.id === idList[0]);
   const defaultTitle =
-    !multi && categories && categories[0]
-      ? categoryLabel(categories[0])
-      : "";
+    !multi && firstCategory ? categoryLabel(firstCategory) : "";
+
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  // 단일 선택이면 그 실모의 시행일, 복수 선택이면 오늘(모음 만드는 날)로.
+  const examDate =
+    !multi && firstCategory?.exam_date ? firstCategory.exam_date : todayIso;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
@@ -116,6 +121,7 @@ export default async function ExportPage({
         <ExportComposer
           multi={multi}
           defaultTitle={defaultTitle}
+          examDate={examDate}
           problems={composerProblems}
         />
       )}
