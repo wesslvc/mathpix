@@ -92,7 +92,7 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
     setStage("idle");
   }
 
-  async function handleSaveToCategory(pngDataUrl: string) {
+  async function handleSaveToCategory(pngDataUrl: string, answer: string) {
     const supabase = createClient();
     const {
       data: { user },
@@ -123,6 +123,7 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
       image_path: path,
       latex: result?.latex ?? null,
       text_content: result?.text ?? null,
+      answer: answer || null,
       sort_order: nextOrder,
     });
     if (insertError) {
