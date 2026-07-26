@@ -1,0 +1,124 @@
+import Link from "next/link";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { createClient } from "@/lib/supabase/server";
+import { categoryLabel, type Category, type Problem } from "@/lib/supabase/types";
+import { parseProblemNumber } from "@/lib/problemNumber";
+import ExportComposer, {
+  type ComposerProblem,
+} from "@/components/ExportComposer";
+
+export default async function ExportPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ids?: string }>;
+}) {
+  const { ids } = await searchParams;
+  const idList = (ids ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+
+  if (!isSupabaseConfigured()) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 text-center">
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Supabase 설정이 아직 완료되지 않았습니다.
+        </p>
+      </main>
+    );
+  }
+
+  if (idList.length === 0) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-4 py-10">
+        <p className="text-sm text-slate-500">
+          출력할 실모를 선택하지 않았습니다.{" "}
+          <Link href="/" className="text-blue-600 underline">
+            목록으로 돌아가기
+          </Link>
+        </p>
+      </main>
+    );
+  }
+
+  const supabase = await createClient();
+
+  const { data: categories } = await supabase
+    .from("categories")
+    .select("*")
+    .in("id", idList)
+    .returns<Category[]>();
+
+  const categoryById = new Map((categories ?? []).map((c) => [c.id, c]));
+
+  const { data: problems } = await supabase
+    .from("problems")
+    .select("*")
+    .in("category_id", idList)
+    .returns<Problem[]>();
+
+  // 선택한 실모 순서대로, 각 실모 안에서는 sort_order 순으로 정렬.
+  const ordered = (problems ?? []).slice().sort((a, b) => {
+    const ai = idList.indexOf(a.category_id);
+    const bi = idList.indexOf(b.category_id);
+    if (ai !== bi) return ai - bi;
+    const ao = a.sort_order ?? Number.MAX_SAFE_INTEGER;
+    const bo = b.sort_order ?? Number.MAX_SAFE_INTEGER;
+    if (ao !== bo) return ao - bo;
+    return a.created_at.localeCompare(b.created_at);
+  });
+
+  const paths = ordered.map((p) => p.image_path);
+  const signedUrlByPath = new Map<string, string>();
+  if (paths.length > 0) {
+    const { data: signed } = await supabase.storage
+      .from("problem-images")
+      .createSignedUrls(paths, 60 * 60);
+    for (const s of signed ?? []) {
+      if (s.signedUrl && s.path) signedUrlByPath.set(s.path, s.signedUrl);
+    }
+  }
+
+  const composerProblems: ComposerProblem[] = ordered
+    .map((p) => {
+      const imageUrl = signedUrlByPath.get(p.image_path);
+      if (!imageUrl) return null;
+      const cat = categoryById.get(p.category_id);
+      return {
+        id: p.id,
+        imageUrl,
+        source: cat ? categoryLabel(cat) : "출처",
+        origNumber: parseProblemNumber(p.text_content || p.latex || ""),
+      };
+    })
+    .filter((p): p is ComposerProblem => p !== null);
+
+  const multi = idList.length > 1;
+  const defaultTitle =
+    !multi && categories && categories[0]
+      ? categoryLabel(categories[0])
+      : "";
+
+  return (
+    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
+      <header>
+        <Link href="/" className="text-sm text-blue-600 underline">
+          ← 목록으로
+        </Link>
+        <h1 className="mt-1 text-2xl font-bold text-ink">PDF 만들기</h1>
+        <p className="text-sm text-slate-500">
+          실모 {idList.length}개 · 문제 {composerProblems.length}개
+        </p>
+      </header>
+
+      {composerProblems.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+          선택한 실모에 저장된 오답이 없습니다.
+        </p>
+      ) : (
+        <ExportComposer
+          multi={multi}
+          defaultTitle={defaultTitle}
+          problems={composerProblems}
+        />
+      )}
+    </main>
+  );
+}
