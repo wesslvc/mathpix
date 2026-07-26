@@ -66,10 +66,22 @@ function enhanceLatex(latex: string): string {
   return latex.replace(opPattern, "\\$1\\limits");
 }
 
+/**
+ * Mathpix가 배열/케이스(구간별 정의) 수식을 여러 줄로 나눠 보내면서 "\left\"
+ * 처럼 백슬래시 바로 뒤에 개행이 끼어드는 경우가 있다. TeX는 백슬래시 다음에
+ * 오는 공백(개행 포함)을 그대로 컨트롤 시퀀스 이름으로 읽어버려
+ * "Invalid delimiter '\ ' after '\left'" 같은 파싱 오류가 나 수식 전체가
+ * 렌더링되지 않는다. 백슬래시와 '{'/'}' 사이의 공백(개행 포함)을 제거해
+ * 원래 의도한 "\{"/"\}"로 되돌린다.
+ */
+function sanitizeBrokenDelimiters(latex: string): string {
+  return latex.replace(/\\[ \t\r\n]+([{}])/g, "\\$1");
+}
+
 function renderMath(latex: string, displayMode: boolean): string {
   // displaystyle을 강제해 인라인 수식에서도 적분·분수·시그마가 큼직하게
   // (교과서처럼) 렌더링되도록 한다.
-  const enhanced = `\\displaystyle ${enhanceLatex(latex)}`;
+  const enhanced = `\\displaystyle ${enhanceLatex(sanitizeBrokenDelimiters(latex))}`;
   try {
     return katex.renderToString(enhanced, {
       throwOnError: false,
@@ -105,12 +117,35 @@ function isBareMathBlock(s: string): boolean {
   );
 }
 
+// Mathpix가 배열/케이스 수식 안에 빈 줄까지 끼워 보내는 경우, 문단을 빈 줄
+// 기준으로 나누는 로직이 "$$...$$" 하나를 여러 조각으로 쪼개버려 LaTeX 원문이
+// 그대로 글자로 노출되는 문제가 있었다. 문단/줄 분리를 하기 전에 "$$...$$"
+// 전체를 플레이스홀더 토큰(줄바꿈 없는 한 덩어리)으로 바꿔 보호했다가,
+// 실제 렌더링 직전(줄 단위)에 원문으로 되돌린다.
+const MATH_PLACEHOLDER = /\x00MATH(\d+)\x00/g;
+
+function protectDisplayMath(input: string): { text: string; blocks: string[] } {
+  const blocks: string[] = [];
+  const text = input.replace(/\$\$[\s\S]+?\$\$/g, (match) => {
+    const token = `\x00MATH${blocks.length}\x00`;
+    blocks.push(match);
+    return token;
+  });
+  return { text, blocks };
+}
+
+function restoreDisplayMath(s: string, blocks: string[]): string {
+  if (blocks.length === 0) return s;
+  return s.replace(MATH_PLACEHOLDER, (_, i) => blocks[Number(i)]);
+}
+
 /** 한 줄(내부 줄바꿈 없음)을 렌더링한다. 순수 수식이면 통째로, 아니면 "$...$" 단위로. */
-function renderLineContent(line: string): string {
-  if (isBareMathBlock(line)) {
-    return renderMath(line.trim(), true);
+function renderLineContent(line: string, mathBlocks: string[]): string {
+  const restored = restoreDisplayMath(line, mathBlocks);
+  if (isBareMathBlock(restored)) {
+    return renderMath(restored.trim(), true);
   }
-  return renderInline(line);
+  return renderInline(restored);
 }
 
 /**
@@ -118,7 +153,11 @@ function renderLineContent(line: string): string {
  * 원본에 줄바꿈이 있던 자리에만 여백(.mmd-line)을 줘서 위아래 수식이 너무
  * 붙지 않게 하고, 한 줄 안의 띄어쓰기는 그대로 둔다(새 줄바꿈을 만들지 않음).
  */
-function renderLines(lines: string[], firstLineHasNumber: boolean): string {
+function renderLines(
+  lines: string[],
+  firstLineHasNumber: boolean,
+  mathBlocks: string[],
+): string {
   return lines
     .map((line, i) => {
       let inner: string;
@@ -128,12 +167,12 @@ function renderLines(lines: string[], firstLineHasNumber: boolean): string {
           const rest = line.slice(m[0].length);
           inner = `<strong class="mmd-problem-number">${escapeHtml(
             m[1],
-          )}</strong> ${renderLineContent(rest)}`;
+          )}</strong> ${renderLineContent(rest, mathBlocks)}`;
         } else {
-          inner = renderLineContent(line);
+          inner = renderLineContent(line, mathBlocks);
         }
       } else {
-        inner = renderLineContent(line);
+        inner = renderLineContent(line, mathBlocks);
       }
       return `<span class="mmd-line">${inner}</span>`;
     })
@@ -166,16 +205,20 @@ function renderInline(text: string): string {
 }
 
 /** 블록의 모든 줄이 ">"로 시작하면(조건 박스 등) 테두리 박스로 렌더링한다. */
-function renderBlock(block: string, isFirst: boolean): string {
+function renderBlock(
+  block: string,
+  isFirst: boolean,
+  mathBlocks: string[],
+): string {
   const lines = block.split("\n");
   const isBoxed = lines.every((line) => /^\s*>/.test(line));
 
   if (isBoxed) {
     const content = lines.map((line) => line.replace(/^\s*>\s?/, ""));
-    return `<div class="mmd-box">${renderLines(content, false)}</div>`;
+    return `<div class="mmd-box">${renderLines(content, false, mathBlocks)}</div>`;
   }
 
-  return `<p class="mmd-paragraph">${renderLines(lines, isFirst)}</p>`;
+  return `<p class="mmd-paragraph">${renderLines(lines, isFirst, mathBlocks)}</p>`;
 }
 
 /**
@@ -186,7 +229,10 @@ function renderBlock(block: string, isFirst: boolean): string {
  */
 export function renderMathText(input: string): string {
   const normalized = normalizeDelimiters(input);
-  const blocks = normalized.trim().split(/\n\s*\n+/);
+  const { text, blocks: mathBlocks } = protectDisplayMath(normalized);
+  const blocks = text.trim().split(/\n\s*\n+/);
 
-  return blocks.map((block, idx) => renderBlock(block, idx === 0)).join("");
+  return blocks
+    .map((block, idx) => renderBlock(block, idx === 0, mathBlocks))
+    .join("");
 }
