@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toPng } from "html-to-image";
 import { createClient } from "@/lib/supabase/client";
@@ -25,33 +25,23 @@ type Props = {
 };
 
 /**
- * 편집한 텍스트를 화면 밖 카드에 렌더링해 PNG Blob으로 만든다.
- * (저장 당시 ResultStage 카드와 같은 스타일 - 나눔명조 + KaTeX)
+ * 화면에 실제로 그려진(보이는) 노드를 PNG Blob으로 캡처한다.
+ * iOS Safari는 화면 밖/투명 요소나 첫 toPng 호출에서 빈 이미지를 내놓는
+ * 경우가 있어, 이미 렌더된 요소를 대상으로 여러 번 호출해 안정화한다.
  */
-async function renderTextToPng(text: string): Promise<Blob> {
-  const container = document.createElement("div");
-  container.style.position = "fixed";
-  container.style.left = "-99999px";
-  container.style.top = "0";
-  container.style.width = "640px";
-  container.style.padding = "32px";
-  container.style.background = "#ffffff";
-  container.style.fontFamily = '"Nanum Myeongjo", serif';
-  container.style.fontSize = "24px";
-  container.style.lineHeight = "1.7";
-  container.style.color = "#1a1d29";
-  container.innerHTML = renderMathText(text);
-  document.body.appendChild(container);
-  try {
-    if (document.fonts?.ready) await document.fonts.ready;
-    const dataUrl = await toPng(container, {
-      pixelRatio: 2,
-      backgroundColor: "#ffffff",
-    });
-    return await (await fetch(dataUrl)).blob();
-  } finally {
-    document.body.removeChild(container);
+async function captureNode(node: HTMLElement): Promise<Blob> {
+  if (document.fonts?.ready) {
+    await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 2000))]);
   }
+  // 다음 페인트까지 기다린다.
+  await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+  let dataUrl = "";
+  // Safari 첫 렌더가 비는 문제 대비로 몇 번 반복(마지막 결과 사용).
+  for (let i = 0; i < 3; i++) {
+    dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: "#ffffff" });
+  }
+  return await (await fetch(dataUrl)).blob();
 }
 
 export default function ProblemGallery({ problems }: Props) {
@@ -62,6 +52,7 @@ export default function ProblemGallery({ problems }: Props) {
   const [editText, setEditText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   async function move(index: number, dir: -1 | 1) {
     const j = index + dir;
@@ -78,7 +69,7 @@ export default function ProblemGallery({ problems }: Props) {
 
     setBusyId(a.id);
 
-    // 두 문제의 sort_order 값을 서로 맞바꿈다.
+    // 두 문제의 sort_order 값을 서로 맞바꾼다.
     const next = [...list];
     next[index] = { ...b, sortOrder: a.sortOrder };
     next[j] = { ...a, sortOrder: b.sortOrder };
@@ -117,11 +108,14 @@ export default function ProblemGallery({ problems }: Props) {
     setIsSaving(true);
     setEditError(null);
     try {
+      const node = previewRef.current;
+      if (!node) throw new Error("미리보기를 찾을 수 없습니다.");
+
       const supabase = createClient();
-      const blob = await renderTextToPng(editText);
+      const blob = await captureNode(node);
 
       // 스토리지 버킷에 UPDATE 정책이 없어 덮어쓰기(upsert)는 RLS에 막힌다.
-      // 새 경로에 업로드하고 image_path를 바꿘 뒤 예전 파일을 지운다.
+      // 새 경로에 업로드하고 image_path를 바꾼 뒤 예전 파일을 지운다.
       const newPath = siblingPath(editing.imagePath);
       const { error: upErr } = await supabase.storage
         .from("problem-images")
@@ -265,11 +259,17 @@ export default function ProblemGallery({ problems }: Props) {
             />
 
             <div>
-              <p className="mb-1 text-xs font-medium text-slate-500">미리보기</p>
-              <div
-                className="rounded-lg border border-slate-200 bg-white p-6 font-serif text-lg leading-relaxed text-ink"
-                dangerouslySetInnerHTML={{ __html: renderMathText(editText) }}
-              />
+              <p className="mb-1 text-xs font-medium text-slate-500">
+                미리보기 (이 모습 그대로 저장됩니다)
+              </p>
+              <div className="overflow-hidden rounded-lg border border-slate-200">
+                <div
+                  ref={previewRef}
+                  className="bg-white p-8 font-serif leading-relaxed text-ink"
+                  style={{ fontSize: 24 }}
+                  dangerouslySetInnerHTML={{ __html: renderMathText(editText) }}
+                />
+              </div>
             </div>
 
             {editError && <p className="text-sm text-red-600">{editError}</p>}
