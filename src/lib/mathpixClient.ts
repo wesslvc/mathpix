@@ -1,4 +1,4 @@
-import type { RecognizeResponse } from "./types";
+import type { DiagramRegion, RecognizeResponse } from "./types";
 
 const MATHPIX_ENDPOINT = "https://api.mathpix.com/v3/text";
 
@@ -14,7 +14,34 @@ const MOCK_RESPONSE: RecognizeResponse = {
     "> 이다.\n\n" +
     "$f(2)$의 값을 구하시오. [4점]\n\n" +
     "$$\\int_0^1 x^2 \\,dx = \\dfrac{1}{3}$$",
+  diagrams: [],
 };
+
+type MathpixLineData = {
+  id?: string;
+  type?: string;
+  region?: {
+    top_left_x?: number;
+    top_left_y?: number;
+    width?: number;
+    height?: number;
+  };
+};
+
+/** line_data 중 OCR로 옮길 수 없는 도형/그림 영역만 골라낸다. */
+function extractDiagrams(lineData: unknown): DiagramRegion[] {
+  if (!Array.isArray(lineData)) return [];
+  return (lineData as MathpixLineData[])
+    .filter((line) => line.type === "diagram" && line.region)
+    .map((line, idx) => ({
+      id: line.id ?? `diagram-${idx}`,
+      left: line.region?.top_left_x ?? 0,
+      top: line.region?.top_left_y ?? 0,
+      width: line.region?.width ?? 0,
+      height: line.region?.height ?? 0,
+    }))
+    .filter((d) => d.width > 0 && d.height > 0);
+}
 
 type RecognizeOptions = {
   appId: string | undefined;
@@ -47,6 +74,9 @@ export async function recognizeImage(
       data_options: {
         include_latex: true,
       },
+      // 도형/그림 영역의 위치(픽셀 좌표)를 받아 원본 이미지에서 그대로
+      // 오려 붙일 수 있게 한다(OCR로는 도형 자체를 텍스트화할 수 없음).
+      include_line_data: true,
     }),
   });
 
@@ -68,5 +98,6 @@ export async function recognizeImage(
     latex: json.latex_styled ?? json.text ?? "",
     text: json.text ?? "",
     confidence: typeof json.confidence === "number" ? json.confidence : null,
+    diagrams: extractDiagrams(json.line_data),
   };
 }

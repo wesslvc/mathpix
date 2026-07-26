@@ -22,6 +22,10 @@ export default function AddProblemFlow({
   const [stage, setStage] = useState<Stage>("idle");
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [result, setResult] = useState<RecognizeResponse | null>(null);
+  // 인식(result)을 만든 바로 그 이미지. 도형 영역을 오려낼 때 필요하다.
+  const [recognizedSourceImage, setRecognizedSourceImage] = useState<
+    string | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   // 여러 장을 한 번에 올리면 첫 장부터 크롭→인식→저장하고, 나머지는 여기 대기.
   const [queue, setQueue] = useState<string[]>([]);
@@ -54,6 +58,7 @@ export default function AddProblemFlow({
   // 저장 후 대기열에 남은 다음 이미지로 넘어간다. 없으면 처음 화면으로.
   function advanceQueue() {
     setResult(null);
+    setRecognizedSourceImage(null);
     setError(null);
     if (queue.length > 0) {
       const [next, ...rest] = queue;
@@ -77,6 +82,7 @@ export default function AddProblemFlow({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "인식에 실패했습니다.");
       setResult(json as RecognizeResponse);
+      setRecognizedSourceImage(croppedDataUrl);
       setStage("result");
     } catch (err) {
       setError(err instanceof Error ? err.message : "알 수 없는 오류");
@@ -87,6 +93,7 @@ export default function AddProblemFlow({
   function handleReset() {
     setImageSrc(null);
     setResult(null);
+    setRecognizedSourceImage(null);
     setError(null);
     setQueue([]);
     setStage("idle");
@@ -209,6 +216,7 @@ export default function AddProblemFlow({
           onSaveToCategory={handleSaveToCategory}
           remainingCount={queue.length}
           onNext={advanceQueue}
+          sourceImage={recognizedSourceImage}
         />
       )}
     </div>
