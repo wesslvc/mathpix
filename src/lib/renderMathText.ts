@@ -65,8 +65,30 @@ function normalizeDelimiters(input: string): string {
     .replace(/\\\(([\s\S]+?)\\\)/g, (_, expr) => `$${expr}$`);
 }
 
-const LOOKS_LIKE_BARE_LATEX = /\\[a-zA-Z]+/;
 const PROBLEM_NUMBER = /^(\d{1,3}\s*\.)(\s*)/;
+
+// 한글/CJK 문자(수식이 아니라 설명 텍스트로 간주).
+const CJK_PATTERN = /[　-〿㐀-鿿가-힯＀-￯]/;
+// 델리미터가 없어도 수식으로 볼 만한 토큰(위/아래 첨자, 중괄호, 백슬래시 명령).
+const MATH_TOKEN_PATTERN = /[\\^_{}]/;
+
+/**
+ * "$"가 전혀 없어도 통째로 수식으로 렌더할 만한 순수 수식 블록인지 판단한다.
+ * (한글이 섞여 있으면 설명 문장으로 보고 그대로 둔다 — 이때는 $...$가 필요.)
+ */
+function isBareMathBlock(s: string): boolean {
+  return (
+    !s.includes("$") && !CJK_PATTERN.test(s) && MATH_TOKEN_PATTERN.test(s)
+  );
+}
+
+/** 한 조각의 텍스트를 렌더링한다. 순수 수식이면 통째로, 아니면 "$...$" 단위로. */
+function renderContent(text: string): string {
+  if (isBareMathBlock(text)) {
+    return renderMath(text.trim(), true);
+  }
+  return renderInline(text);
+}
 
 /** 한 문단(블록) 안의 "$$...$$"/"$...$" 수식과 일반 텍스트를 인라인 HTML로 변환한다. */
 function renderInline(text: string): string {
@@ -100,7 +122,7 @@ function renderBlock(block: string, isFirst: boolean): string {
 
   if (isBoxed) {
     const content = lines.map((line) => line.replace(/^\s*>\s?/, "")).join("\n");
-    return `<div class="mmd-box">${renderInline(content)}</div>`;
+    return `<div class="mmd-box">${renderContent(content)}</div>`;
   }
 
   if (isFirst) {
@@ -109,27 +131,21 @@ function renderBlock(block: string, isFirst: boolean): string {
       const rest = block.slice(m[0].length);
       return `<p class="mmd-paragraph"><strong class="mmd-problem-number">${escapeHtml(
         m[1],
-      )}</strong> ${renderInline(rest)}</p>`;
+      )}</strong> ${renderContent(rest)}</p>`;
     }
   }
 
-  return `<p class="mmd-paragraph">${renderInline(block)}</p>`;
+  return `<p class="mmd-paragraph">${renderContent(block)}</p>`;
 }
 
 /**
  * Mathpix의 mmd(마크다운+수식) 형식 텍스트를 안전한 HTML로 변환한다.
  * 빈 줄로 구분된 블록마다 문단으로 나누고, ">"로 시작하는 블록은 테두리 박스로,
  * 첫 블록 맨 앞의 "21." 같은 문제 번호는 굵게 강조해 실제 문제집처럼 보이게 한다.
- * 델리미터가 전혀 없는데 LaTeX 명령어(백슬래시)만 있는 경우(예: latex_styled를
- * 그대로 받은 경우)는 전체를 블록 수식 하나로 간주해 렌더링한다.
+ * "$"가 없어도 순수 수식(예: x^2 + 3x - 1 = 0)으로 보이면 통째로 렌더링한다.
  */
 export function renderMathText(input: string): string {
   const normalized = normalizeDelimiters(input);
-
-  if (!normalized.includes("$") && LOOKS_LIKE_BARE_LATEX.test(normalized)) {
-    return renderMath(normalized.trim(), true);
-  }
-
   const blocks = normalized.trim().split(/\n\s*\n+/);
 
   return blocks.map((block, idx) => renderBlock(block, idx === 0)).join("");
