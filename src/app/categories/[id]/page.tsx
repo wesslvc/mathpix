@@ -4,7 +4,6 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { categoryLabel, type Category, type Problem } from "@/lib/supabase/types";
 import AddProblemFlow from "@/components/AddProblemFlow";
-import ExportPdfButton from "@/components/ExportPdfButton";
 import ProblemGallery, {
   type GalleryProblem,
 } from "@/components/ProblemGallery";
@@ -61,10 +60,6 @@ export default async function CategoryPage({
     );
   }
 
-  const imageUrls = (problems ?? [])
-    .map((p) => signedUrlByPath.get(p.image_path))
-    .filter((url): url is string => Boolean(url));
-
   const galleryProblems: GalleryProblem[] = (problems ?? [])
     .map((p) => {
       const imageUrl = signedUrlByPath.get(p.image_path);
@@ -93,7 +88,12 @@ export default async function CategoryPage({
             문제 {problems?.length ?? 0}개 저장됨
           </p>
         </div>
-        <ExportPdfButton source={categoryLabel(category)} imageUrls={imageUrls} />
+        <Link
+          href={`/export?ids=${category.id}`}
+          className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+        >
+          PDF 만들기
+        </Link>
       </header>
 
       <AddProblemFlow categoryId={category.id} />

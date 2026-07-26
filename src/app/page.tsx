@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { categoryLabel, type Category } from "@/lib/supabase/types";
+import type { Category } from "@/lib/supabase/types";
 import NewCategoryForm from "@/components/NewCategoryForm";
 import LogoutButton from "@/components/LogoutButton";
-import DeleteCategoryButton from "@/components/DeleteCategoryButton";
+import CategoryList from "@/components/CategoryList";
 
 export default async function DashboardPage() {
   if (!isSupabaseConfigured()) {
@@ -58,42 +58,7 @@ export default async function DashboardPage() {
 
       <NewCategoryForm />
 
-      <div className="flex flex-col gap-3">
-        {(!categories || categories.length === 0) && (
-          <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
-            아직 등록된 실모가 없습니다. 위에서 실모를 추가해보세요.
-          </p>
-        )}
-
-        {categories?.map((category) => (
-          <Link
-            key={category.id}
-            href={`/categories/${category.id}`}
-            className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm hover:border-blue-400"
-          >
-            <div>
-              <p className="font-semibold text-ink">
-                {categoryLabel(category)}
-                {category.is_exam && (
-                  <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
-                    실모
-                  </span>
-                )}
-              </p>
-              <p className="text-xs text-slate-400">
-                {new Date(category.created_at).toLocaleDateString("ko-KR")} 생성
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <DeleteCategoryButton
-                categoryId={category.id}
-                label={categoryLabel(category)}
-              />
-              <span className="text-sm text-blue-600">열기 →</span>
-            </div>
-          </Link>
-        ))}
-      </div>
+      <CategoryList categories={categories ?? []} />
     </main>
   );
 }
