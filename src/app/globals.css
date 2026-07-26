@@ -18,10 +18,17 @@ body {
 
 .mmd-paragraph {
   margin: 0 0 1.1em;
+  line-height: 1.9;
 }
 
 .mmd-paragraph:last-child {
   margin-bottom: 0;
+}
+
+/* 분수·적분·시그마 등 키 큰 수식은 한 줄을 통째로 차지해 위아래와 겹치지 않게 한다. */
+.mmd-tall {
+  display: block;
+  margin: 0.55em 0;
 }
 
 .mmd-problem-number {
