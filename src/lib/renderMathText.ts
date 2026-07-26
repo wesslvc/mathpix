@@ -102,6 +102,12 @@ function normalizeDelimiters(input: string): string {
 
 const PROBLEM_NUMBER = /^(\d{1,3}\s*\.)(\s*)/;
 
+// 문제집에서 "(가)", "(나)", "(다)"처럼 조건을 나열할 때 쓰는 표지. Mathpix는
+// 이 부분을 ">" 인용 문법 없이 그냥 일반 줄로 보내는 경우가 많아서, 표지로
+// 시작하는 줄인지는 별도로 감지해야 한다(원본 문제집에서는 테두리 박스로
+// 보이는 부분).
+const CONDITION_MARKER = /^\s*\([가나다라마바사아자차카타파하]\)\s*/;
+
 // 한글/CJK 문자(수식이 아니라 설명 텍스트로 간주).
 const CJK_PATTERN = /[　-〿㐀-鿿가-힯＀-￯]/;
 // 델리미터가 없어도 수식으로 볼 만한 토큰(위/아래 첨자, 중괄호, 백슬래시 명령).
@@ -204,7 +210,12 @@ function renderInline(text: string): string {
   return html;
 }
 
-/** 블록의 모든 줄이 ">"로 시작하면(조건 박스 등) 테두리 박스로 렌더링한다. */
+/**
+ * 블록의 모든 줄이 ">"로 시작하면(조건 박스 등) 테두리 박스로 렌더링한다.
+ * ">"가 없어도 "(가)/(나)/(다)" 같은 조건 표지로 시작하는 줄이 있으면, 그
+ * 표지가 처음 나온 줄부터 블록 끝까지를 박스로 묶고(원본 문제집의 테두리
+ * 박스에 해당) 그 앞의 문장(예: "30. ... 만족시킨다.")은 평범한 문단으로 둔다.
+ */
 function renderBlock(
   block: string,
   isFirst: boolean,
@@ -216,6 +227,20 @@ function renderBlock(
   if (isBoxed) {
     const content = lines.map((line) => line.replace(/^\s*>\s?/, ""));
     return `<div class="mmd-box">${renderLines(content, false, mathBlocks)}</div>`;
+  }
+
+  const markerIdx = lines.findIndex((line) => CONDITION_MARKER.test(line));
+  if (markerIdx > -1) {
+    const introLines = lines.slice(0, markerIdx);
+    const conditionLines = lines.slice(markerIdx);
+    const introHtml =
+      introLines.length > 0
+        ? `<p class="mmd-paragraph">${renderLines(introLines, isFirst, mathBlocks)}</p>`
+        : "";
+    return (
+      introHtml +
+      `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`
+    );
   }
 
   return `<p class="mmd-paragraph">${renderLines(lines, isFirst, mathBlocks)}</p>`;
