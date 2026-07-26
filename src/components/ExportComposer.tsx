@@ -209,11 +209,24 @@ export default function ExportComposer({ multi, defaultTitle, problems }: Props)
         );
         const drawWidth = image.width * scale;
         const drawHeight = image.height * scale;
+        const imgX = MARGIN_X;
+        const imgY = imgTop - drawHeight;
         page.drawImage(image, {
-          x: MARGIN_X,
-          y: imgTop - drawHeight,
+          x: imgX,
+          y: imgY,
           width: drawWidth,
           height: drawHeight,
+        });
+
+        // 문제 영역을 얇은 테두리로 표시한다.
+        const pad = 5;
+        page.drawRectangle({
+          x: imgX - pad,
+          y: imgY - pad,
+          width: drawWidth + pad * 2,
+          height: drawHeight + pad * 2,
+          borderColor: rgb(0.6, 0.6, 0.6),
+          borderWidth: 0.7,
         });
       }
 
