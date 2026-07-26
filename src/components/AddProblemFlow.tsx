@@ -15,7 +15,7 @@ export default function AddProblemFlow({
   canAdd = true,
 }: {
   categoryId: string;
-  /** false면 무료 체험 소진 → 오답 추가 대신 이용권 안내를 보여준다. */
+  /** false면 사진인식권이 없음 → 오답 추가 대신 이용권 안내를 보여준다. */
   canAdd?: boolean;
 }) {
   const router = useRouter();
@@ -162,7 +162,7 @@ export default function AddProblemFlow({
 
       {stage === "idle" && !canAdd && (
         <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <p>무료 체험이 끝나 오답을 더 추가할 수 없어요. 이용권을 구매하면 계속 저장할 수 있어요.</p>
+          <p>사진인식권이 모두 소진돼 오답을 더 추가할 수 없어요. 이용권을 구매하면 1000개가 충전돼요.</p>
           <a
             href="/api/checkout"
             className="w-fit rounded-lg bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-700"

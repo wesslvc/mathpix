@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { PAID_RECOGNITION_CREDITS } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -47,23 +48,10 @@ async function resolveUserId(
   return (data?.user_id as string | undefined) ?? null;
 }
 
-async function setEntitlement(
-  admin: SupabaseClient,
-  userId: string,
-  fields: { active: boolean; is_recurring?: boolean; expires_at?: string | null },
-): Promise<void> {
-  await admin.from("entitlements").upsert({
-    user_id: userId,
-    updated_at: new Date().toISOString(),
-    ...fields,
-  });
-}
-
-/** 결제 완료 → 이용권 활성화. */
-async function grantAccess(
+/** 결제 완료 → 사진인식권 1000개 충전(정기결제 회차도 매번 동일하게 충전). */
+async function grantCredits(
   admin: SupabaseClient,
   args: {
-    type: string;
     sellerReference: string | null;
     merchantUid: string | null;
   },
@@ -71,17 +59,11 @@ async function grantAccess(
   const userId = await resolveUserId(admin, args.sellerReference);
   if (!userId) return; // 매핑 없음(잘못된/폐기된 ref) → 조용히 무시
 
-  const isRecurring = args.type.startsWith("subscription");
-  // 정기결제면 다음 갱신까지 여유 있게 접근 허용, 일반결제면 무기한.
-  const expiresAt = isRecurring
-    ? new Date(Date.now() + 35 * 24 * 60 * 60 * 1000).toISOString()
-    : null;
-
-  await setEntitlement(admin, userId, {
-    active: true,
-    is_recurring: isRecurring,
-    expires_at: expiresAt,
+  const { error } = await admin.rpc("grant_recognition_credits", {
+    p_user_id: userId,
+    p_amount: PAID_RECOGNITION_CREDITS,
   });
+  if (error) throw error;
 
   // 일반결제 취소·환불은 sellerReference가 안 오므로 merchantUid로 연결하려 매핑 저장.
   if (args.merchantUid && args.sellerReference) {
@@ -93,18 +75,8 @@ async function grantAccess(
   }
 }
 
-/** 정기결제 해지 완료 → 이용권 비활성화(참조값 기준). */
-async function revokeBySellerReference(
-  admin: SupabaseClient,
-  sellerReference: string | null,
-): Promise<void> {
-  const userId = await resolveUserId(admin, sellerReference);
-  if (!userId) return;
-  await setEntitlement(admin, userId, { active: false });
-}
-
-/** 일반결제 환불 → 이용권 비활성화(merchantUid 매핑 기준). */
-async function revokeByMerchantUid(
+/** 일반결제 환불 → 해당 구매로 충전된 크레딧을 0으로 되돌린다(merchantUid 매핑 기준). */
+async function revokeCreditsByMerchantUid(
   admin: SupabaseClient,
   merchantUid: string | null,
 ): Promise<void> {
@@ -116,7 +88,10 @@ async function revokeByMerchantUid(
     .maybeSingle();
   const userId = (data?.user_id as string | undefined) ?? null;
   if (!userId) return;
-  await setEntitlement(admin, userId, { active: false });
+  await admin
+    .from("entitlements")
+    .update({ credits: 0, updated_at: new Date().toISOString() })
+    .eq("user_id", userId);
 }
 
 export async function POST(request: Request) {
@@ -179,14 +154,15 @@ export async function POST(request: Request) {
       type === "payment.completed" ||
       type === "subscription_payment.completed"
     ) {
-      await grantAccess(admin, { type, sellerReference, merchantUid });
-    } else if (type === "subscription.terminated") {
-      await revokeBySellerReference(admin, sellerReference);
+      // 정기결제는 최초 결제와 매 갱신 회차마다 이 이벤트가 오므로, 회차마다
+      // 1000개씩 충전된다.
+      await grantCredits(admin, { sellerReference, merchantUid });
     } else if (type === "payment.refunded") {
-      await revokeByMerchantUid(admin, merchantUid);
+      await revokeCreditsByMerchantUid(admin, merchantUid);
     }
-    // 그 외(cancel_requested, subscription_payment.failed/refunded 등)는
-    // 접근을 바로 끊지 않고 유지한다(해지 완료 시 subscription.terminated로 처리).
+    // 그 외(cancel_requested, subscription_payment.refunded/failed,
+    // subscription.terminated 등)는 이미 충전된 크레딧을 건드리지 않는다 —
+    // 크레딧은 회차 결제 시점에만 충전되고, 남은 크레딧은 계속 쓸 수 있다.
   } catch {
     // 처리 실패 → 500으로 응답해 그로블이 재시도하게 한다.
     return NextResponse.json({ error: "processing failed" }, { status: 500 });

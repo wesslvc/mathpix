@@ -100,16 +100,9 @@ export default async function CategoryPage({
         </Link>
       </header>
 
-      {!access.paid && (
-        <BillingStatus
-          paid={access.paid}
-          remaining={access.remaining}
-          limit={access.limit}
-          checkoutReady={isCheckoutReady()}
-        />
-      )}
+      <BillingStatus credits={access.credits} checkoutReady={isCheckoutReady()} />
 
-      <AddProblemFlow categoryId={category.id} canAdd={access.canUse} />
+      <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
 
       <ProblemGallery problems={galleryProblems} />
     </main>

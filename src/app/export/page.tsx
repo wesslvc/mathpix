@@ -6,7 +6,6 @@ import { parseProblemNumber } from "@/lib/problemNumber";
 import ExportComposer, {
   type ComposerProblem,
 } from "@/components/ExportComposer";
-import { getAccessState, isCheckoutReady } from "@/lib/billing";
 
 export default async function ExportPage({
   searchParams,
@@ -40,30 +39,6 @@ export default async function ExportPage({
   }
 
   const supabase = await createClient();
-
-  const access = await getAccessState(supabase);
-  if (!access.canUse) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 px-4 text-center">
-        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          무료 체험이 끝나 PDF로 내보내려면 이용권이 필요해요.
-        </p>
-        {isCheckoutReady() ? (
-          <a
-            href="/api/checkout"
-            className="rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-amber-700"
-          >
-            이용권 구매하기
-          </a>
-        ) : (
-          <span className="text-xs text-slate-400">결제 준비 중입니다.</span>
-        )}
-        <Link href="/" className="text-sm text-blue-600 underline">
-          목록으로 돌아가기
-        </Link>
-      </main>
-    );
-  }
 
   const { data: categories } = await supabase
     .from("categories")

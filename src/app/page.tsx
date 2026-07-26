@@ -60,12 +60,7 @@ export default async function DashboardPage() {
         <LogoutButton />
       </header>
 
-      <BillingStatus
-        paid={access.paid}
-        remaining={access.remaining}
-        limit={access.limit}
-        checkoutReady={isCheckoutReady()}
-      />
+      <BillingStatus credits={access.credits} checkoutReady={isCheckoutReady()} />
 
       <NewCategoryForm />
 
