@@ -11,6 +11,10 @@ type Props = {
   onRestart: () => void;
   /** 지정하면 "오답으로 저장" 버튼이 나타나고, PNG data URL을 인자로 호출된다. */
   onSaveToCategory?: (pngDataUrl: string) => Promise<void>;
+  /** 복수 업로드 시 아직 처리하지 않은 이미지 수. */
+  remainingCount?: number;
+  /** 다음 대기 이미지로 넘어간다. */
+  onNext?: () => void;
 };
 
 const FONT_SIZES = [
@@ -24,6 +28,8 @@ export default function ResultStage({
   onBack,
   onRestart,
   onSaveToCategory,
+  remainingCount = 0,
+  onNext,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [fontSizeIdx, setFontSizeIdx] = useState(1);
@@ -134,6 +140,15 @@ export default function ResultStage({
       )}
 
       <div className="flex flex-wrap justify-end gap-2">
+        {onNext && remainingCount > 0 && (
+          <button
+            type="button"
+            onClick={onNext}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            다음 이미지 → ({remainingCount}장 남음)
+          </button>
+        )}
         {onSaveToCategory && (
           <button
             type="button"

@@ -13,6 +13,7 @@ export type ComposerProblem = {
 type Props = {
   multi: boolean;
   defaultTitle: string;
+  examDate: string;
   problems: ComposerProblem[];
 };
 
@@ -65,21 +66,19 @@ function renderCanvasText(
   };
 }
 
-function todayString(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
 function formatDate(iso: string): string {
   const [y, m, d] = iso.split("-");
   if (!y || !m || !d) return iso;
   return `${y}. ${Number(m)}. ${Number(d)}.`;
 }
 
-export default function ExportComposer({ multi, defaultTitle, problems }: Props) {
+export default function ExportComposer({
+  multi,
+  defaultTitle,
+  examDate,
+  problems,
+}: Props) {
   const [title, setTitle] = useState(defaultTitle);
-  const [dateStr, setDateStr] = useState(todayString());
   const [order, setOrder] = useState<ComposerProblem[]>(problems);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +93,9 @@ export default function ExportComposer({ multi, defaultTitle, problems }: Props)
 
   /** 각 문제 라벨: 단일이면 원래 번호, 복수 선택이면 1번부터 다시 매긴다. */
   function labelFor(problem: ComposerProblem, index: number): string {
-    const num = multi ? index + 1 : (problem.origNumber ?? index + 1);
+    const num = multi
+      ? index + 1
+      : (problem.origNumber ?? index + 1);
     return `${problem.source} ${num}번`;
   }
 
@@ -116,7 +117,7 @@ export default function ExportComposer({ multi, defaultTitle, problems }: Props)
         weight: "700",
         color: "#111111",
       });
-      const dateImg = renderCanvasText(`시행일 : ${formatDate(dateStr)}`, {
+      const dateImg = renderCanvasText(`시행일 : ${formatDate(examDate)}`, {
         fontPt: 10,
         color: "#555555",
       });
@@ -263,18 +264,9 @@ export default function ExportComposer({ multi, defaultTitle, problems }: Props)
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
-          시행일
-          <input
-            type="date"
-            value={dateStr}
-            onChange={(e) => setDateStr(e.target.value)}
-            className="w-48 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-          />
-          <span className="text-xs text-slate-400">
-            입력하지 않으면 오늘 날짜로 인쇄됩니다.
-          </span>
-        </label>
+        <p className="text-xs text-slate-400">
+          시행일 : {formatDate(examDate)} (실모 추가 시 정한 날짜)
+        </p>
       </div>
 
       <div className="flex flex-col gap-2">
