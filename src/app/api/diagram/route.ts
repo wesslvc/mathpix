@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!process.env.GEMINI_API_KEY) {
+    console.error("[api/diagram] GEMINI_API_KEY not set");
     return NextResponse.json(
       { error: "GEMINI_API_KEY가 설정되지 않아 도형 재구성 기능을 쓸 수 없습니다." },
       { status: 500 },
@@ -48,6 +49,8 @@ export async function POST(req: NextRequest) {
       { p_amount: DIAGRAM_CREDIT_COST },
     );
     if (rpcError) {
+      // 원인 파악용 — 클라이언트에도 같은 메시지를 그대로 보여준다.
+      console.error("[api/diagram] consume_recognition_credit rpc error:", rpcError);
       return NextResponse.json({ error: rpcError.message }, { status: 500 });
     }
     if (remaining === null) {
@@ -90,6 +93,7 @@ export async function POST(req: NextRequest) {
       }
     }
     const message = err instanceof Error ? err.message : "알 수 없는 오류";
+    console.error("[api/diagram] unexpected error:", err);
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }
