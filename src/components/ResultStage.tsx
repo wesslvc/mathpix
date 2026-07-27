@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { renderMathText } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
+import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 
 type Props = {
   result: RecognizeResponse;
@@ -173,24 +174,27 @@ export default function ResultStage({
         </div>
       </div>
 
-      <div
-        ref={cardRef}
-        className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
-      >
+      <div className="overflow-x-auto">
         <div
-          className="font-serif leading-relaxed text-ink"
-          style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
-        {diagramImages.map((src, idx) => (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            key={idx}
-            src={src}
-            alt="도형"
-            className="mx-auto mt-4 max-w-full"
+          ref={cardRef}
+          className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
+          style={{ width: PROBLEM_CARD_WIDTH }}
+        >
+          <div
+            className="font-serif leading-relaxed text-ink"
+            style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
+            dangerouslySetInnerHTML={{ __html: html }}
           />
-        ))}
+          {diagramImages.map((src, idx) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={idx}
+              src={src}
+              alt="도형"
+              className="mx-auto mt-4 max-w-full"
+            />
+          ))}
+        </div>
       </div>
 
       {result.confidence !== null && (

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toPng } from "html-to-image";
 import { createClient } from "@/lib/supabase/client";
 import { renderMathText } from "@/lib/renderMathText";
+import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 
 export type GalleryProblem = {
   id: string;
@@ -262,11 +263,11 @@ export default function ProblemGallery({ problems }: Props) {
               <p className="mb-1 text-xs font-medium text-slate-500">
                 미리보기 (이 모습 그대로 저장됩니다)
               </p>
-              <div className="overflow-hidden rounded-lg border border-slate-200">
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <div
                   ref={previewRef}
                   className="bg-white p-8 font-serif leading-relaxed text-ink"
-                  style={{ fontSize: 24 }}
+                  style={{ fontSize: 24, width: PROBLEM_CARD_WIDTH }}
                   dangerouslySetInnerHTML={{ __html: renderMathText(editText) }}
                 />
               </div>
