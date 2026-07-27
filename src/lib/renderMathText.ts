@@ -36,7 +36,7 @@ function textToInlineHtml(str: string): string {
   return html;
 }
 
-// 첨자가 옆이 아니라 위/아래로 붙어야 자연스러운 큰 연산자들.
+// 첨자가 옷이 아니라 위/아래로 붙어야 자연스러운 큰 연산자들.
 const LIMIT_OPERATORS = [
   "sum",
   "prod",
@@ -54,7 +54,7 @@ const LIMIT_OPERATORS = [
 
 /**
  * Mathpix가 준 LaTeX를 보기 좋게 자동 보정한다.
- * - ∑, ∏ 같은 큰 연산자는 첨자(n=1, k 등)가 옆이 아니라 위/아래로 붙도록
+ * - ∑, ∏ 같은 큰 연산자는 첨자(n=1, k 등)가 옷이 아니라 위/아래로 붙도록
  *   `\limits`를 강제한다. (이미 \limits/\nolimits가 있으면 건드리지 않는다.)
  */
 function enhanceLatex(latex: string): string {
@@ -68,10 +68,10 @@ function enhanceLatex(latex: string): string {
 
 /**
  * Mathpix가 배열/케이스(구간별 정의) 수식을 여러 줄로 나눠 보내면서 "\left\"
- * 처럼 백슬래시 바로 뒤에 개행이 끼어드는 경우가 있다. TeX는 백슬래시 다음에
+ * 처럼 백슬래시 바로 뒤에 개행이 끼어들는 경우가 있다. TeX는 백슬래시 다음에
  * 오는 공백(개행 포함)을 그대로 컨트롤 시퀀스 이름으로 읽어버려
- * "Invalid delimiter '\ ' after '\left'" 같은 파싱 오류가 나 수식 전체가
- * 렌더링되지 않는다. 백슬래시와 '{'/'}' 사이의 공백(개행 포함)을 제거해
+ * "Invalid delimiter '\ ' after '\left'" 같은 파싱 오류가 나 수식 전체가 렌더링되지 않는
+ * 문제가 있다. 백슬래시와 '{'/'}' 사이의 공백(개행 포함)을 제거해
  * 원래 의도한 "\{"/"\}"로 되돌린다.
  */
 function sanitizeBrokenDelimiters(latex: string): string {
@@ -105,7 +105,7 @@ const PROBLEM_NUMBER = /^(\d{1,3}\s*\.)(\s*)/;
 // 문제집에서 "(가)", "(나)", "(다)"처럼 조건을 나열할 때 쓰는 표지. Mathpix는
 // 이 부분을 ">" 인용 문법 없이 그냥 일반 줄로 보내는 경우가 많아서, 표지로
 // 시작하는 줄인지는 별도로 감지해야 한다(원본 문제집에서는 테두리 박스로
-// 보이는 부분).
+// 보이는 부분이다).
 const CONDITION_MARKER = /^\s*\([가나다라마바사아자차카타파하]\)\s*/;
 
 // 한글/CJK 문자(수식이 아니라 설명 텍스트로 간주).
@@ -115,7 +115,7 @@ const MATH_TOKEN_PATTERN = /[\\^_{}]/;
 
 /**
  * "$"가 전혀 없어도 통째로 수식으로 렌더할 만한 순수 수식 블록인지 판단한다.
- * (한글이 섞여 있으면 설명 문장으로 보고 그대로 둔다 — 이때는 $...$가 필요.)
+ * (한글이 섞여 있으면 설명 문장으로 보고 그대로 둔다 — 이때는 $...$가 필요하다.)
  */
 function isBareMathBlock(s: string): boolean {
   return (
@@ -124,10 +124,9 @@ function isBareMathBlock(s: string): boolean {
 }
 
 // Mathpix가 배열/케이스 수식 안에 빈 줄까지 끼워 보내는 경우, 문단을 빈 줄
-// 기준으로 나누는 로직이 "$$...$$" 하나를 여러 조각으로 쪽개버려 LaTeX 원문이
-// 그대로 글자로 노출되는 문제가 있었다. 문단/줄 분리를 하기 전에 "$$...$$"
-// 전체를 플레이스홀더 토큰(줄바꿈 없는 한 덝어리)으로 바꿔 보호했다가,
-// 실제 렌더링 직전(줄 단위)에 원문으로 되돌린다.
+// 기준으로 나누는 로직이 "$$...$$" 하나를 여러 조각으로 쪽개버리는 문제가 있었다.
+// 문단/줄 분리를 하기 전에 "$$...$$" 전체를 플레이스홀더 토큰(줄바꿈 없는 한
+// 덩어리)로 바꿔 보호했다가, 실제 렌더링 직전(줄 단위)에 원문으로 되돌린다.
 const MATH_PLACEHOLDER = /\x00MATH(\d+)\x00/g;
 
 function protectDisplayMath(input: string): { text: string; blocks: string[] } {
@@ -156,7 +155,7 @@ function renderLineContent(line: string, mathBlocks: string[]): string {
 
 /**
  * 블록 안의 각 줄을 "이미 줄바꿈된" 단위로 보고 한 줄씩 렌더링한다.
- * 원본에 줄바꿈이 있던 자리에만 여백(.mmd-line)을 줘서 위아래 수식이 너무
+ * 원본에 줄바꿈이 있던 자리에만 여백(.mmd-line)을 줌서 위아래 수식이 너무
  * 붙지 않게 하고, 한 줄 안의 띄어쓰기는 그대로 둔다(새 줄바꿈을 만들지 않음).
  */
 function renderLines(
@@ -210,13 +209,33 @@ function renderInline(text: string): string {
   return html;
 }
 
+// 문장 끝을 나타내는 마침표. 종결어미(-다/-이다 등) 패턴이 아니라 글자
+// 그대로의 "."로만 판단한다. 소수점(예: "10.5")은 문장 끝이 아니므로 제외.
+const SENTENCE_END = /\.(?!\d)/;
+
+/**
+ * 마지막 조건 표지가 달린 줄을 "그 조건 문장의 마침표"에서 끓는다. 마침표
+ * 뒤에 다른 문장(문제 본문)이 이어 붙어 있으면 그 부분은 박스 밖으로 빼다.
+ * 마침표가 없으면(원본에 마침표가 없는 경우) 줄 전체를 그대로 박스에 둔다.
+ */
+function splitAtSentenceEnd(line: string): { head: string; rest: string | null } {
+  const match = line.match(SENTENCE_END);
+  if (!match || match.index === undefined) {
+    return { head: line, rest: null };
+  }
+  const cut = match.index + 1;
+  const head = line.slice(0, cut);
+  const rest = line.slice(cut).trim();
+  return { head, rest: rest.length > 0 ? rest : null };
+}
+
 /**
  * 블록의 모든 줄이 ">"로 시작하면(조건 박스 등) 테두리 박스로 렌더링한다.
  * ">"가 없어도 "(가)/(나)/(다)" 같은 조건 표지로 시작하는 줄이 있으면, 그
- * 표지가 처음 나온 줄부터 "마지막으로 표지가 달린 줄"까지만 박스로 묶는다
- * (원본 문제집의 테두리 박스에 해당). 표지 앞 문장(예: "30. ... 만족시킨다.")과
- * 마지막 표지 문장 뒤에 이어지는 표지 없는 문장은 각각 박스 밖 평범한 문단으로
- * 둔다 — 박스가 블록 끝까지 무조건 이어지지 않게 한다.
+ * 표지가 처음 나온 줄부터 시작해 "마지막 표지가 달린 문장의 마침표"까지만
+ * 박스로 묶는다(원본 문제집의 테두리 박스에 해당한다). 그 마침표 뒤에 같은 줄에
+ * 이어 붙은 문장이나, 표지 앞/뒤의 다른 줄은 박스 밖 평범한 문단으로 둔다 —
+ * 박스가 블록 끝까지 무조건 이어지지 않게 한다.
  */
 function renderBlock(
   block: string,
@@ -239,9 +258,14 @@ function renderBlock(
   if (markerIndices.length > 0) {
     const firstIdx = markerIndices[0];
     const lastIdx = markerIndices[markerIndices.length - 1];
+    const { head, rest } = splitAtSentenceEnd(lines[lastIdx]);
+
     const introLines = lines.slice(0, firstIdx);
-    const conditionLines = lines.slice(firstIdx, lastIdx + 1);
-    const trailingLines = lines.slice(lastIdx + 1);
+    const conditionLines = [...lines.slice(firstIdx, lastIdx), head];
+    const trailingLines = [
+      ...(rest !== null ? [rest] : []),
+      ...lines.slice(lastIdx + 1),
+    ];
 
     const introHtml =
       introLines.length > 0
@@ -262,7 +286,7 @@ function renderBlock(
 /**
  * Mathpix의 mmd(마크다운+수식) 형식 텍스트를 안전한 HTML로 변환한다.
  * 빈 줄로 구분된 블록마다 문단으로 나누고, ">"로 시작하는 블록은 테두리 박스로,
- * 첫 블록 맨 앞의 "21." 같은 문제 번호는 굵게 강조해 실제 문제집처럼 보이게 한다.
+ * 첨 블록 맨 앞의 "21." 같은 문제 번호는 굵게 강조해 실제 문제집처럼 보이게 한다.
  * "$"가 없어도 순수 수식(예: x^2 + 3x - 1 = 0)으로 보이면 통째로 렌더링한다.
  */
 export function renderMathText(input: string): string {
