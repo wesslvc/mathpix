@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { renderMathText } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
@@ -15,6 +15,8 @@ type Props = {
   remainingCount?: number;
   /** 다음 대기 이미지로 넘어간다. */
   onNext?: () => void;
+  /** Mathpix에 보낸 원본(크롭된) 이미지. 도형 영역을 오려내는 데 쓴다. */
+  sourceImage?: string | null;
 };
 
 const FONT_SIZES = [
@@ -30,20 +32,66 @@ export default function ResultStage({
   onSaveToCategory,
   remainingCount = 0,
   onNext,
+  sourceImage,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [fontSizeIdx, setFontSizeIdx] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [textCopied, setTextCopied] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [answer, setAnswer] = useState("");
+  const [diagramImages, setDiagramImages] = useState<string[]>([]);
 
   const html = useMemo(
     () => renderMathText(result.text || result.latex),
     [result.text, result.latex],
   );
+
+  // Mathpix가 텍스트로 옮길 수 없는 도형(원, 삼각형 등)을 감지하면 그 영역의
+  // 좌표를 함께 알려준다. OCR로는 도형을 재구성할 수 없으니, 보낸 원본
+  // 이미지에서 그 영역을 그대로 오려내 결과 카드에 이미지로 붙여넣는다.
+  useEffect(() => {
+    let cancelled = false;
+    setDiagramImages([]);
+    if (!sourceImage || !result.diagrams || result.diagrams.length === 0) {
+      return;
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      const crops = result
+        .diagrams!.map((d) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = d.width;
+          canvas.height = d.height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return null;
+          ctx.drawImage(
+            img,
+            d.left,
+            d.top,
+            d.width,
+            d.height,
+            0,
+            0,
+            d.width,
+            d.height,
+          );
+          return canvas.toDataURL("image/png");
+        })
+        .filter((u): u is string => Boolean(u));
+      setDiagramImages(crops);
+    };
+    img.src = sourceImage;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceImage, result.diagrams]);
 
   async function handleExport() {
     if (!cardRef.current) return;
@@ -86,6 +134,14 @@ export default function ResultStage({
     setTimeout(() => setCopied(false), 1500);
   }
 
+  /** 렌더링에 실제로 쓰인 원문(mmd)을 복사한다. 줄바꿈/박스 등 렌더링 문제를
+   * 알려줄 때 이 텍스트가 필요하다. */
+  async function handleCopyText() {
+    await navigator.clipboard.writeText(result.text || result.latex);
+    setTextCopied(true);
+    setTimeout(() => setTextCopied(false), 1500);
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {result.mock && (
@@ -126,6 +182,15 @@ export default function ResultStage({
           style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
           dangerouslySetInnerHTML={{ __html: html }}
         />
+        {diagramImages.map((src, idx) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={idx}
+            src={src}
+            alt="도형"
+            className="mx-auto mt-4 max-w-full"
+          />
+        ))}
       </div>
 
       {result.confidence !== null && (
@@ -193,6 +258,13 @@ export default function ResultStage({
           className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
         >
           {copied ? "복사됨!" : "LaTeX 복사"}
+        </button>
+        <button
+          type="button"
+          onClick={handleCopyText}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+        >
+          {textCopied ? "복사됨!" : "텍스트 복사"}
         </button>
         <button
           type="button"

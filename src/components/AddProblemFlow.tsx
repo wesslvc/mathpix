@@ -10,11 +10,22 @@ import type { RecognizeResponse } from "@/lib/types";
 
 type Stage = "idle" | "upload" | "crop" | "loading" | "result";
 
-export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
+export default function AddProblemFlow({
+  categoryId,
+  canAdd = true,
+}: {
+  categoryId: string;
+  /** false면 사진인식권이 없음 → 오답 추가 대신 이용권 안내를 보여준다. */
+  canAdd?: boolean;
+}) {
   const router = useRouter();
   const [stage, setStage] = useState<Stage>("idle");
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [result, setResult] = useState<RecognizeResponse | null>(null);
+  // 인식(result)을 만든 바로 그 이미지. 도형 영역을 오려낼 때 필요하다.
+  const [recognizedSourceImage, setRecognizedSourceImage] = useState<
+    string | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   // 여러 장을 한 번에 올리면 첫 장부터 크롭→인식→저장하고, 나머지는 여기 대기.
   const [queue, setQueue] = useState<string[]>([]);
@@ -47,6 +58,7 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
   // 저장 후 대기열에 남은 다음 이미지로 넘어간다. 없으면 처음 화면으로.
   function advanceQueue() {
     setResult(null);
+    setRecognizedSourceImage(null);
     setError(null);
     if (queue.length > 0) {
       const [next, ...rest] = queue;
@@ -70,6 +82,7 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "인식에 실패했습니다.");
       setResult(json as RecognizeResponse);
+      setRecognizedSourceImage(croppedDataUrl);
       setStage("result");
     } catch (err) {
       setError(err instanceof Error ? err.message : "알 수 없는 오류");
@@ -80,6 +93,7 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
   function handleReset() {
     setImageSrc(null);
     setResult(null);
+    setRecognizedSourceImage(null);
     setError(null);
     setQueue([]);
     setStage("idle");
@@ -143,7 +157,7 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
         </div>
       )}
 
-      {stage === "idle" && (
+      {stage === "idle" && canAdd && (
         <button
           type="button"
           onClick={() => setStage("upload")}
@@ -151,6 +165,18 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
         >
           + 오답 추가
         </button>
+      )}
+
+      {stage === "idle" && !canAdd && (
+        <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p>사진인식권이 모두 소진돼 오답을 더 추가할 수 없어요. 이용권을 구매하면 1000개가 충전돼요.</p>
+          <a
+            href="/api/checkout"
+            className="w-fit rounded-lg bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-700"
+          >
+            이용권 구매하기
+          </a>
+        </div>
       )}
 
       {stage === "upload" && (
@@ -190,6 +216,7 @@ export default function AddProblemFlow({ categoryId }: { categoryId: string }) {
           onSaveToCategory={handleSaveToCategory}
           remainingCount={queue.length}
           onNext={advanceQueue}
+          sourceImage={recognizedSourceImage}
         />
       )}
     </div>
