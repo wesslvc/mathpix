@@ -100,7 +100,14 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 
 - **Vercel 프로젝트 `mathpix`의 Production Branch는 `main`을 따라가지 않는다.**
   실제 서비스 중인 배포는 `mathocr` 프로젝트 쪽이며, 그쪽은 Production Branch가
-  `main`으로 정상 연결되어 있어 `main`에 push하면 자동으로 재배포된다.
+  `main`으로 정상 연결되어 있어 보통 `main`에 push하면 자동으로 재배포된다.
+- **2026-07-27 세션에서 GitHub→Vercel 웹훅이 멈춘 적 있음** — 커밋 3개(`3d19299`,
+  `16e4825`, `7127b54`)를 연달아 `main`에 push했는데 `mathocr` 프로젝트에 배포가
+  하나도 안 생김(재배포조차 안 됨, 30분+ 대기해도 동일). `list_deployments`로
+  최신 배포의 `githubCommitSha`가 push한 커밋과 같은지 꼭 확인할 것 — 다를 경우
+  Vercel 대시보드 Settings→Git 연결 상태나 GitHub Settings→Webhooks 배송 로그를
+  사용자에게 확인받아야 함(API로는 재연결 불가). 이 문제 때문에 도형 재구성
+  모델을 90b로 올린 커밋이 한동안 실제 서비스에 반영되지 않았었다.
 - `main`에 직접 push하는 것이 이 저장소의 관행이었음(PR 없이). 다만 세션 지침에서
   특정 작업 브랜치를 지정한 경우 그 브랜치에서 작업하고, `main`에 반영할 때는
   사용자에게 확인받을 것.
