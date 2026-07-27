@@ -10,7 +10,7 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 → 출처가 표시된 PDF로 인쇄하는 Next.js 앱.
 
 - 저장소: `wesslvc/mathpix`, 작업 브랜치: `main`
-  (한 번 삭제된 적이 있어 커밋 해시로 복구함: `3a92fa19a72ab7b5e8f41d2a47b5a0d547268ae5`)
+  (한 번 삭제된 적이 있어 커묋 해시로 복구함: `3a92fa19a72ab7b5e8f41d2a47b5a0d547268ae5`)
 - **배포는 Vercel의 `mathocr` 프로젝트**를 씁니다(`mathocr-...vercel.app`).
   Vercel 프로젝트 `mathpix`도 같은 저장소에 연결돼 있지만 Production Branch가
   `main`을 따라가지 않아 실사용 배포가 아닙니다. 헷갈리지 말 것.
@@ -47,7 +47,7 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   그대로 오려낸 raster로 무료·자동 표시(기존 동작, `ResultStage.tsx`). 그와
   별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
   사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
-  `src/lib/diagramVector.ts`가 Gemini 2.0 Flash로 보내 깨끗한 SVG로 재구성해
+  `src/lib/diagramVector.ts`가 Gemini 2.5 Flash-Lite로 보내 깨끗한 SVG로 재구성해
   문제 밑에 추가로 붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식
   1회(클릭당) = 2개 — 둘 다 하면 문제 하나에 총 3개 차감
   (`supabase/migrations/0009_diagram_credit_amount.sql`에서
