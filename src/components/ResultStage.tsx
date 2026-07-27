@@ -44,7 +44,9 @@ export default function ResultStage({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [answer, setAnswer] = useState("");
-  const [diagramImages, setDiagramImages] = useState<string[]>([]);
+  // 도형 id -> 원본에서 오려낸 raster 이미지(data URL). svg로 재구성되지
+  // 못한 도형만 여기 채워져 대체 표시된다.
+  const [rasterFallbacks, setRasterFallbacks] = useState<Record<string, string>>({});
 
   const html = useMemo(
     () => renderMathText(result.text || result.latex),
@@ -52,40 +54,41 @@ export default function ResultStage({
   );
 
   // Mathpix가 텍스트로 옮길 수 없는 도형(원, 삼각형 등)을 감지하면 그 영역의
-  // 좌표를 함께 알려준다. OCR로는 도형을 재구성할 수 없으니, 보낸 원본
-  // 이미지에서 그 영역을 그대로 오려내 결과 카드에 이미지로 붙여넣는다.
+  // 좌표를 함께 알려준다. 서버에서 Gemini로 깨끗한 SVG 재구성을 시도하고,
+  // (키 미설정/실패 등으로) svg가 없는 도형만 보낸 원본 이미지에서 그 영역을
+  // 그대로 오려내 대체 표시한다.
   useEffect(() => {
     let cancelled = false;
-    setDiagramImages([]);
-    if (!sourceImage || !result.diagrams || result.diagrams.length === 0) {
+    setRasterFallbacks({});
+    const needsRaster = (result.diagrams ?? []).filter((d) => !d.svg);
+    if (!sourceImage || needsRaster.length === 0) {
       return;
     }
 
     const img = new Image();
     img.onload = () => {
       if (cancelled) return;
-      const crops = result
-        .diagrams!.map((d) => {
-          const canvas = document.createElement("canvas");
-          canvas.width = d.width;
-          canvas.height = d.height;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return null;
-          ctx.drawImage(
-            img,
-            d.left,
-            d.top,
-            d.width,
-            d.height,
-            0,
-            0,
-            d.width,
-            d.height,
-          );
-          return canvas.toDataURL("image/png");
-        })
-        .filter((u): u is string => Boolean(u));
-      setDiagramImages(crops);
+      const crops: Record<string, string> = {};
+      for (const d of needsRaster) {
+        const canvas = document.createElement("canvas");
+        canvas.width = d.width;
+        canvas.height = d.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) continue;
+        ctx.drawImage(
+          img,
+          d.left,
+          d.top,
+          d.width,
+          d.height,
+          0,
+          0,
+          d.width,
+          d.height,
+        );
+        crops[d.id] = canvas.toDataURL("image/png");
+      }
+      setRasterFallbacks(crops);
     };
     img.src = sourceImage;
 
@@ -185,15 +188,23 @@ export default function ResultStage({
             style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
             dangerouslySetInnerHTML={{ __html: html }}
           />
-          {diagramImages.map((src, idx) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={idx}
-              src={src}
-              alt="도형"
-              className="mx-auto mt-4 max-w-full"
-            />
-          ))}
+          {(result.diagrams ?? []).map((d) =>
+            d.svg ? (
+              <div
+                key={d.id}
+                className="mx-auto mt-4 max-w-full [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
+                dangerouslySetInnerHTML={{ __html: d.svg }}
+              />
+            ) : rasterFallbacks[d.id] ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={d.id}
+                src={rasterFallbacks[d.id]}
+                alt="도형"
+                className="mx-auto mt-4 max-w-full"
+              />
+            ) : null,
+          )}
         </div>
       </div>
 

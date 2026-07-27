@@ -43,6 +43,11 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 - DB 스키마 SQL: `supabase/migrations/0001_init.sql`
   (categories / problems 테이블 + RLS + `problem-images` 비공개 버킷)
 - 키가 없으면 앱이 죽지 않고 안내 메시지만 표시하도록 처리 (Mathpix mock, Supabase 안내)
+- 도형(원/삼각형 등) 인식: Mathpix는 도형 영역 좌표만 알려주고 벡터화는 못 함.
+  `GEMINI_API_KEY`가 설정돼 있으면 `src/lib/diagramVector.ts`에서 그 영역을
+  `sharp`로 잘라 Gemini 2.0 Flash에 보내 깨끗한 SVG로 재구성(`/api/mathpix`에서
+  호출). 키가 없거나 실패하면 `ResultStage.tsx`가 원본 사진에서 오려낸 raster
+  이미지로 조용히 대체 표시함 — 이 기능도 필수 아님.
 
 ### 과거에 해결한 버그 (재발 시 참고)
 
@@ -68,6 +73,8 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 3. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
    `MATHPIX_APP_ID`, `MATHPIX_APP_KEY`가 들어있는지 확인.
+   `GEMINI_API_KEY`(도형 SVG 재구성용, Google AI Studio에서 무료 발급)는
+   선택 사항 — 없어도 원본 크롭 이미지로 대체 표시되니 앱이 죽지 않음.
 4. **실제 동작 검증** — 회원가입 → 이메일 확인 → 로그인 → 실모추가 → 오답추가 →
    PDF 내보내기 전 과정.
 

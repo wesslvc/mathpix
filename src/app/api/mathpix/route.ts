@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recognizeImage } from "@/lib/mathpixClient";
+import { vectorizeDiagrams } from "@/lib/diagramVector";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -58,6 +59,17 @@ export async function POST(req: NextRequest) {
       appId: process.env.MATHPIX_APP_ID,
       appKey: process.env.MATHPIX_APP_KEY,
     });
+
+    // 도형이 감지됐고 Gemini 키가 있으면 깨끗한 SVG로 재구성한다. 실패해도
+    // 인식 결과 자체는 그대로 돌려준다(클라이언트가 원본 크롭으로 대체 표시).
+    if (result.diagrams.length > 0) {
+      try {
+        result.diagrams = await vectorizeDiagrams(body.image, result.diagrams);
+      } catch {
+        // 무시 — diagrams는 원본(svg 없는) 상태로 남는다.
+      }
+    }
+
     return NextResponse.json(result);
   } catch (err) {
     // Mathpix 호출 자체가 실패했다면 방금 차감한 크레딧을 되돌려준다.
