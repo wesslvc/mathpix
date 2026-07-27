@@ -213,8 +213,10 @@ function renderInline(text: string): string {
 /**
  * 블록의 모든 줄이 ">"로 시작하면(조건 박스 등) 테두리 박스로 렌더링한다.
  * ">"가 없어도 "(가)/(나)/(다)" 같은 조건 표지로 시작하는 줄이 있으면, 그
- * 표지가 처음 나온 줄부터 블록 끝까지를 박스로 묶고(원본 문제집의 테두리
- * 박스에 해당) 그 앞의 문장(예: "30. ... 만족시킨다.")은 평범한 문단으로 둔다.
+ * 표지가 처음 나온 줄부터 "마지막으로 표지가 달린 줄"까지만 박스로 묶는다
+ * (원본 문제집의 테두리 박스에 해당). 표지 앞 문장(예: "30. ... 만족시킨다.")과
+ * 마지막 표지 문장 뒤에 이어지는 표지 없는 문장은 각각 박스 밖 평범한 문단으로
+ * 둔다 — 박스가 블록 끝까지 무조건 이어지지 않게 한다.
  */
 function renderBlock(
   block: string,
@@ -229,18 +231,29 @@ function renderBlock(
     return `<div class="mmd-box">${renderLines(content, false, mathBlocks)}</div>`;
   }
 
-  const markerIdx = lines.findIndex((line) => CONDITION_MARKER.test(line));
-  if (markerIdx > -1) {
-    const introLines = lines.slice(0, markerIdx);
-    const conditionLines = lines.slice(markerIdx);
+  const markerIndices = lines.reduce<number[]>((acc, line, i) => {
+    if (CONDITION_MARKER.test(line)) acc.push(i);
+    return acc;
+  }, []);
+
+  if (markerIndices.length > 0) {
+    const firstIdx = markerIndices[0];
+    const lastIdx = markerIndices[markerIndices.length - 1];
+    const introLines = lines.slice(0, firstIdx);
+    const conditionLines = lines.slice(firstIdx, lastIdx + 1);
+    const trailingLines = lines.slice(lastIdx + 1);
+
     const introHtml =
       introLines.length > 0
         ? `<p class="mmd-paragraph">${renderLines(introLines, isFirst, mathBlocks)}</p>`
         : "";
-    return (
-      introHtml +
-      `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`
-    );
+    const boxHtml = `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
+    const trailingHtml =
+      trailingLines.length > 0
+        ? `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`
+        : "";
+
+    return introHtml + boxHtml + trailingHtml;
   }
 
   return `<p class="mmd-paragraph">${renderLines(lines, isFirst, mathBlocks)}</p>`;
