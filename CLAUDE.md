@@ -48,7 +48,7 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
   사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
   `src/lib/diagramVector.ts`가 **NVIDIA API 카탈로그**(build.nvidia.com)의
-  `nvidia/nemotron-nano-12b-v2-vl` 모델(OpenAI 호환 chat/completions 형식,
+  `meta/llama-3.2-90b-vision-instruct` 모델(OpenAI 호환 chat/completions 형식,
   `NVIDIA_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
   붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식 1회(클릭당) = 2개
   — 둘 다 하면 문제 하나에 총 3개 차감(`supabase/migrations/0009_diagram_credit_amount.sql`에서
@@ -58,58 +58,6 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   (Gemini API를 먼저 써봤으나 계정에 `gemini-2.0-flash`가 사라져 있고
   `gemini-2.5-flash`도 첫 시도부터 429가 계속 나서, 분당 40회 무료 한도가
   있는 NVIDIA API 카탈로그로 교체함 — `GEMINI_API_KEY` 관련 코드는 이제
-  안 쓴.)
-
-### 과거에 해결한 버그 (재발 시 참고)
-
-- Mathpix가 `latex_styled`만 주거나 `\( \)` / `\[ \]` 델리미터를 쓰면 LaTeX가 그대로
-  글자로 보이던 문제 → `renderMathText`에서 델리미터 정규화 + 델리미터 없는 순수
-  LaTeX는 통째로 블록 수식 처리
-- 아이폰 사진(수천 px)을 무압축 PNG data URL로 보내다 Safari에서
-  "The string did not match the expected pattern." 발생 → `src/lib/cropImage.ts`에서
-  긴 변 1600px 이하 + JPEG 품질 0.9로 압축해 전송
-- HEIC/HEIF 업로드 시 안내 메시지 표시
-- `main` 브랜치가 원격에서 통째로 삭제된 적이 있음(원인 불명). 커밋은 GitHub에
-  GC되지 않고 SHA로 남아 있어서 `git fetch origin <sha>`로 복구 가능했음. 브랜치가
-  안 보이면 먼저 Vercel 배포 메타데이터의 `githubCommitSha`로 마지막 커밋을 찾아볼 것.
-
-## 남은 작업 (여기서부터 이어서)
-
-1. **DB 마이그레이션 재확인** — `supabase/migrations/0001_init.sql`(categories/problems/
-   problem-images 버킷)이 실제 `bmhupmkxzvbqndxkvjmx` 프로젝트에 적용됐는지 확인 필요.
-   이전에 사용자에게 실수로 다른(지금은 버려진) 스키마인 `problem_history` 테이블
-   SQL을 먼저 전달한 적이 있어서, `0001_init.sql`을 아직 안 돌렸을 수 있음.
-   **`0009_diagram_credit_amount.sql`도 아직 실행 안 됐을 수 있음** — 이게 없으면
-   "도형 추가인식" 버튼이 크레딧 차감에 실패해 500 에러가 남(RPC가 `p_amount`
-   인자를 못 받는 옵 함수로 남아있기 때문).
-2. **이메일 확인 리디렉션 URL 등록** — Supabase 대시보드 Authentication > URL
-   Configuration에 `{mathocr 배포 도메인}/auth/callback` 추가.
-3. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
-   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-   `MATHPIX_APP_ID`, `MATHPIX_APP_KEY`가 들어있는지 확인.
-   `NVIDIA_API_KEY`(도형 SVG 재구성용, build.nvidia.com에서 무료 발급, 분당
-   40회 한도)는 선택 사항 — 없어도 원본 크롭 이미지로 대체 표시되니 앱이
-   죽지 않음.
-4. **실제 동작 검증** — 회원가입 → 이메일 확인 → 로그인 → 실모추가 → 오답추가 →
-   PDF 내보내기 전 과정.
-
-## 주의할 점
-
-- **Vercel 프로젝트 `mathpix`의 Production Branch는 `main`을 따라가지 않는다.**
-  실제 서비스 중인 배포는 `mathocr` 프로젝트 쪽이며, 그쪽은 Production Branch가
-  `main`으로 정상 연결되어 있어 `main`에 push하면 자동으로 재배포된다.
-- `main`에 직접 push하는 것이 이 저장소의 관행이었음(PR 없이). 다만 세션 지침에서
-  특정 작업 브랜치를 지정한 경우 그 브랜치에서 작업하고, `main`에 반영할 때는
-  사용자에게 확인받을 것.
-- 이전 세션에서 중복 스캐폴드 브랜치 1개(`claude/math-problem-image-recognition-64hjax`)가
-  원격에 남아 있음. 내용은 `main`에 모두 반영돼 있으니 무시해도 된다.
-- 사용자가 채팅에 API 키를 평문으로 붙여넣은 적 있음(Mathpix, Supabase anon key 등).
-  민감정보를 다룰 때 채팅에 노출하지 말 것.
-
-## 명령어
-
-```bash
-npm install
-npm run dev     # http://localhost:3000
-npm run build   # 배포 전 항상 확인
-```
+  안 쓴. 처음엔 가보운 `nvidia/nemotron-nano-12b-v2-vl`을 써다 도형
+  재구성 품질이 너무 떨어져 `meta/llama-3.2-90b-vision-instruct`로 올림
+  — 같은 계정/키로 쓰는 무료 엔드포인트라 비용 차이는 없음.)
