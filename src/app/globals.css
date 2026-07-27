@@ -49,3 +49,23 @@ body {
 .mmd-box:last-child {
   margin-bottom: 0;
 }
+
+/* 표준정규분포표 등 "\begin{tabular}"로 온 표. 원본 문제집처럼 모든 칸에
+   테두리를 두르고, 숫자 위주라 가운데 정렬한다. */
+.mmd-table {
+  margin: 1.1em auto;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.mmd-table:last-child {
+  margin-bottom: 0;
+}
+
+.mmd-table th,
+.mmd-table td {
+  border: 1px solid #94a3b8;
+  padding: 0.4em 1em;
+  text-align: center;
+  font-weight: normal;
+}
