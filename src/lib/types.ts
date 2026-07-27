@@ -13,6 +13,8 @@ export type DiagramRegion = {
   top: number;
   width: number;
   height: number;
+  /** Gemini로 재구성한 벡터 SVG 마크업. 없으면 원본 크롭 이미지로 대체 표시한다. */
+  svg?: string;
 };
 
 export type RecognizeResponse = {
