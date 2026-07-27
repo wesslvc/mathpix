@@ -1,5 +1,5 @@
-const GEMINI_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
+const NVIDIA_MODEL = "nvidia/nemotron-nano-12b-v2-vl";
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
 이 도형을 원본과 최대한 똑같은 비율·각도·위치로, 깨끗한 벡터 그래픽으로 다시 그려주세요.
@@ -27,47 +27,51 @@ function sanitizeSvg(svg: string): string {
 }
 
 /**
- * 사용자가 직접 오려낸 도형 이미지(data URL)를 Gemini에 보내 깨끗한 SVG로
+ * 사용자가 직접 오려낸 도형 이미지(data URL)를 NVIDIA API 카탈로그의
+ * nemotron-nano-12b-v2-vl(비전 특화, 가벼운 모델)에 보내 깨끗한 SVG로
  * 다시 그리게 한다. 실패하면 null을 반환한다(호출부에서 크레딧 환불 처리).
+ * OpenAI 호환 chat/completions 형식이라 image_url에 data URL을 그대로 넣는다.
  */
 export async function vectorizeDiagram(
   imageDataUrl: string,
 ): Promise<string | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) return null;
 
-  const base64 = imageDataUrl.replace(/^data:image\/\w+;base64,/, "");
-  const mimeMatch = imageDataUrl.match(/^data:(image\/\w+);base64,/);
-  const mimeType = mimeMatch?.[1] ?? "image/png";
-
-  const res = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+  const res = await fetch(NVIDIA_ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({
-      contents: [
+      model: NVIDIA_MODEL,
+      messages: [
         {
-          parts: [
-            { text: PROMPT },
-            { inline_data: { mime_type: mimeType, data: base64 } },
+          role: "user",
+          content: [
+            { type: "text", text: PROMPT },
+            { type: "image_url", image_url: { url: imageDataUrl } },
           ],
         },
       ],
-      generationConfig: { temperature: 0.1 },
+      temperature: 0.1,
+      max_tokens: 4096,
     }),
   });
 
   if (res.status === 429) {
-    // 무료 티어 분당/일별 요청 한도 초과. 재시도하면 될 문제라 명확히 구분해
+    // 계정 분당 요청 한도(RPM) 초과. 재시도하면 될 문제라 명확히 구분해
     // 알려준다(그 외 실패는 원인이 다양해 일반 메시지로 남긴다).
     throw new Error(
-      "Gemini 요청 한도(무료 티어)를 초과했습니다. 잠시 후 다시 시도해주세요.",
+      "NVIDIA API 요청 한도(분당 요청 수)를 초과했습니다. 잠시 후 다시 시도해주세요.",
     );
   }
 
   if (!res.ok) return null;
 
   const json = await res.json();
-  const text: string | undefined = json.candidates?.[0]?.content?.parts?.[0]?.text;
+  const text: string | undefined = json.choices?.[0]?.message?.content;
   if (!text) return null;
 
   const svg = extractSvg(text);

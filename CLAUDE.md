@@ -47,13 +47,18 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   그대로 오려낸 raster로 무료·자동 표시(기존 동작, `ResultStage.tsx`). 그와
   별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
   사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
-  `src/lib/diagramVector.ts`가 Gemini 2.5 Flash로 보내 깨끗한 SVG로 재구성해
-  문제 밑에 추가로 붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식
-  1회(클릭당) = 2개 — 둘 다 하면 문제 하나에 총 3개 차감
-  (`supabase/migrations/0009_diagram_credit_amount.sql`에서
+  `src/lib/diagramVector.ts`가 **NVIDIA API 카탈로그**(build.nvidia.com)의
+  `nvidia/nemotron-nano-12b-v2-vl` 모델(OpenAI 호환 chat/completions 형식,
+  `NVIDIA_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
+  붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식 1회(클릭당) = 2개
+  — 둘 다 하면 문제 하나에 총 3개 차감(`supabase/migrations/0009_diagram_credit_amount.sql`에서
   `consume_recognition_credit`/`refund_recognition_credit`이 `p_amount`를
-  받도록 바뀜). `GEMINI_API_KEY`가 없으면 이 버튼을 눌러도 에러 메시지만
+  받도록 바뀜). `NVIDIA_API_KEY`가 없으면 이 버튼을 눌러도 에러 메시지만
   뜨고 크레딧은 차감되지 않음(자동 raster 표시는 키 없이도 그대로 동작).
+  (Gemini API를 먼저 써봤으나 계정에 `gemini-2.0-flash`가 사라져 있고
+  `gemini-2.5-flash`도 첫 시도부터 429가 계속 나서, 분당 40회 무료 한도가
+  있는 NVIDIA API 카탈로그로 교체함 — `GEMINI_API_KEY` 관련 코드는 이제
+  안 씀.)
 
 ### 과거에 해결한 버그 (재발 시 참고)
 
@@ -82,8 +87,9 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 3. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
    `MATHPIX_APP_ID`, `MATHPIX_APP_KEY`가 들어있는지 확인.
-   `GEMINI_API_KEY`(도형 SVG 재구성용, Google AI Studio에서 무료 발급)는
-   선택 사항 — 없어도 원본 크롭 이미지로 대체 표시되니 앱이 죽지 않음.
+   `NVIDIA_API_KEY`(도형 SVG 재구성용, build.nvidia.com에서 무료 발급, 분당
+   40회 한도)는 선택 사항 — 없어도 원본 크롭 이미지로 대체 표시되니 앱이
+   죽지 않음.
 4. **실제 동작 검증** — 회원가입 → 이메일 확인 → 로그인 → 실모추가 → 오답추가 →
    PDF 내보내기 전 과정.
 
