@@ -210,13 +210,33 @@ function renderInline(text: string): string {
   return html;
 }
 
+// 문장 끝을 나타내는 마침표. 종결어미(-다/-이다 등) 패턴이 아니라 글자
+// 그대로의 "."로만 판단한다. 소수점(예: "10.5")은 문장 끝이 아니므로 제외.
+const SENTENCE_END = /\.(?!\d)/;
+
+/**
+ * 마지막 조건 표지가 달린 줄을 "그 조건 문장의 마침표"에서 끊는다. 마침표
+ * 뒤에 다른 문장(문제 본문)이 이어 붙어 있으면 그 부분은 박스 밖으로 뺀다.
+ * 마침표가 없으면(원본에 마침표가 없는 경우) 줄 전체를 그대로 박스에 둔다.
+ */
+function splitAtSentenceEnd(line: string): { head: string; rest: string | null } {
+  const match = line.match(SENTENCE_END);
+  if (!match || match.index === undefined) {
+    return { head: line, rest: null };
+  }
+  const cut = match.index + 1;
+  const head = line.slice(0, cut);
+  const rest = line.slice(cut).trim();
+  return { head, rest: rest.length > 0 ? rest : null };
+}
+
 /**
  * 블록의 모든 줄이 ">"로 시작하면(조건 박스 등) 테두리 박스로 렌더링한다.
  * ">"가 없어도 "(가)/(나)/(다)" 같은 조건 표지로 시작하는 줄이 있으면, 그
- * 표지가 처음 나온 줄부터 "마지막으로 표지가 달린 줄"까지만 박스로 묶는다
- * (원본 문제집의 테두리 박스에 해당). 표지 앞 문장(예: "30. ... 만족시킨다.")과
- * 마지막 표지 문장 뒤에 이어지는 표지 없는 문장은 각각 박스 밖 평범한 문단으로
- * 둔다 — 박스가 블록 끝까지 무조건 이어지지 않게 한다.
+ * 표지가 처음 나온 줄부터 시작해 "마지막 표지가 달린 문장의 마침표"까지만
+ * 박스로 묶는다(원본 문제집의 테두리 박스에 해당). 그 마침표 뒤에 같은 줄에
+ * 이어 붙은 문장이나, 표지 앞/뒤의 다른 줄은 박스 밖 평범한 문단으로 둔다 —
+ * 박스가 블록 끝까지 무조건 이어지지 않게 한다.
  */
 function renderBlock(
   block: string,
@@ -239,9 +259,14 @@ function renderBlock(
   if (markerIndices.length > 0) {
     const firstIdx = markerIndices[0];
     const lastIdx = markerIndices[markerIndices.length - 1];
+    const { head, rest } = splitAtSentenceEnd(lines[lastIdx]);
+
     const introLines = lines.slice(0, firstIdx);
-    const conditionLines = lines.slice(firstIdx, lastIdx + 1);
-    const trailingLines = lines.slice(lastIdx + 1);
+    const conditionLines = [...lines.slice(firstIdx, lastIdx), head];
+    const trailingLines = [
+      ...(rest !== null ? [rest] : []),
+      ...lines.slice(lastIdx + 1),
+    ];
 
     const introHtml =
       introLines.length > 0
