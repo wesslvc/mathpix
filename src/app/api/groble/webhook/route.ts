@@ -144,6 +144,15 @@ export async function POST(request: Request) {
     }
   }
 
+  // 그로블 "테스트 발송"은 evt_test_ 접두사가 붙은 이벤트를 실제 거래 데이터를
+  // 흉내내어 보낸다(같은 merchantUid를 재사용하기도 함). 서명 검증까지는 정상
+  // 통과해야 하므로 응답은 200으로 주되, 실제 크레딧 지급/차감은 절대 적용하지
+  // 않는다 — 실서비스 계정 크레딧이 테스트 발송으로 바뀌는 사고를 막기 위함.
+  const isTestEvent = (event.id ?? "").startsWith("evt_test_");
+  if (isTestEvent) {
+    return NextResponse.json({ ok: true, test: true });
+  }
+
   const type = event.type ?? "";
   const obj = event.data?.object ?? {};
   const sellerReference = asString(obj.sellerReference);
