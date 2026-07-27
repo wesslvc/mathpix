@@ -31,7 +31,7 @@ function sanitizeSvg(svg: string): string {
  * llama-3.2-90b-vision-instruct(고품질 비전 모델)에 보내 깨끗한 SVG로
  * 다시 그리게 한다. 실패하면 null을 반환한다(호출부에서 크레딧 환불 처리).
  * OpenAI 호환 chat/completions 형식이라 image_url에 data URL을 그대로 넣는다.
- * (처음엔 가보운 nemotron-nano-12b-v2-vl을 썜으나 도형 재구성 품질이
+ * (처음엔 가벼운 nemotron-nano-12b-v2-vl을 썼으나 도형 재구성 품질이
  * 떨어져 90b로 올림 — 같은 계정/키로 호출하는 무료 엔드포인트라 비용
  * 차이는 없음.)
  */
@@ -59,7 +59,7 @@ export async function vectorizeDiagram(
         },
       ],
       temperature: 0.1,
-      max_tokens: 4096,
+      max_tokens: 8192,
     }),
   });
 
