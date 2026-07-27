@@ -25,7 +25,7 @@ body {
   margin-bottom: 0;
 }
 
-/* 원본에 줄바꿈이 있던 자리마다 한 줄씩. 줄 사이에 여백을 줘서 분수·적분·시그마
+/* 원본에 줄바꿈이 있던 자리마다 한 줄씩. 줄 사이에 여백을 줌서 분수·적분·시그마
    같은 키 큰 수식이 위아래 줄과 너무 붙지 않게 한다(새 줄바꿈은 만들지 않음). */
 .mmd-line {
   display: block;
@@ -48,4 +48,24 @@ body {
 
 .mmd-box:last-child {
   margin-bottom: 0;
+}
+
+/* 표준정규분포표 등 "\begin{tabular}"로 온 표. 원본 문제집처럼 모든 칸에
+   테두리를 두르고, 숫자 위주라 가운데 정렬한다. */
+.mmd-table {
+  margin: 1.1em auto;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.mmd-table:last-child {
+  margin-bottom: 0;
+}
+
+.mmd-table th,
+.mmd-table td {
+  border: 1px solid #94a3b8;
+  padding: 0.4em 1em;
+  text-align: center;
+  font-weight: normal;
 }

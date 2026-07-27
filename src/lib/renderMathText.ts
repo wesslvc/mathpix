@@ -144,6 +144,52 @@ function restoreDisplayMath(s: string, blocks: string[]): string {
   return s.replace(MATH_PLACEHOLDER, (_, i) => blocks[Number(i)]);
 }
 
+// 표준정규분포표처럼 문제집이 "\begin{tabular}...\end{tabular}"로 표를
+// 보내는 경우가 있다. KaTeX는 tabular 환경을 지원하지 않고, 줄 단위 렌더링
+// 로직이 표 안의 개행까지 각각 별도 줄로 쪽개버려 표가 아예 사라지거나
+// 깨진 글자로 노출된다. 문단/줄 분리 전에 tabular 블록 전체를 실제 HTML
+// <table>로 미리 변환해 플레이스홀더 토큰(줄바꿈 없는 한 줄)으로 바꿔두고,
+// renderBlock에서 그 줄을 찾아 표만 따로 떼어 형제 요소로 내보낸다.
+const TABULAR_PATTERN = /\\begin\{tabular\}\{[^}]*\}([\s\S]*?)\\end\{tabular\}/g;
+
+function tabularToTableHtml(body: string): string {
+  const rows = body
+    .split(/\\\\/)
+    .map((row) => row.replace(/\\hline/g, "").trim())
+    .filter((row) => row.length > 0);
+
+  const rowsHtml = rows
+    .map((row, i) => {
+      const cells = row.split("&").map((cell) => cell.trim());
+      const tag = i === 0 ? "th" : "td";
+      const cellsHtml = cells
+        .map((cell) => `<${tag}>${renderInline(cell)}</${tag}>`)
+        .join("");
+      return `<tr>${cellsHtml}</tr>`;
+    })
+    .join("");
+
+  return `<table class="mmd-table">${rowsHtml}</table>`;
+}
+
+function protectTabular(input: string): { text: string; tables: string[] } {
+  const tables: string[] = [];
+  const text = input.replace(TABULAR_PATTERN, (_match, body: string) => {
+    const token = `\x00TABLE${tables.length}\x00`;
+    tables.push(tabularToTableHtml(body));
+    return token;
+  });
+  return { text, tables };
+}
+
+const TABLE_PLACEHOLDER_ONLY = /^\x00TABLE(\d+)\x00$/;
+const TABLE_PLACEHOLDER = /\x00TABLE(\d+)\x00/g;
+
+function restoreTables(html: string, tables: string[]): string {
+  if (tables.length === 0) return html;
+  return html.replace(TABLE_PLACEHOLDER, (_, i) => tables[Number(i)]);
+}
+
 /** 한 줄(내부 줄바꿈 없음)을 렌더링한다. 순수 수식이면 통째로, 아니면 "$...$" 단위로. */
 function renderLineContent(line: string, mathBlocks: string[]): string {
   const restored = restoreDisplayMath(line, mathBlocks);
@@ -241,8 +287,35 @@ function renderBlock(
   block: string,
   isFirst: boolean,
   mathBlocks: string[],
+  tables: string[],
 ): string {
   const lines = block.split("\n");
+
+  // "<table>"은 블록 레벨 요소라 "<p>"/"<span>" 안에 넣으면 브라우저가 HTML
+  // 파싱 중 <p>를 강제로 닫아버려(스펙상 <table>은 <p> 안에 못 들어감) 뒤에
+  // 오는 문장이 문단 스타일을 잃는 문제가 생긴다. 표 토큰이 있는 줄을 찾으면
+  // 그 앞/뒤 줄만 각각 별도 문단으로 두고 표는 형제 요소로 내보낸다.
+  const tableLineIdx = lines.findIndex((line) =>
+    TABLE_PLACEHOLDER_ONLY.test(line.trim()),
+  );
+  if (tableLineIdx !== -1) {
+    const tableMatch = lines[tableLineIdx].trim().match(TABLE_PLACEHOLDER_ONLY)!;
+    const tableHtml = tables[Number(tableMatch[1])];
+    const beforeLines = lines.slice(0, tableLineIdx);
+    const afterLines = lines.slice(tableLineIdx + 1);
+
+    const beforeHtml =
+      beforeLines.length > 0
+        ? `<p class="mmd-paragraph">${renderLines(beforeLines, isFirst, mathBlocks)}</p>`
+        : "";
+    const afterHtml =
+      afterLines.length > 0
+        ? `<p class="mmd-paragraph">${renderLines(afterLines, false, mathBlocks)}</p>`
+        : "";
+
+    return beforeHtml + tableHtml + afterHtml;
+  }
+
   const isBoxed = lines.every((line) => /^\s*>/.test(line));
 
   if (isBoxed) {
@@ -291,10 +364,13 @@ function renderBlock(
  */
 export function renderMathText(input: string): string {
   const normalized = normalizeDelimiters(input);
-  const { text, blocks: mathBlocks } = protectDisplayMath(normalized);
+  const { text: withoutTables, tables } = protectTabular(normalized);
+  const { text, blocks: mathBlocks } = protectDisplayMath(withoutTables);
   const blocks = text.trim().split(/\n\s*\n+/);
 
-  return blocks
-    .map((block, idx) => renderBlock(block, idx === 0, mathBlocks))
+  const html = blocks
+    .map((block, idx) => renderBlock(block, idx === 0, mathBlocks, tables))
     .join("");
+
+  return restoreTables(html, tables);
 }
