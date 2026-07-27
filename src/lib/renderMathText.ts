@@ -149,8 +149,8 @@ function restoreDisplayMath(s: string, blocks: string[]): string {
 // 보내는 경우가 있다. KaTeX는 tabular 환경을 지원하지 않고, 줄 단위 렌더링
 // 로직이 표 안의 개행까지 각각 별도 줄로 쪼개버려 표가 아예 사라지거나
 // 깨진 글자로 노출됐다. 문단/줄 분리 전에 tabular 블록 전체를 실제 HTML
-// <table>로 미리 변환해 플레이스홀더 토큰으로 바꿔두고, 그 블록이 통째로
-// 표 하나뿐이면 <p>로 감싸지 않고 표 HTML을 그대로 내보낸다.
+// <table>로 미리 변환해 플레이스홀더 토큰(줄바꿈 없는 한 줄)으로 바꿔두고,
+// renderBlock에서 그 줄을 찾아 표만 따로 떼어 형제 요소로 내보낸다.
 const TABULAR_PATTERN = /\\begin\{tabular\}\{[^}]*\}([\s\S]*?)\\end\{tabular\}/g;
 
 function tabularToTableHtml(body: string): string {
