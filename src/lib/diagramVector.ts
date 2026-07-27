@@ -56,6 +56,14 @@ export async function vectorizeDiagram(
     }),
   });
 
+  if (res.status === 429) {
+    // 무료 티어 분당/일별 요청 한도 초과. 재시도하면 될 문제라 명확히 구분해
+    // 알려준다(그 외 실패는 원인이 다양해 일반 메시지로 남긴다).
+    throw new Error(
+      "Gemini 요청 한도(무료 티어)를 초과했습니다. 잠시 후 다시 시도해주세요.",
+    );
+  }
+
   if (!res.ok) return null;
 
   const json = await res.json();
