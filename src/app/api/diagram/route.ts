@@ -5,8 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-/** 도형 추가인식 1회당 차감되는 크레딧(OCR 1개와 별도). */
-const DIAGRAM_CREDIT_COST = 2;
+/** 도형 추가인식 1회당 차감되는 크레딧(OCR 1개와 별도). API 호출 비용이 커서 30으로 책정. */
+const DIAGRAM_CREDIT_COST = 30;
 
 export async function POST(req: NextRequest) {
   let body: { image?: string };
