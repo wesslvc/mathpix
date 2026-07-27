@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toPng } from "html-to-image";
 import { createClient } from "@/lib/supabase/client";
 import { renderMathText } from "@/lib/renderMathText";
+import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 
 export type GalleryProblem = {
   id: string;
@@ -25,7 +26,7 @@ type Props = {
 };
 
 /**
- * 화면에 실제로 그려진(보이는) 노드를 PNG Blob으로 캡처한다.
+ * 화면에 실제로 그려진(보이는) 노드를 PNG Blob으로 칵처한다.
  * iOS Safari는 화면 밖/투명 요소나 첫 toPng 호출에서 빈 이미지를 내놓는
  * 경우가 있어, 이미 렌더된 요소를 대상으로 여러 번 호출해 안정화한다.
  */
@@ -69,7 +70,7 @@ export default function ProblemGallery({ problems }: Props) {
 
     setBusyId(a.id);
 
-    // 두 문제의 sort_order 값을 서로 맞바꾼다.
+    // 두 문제의 sort_order 값을 서로 맞바꿔다.
     const next = [...list];
     next[index] = { ...b, sortOrder: a.sortOrder };
     next[j] = { ...a, sortOrder: b.sortOrder };
@@ -114,8 +115,8 @@ export default function ProblemGallery({ problems }: Props) {
       const supabase = createClient();
       const blob = await captureNode(node);
 
-      // 스토리지 버킷에 UPDATE 정책이 없어 덮어쓰기(upsert)는 RLS에 막힌다.
-      // 새 경로에 업로드하고 image_path를 바꾼 뒤 예전 파일을 지운다.
+      // 스토리지 버켓에 UPDATE 정책이 없어 덮어쓰기(upsert)는 RLS에 막힌다.
+      // 새 경로에 업로드하고 image_path를 바꿄 뒤 예전 파일을 지운다.
       const newPath = siblingPath(editing.imagePath);
       const { error: upErr } = await supabase.storage
         .from("problem-images")
@@ -262,11 +263,11 @@ export default function ProblemGallery({ problems }: Props) {
               <p className="mb-1 text-xs font-medium text-slate-500">
                 미리보기 (이 모습 그대로 저장됩니다)
               </p>
-              <div className="overflow-hidden rounded-lg border border-slate-200">
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <div
                   ref={previewRef}
                   className="bg-white p-8 font-serif leading-relaxed text-ink"
-                  style={{ fontSize: 24 }}
+                  style={{ fontSize: 24, width: PROBLEM_CARD_WIDTH }}
                   dangerouslySetInnerHTML={{ __html: renderMathText(editText) }}
                 />
               </div>
