@@ -43,11 +43,17 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 - DB 스키마 SQL: `supabase/migrations/0001_init.sql`
   (categories / problems 테이블 + RLS + `problem-images` 비공개 버킷)
 - 키가 없으면 앱이 죽지 않고 안내 메시지만 표시하도록 처리 (Mathpix mock, Supabase 안내)
-- 도형(원/삼각형 등) 인식: Mathpix는 도형 영역 좌표만 알려주고 벡터화는 못 함.
-  `GEMINI_API_KEY`가 설정돼 있으면 `src/lib/diagramVector.ts`에서 그 영역을
-  `sharp`로 잘라 Gemini 2.0 Flash에 보내 깨끗한 SVG로 재구성(`/api/mathpix`에서
-  호출). 키가 없거나 실패하면 `ResultStage.tsx`가 원본 사진에서 오려낸 raster
-  이미지로 조용히 대체 표시함 — 이 기능도 필수 아님.
+- 도형(원/삼각형 등) 재구성: Mathpix가 자동 감지한 도형 영역은 원본 사진에서
+  그대로 오려낸 raster로 무료·자동 표시(기존 동작, `ResultStage.tsx`). 그와
+  별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
+  사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
+  `src/lib/diagramVector.ts`가 Gemini 2.0 Flash로 보내 깨끗한 SVG로 재구성해
+  문제 밑에 추가로 붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식
+  1회(클릭당) = 2개 — 둘 다 하면 문제 하나에 총 3개 차감
+  (`supabase/migrations/0009_diagram_credit_amount.sql`에서
+  `consume_recognition_credit`/`refund_recognition_credit`이 `p_amount`를
+  받도록 바뀌). `GEMINI_API_KEY`가 없으면 이 버튼을 눌러도 에러 메시지만
+  뜨고 크레딧은 차감되지 않음(자동 raster 표시는 키 없이도 그대로 동작).
 
 ### 과거에 해결한 버그 (재발 시 참고)
 
@@ -68,6 +74,9 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
    problem-images 버킷)이 실제 `bmhupmkxzvbqndxkvjmx` 프로젝트에 적용됐는지 확인 필요.
    이전에 사용자에게 실수로 다른(지금은 버려진) 스키마인 `problem_history` 테이블
    SQL을 먼저 전달한 적이 있어서, `0001_init.sql`을 아직 안 돌렸을 수 있음.
+   **`0009_diagram_credit_amount.sql`도 아직 실행 안 됐을 수 있음** — 이게 없으면
+   "도형 추가인식" 버튼이 크레딧 차감에 실패해 500 에러가 남(RPC가 `p_amount`
+   인자를 못 받는 옵 함수로 남아있기 때문).
 2. **이메일 확인 리디렉션 URL 등록** — Supabase 대시보드 Authentication > URL
    Configuration에 `{mathocr 배포 도메인}/auth/callback` 추가.
 3. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
