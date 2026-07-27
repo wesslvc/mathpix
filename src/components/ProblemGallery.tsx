@@ -78,14 +78,12 @@ export default function ProblemGallery({ problems }: Props) {
 
     try {
       const supabase = createClient();
-      const { error: e1 } = await supabase
-        .from("problems")
-        .update({ sort_order: b.sortOrder })
-        .eq("id", a.id);
-      const { error: e2 } = await supabase
-        .from("problems")
-        .update({ sort_order: a.sortOrder })
-        .eq("id", b.id);
+      // 서로 독립된 두 행 갱신이라 동시에 보내도 안전하다(순서대로 기다리면
+      // 왕복이 두 번 격쳐 느려진다).
+      const [{ error: e1 }, { error: e2 }] = await Promise.all([
+        supabase.from("problems").update({ sort_order: b.sortOrder }).eq("id", a.id),
+        supabase.from("problems").update({ sort_order: a.sortOrder }).eq("id", b.id),
+      ]);
       if (e1 || e2) throw e1 ?? e2;
     } catch (err) {
       // 실패하면 원래 순서로 되돌린다.

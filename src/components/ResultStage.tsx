@@ -222,7 +222,41 @@ export default function ResultStage({
         </label>
       )}
 
-      <div className="flex flex-wrap justify-end gap-2">
+      {/* 보조 도구: 저장 결과를 만드는 액션이 아니라 다시 시작/복사 같은
+          부가 기능이라 작고 옷은 스타일로 아래 주요 액션과 구분한다. */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        <button
+          type="button"
+          onClick={onRestart}
+          className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+        >
+          새 이미지로 시작
+        </button>
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+        >
+          크롭 다시하기
+        </button>
+        <button
+          type="button"
+          onClick={handleCopyLatex}
+          className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+        >
+          {copied ? "복사됨!" : "LaTeX 복사"}
+        </button>
+        <button
+          type="button"
+          onClick={handleCopyText}
+          className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+        >
+          {textCopied ? "복사됨!" : "텍스트 복사"}
+        </button>
+      </div>
+
+      {/* 주요 액션: 결과를 실제로 저장/출력하는 버튼만 모아 눈에 띄게 둔다. */}
+      <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
         {onNext && remainingCount > 0 && (
           <button
             type="button"
@@ -232,6 +266,14 @@ export default function ResultStage({
             다음 이미지 → ({remainingCount}장 남음)
           </button>
         )}
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={isExporting}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+        >
+          {isExporting ? "저장 중..." : "이미지로 저장"}
+        </button>
         {onSaveToCategory && (
           <button
             type="button"
@@ -242,42 +284,6 @@ export default function ResultStage({
             {saved ? "저장됨!" : isSaving ? "저장 중..." : "오답으로 저장"}
           </button>
         )}
-        <button
-          type="button"
-          onClick={onRestart}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-        >
-          새 이미지로 시작
-        </button>
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-        >
-          크롭 다시하기
-        </button>
-        <button
-          type="button"
-          onClick={handleCopyLatex}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-        >
-          {copied ? "복사됨!" : "LaTeX 복사"}
-        </button>
-        <button
-          type="button"
-          onClick={handleCopyText}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-        >
-          {textCopied ? "복사됨!" : "텍스트 복사"}
-        </button>
-        <button
-          type="button"
-          onClick={handleExport}
-          disabled={isExporting}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {isExporting ? "저장 중..." : "이미지로 저장"}
-        </button>
       </div>
     </div>
   );

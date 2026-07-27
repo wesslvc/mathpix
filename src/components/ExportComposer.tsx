@@ -216,16 +216,24 @@ export default function ExportComposer({
 
       const skipped: number[] = [];
 
+      // 이미지를 한 장씩 순서대로 내려받으면 문제 수만큼 네트워크 왕복이
+      // 쌍여 느리다. 먼저 전부 동시에 내려받고, PDF에 그려 넣는(embedPng)
+      // 단계만 순서대로 처리한다.
+      const fetched = await Promise.all(
+        order.map(async (problem) => {
+          try {
+            const bytes = await fetchArrayBuffer(problem.imageUrl);
+            return isPng(bytes) ? bytes : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
       for (let i = 0; i < order.length; i++) {
         const problem = order[i];
-        let bytes: ArrayBuffer;
-        try {
-          bytes = await fetchArrayBuffer(problem.imageUrl);
-        } catch {
-          skipped.push(i + 1);
-          continue;
-        }
-        if (!isPng(bytes)) {
+        const bytes = fetched[i];
+        if (!bytes) {
           skipped.push(i + 1);
           continue;
         }
