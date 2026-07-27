@@ -50,8 +50,9 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   `src/lib/diagramVector.ts`가 **NVIDIA API 카탈로그**(build.nvidia.com)의
   `meta/llama-3.2-90b-vision-instruct` 모델(OpenAI 호환 chat/completions 형식,
   `NVIDIA_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
-  붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식 1회(클릭당) = 2개
-  — 둘 다 하면 문제 하나에 총 3개 차감(`supabase/migrations/0009_diagram_credit_amount.sql`에서
+  붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식 1회(클릭당) = 30개
+  (NVIDIA API 호출 비용이 커서 비싸게 책정)
+  — 둘 다 하면 문제 하나에 총 31개 차감(`supabase/migrations/0009_diagram_credit_amount.sql`에서
   `consume_recognition_credit`/`refund_recognition_credit`이 `p_amount`를
   받도록 바뀜). `NVIDIA_API_KEY`가 없으면 이 버튼을 눌러도 에러 메시지만
   뜨고 크레딧은 차감되지 않음(자동 raster 표시는 키 없이도 그대로 동작).

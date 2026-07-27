@@ -102,7 +102,7 @@ export default function ResultStage({
     };
   }, [sourceImage, result.diagrams]);
 
-  /** 사람이 오려낸 도형 영역을 Gemini로 보내 깨끗한 SVG로 재구성한다(사진인식권 2개 차감). */
+  /** 사람이 오려낸 도형 영역을 Gemini로 보내 깨끗한 SVG로 재구성한다(사진인식권 30개 차감). */
   async function handleDiagramCropConfirm(croppedDataUrl: string) {
     setShowDiagramCrop(false);
     setIsVectorizing(true);
@@ -245,7 +245,7 @@ export default function ResultStage({
             disabled={isVectorizing}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
           >
-            {isVectorizing ? "도형 재구성 중..." : "도형 추가인식 (사진인식권 2개)"}
+            {isVectorizing ? "도형 재구성 중..." : "도형 추가인식 (사진인식권 30개)"}
           </button>
           {vectorizeError && (
             <p className="text-xs text-red-600">{vectorizeError}</p>
