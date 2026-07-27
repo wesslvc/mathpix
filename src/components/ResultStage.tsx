@@ -5,6 +5,7 @@ import { toPng } from "html-to-image";
 import { renderMathText } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
+import DiagramCropModal from "./DiagramCropModal";
 
 type Props = {
   result: RecognizeResponse;
@@ -44,9 +45,15 @@ export default function ResultStage({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [answer, setAnswer] = useState("");
-  // 도형 id -> 원본에서 오려낸 raster 이미지(data URL). svg로 재구성되지
-  // 못한 도형만 여기 채워져 대체 표시된다.
+  // Mathpix가 자동 감지한 도형 영역을 원본에서 그대로 오려낸 raster 이미지들
+  // (도형 id -> data URL). 무료·자동, Gemini 재구성과는 별개다.
   const [rasterFallbacks, setRasterFallbacks] = useState<Record<string, string>>({});
+  // "도형 추가인식"으로 사람이 직접 오려내 Gemini가 재구성한 SVG들. 클릭할
+  // 때마다 하나씩 쌓인다(문제당 여러 도형이 있으면 여러 번 실행 가능).
+  const [manualDiagramSvgs, setManualDiagramSvgs] = useState<string[]>([]);
+  const [showDiagramCrop, setShowDiagramCrop] = useState(false);
+  const [isVectorizing, setIsVectorizing] = useState(false);
+  const [vectorizeError, setVectorizeError] = useState<string | null>(null);
 
   const html = useMemo(
     () => renderMathText(result.text || result.latex),
@@ -54,14 +61,12 @@ export default function ResultStage({
   );
 
   // Mathpix가 텍스트로 옮길 수 없는 도형(원, 삼각형 등)을 감지하면 그 영역의
-  // 좌표를 함께 알려준다. 서버에서 Gemini로 깨끗한 SVG 재구성을 시도하고,
-  // (키 미설정/실패 등으로) svg가 없는 도형만 보낸 원본 이미지에서 그 영역을
-  // 그대로 오려내 대체 표시한다.
+  // 좌표를 함께 알려준다. OCR로는 도형을 재구성할 수 없으니, 보낸 원본
+  // 이미지에서 그 영역을 그대로 오려내 결과 카드에 이미지로 붙여넣는다.
   useEffect(() => {
     let cancelled = false;
     setRasterFallbacks({});
-    const needsRaster = (result.diagrams ?? []).filter((d) => !d.svg);
-    if (!sourceImage || needsRaster.length === 0) {
+    if (!sourceImage || !result.diagrams || result.diagrams.length === 0) {
       return;
     }
 
@@ -69,7 +74,7 @@ export default function ResultStage({
     img.onload = () => {
       if (cancelled) return;
       const crops: Record<string, string> = {};
-      for (const d of needsRaster) {
+      for (const d of result.diagrams) {
         const canvas = document.createElement("canvas");
         canvas.width = d.width;
         canvas.height = d.height;
@@ -96,6 +101,29 @@ export default function ResultStage({
       cancelled = true;
     };
   }, [sourceImage, result.diagrams]);
+
+  /** 사람이 오려낸 도형 영역을 Gemini로 보내 깨끗한 SVG로 재구성한다(사진인식권 2개 차감). */
+  async function handleDiagramCropConfirm(croppedDataUrl: string) {
+    setShowDiagramCrop(false);
+    setIsVectorizing(true);
+    setVectorizeError(null);
+    try {
+      const res = await fetch("/api/diagram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: croppedDataUrl }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "도형 재구성에 실패했습니다.");
+      setManualDiagramSvgs((prev) => [...prev, json.svg as string]);
+    } catch (err) {
+      setVectorizeError(
+        err instanceof Error ? err.message : "도형 재구성에 실패했습니다.",
+      );
+    } finally {
+      setIsVectorizing(false);
+    }
+  }
 
   async function handleExport() {
     if (!cardRef.current) return;
@@ -189,13 +217,7 @@ export default function ResultStage({
             dangerouslySetInnerHTML={{ __html: html }}
           />
           {(result.diagrams ?? []).map((d) =>
-            d.svg ? (
-              <div
-                key={d.id}
-                className="mx-auto mt-4 max-w-full [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
-                dangerouslySetInnerHTML={{ __html: d.svg }}
-              />
-            ) : rasterFallbacks[d.id] ? (
+            rasterFallbacks[d.id] ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 key={d.id}
@@ -205,8 +227,39 @@ export default function ResultStage({
               />
             ) : null,
           )}
+          {manualDiagramSvgs.map((svg, idx) => (
+            <div
+              key={idx}
+              className="mx-auto mt-4 max-w-full [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          ))}
         </div>
       </div>
+
+      {sourceImage && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowDiagramCrop(true)}
+            disabled={isVectorizing}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+          >
+            {isVectorizing ? "도형 재구성 중..." : "도형 추가인식 (사진인식권 2개)"}
+          </button>
+          {vectorizeError && (
+            <p className="text-xs text-red-600">{vectorizeError}</p>
+          )}
+        </div>
+      )}
+
+      {showDiagramCrop && sourceImage && (
+        <DiagramCropModal
+          imageSrc={sourceImage}
+          onConfirm={handleDiagramCropConfirm}
+          onCancel={() => setShowDiagramCrop(false)}
+        />
+      )}
 
       {result.confidence !== null && (
         <p className="text-xs text-slate-400">
