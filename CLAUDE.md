@@ -48,7 +48,7 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
   사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
   `src/lib/diagramVector.ts`가 **NVIDIA API 카탈로그**(build.nvidia.com)의
-  `nvidia/nemotron-nano-12b-v2-vl` 모델(OpenAI 호환 chat/completions 형식,
+  `meta/llama-3.2-90b-vision-instruct` 모델(OpenAI 호환 chat/completions 형식,
   `NVIDIA_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
   붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식 1회(클릭당) = 2개
   — 둘 다 하면 문제 하나에 총 3개 차감(`supabase/migrations/0009_diagram_credit_amount.sql`에서
@@ -58,7 +58,9 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   (Gemini API를 먼저 써봤으나 계정에 `gemini-2.0-flash`가 사라져 있고
   `gemini-2.5-flash`도 첫 시도부터 429가 계속 나서, 분당 40회 무료 한도가
   있는 NVIDIA API 카탈로그로 교체함 — `GEMINI_API_KEY` 관련 코드는 이제
-  안 씀.)
+  안 씀. 처음엔 가벼운 `nvidia/nemotron-nano-12b-v2-vl`을 썼으나 도형
+  재구성 품질이 너무 떨어져 `meta/llama-3.2-90b-vision-instruct`로 올림
+  — 같은 계정/키로 쓰는 무료 엔드포인트라 비용 차이는 없음.)
 
 ### 과거에 해결한 버그 (재발 시 참고)
 
