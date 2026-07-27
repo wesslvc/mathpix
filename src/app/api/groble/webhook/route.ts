@@ -75,7 +75,7 @@ async function grantCredits(
   }
 }
 
-/** 일반결제 환불 → 해당 구매로 충전된 크레딛을 0으로 되돌린다(merchantUid 매핑 기준). */
+/** 일반결제 환불 → 해당 구매로 충전된 크레딧을 0으로 되돌린다(merchantUid 매핑 기준). */
 async function revokeCreditsByMerchantUid(
   admin: SupabaseClient,
   merchantUid: string | null,
@@ -131,7 +131,7 @@ export async function POST(request: Request) {
 
   const admin = createAdminClient();
 
-  // 2) 먱등 처리 — 이미 처리한 이벤트면 200으로 조용히 넘어간다.
+  // 2) 멱등 처리 — 이미 처리한 이벤트면 200으로 조용히 넘어간다.
   if (idempotencyKey) {
     const { error: dupErr } = await admin.from("groble_webhook_events").insert({
       idempotency_key: idempotencyKey,
@@ -142,6 +142,15 @@ export async function POST(request: Request) {
       // primary key 충돌 = 이미 처리함.
       return NextResponse.json({ ok: true, duplicate: true });
     }
+  }
+
+  // 그로블 "테스트 발송"은 evt_test_ 접두사가 붙은 이벤트를 실제 거래 데이터를
+  // 흉내내어 보낸다(같은 merchantUid를 재사용하기도 함). 서명 검증까지는 정상
+  // 통과해야 하므로 응답은 200으로 주되, 실제 크레딧 지급/차감은 절대 적용하지
+  // 않는다 — 실서비스 계정 크레딧이 테스트 발송으로 바뀌는 사고를 막기 위함.
+  const isTestEvent = (event.id ?? "").startsWith("evt_test_");
+  if (isTestEvent) {
+    return NextResponse.json({ ok: true, test: true });
   }
 
   const type = event.type ?? "";
@@ -161,8 +170,8 @@ export async function POST(request: Request) {
       await revokeCreditsByMerchantUid(admin, merchantUid);
     }
     // 그 외(cancel_requested, subscription_payment.refunded/failed,
-    // subscription.terminated 등)는 이미 충전된 크레딛을 건드리지 않는다 —
-    // 크레딛은 회차 결제 시점에만 충전되고, 남은 크레딛은 계속 쓸 수 있다.
+    // subscription.terminated 등)는 이미 충전된 크레딧을 건드리지 않는다 —
+    // 크레딧은 회차 결제 시점에만 충전되고, 남은 크레딧은 계속 쓸 수 있다.
   } catch {
     // 처리 실패 → 500으로 응답해 그로블이 재시도하게 한다.
     return NextResponse.json({ error: "processing failed" }, { status: 500 });
