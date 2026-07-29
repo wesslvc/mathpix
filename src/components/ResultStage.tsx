@@ -37,7 +37,7 @@ export default function ResultStage({
   sourceImage,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const [fontSizeIdx, setFontSizeIdx] = useState(1);
+  const [fontSizeIdx, setFontSizeIdx] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [textCopied, setTextCopied] = useState(false);

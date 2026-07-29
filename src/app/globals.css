@@ -16,6 +16,15 @@ body {
   margin: 0.75em 0;
 }
 
+/* KaTeX 폰트(KaTeX_Main 등)에는 한글 글리프가 없어서, "\text{...}"로 수식
+   안에 들어간 한글(예: 케이스 구분의 "n이 3의 배수인 경우")은 브라우저가
+   임의로 다른 기본 폰트로 대체해 본문과 다르게 보인다. 한글이 필요한 글리프만
+   나눔명조로 자연스럽게 폴백되도록 마지막에 추가한다(수식 기호는 이미 더
+   구체적인 KaTeX_* 규칙이 우선 적용되므로 영향받지 않는다). */
+.katex {
+  font-family: KaTeX_Main, "Nanum Myeongjo", serif;
+}
+
 .mmd-paragraph {
   margin: 0 0 1.1em;
   line-height: 1.7;
