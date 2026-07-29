@@ -277,6 +277,35 @@ function splitAtSentenceEnd(line: string): { head: string; rest: string | null }
 }
 
 /**
+ * 이 줄에 "문장이 끝났다고 볼 마침표"가 있는지 판단한다. "$$...$$"(디스플레이
+ * 수식)는 protectDisplayMath가 플레이스홀더 토큰(예: "\x00MATH2\x00")으로
+ * 감춰둔 상태라, 마침표가 "\[ x=\alpha,... \text{ 에서 극소이다. } \]"처럼
+ * 수식 안쪽에 있으면 줄의 원문에는 마침표가 안 보인다. 그래서 원문에 없으면
+ * 복원한(플레이스홀더를 실제 수식으로 되돌린) 내용까지 확인한다.
+ */
+function lineHasSentenceEnd(line: string, mathBlocks: string[]): boolean {
+  return SENTENCE_END.test(restoreDisplayMath(line, mathBlocks));
+}
+
+/**
+ * 조건 문장이 끝나는 줄을 박스에 마저 담는다. 마침표가 줄 원문에 그대로
+ * 보이면(일반 텍스트 줄) 기존처럼 그 지점에서 잘라 뒤쪽을 박스 밖으로 뺀다.
+ * 마침표가 디스플레이 수식 플레이스홀더 안에 숨어 있는 경우(원문엔 마침표가
+ * 안 보임)는 그 자리에서 안전하게 자를 수 없으므로 — 잘라내면 "$$"/"}" 같은
+ * 수식 델리미터가 반토막 나 렌더링이 깨진다 — 줄 전체를 그대로 박스에 넣고
+ * 아무것도 박스 밖으로 빼지 않는다.
+ */
+function closeBoxAtLine(
+  line: string,
+  mathBlocks: string[],
+): { head: string; rest: string | null } {
+  if (SENTENCE_END.test(line)) {
+    return splitAtSentenceEnd(line);
+  }
+  return { head: line, rest: null };
+}
+
+/**
  * 블록의 모든 줄이 ">"로 시작하면(조건 박스 등) 테두리 박스로 렌더링한다.
  * ">"가 없어도 "(가)/(나)/(다)" 같은 조건 표지로 시작하는 줄이 있으면, 그
  * 표지가 처음 나온 줄부터 시작해 "마지막 표지가 달린 문장의 마침표"까지만
@@ -309,7 +338,7 @@ export function renderMathText(input: string): string {
     if (openBoxLines !== null) {
       let closeIdx = -1;
       for (let i = 0; i < lines.length; i++) {
-        if (SENTENCE_END.test(lines[i])) {
+        if (lineHasSentenceEnd(lines[i], mathBlocks)) {
           closeIdx = i;
           break;
         }
@@ -320,7 +349,7 @@ export function renderMathText(input: string): string {
         continue;
       }
 
-      const { head, rest } = splitAtSentenceEnd(lines[closeIdx]);
+      const { head, rest } = closeBoxAtLine(lines[closeIdx], mathBlocks);
       openBoxLines.push(...lines.slice(0, closeIdx), head);
       html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
       openBoxLines = null;
@@ -379,7 +408,7 @@ export function renderMathText(input: string): string {
 
       let closeIdx = -1;
       for (let i = lastIdx; i < lines.length; i++) {
-        if (SENTENCE_END.test(lines[i])) {
+        if (lineHasSentenceEnd(lines[i], mathBlocks)) {
           closeIdx = i;
           break;
         }
@@ -397,7 +426,7 @@ export function renderMathText(input: string): string {
         continue;
       }
 
-      const { head, rest } = splitAtSentenceEnd(lines[closeIdx]);
+      const { head, rest } = closeBoxAtLine(lines[closeIdx], mathBlocks);
       const conditionLines = [...lines.slice(firstIdx, closeIdx), head];
       html += `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
 
