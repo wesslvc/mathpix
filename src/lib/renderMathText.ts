@@ -36,7 +36,7 @@ function textToInlineHtml(str: string): string {
   return html;
 }
 
-// 첨자가 옷이 아니라 위/아래로 붙어야 자연스러운 큰 연산자들.
+// 첨자가 엷이 아니라 위/아래로 붙어야 자연스러운 큰 연산자들.
 const LIMIT_OPERATORS = [
   "sum",
   "prod",
@@ -54,7 +54,7 @@ const LIMIT_OPERATORS = [
 
 /**
  * Mathpix가 준 LaTeX를 보기 좋게 자동 보정한다.
- * - ∑, ∏ 같은 큰 연산자는 첨자(n=1, k 등)가 옷이 아니라 위/아래로 붙도록
+ * - ∑, ∏ 같은 큰 연산자는 첨자(n=1, k 등)가 엷이 아니라 위/아래로 붙도록
  *   `\limits`를 강제한다. (이미 \limits/\nolimits가 있으면 건드리지 않는다.)
  */
 function enhanceLatex(latex: string): string {
@@ -70,8 +70,8 @@ function enhanceLatex(latex: string): string {
  * Mathpix가 배열/케이스(구간별 정의) 수식을 여러 줄로 나눠 보내면서 "\left\"
  * 처럼 백슬래시 바로 뒤에 개행이 끼어들는 경우가 있다. TeX는 백슬래시 다음에
  * 오는 공백(개행 포함)을 그대로 컨트롤 시퀀스 이름으로 읽어버려
- * "Invalid delimiter '\ ' after '\left'" 같은 파싱 오류가 나 수식 전체가 렌더링되지 않는
- * 문제가 있다. 백슬래시와 '{'/'}' 사이의 공백(개행 포함)을 제거해
+ * "Invalid delimiter '\ ' after '\left'" 같은 파싱 오류가 나 수식 전체가
+ * 렌더링되지 않는다. 백슬래시와 '{'/'}'  사이의 공백(개행 포함)을 제거해
  * 원래 의도한 "\{"/"\}"로 되돌린다.
  */
 function sanitizeBrokenDelimiters(latex: string): string {
@@ -115,7 +115,7 @@ const MATH_TOKEN_PATTERN = /[\\^_{}]/;
 
 /**
  * "$"가 전혀 없어도 통째로 수식으로 렌더할 만한 순수 수식 블록인지 판단한다.
- * (한글이 섞여 있으면 설명 문장으로 보고 그대로 둔다 — 이때는 $...$가 필요하다.)
+ * (한글이 섮여 있으면 설명 문장으로 보고 그대로 둔다 — 이때는 $...$가 필요.)
  */
 function isBareMathBlock(s: string): boolean {
   return (
@@ -124,9 +124,10 @@ function isBareMathBlock(s: string): boolean {
 }
 
 // Mathpix가 배열/케이스 수식 안에 빈 줄까지 끼워 보내는 경우, 문단을 빈 줄
-// 기준으로 나누는 로직이 "$$...$$" 하나를 여러 조각으로 쪽개버리는 문제가 있었다.
-// 문단/줄 분리를 하기 전에 "$$...$$" 전체를 플레이스홀더 토큰(줄바꿈 없는 한
-// 덩어리)로 바꿔 보호했다가, 실제 렌더링 직전(줄 단위)에 원문으로 되돌린다.
+// 기준으로 나누는 로직이 "$$...$$" 하나를 여러 조각으로 쪼개버려 LaTeX 원문이
+// 그대로 글자로 노출되는 문제가 있었다. 문단/줄 분리를 하기 전에 "$$...$$"
+// 전체를 플레이스홀더 토큰(줄바꿈 없는 한 덩어리)으로 바꿔 보호했다가,
+// 실제 렌더링 직전(줄 단위)에 원문으로 되돌린다.
 const MATH_PLACEHOLDER = /\x00MATH(\d+)\x00/g;
 
 function protectDisplayMath(input: string): { text: string; blocks: string[] } {
@@ -146,10 +147,10 @@ function restoreDisplayMath(s: string, blocks: string[]): string {
 
 // 표준정규분포표처럼 문제집이 "\begin{tabular}...\end{tabular}"로 표를
 // 보내는 경우가 있다. KaTeX는 tabular 환경을 지원하지 않고, 줄 단위 렌더링
-// 로직이 표 안의 개행까지 각각 별도 줄로 쪽개버려 표가 아예 사라지거나
+// 로직이 표 안의 개행까지 각각 별도 줄로 쪼개버려 표가 아예 사라지거나
 // 깨진 글자로 노출된다. 문단/줄 분리 전에 tabular 블록 전체를 실제 HTML
 // <table>로 미리 변환해 플레이스홀더 토큰(줄바꿈 없는 한 줄)으로 바꿔두고,
-// renderBlock에서 그 줄을 찾아 표만 따로 떼어 형제 요소로 내보낸다.
+// 렌더링 단계에서 그 줄을 찾아 표만 따로 떼어 형제 요소로 내보낸다.
 const TABULAR_PATTERN = /\\begin\{tabular\}\{[^}]*\}([\s\S]*?)\\end\{tabular\}/g;
 
 function tabularToTableHtml(body: string): string {
@@ -201,8 +202,8 @@ function renderLineContent(line: string, mathBlocks: string[]): string {
 
 /**
  * 블록 안의 각 줄을 "이미 줄바꿈된" 단위로 보고 한 줄씩 렌더링한다.
- * 원본에 줄바꿈이 있던 자리에만 여백(.mmd-line)을 줌서 위아래 수식이 너무
- * 붙지 않게 하고, 한 줄 안의 띄어쓰기는 그대로 둔다(새 줄바꿈을 만들지 않음).
+ * 원본에 줄바꿈이 있던 자리에만 여백(.mmd-line)을 줘 위아래 수식이 너무
+ * 붙지 않게 하고, 한 줄 안의 늂어쓰기는 그대로 둔다(새 줄바꿈을 만들지 않음).
  */
 function renderLines(
   lines: string[],
@@ -282,85 +283,13 @@ function splitAtSentenceEnd(line: string): { head: string; rest: string | null }
  * 박스로 묶는다(원본 문제집의 테두리 박스에 해당한다). 그 마침표 뒤에 같은 줄에
  * 이어 붙은 문장이나, 표지 앞/뒤의 다른 줄은 박스 밖 평범한 문단으로 둔다 —
  * 박스가 블록 끝까지 무조건 이어지지 않게 한다.
- */
-function renderBlock(
-  block: string,
-  isFirst: boolean,
-  mathBlocks: string[],
-  tables: string[],
-): string {
-  const lines = block.split("\n");
-
-  // "<table>"은 블록 레벨 요소라 "<p>"/"<span>" 안에 넣으면 브라우저가 HTML
-  // 파싱 중 <p>를 강제로 닫아버려(스펙상 <table>은 <p> 안에 못 들어감) 뒤에
-  // 오는 문장이 문단 스타일을 잃는 문제가 생긴다. 표 토큰이 있는 줄을 찾으면
-  // 그 앞/뒤 줄만 각각 별도 문단으로 두고 표는 형제 요소로 내보낸다.
-  const tableLineIdx = lines.findIndex((line) =>
-    TABLE_PLACEHOLDER_ONLY.test(line.trim()),
-  );
-  if (tableLineIdx !== -1) {
-    const tableMatch = lines[tableLineIdx].trim().match(TABLE_PLACEHOLDER_ONLY)!;
-    const tableHtml = tables[Number(tableMatch[1])];
-    const beforeLines = lines.slice(0, tableLineIdx);
-    const afterLines = lines.slice(tableLineIdx + 1);
-
-    const beforeHtml =
-      beforeLines.length > 0
-        ? `<p class="mmd-paragraph">${renderLines(beforeLines, isFirst, mathBlocks)}</p>`
-        : "";
-    const afterHtml =
-      afterLines.length > 0
-        ? `<p class="mmd-paragraph">${renderLines(afterLines, false, mathBlocks)}</p>`
-        : "";
-
-    return beforeHtml + tableHtml + afterHtml;
-  }
-
-  const isBoxed = lines.every((line) => /^\s*>/.test(line));
-
-  if (isBoxed) {
-    const content = lines.map((line) => line.replace(/^\s*>\s?/, ""));
-    return `<div class="mmd-box">${renderLines(content, false, mathBlocks)}</div>`;
-  }
-
-  const markerIndices = lines.reduce<number[]>((acc, line, i) => {
-    if (CONDITION_MARKER.test(line)) acc.push(i);
-    return acc;
-  }, []);
-
-  if (markerIndices.length > 0) {
-    const firstIdx = markerIndices[0];
-    const lastIdx = markerIndices[markerIndices.length - 1];
-    const { head, rest } = splitAtSentenceEnd(lines[lastIdx]);
-
-    const introLines = lines.slice(0, firstIdx);
-    const conditionLines = [...lines.slice(firstIdx, lastIdx), head];
-    const trailingLines = [
-      ...(rest !== null ? [rest] : []),
-      ...lines.slice(lastIdx + 1),
-    ];
-
-    const introHtml =
-      introLines.length > 0
-        ? `<p class="mmd-paragraph">${renderLines(introLines, isFirst, mathBlocks)}</p>`
-        : "";
-    const boxHtml = `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
-    const trailingHtml =
-      trailingLines.length > 0
-        ? `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`
-        : "";
-
-    return introHtml + boxHtml + trailingHtml;
-  }
-
-  return `<p class="mmd-paragraph">${renderLines(lines, isFirst, mathBlocks)}</p>`;
-}
-
-/**
- * Mathpix의 mmd(마크다운+수식) 형식 텍스트를 안전한 HTML로 변환한다.
- * 빈 줄로 구분된 블록마다 문단으로 나누고, ">"로 시작하는 블록은 테두리 박스로,
- * 첨 블록 맨 앞의 "21." 같은 문제 번호는 굵게 강조해 실제 문제집처럼 보이게 한다.
- * "$"가 없어도 순수 수식(예: x^2 + 3x - 1 = 0)으로 보이면 통째로 렌더링한다.
+ *
+ * 조건 문장의 마침표가 같은 블록(빈 줄로 구분된 문단) 안에 없으면 — 예를 들어
+ * Mathpix가 "x=0에서 극대이고"와 그 다음 문장 "x=α, x=β에서 극소이다."를
+ * 디스플레이 수식 때문에 서로 다른 문단으로 나눠 보내는 경우 — 박스가 그
+ * 블록에서 그냥 끝나버리면 뒤 문장이 박스 밖으로 새어나간다. 그래서 이 함수는
+ * 블록을 하나씩 순회하며 마침표를 못 찾으면 박스를 "열어둔 채" 다음 블록까지
+ * 이어가고, 마침표가 나오는 블록에서 박스를 닫는다.
  */
 export function renderMathText(input: string): string {
   const normalized = normalizeDelimiters(input);
@@ -368,9 +297,130 @@ export function renderMathText(input: string): string {
   const { text, blocks: mathBlocks } = protectDisplayMath(withoutTables);
   const blocks = text.trim().split(/\n\s*\n+/);
 
-  const html = blocks
-    .map((block, idx) => renderBlock(block, idx === 0, mathBlocks, tables))
-    .join("");
+  let html = "";
+  let isFirst = true;
+  // 마침표를 못 찾아 아직 안 닫힌 박스의 줄들(여러 블록에 걸친 쌍인다). null이된
+  // 현재 열린 박스가 없다는 뜻.
+  let openBoxLines: string[] | null = null;
+
+  for (const block of blocks) {
+    const lines = block.split("\n");
+
+    if (openBoxLines !== null) {
+      let closeIdx = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (SENTENCE_END.test(lines[i])) {
+          closeIdx = i;
+          break;
+        }
+      }
+
+      if (closeIdx === -1) {
+        openBoxLines.push(...lines);
+        continue;
+      }
+
+      const { head, rest } = splitAtSentenceEnd(lines[closeIdx]);
+      openBoxLines.push(...lines.slice(0, closeIdx), head);
+      html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
+      openBoxLines = null;
+
+      const trailingLines = [
+        ...(rest !== null ? [rest] : []),
+        ...lines.slice(closeIdx + 1),
+      ];
+      if (trailingLines.length > 0) {
+        html += `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`;
+      }
+      isFirst = false;
+      continue;
+    }
+
+    // "<table>"은 블록 레벨 요소라 "<p>"/"<span>" 안에 넣으면 브라우저가 HTML
+    // 파싱 중 <p>를 강제로 닫아버려(스펙상 <table>은 <p> 안에 못 들어감) 뒤에
+    // 오는 문장이 문단 스타일을 잃는 문제가 생긴다. 표 토큰이 있는 줄을 찾으면
+    // 그 앞/뒤 줄만 각각 별도 문단으로 두고 표는 형제 요소로 내보낸다.
+    const tableLineIdx = lines.findIndex((line) =>
+      TABLE_PLACEHOLDER_ONLY.test(line.trim()),
+    );
+    if (tableLineIdx !== -1) {
+      const tableMatch = lines[tableLineIdx].trim().match(TABLE_PLACEHOLDER_ONLY)!;
+      const tableHtml = tables[Number(tableMatch[1])];
+      const beforeLines = lines.slice(0, tableLineIdx);
+      const afterLines = lines.slice(tableLineIdx + 1);
+
+      if (beforeLines.length > 0) {
+        html += `<p class="mmd-paragraph">${renderLines(beforeLines, isFirst, mathBlocks)}</p>`;
+      }
+      html += tableHtml;
+      if (afterLines.length > 0) {
+        html += `<p class="mmd-paragraph">${renderLines(afterLines, false, mathBlocks)}</p>`;
+      }
+      isFirst = false;
+      continue;
+    }
+
+    const isBoxedAll = lines.every((line) => /^\s*>/.test(line));
+    if (isBoxedAll) {
+      const content = lines.map((line) => line.replace(/^\s*>\s?/, ""));
+      html += `<div class="mmd-box">${renderLines(content, false, mathBlocks)}</div>`;
+      isFirst = false;
+      continue;
+    }
+
+    const markerIndices = lines.reduce<number[]>((acc, line, i) => {
+      if (CONDITION_MARKER.test(line)) acc.push(i);
+      return acc;
+    }, []);
+
+    if (markerIndices.length > 0) {
+      const firstIdx = markerIndices[0];
+      const lastIdx = markerIndices[markerIndices.length - 1];
+
+      let closeIdx = -1;
+      for (let i = lastIdx; i < lines.length; i++) {
+        if (SENTENCE_END.test(lines[i])) {
+          closeIdx = i;
+          break;
+        }
+      }
+
+      const introLines = lines.slice(0, firstIdx);
+      if (introLines.length > 0) {
+        html += `<p class="mmd-paragraph">${renderLines(introLines, isFirst, mathBlocks)}</p>`;
+      }
+
+      if (closeIdx === -1) {
+        // 이 블록 안에서 조건 문장이 끝나지 않음 — 다음 블록까지 박스를 이어간다.
+        openBoxLines = lines.slice(firstIdx);
+        isFirst = false;
+        continue;
+      }
+
+      const { head, rest } = splitAtSentenceEnd(lines[closeIdx]);
+      const conditionLines = [...lines.slice(firstIdx, closeIdx), head];
+      html += `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
+
+      const trailingLines = [
+        ...(rest !== null ? [rest] : []),
+        ...lines.slice(closeIdx + 1),
+      ];
+      if (trailingLines.length > 0) {
+        html += `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`;
+      }
+      isFirst = false;
+      continue;
+    }
+
+    html += `<p class="mmd-paragraph">${renderLines(lines, isFirst, mathBlocks)}</p>`;
+    isFirst = false;
+  }
+
+  // 마지막까지 마침표를 못 찾은 채 끝나면(원본에 마침표가 없는 등) 남은 줄을
+  // 그대로 박스로 닫아 최소한 내용이 사라지지 않게 한다.
+  if (openBoxLines !== null) {
+    html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
+  }
 
   return restoreTables(html, tables);
 }
