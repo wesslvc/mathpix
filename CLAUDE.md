@@ -47,38 +47,51 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   그대로 오려낸 raster로 무료·자동 표시(기존 동작, `ResultStage.tsx`). 그와
   별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
   사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
-  `src/lib/diagramVector.ts`가 **NVIDIA API 카탈로그**(build.nvidia.com)의
-  `moonshotai/kimi-k2.6` 모델(OpenAI 호환 chat/completions 형식,
-  `NVIDIA_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
+  `src/lib/diagramVector.ts`가 **Google Gemini API**의 `gemini-3.6-flash`
+  모델(`generativelanguage.googleapis.com/v1beta/models/<모델>:generateContent`,
+  `x-goog-api-key` 헤더, 이미지는 `inline_data`에 접두어 없는 순수 base64,
+  `GEMINI_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
   붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식 1회(클릭당) = 30개
-  (NVIDIA API 호출 비용이 커서 비싸게 책정)
+  (API 호출 비용이 커서 비싸게 책정)
   — 둘 다 하면 문제 하나에 총 31개 차감(`supabase/migrations/0009_diagram_credit_amount.sql`에서
   `consume_recognition_credit`/`refund_recognition_credit`이 `p_amount`를
-  받도록 바뀜). `NVIDIA_API_KEY`가 없으면 이 버튼을 눌러도 에러 메시지만
+  받도록 바뀜). `GEMINI_API_KEY`가 없으면 이 버튼을 눌러도 에러 메시지만
   뜨고 크레딧은 차감되지 않음(자동 raster 표시는 키 없이도 그대로 동작).
-  (Gemini API를 먼저 써봤으나 계정에 `gemini-2.0-flash`가 사라져 있고
-  `gemini-2.5-flash`도 첫 시도부터 429가 계속 나서, 분당 40회 무료 한도가
-  있는 NVIDIA API 카탈로그로 교체함 — `GEMINI_API_KEY` 관련 코드는 이제
-  안 씀. 처음엔 가벼운 `nvidia/nemotron-nano-12b-v2-vl`을 썼으나 도형
-  재구성 품질이 너무 떨어져 `meta/llama-3.2-90b-vision-instruct`로 올렸다가,
-  90b는 응답이 몇십 초~1분 넘게 걸릴 만큼 느려서(그 대기 시간을 보여주려고
-  `ResultStage.tsx`에 경과시간+진행률 UI 추가함) 같은 Llama 3.2 Vision 계열의
-  더 작은 `meta/llama-3.2-11b-vision-instruct`로 내림. 그마저도 여전히 느려
-  Vercel 함수 타임아웃(비JSON 에러 응답, `handleDiagramCropConfirm`에서 파싱
-  실패 처리 추가함)이 나서 "아예 다른 모델"로 `microsoft/phi-3.5-vision-instruct`
-  로 잠깐 바꿨었는데, **그 모델은 실제로 이 API 카탈로그에 없는 것으로
-  확인됨**(검증 없이 웹 검색만 믿고 넣은 실수) — 사용자가 build.nvidia.com에서
-  직접 확인한 코드 스니펫으로 `llama-3.2-11b-vision-instruct`의 존재를
-  재확인해줘서 다시 11b로 되돌렸다가, 사용자 요청으로 `moonshotai/kimi-k2.6`
-  (Moonshot AI, MoonViT 비전 인코더가 달린 네이티브 멀티모달 모델, 1T 파라미터
-  중 32B 활성 MoE)로 교체함 — 이번엔 build.nvidia.com/moonshotai/kimi-k2.6
-  모델 페이지와 NVIDIA API 레퍼런스 문서로 실존을 다시 확인하고 바꿈. 단
-  1T MoE 에이전틱 모델이라 추론이 길어 11b보다 더 느릴 수도 있음 — 실사용
-  결과를 봐야 함. 모델을 바꿀 땐 반드시 실제 존재를 확인(가능하면 사용자가
-  카탈로그에서 직접 본 모델명, 최소한 build.nvidia.com 모델 페이지 URL로
-  교차 확인)하고 바꿀 것 — 웹 검색 결과 하나만으로 존재를 추정하지 말 것.
-  (같은 계정/키로 쓰는 무료 엔드포인트라 비용 차이는 없음. 단, k2.6처럼
-  덩치 큰 모델이 실제로 무료 한도 안에 포함되는지는 사용해보며 확인 필요.)
+  `/api/diagram`에는 `export const maxDuration = 60`이 필요하다 — 기본
+  서버리스 제한(10초대)에 걸리면 Vercel이 **JSON이 아닌** 에러 페이지를
+  돌려줘서 클라이언트 `res.json()`이 깨진다(`ResultStage.tsx`에 파싱 실패
+  처리 있음).
+
+  #### 모델 선택에서 배운 것 (제일 중요)
+
+  **모델 이름을 기억이나 웹 검색으로 고르지 말 것. 반드시 실제로 호출해보고
+  고를 것.** 카탈로그/ListModels에 이름이 보여도 그 키로는 404가 날 수 있다
+  (제공 여부가 키가 아니라 **계정**에 묶여 있음). 이걸 검증하려고
+  `/api/diagram/models` 진단 엔드포인트를 만들어 뒀다(로그인 필요, 현재는
+  Gemini ListModels 조회용). NVIDIA를 쓰던 시절엔 후보 모델마다 1×1 PNG를
+  실제로 찔러보는 프로브 버전이었고, 그게 한 방에 답을 줬다.
+
+  이름 추측으로 날린 실패들: `microsoft/phi-3.5-vision-instruct`(카탈로그에
+  아예 없음), `moonshotai/kimi-k2.6`(404 `Not found for account` — 사용자가
+  키를 새로 발급해도 계정 해시가 동일해서 그대로 404),
+  `nvidia/nemotron-3-super-120b-a12b`(텍스트 전용, 500 "multimodal processing
+  is not enabled"), `gemini-2.5-flash-lite`(ListModels 목록엔 있는데 호출하면
+  "no longer available to new users").
+
+  전체 이력: Gemini 2.0 Flash(계정에서 사라짐) → 2.5 Flash(429 연발) →
+  NVIDIA `nemotron-nano-12b-v2-vl`(품질 부족) → `llama-3.2-90b-vision`(느림,
+  이때 `ResultStage.tsx`에 경과시간+진행률 UI 추가) → `llama-3.2-11b-vision`
+  → phi-3.5(없는 모델) → 11b → kimi-k2.6(404) → `nvidia/llama-3.1-nemotron-nano-vl-8b-v1`
+  (프로브로 200 OK 확인됨 — NVIDIA로 되돌아갈 일이 있으면 이걸 쓸 것. 단
+  `route.ts`의 키 검사와 `diagramVector.ts`의 요청 형식을 NVIDIA용으로 함께
+  되돌려야 한다. 두 API는 요청 모양이 완전히 다름) → Gemini 2.5 Flash Lite(404)
+  → **현재 `gemini-3.6-flash`**. 품질이 부족하면 상위 모델로, 429가 잦으면
+  `gemini-3.5-flash-lite` / `gemini-flash-lite-latest`로 조정.
+
+  `diagramVector.ts`의 실패 처리 원칙: HTTP 에러는 상태 코드와 API가 준
+  메시지를 담아 **throw**하고(호출부가 크레딧 환불 + 그 메시지를 사용자에게
+  노출), 응답은 정상인데 SVG를 못 뽑은 경우만 `null`을 반환한다. 예전엔
+  전부 `return null`이라 k2.6이 왜 안 되는지 몇 번을 잘못 짚었다.
 
 ### 과거에 해결한 버그 (재발 시 참고)
 
@@ -107,9 +120,8 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 3. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
    `MATHPIX_APP_ID`, `MATHPIX_APP_KEY`가 들어있는지 확인.
-   `NVIDIA_API_KEY`(도형 SVG 재구성용, build.nvidia.com에서 무료 발급, 분당
-   40회 한도)는 선택 사항 — 없어도 원본 크롭 이미지로 대체 표시되니 앱이
-   죽지 않음.
+   `GEMINI_API_KEY`(도형 SVG 재구성용)는 선택 사항 — 없어도 원본 크롭
+   이미지로 대체 표시되니 앱이 죽지 않음. `NVIDIA_API_KEY`는 이제 안 씀.
 4. **실제 동작 검증** — 회원가입 → 이메일 확인 → 로그인 → 실모추가 → 오답추가 →
    PDF 내보내기 전 과정.
 
