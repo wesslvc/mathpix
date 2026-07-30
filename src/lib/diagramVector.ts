@@ -2,10 +2,29 @@
 // 모델명이 들어가고, 이미지는 image_url이 아니라 inline_data(base64 원문)로 넣는다.
 // 주의: /api/diagram/models 목록에 있어도 호출은 404가 날 수 있다. 2.5-flash-lite가
 // 목록엔 있었는데 "no longer available to new users"로 막혔다(구세대 은퇴).
-// 그래서 목록 중에서도 최신 세대를 고른다. 429가 잦으면 gemini-3.5-flash-lite나
-// gemini-flash-lite-latest로 내리고, 품질이 부족하면 gemini-3.6-flash 유지.
-const GEMINI_MODEL = "gemini-3.6-flash";
+// -latest 별칭을 쓰면 구글이 알아서 현행 세대로 라우팅해줘서 이 문제를 피한다.
+const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+// Gemini 3 계열은 thinking이 기본 ON이라 SVG를 뱉기 전에 추론 토큰을 잔뜩 쓴다.
+// 3.6-flash로 처음 돌렸을 때 출력 토큰이 10K 가까이 튀면서 8192 한도에 걸려
+// </svg>가 잘려나갔고(그래서 "다시 그리지 못했습니다"), 60초 함수 제한도 넘겼다.
+// Vercel Hobby는 maxDuration 60초가 상한이라 시간을 늘릴 수 없으니 출력을 줄여야 한다.
+//
+// 문제는 thinking을 끄는 필드 이름이 세대마다 다르다는 것 —
+// Gemini 3.x는 thinkingLevel, 2.5는 thinkingBudget이고, 모르는 필드를 보내면 400이 난다.
+// -latest 별칭은 지금 어느 세대에 붙어 있는지 알 수 없으므로, 400이 나면
+// 다음 후보로 넘어가며 순서대로 시도한다(400은 즉시 떨어져서 비용이 거의 없다).
+const THINKING_CONFIGS: (Record<string, unknown> | null)[] = [
+  { thinkingConfig: { thinkingLevel: "low" } },
+  { thinkingConfig: { thinkingBudget: 0 } },
+  null, // 전부 거부당하면 thinking을 켠 채로라도 시도한다
+];
+
+/** thinking 관련 필드를 몰라서 난 400인지(=다음 후보로 재시도) 판별한다. */
+function isUnknownThinkingFieldError(status: number, body: string): boolean {
+  return status === 400 && /thinking/i.test(body);
+}
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
 이 도형을 원본과 최대한 똑같은 비율·각도·위치로, 깨끗한 벡터 그래픽으로 다시 그려주세요.
@@ -13,7 +32,9 @@ const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각�
 - 새로운 내용을 추가하거나 원본에 없는 부분을 생략하지 마세요.
 - 배경은 흰색(투명 없음)으로, 선 색은 검정으로 통일하세요.
 - 답은 오직 하나의 <svg>...</svg> 태그로만 출력하세요. 설명이나 코드블록 표시(\`\`\`) 없이 SVG 마크업만 출력하세요.
-- viewBox는 원본 이미지의 가로세로 비율에 맞게 설정하세요.`;
+- viewBox는 원본 이미지의 가로세로 비율에 맞게 설정하세요.
+- 생각 과정을 적지 말고 곧바로 SVG를 출력하세요. 곡선은 path 하나로 간결하게 그리고,
+  불필요한 주석·중복 좌표·과도한 소수점 자리는 쓰지 마세요.`;
 
 function extractSvg(text: string): string | null {
   const match = text.match(/<svg[\s\S]*?<\/svg>/i);
@@ -100,55 +121,88 @@ export async function vectorizeDiagram(
     return null;
   }
 
-  const res = await fetch(GEMINI_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            { text: PROMPT },
-            { inline_data: { mime_type: image.mimeType, data: image.data } },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 8192,
+  let res: Response | null = null;
+  for (const thinking of THINKING_CONFIGS) {
+    res = await fetch(GEMINI_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
       },
-    }),
-  });
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: PROMPT },
+              { inline_data: { mime_type: image.mimeType, data: image.data } },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 16384,
+          ...thinking,
+        },
+      }),
+    });
 
-  if (!res.ok) {
+    if (res.ok) break;
+
     const body = await res.text().catch(() => "");
+    if (isUnknownThinkingFieldError(res.status, body)) {
+      // 이 세대가 모르는 필드였다. 다음 후보로 넘어간다.
+      console.warn(
+        `[diagramVector] ${GEMINI_MODEL}이 ${JSON.stringify(thinking)}를 거부함, 다음 후보 시도: ${body.slice(0, 300)}`,
+      );
+      continue;
+    }
+
     console.error(
       `[diagramVector] ${GEMINI_MODEL} 호출 실패 ${res.status} ${res.statusText}: ${body.slice(0, 2000)}`,
     );
     throw new Error(describeApiError(res.status, body));
   }
 
+  if (!res || !res.ok) {
+    throw new Error(
+      "도형 재구성 요청이 모두 거부됐습니다(thinking 설정 호환 실패). 서버 로그를 확인해주세요.",
+    );
+  }
+
   const json = await res.json();
   const candidate = json?.candidates?.[0];
+  const finishReason: string | undefined = candidate?.finishReason;
+
+  // thinking이 켜져 있으면 추론 파트가 thought: true로 섞여 온다. 그건 SVG가 아니다.
   const text: string | undefined = candidate?.content?.parts
-    ?.map((p: { text?: string }) => p?.text ?? "")
+    ?.filter((p: { thought?: boolean }) => !p?.thought)
+    .map((p: { text?: string }) => p?.text ?? "")
     .join("");
 
   if (!text) {
     // 안전필터에 걸리면 parts 없이 finishReason만 온다. 원인을 남겨둔다.
     console.error(
-      `[diagramVector] ${GEMINI_MODEL} 응답에 본문이 없음(finishReason=${candidate?.finishReason}): ${JSON.stringify(json).slice(0, 2000)}`,
+      `[diagramVector] ${GEMINI_MODEL} 응답에 본문이 없음(finishReason=${finishReason}): ${JSON.stringify(json).slice(0, 2000)}`,
     );
+    if (finishReason === "MAX_TOKENS") {
+      throw new Error(
+        "모델이 생각하는 데 출력 한도를 다 써서 도형을 그리지 못했습니다. 도형 영역을 더 좁게 잘라서 다시 시도해주세요.",
+      );
+    }
     return null;
   }
 
   const svg = extractSvg(text);
   if (!svg) {
     console.error(
-      `[diagramVector] ${GEMINI_MODEL} 응답에서 <svg>를 못 찾음: ${text.slice(0, 1000)}`,
+      `[diagramVector] ${GEMINI_MODEL} 응답에서 <svg>를 못 찾음(finishReason=${finishReason}): ${text.slice(0, 1000)}`,
     );
+    // 출력 한도에 걸리면 </svg>가 잘려서 여기로 온다. 원인을 사용자에게 알려준다.
+    if (finishReason === "MAX_TOKENS") {
+      throw new Error(
+        "도형이 너무 복잡해 출력이 중간에 잘렸습니다. 도형 영역을 더 좁게 잘라서 다시 시도해주세요.",
+      );
+    }
     return null;
   }
   return sanitizeSvg(svg);
