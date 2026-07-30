@@ -1,10 +1,14 @@
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
-// 주의: build.nvidia.com 카탈로그에 보이는 모델이라도 계정 키로 호출이 안 될
-// 수 있다. kimi-k2.6은 키를 새로 발급해도 404 "Function '...': Not found for
-// account '...'"가 계속 났다(계정 해시가 그대로라 권한도 그대로였음).
-// 그래서 모델을 바꿀 땀 이름으로 추측하지 말고, /api/diagram/models 를 열어
-// "이미지를 실제로 받아주는 모델"만 골라서 여기에 넣을 것.
-const NVIDIA_MODEL = "meta/llama-3.2-11b-vision-instruct";
+// 모델을 바꿀 땀 이름으로 추측하지 말고 /api/diagram/models 를 열어 "이미지를
+// 실제로 받아주는 모델"만 골라서 넣을 것. 이름에 vision/vl이 없어도 되고,
+// 있어도 안 되는 경우가 있다. 2026-07-30 실측 결과:
+//   - 이미지 OK: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning(30B, 활성 3B),
+//     nvidia/llama-3.1-nemotron-nano-vl-8b-v1(8B),
+//     meta/llama-3.2-11b-vision-instruct, meta/llama-3.2-90b-vision-instruct
+//   - 텍스트 전용: nemotron-3-super-120b-a12b, llama-3.3-nemotron-super-49b(-v1.5)
+//     → 500 "multimodal processing is not enabled" / 400 "not a multimodal model"
+//   - 계정 미제공(404): moonshotai/kimi-k2.6, nemotron-51b/70b/ultra-253b
+const NVIDIA_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
 이 도형을 원본과 최대한 똑같은 비율·각도·위치로, 깨끗한 벡터 그래픽으로 다시 그려주세요.
@@ -59,7 +63,7 @@ function describeApiError(status: number, body: string): string {
         : status === 404
           ? ` (모델 "${NVIDIA_MODEL}"이 없거나 이 계정에 제공되지 않습니다. /api/diagram/models 로 호출 가능한 목록을 확인하세요)`
           : status === 400 || status === 422
-            ? " (이 모델이 요청 형식/파라미터를 지원하지 않을 수 있습니다)"
+            ? " (이 모델이 이미지 입력을 지원하지 않거나 요청 형식이 맞지 않습니다)"
             : status >= 500
               ? " (NVIDIA 서버 오류입니다. 잠시 후 재시도해주세요)"
               : "";
@@ -77,11 +81,6 @@ function describeApiError(status: number, body: string): string {
  * 사용자에게 보여준다), 응답은 정상인데 SVG를 못 뽑은 경우만 null을
  * 반환한다. 예전엔 모든 실패를 null로 뭉개서 "왜 안 되는지"를 전혀 알
  * 수 없었기 때문에 이렇게 나눠둔 것이다.
- *
- * (모델 변경 이력: nemotron-nano-12b-v2-vl → 품질 부족으로 90b → 너무 느려
- * 11b → 카탈로그에 없는 phi-3.5-vision-instruct로 잘못 바꿨다가 11b →
- * kimi-k2.6은 키를 갈아도 404 "Not found for account"로 계정 미제공이라
- * 다시 11b. 같은 계정/키로 호출하는 무료 엔드포인트라 비용 차이는 없음.)
  */
 export async function vectorizeDiagram(
   imageDataUrl: string,
@@ -129,8 +128,8 @@ export async function vectorizeDiagram(
 
   const json = await res.json();
   const message = json.choices?.[0]?.message;
-  // 일부 추론(thinking) 모델은 본문을 content가 아니라 reasoning_content에
-  // 담아 보내기도 해서, content가 비면 그쪽도 확인한다.
+  // 추론(reasoning) 모델은 본문을 content가 아니라 reasoning_content에 담아
+  // 보내기도 해서, content가 비면 그쪽도 확인한다.
   const text: string | undefined =
     message?.content || message?.reasoning_content;
 
