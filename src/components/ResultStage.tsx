@@ -120,11 +120,10 @@ export default function ResultStage({
   // 결제 여부와 남은 수량. null이면 아직 못 불러온 상태.
   const [quota, setQuota] = useState<DiagramQuota | null>(null);
 
-  // 도형 기능이 화면에 보일 때만 잔량을 불러온다. 한 번 쓰고 나면 다시 불러
+  // 결제 상태와 남은 수량을 불러온다. 도형 기능은 원본 사진이 없어도 카메라로
+  // 새로 찍어 쓸 수 있으므로 항상 보여주고, 한 번 쓰고 나면 다시 불러
   // 남은 수량을 갱신한다(refreshQuota).
-  const canShowDiagram = Boolean(sourceImage);
   useEffect(() => {
-    if (!canShowDiagram) return;
     let cancelled = false;
     fetch("/api/diagram/quota")
       .then((res) => (res.ok ? res.json() : null))
@@ -137,7 +136,7 @@ export default function ResultStage({
     return () => {
       cancelled = true;
     };
-  }, [canShowDiagram]);
+  }, []);
 
   async function refreshQuota() {
     try {
@@ -423,7 +422,7 @@ export default function ResultStage({
         </div>
       )}
 
-      {sourceImage && !isVectorizing && (
+      {!isVectorizing && (
         <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium text-slate-500">도형 화질</span>
@@ -521,9 +520,9 @@ export default function ResultStage({
         </div>
       )}
 
-      {showDiagramCrop && sourceImage && (
+      {showDiagramCrop && (
         <DiagramCropModal
-          imageSrc={sourceImage}
+          imageSrc={sourceImage ?? null}
           onConfirm={handleDiagramCropConfirm}
           onCancel={() => setShowDiagramCrop(false)}
         />
