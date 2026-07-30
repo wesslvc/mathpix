@@ -145,6 +145,22 @@ function restoreDisplayMath(s: string, blocks: string[]): string {
   return s.replace(MATH_PLACEHOLDER, (_, i) => blocks[Number(i)]);
 }
 
+const MATH_PLACEHOLDER_ONLY_LINE = /^\x00MATH\d+\x00$/;
+
+/**
+ * 블록 전체가 디스플레이 수식 플레이스홀더 줄들로만 이루어져 있는지 본다
+ * ("(나) ...이고" 다음에 오는 "\[ x=\alpha,... \]"처럼, 조건 문장이 수식
+ * 때문에 별도 블록으로 갈라진 경우가 정확히 이 모양이다). 이 조건을 만족할
+ * 때만 조건 박스가 블록 경계를 넘어가도 되게 해서 — (가)/(나)가 마침표 없는
+ * 순수 수식으로 끝나는 문제(예: "(나) 2×sin(∠ECD)=3×sin(∠EDC)")에서 다음에
+ * 오는 무관한 본문("DF의 값은?" 등)까지 마침표를 찾는다고 한없이 삼켜버리는
+ * 일이 없게 한다.
+ */
+function isPureMathPlaceholderBlock(block: string): boolean {
+  const lines = block.split("\n").map((l) => l.trim());
+  return lines.length > 0 && lines.every((l) => MATH_PLACEHOLDER_ONLY_LINE.test(l));
+}
+
 // 표준정규분포표처럼 문제집이 "\begin{tabular}...\end{tabular}"로 표를
 // 보내는 경우가 있다. KaTeX는 tabular 환경을 지원하지 않고, 줄 단위 렌더링
 // 로직이 표 안의 개행까지 각각 별도 줄로 쪼개버려 표가 아예 사라지거나
@@ -316,9 +332,16 @@ function closeBoxAtLine(
  * 조건 문장의 마침표가 같은 블록(빈 줄로 구분된 문단) 안에 없으면 — 예를 들어
  * Mathpix가 "x=0에서 극대이고"와 그 다음 문장 "x=α, x=β에서 극소이다."를
  * 디스플레이 수식 때문에 서로 다른 문단으로 나눠 보내는 경우 — 박스가 그
- * 블록에서 그냥 끝나버리면 뒤 문장이 박스 밖으로 새어나간다. 그래서 이 함수는
- * 블록을 하나씩 순회하며 마침표를 못 찾으면 박스를 "열어둔 채" 다음 블록까지
- * 이어가고, 마침표가 나오는 블록에서 박스를 닫는다.
+ * 블록에서 그냥 끝나버리면 뒤 문장이 박스 밖으로 새어나간다. 그래서 다음
+ * 블록이 순수 디스플레이 수식 플레이스홀더뿐이면(그 문장의 나머지일 가능성이
+ * 높음) 박스를 "열어둔 채" 딱 한 블록만 더 넘어가 본다.
+ *
+ * 반대로 (가)/(나) 조건이 애초에 마침표 없는 순수 수식으로 끝나는 문제도
+ * 있다(예: "(나) 2×sin(∠ECD)=3×sin(∠EDC)"). 이런 경우 다음 블록이 위 조건에
+ * 안 맞으면(순수 수식 플레이스홀더가 아니라 "DF의 값은?" 같은 일반 본문이면)
+ * 마침표를 찾겠다고 계속 뒤져서는 안 되므로 — 그러면 무관한 본문을 끝없이
+ * 삼킬 수 있다 — 그 블록에서 바로 박스를 닫는다. 블록 경계를 넘는 것도
+ * 한 번으로 제한한다(그 다음 블록에서도 마침표가 없으면 거기서 닫는다).
  */
 export function renderMathText(input: string): string {
   const normalized = normalizeDelimiters(input);
@@ -332,7 +355,8 @@ export function renderMathText(input: string): string {
   // 현재 열린 박스가 없다는 뜻.
   let openBoxLines: string[] | null = null;
 
-  for (const block of blocks) {
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi];
     const lines = block.split("\n");
 
     if (openBoxLines !== null) {
@@ -345,7 +369,12 @@ export function renderMathText(input: string): string {
       }
 
       if (closeIdx === -1) {
+        // 블록 경계를 넘어가는 건 한 번만 허용한다(그 이상은 무관한 본문까지
+        // 삼킬 위험이 있다) — 여기서도 마침표를 못 찾으면 그냥 여기서 닫는다.
         openBoxLines.push(...lines);
+        html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
+        openBoxLines = null;
+        isFirst = false;
         continue;
       }
 
@@ -420,8 +449,21 @@ export function renderMathText(input: string): string {
       }
 
       if (closeIdx === -1) {
-        // 이 블록 안에서 조건 문장이 끝나지 않음 — 다음 블록까지 박스를 이어간다.
-        openBoxLines = lines.slice(firstIdx);
+        // 이 블록 안에서 조건 문장이 끝나지 않았다. 바로 다음 블록이 순수
+        // 디스플레이 수식 플레이스홀더뿐이면(예: "(나)...이고" 다음에 오는
+        // "$$x=\alpha,...$$") 그 문장의 나머지일 가능성이 높으니 박스를
+        // 열어둔 채 딱 한 블록만 더 넘어가 본다. 아니면(예: (나)가 마침표
+        // 없는 순수 수식으로 끝나고 다음이 "DF의 값은?" 같은 무관한 본문인
+        // 경우) 여기서 바로 닫아야 뒤 문장이 딸려 들어가지 않는다.
+        const nextBlock = blocks[bi + 1];
+        if (nextBlock !== undefined && isPureMathPlaceholderBlock(nextBlock)) {
+          openBoxLines = lines.slice(firstIdx);
+          isFirst = false;
+          continue;
+        }
+
+        const conditionLines = lines.slice(firstIdx);
+        html += `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
         isFirst = false;
         continue;
       }
