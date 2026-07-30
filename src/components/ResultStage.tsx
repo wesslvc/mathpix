@@ -6,6 +6,9 @@ import { renderMathText } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import DiagramCropModal from "./DiagramCropModal";
+import type { DiagramQuota } from "@/app/api/diagram/quota/route";
+
+type DiagramModel = "flash" | "lite";
 
 type Props = {
   result: RecognizeResponse;
@@ -31,6 +34,13 @@ const FONT_SIZES = [
 // 이 값을 기준으로 막대를 서서히 채우되(끝나기 전엔 100%를 보여주면 안
 // 되므로 90%에서 멈춘다), 정말 오래 걸리면 안내 문구로 이유를 알려준다.
 const VECTORIZE_EXPECTED_SEC = 15;
+
+// 모델 선택 UI 문구. 실제 과금·한도는 서버(0010 마이그레이션의 RPC)가 정하고,
+// 여기 숫자는 quota 응답으로 채워 넣는다 — 하드코딩하면 서버와 어긋난다.
+const MODEL_LABELS: Record<DiagramModel, string> = {
+  lite: "lite",
+  flash: "flash",
+};
 
 function vectorizeProgressPercent(elapsedSec: number): number {
   return Math.min(90, Math.round((elapsedSec / VECTORIZE_EXPECTED_SEC) * 90));
@@ -73,6 +83,39 @@ export default function ResultStage({
   // 도형 재구성 API는 스트리밍 응답이 아니라 실제 진행률을 알 방법이 없다.
   // 대신 경과 시간을 세서 "멈춘 게 아니라 원래 오래 걸린다"를 보여준다.
   const [vectorizeElapsedSec, setVectorizeElapsedSec] = useState(0);
+  // 어떤 모델로 도형을 재구성할지. 기본은 사진인식권만 쓰는 lite로 둔다
+  // (플래시쿠폰은 하루 5장뿐이라 사용자가 의식하고 골라 쓰게 한다).
+  const [diagramModel, setDiagramModel] = useState<DiagramModel>("lite");
+  // 결제 여부와 남은 수량. null이면 아직 못 불러온 상태.
+  const [quota, setQuota] = useState<DiagramQuota | null>(null);
+
+  // 도형 기능이 화면에 보일 때만 잔량을 불러온다. 한 번 쓰고 나면 다시 불러
+  // 남은 수량을 갱신한다(refreshQuota).
+  const canShowDiagram = Boolean(sourceImage);
+  useEffect(() => {
+    if (!canShowDiagram) return;
+    let cancelled = false;
+    fetch("/api/diagram/quota")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setQuota(data as DiagramQuota);
+      })
+      .catch(() => {
+        // 잔량을 못 불러와도 버튼은 눌러볼 수 있게 둔다(서버가 최종 판단한다).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canShowDiagram]);
+
+  async function refreshQuota() {
+    try {
+      const res = await fetch("/api/diagram/quota");
+      if (res.ok) setQuota((await res.json()) as DiagramQuota);
+    } catch {
+      // 갱신 실패는 무시 — 다음 렌더에서 다시 시도된다.
+    }
+  }
 
   useEffect(() => {
     if (!isVectorizing) {
@@ -133,7 +176,10 @@ export default function ResultStage({
     };
   }, [sourceImage, result.diagrams]);
 
-  /** 사람이 오려낸 도형 영역을 Gemini로 보내 깨끗한 SVG로 재구성한다(사진인식권 30개 차감). */
+  /**
+   * 사람이 오려낸 도형 영역을 Gemini로 보내 깨끗한 SVG로 재구성한다.
+   * 과금은 서버가 한다 — lite는 사진인식권 5장, flash는 플래시쿠폰 1장.
+   */
   async function handleDiagramCropConfirm(croppedDataUrl: string) {
     setShowDiagramCrop(false);
     setIsVectorizing(true);
@@ -142,7 +188,7 @@ export default function ResultStage({
       const res = await fetch("/api/diagram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: croppedDataUrl }),
+        body: JSON.stringify({ image: croppedDataUrl, model: diagramModel }),
       });
       let json: { svg?: string; error?: string };
       try {
@@ -163,6 +209,8 @@ export default function ResultStage({
       );
     } finally {
       setIsVectorizing(false);
+      // 성공이든 실패(=환불)든 서버 잔량이 바뀌었을 수 있으니 다시 읽는다.
+      void refreshQuota();
     }
   }
 
@@ -279,16 +327,79 @@ export default function ResultStage({
       </div>
 
       {sourceImage && !isVectorizing && (
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowDiagramCrop(true)}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
-          >
-            도형 추가인식 (사진인식권 30개)
-          </button>
-          {vectorizeError && (
-            <p className="text-xs text-red-600">{vectorizeError}</p>
+        <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
+          {quota && !quota.paid ? (
+            // 결제자 전용 기능이다. 안 산 사람에게는 버튼 대신 구매 안내를 보여준다.
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-slate-600">
+                <span className="font-medium text-slate-700">도형 추가인식</span>은
+                이용권을 구매한 분만 쓸 수 있어요.
+              </p>
+              <a
+                href="/api/checkout"
+                className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-center text-xs font-medium text-white hover:bg-amber-700"
+              >
+                이용권 구매하기
+              </a>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">도형 화질</span>
+                {(["lite", "flash"] as const).map((m) => {
+                  const selected = diagramModel === m;
+                  // 남은 수량이 0이면 고를 수는 있어도 못 쓴다는 걸 미리 알린다.
+                  const exhausted =
+                    quota !== null &&
+                    (m === "flash"
+                      ? quota.flashRemaining <= 0
+                      : quota.credits < quota.liteCost);
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setDiagramModel(m)}
+                      className={`rounded-lg border px-2.5 py-1 text-xs font-medium ${
+                        selected
+                          ? "border-blue-600 bg-blue-50 text-blue-700"
+                          : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                      } ${exhausted ? "opacity-50" : ""}`}
+                    >
+                      {MODEL_LABELS[m]}
+                      {m === "flash" ? " (고화질)" : " (기본)"}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <p className="text-[11px] text-slate-500">
+                {diagramModel === "flash" ? (
+                  <>
+                    플래시쿠폰 1장을 씁니다.
+                    {quota &&
+                      ` 오늘 ${quota.flashRemaining}/${quota.flashDailyLimit}장 남음 (매일 자정 초기화)`}
+                  </>
+                ) : (
+                  <>
+                    사진인식권 {quota?.liteCost ?? 5}장을 씁니다.
+                    {quota && ` 남은 사진인식권 ${quota.credits}장`}
+                  </>
+                )}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDiagramCrop(true)}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  도형 추가인식
+                </button>
+                {vectorizeError && (
+                  <p className="text-xs text-red-600">{vectorizeError}</p>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}

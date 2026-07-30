@@ -47,16 +47,32 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   그대로 오려낸 raster로 무료·자동 표시(기존 동작, `ResultStage.tsx`). 그와
   별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
   사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
-  `src/lib/diagramVector.ts`가 **Google Gemini API**의 `gemini-3.6-flash`
-  모델(`generativelanguage.googleapis.com/v1beta/models/<모델>:generateContent`,
+  `src/lib/diagramVector.ts`가 **Google Gemini API**
+  (`generativelanguage.googleapis.com/v1beta/models/<모델>:generateContent`,
   `x-goog-api-key` 헤더, 이미지는 `inline_data`에 접두어 없는 순수 base64,
   `GEMINI_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
-  붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식 1회(클릭당) = 30개
-  (API 호출 비용이 커서 비싸게 책정)
-  — 둘 다 하면 문제 하나에 총 31개 차감(`supabase/migrations/0009_diagram_credit_amount.sql`에서
-  `consume_recognition_credit`/`refund_recognition_credit`이 `p_amount`를
-  받도록 바뀜). `GEMINI_API_KEY`가 없으면 이 버튼을 눌러도 에러 메시지만
-  뜨고 크레딧은 차감되지 않음(자동 raster 표시는 키 없이도 그대로 동작).
+  붙인다. `GEMINI_API_KEY`가 없으면 이 버튼을 눌러도 에러 메시지만 뜨고
+  차감되지 않음(자동 raster 표시는 키 없이도 그대로 동작).
+
+  **모델은 사용자가 고른다**(`DIAGRAM_MODELS`, `ResultStage.tsx`의 선택 UI):
+  - `lite` = `gemini-flash-lite-latest` (기본) — 사진인식권 5장
+  - `flash` = `gemini-flash-latest` (고화질) — 플래시쿠폰 1장
+
+  **크레딧/한도 정책** (`supabase/migrations/0010_diagram_model_quota.sql`):
+  - OCR 1회 = 사진인식권 1장 (변경 없음, 무료 사용자도 가능)
+  - **도형 추가인식은 결제자 전용** — `entitlements.active = true`가 아니면
+    `not_paid`로 거부되고 화면엔 구매 버튼이 뜬다
+  - lite: 사진인식권 5장 차감, 잔액 있으면 횟수 제한 없음
+  - flash: 사진인식권 대신 **플래시쿠폰**, 결제자에게 **하루 5장**,
+    **KST 자정 초기화, 누적 안 됨**(누적시키면 몰아 써서 Gemini 무료 등급
+    RPD가 터진다 — 이게 flash를 일일 한도로 묶은 이유다)
+
+  한도 숫자는 전부 DB 함수(`flash_diagram_daily_limit()`, `lite_diagram_cost()`)에
+  있고 서버·화면이 그 값을 읽어 쓴다. **JS 쪽에 하드코딩하지 말 것** — 어긋난다.
+  차감은 `consume_diagram_credit(p_model)`, 환불은 `refund_diagram_credit(p_model)`,
+  화면 표시용 조회는 `diagram_quota()` → `/api/diagram/quota`.
+  실패 사유가 여러 가지(미결제/크레딧 부족/쿠폰 소진)라 이 함수들은 기존
+  `consume_recognition_credit`과 달리 integer가 아니라 **jsonb**를 돌려준다.
   `/api/diagram`에는 `export const maxDuration = 60`이 필요하다 — 기본
   서버리스 제한(10초대)에 걸리면 Vercel이 **JSON이 아닌** 에러 페이지를
   돌려줘서 클라이언트 `res.json()`이 깨진다(`ResultStage.tsx`에 파싱 실패
@@ -115,6 +131,9 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
    **`0009_diagram_credit_amount.sql`도 아직 실행 안 됐을 수 있음** — 이게 없으면
    "도형 추가인식" 버튼이 크레딧 차감에 실패해 500 에러가 남(RPC가 `p_amount`
    인자를 못 받는 옛 함수로 남아있기 때문).
+   **`0010_diagram_model_quota.sql`은 반드시 실행해야 함** — 도형 모델 선택/
+   결제자 전용/플래시쿠폰이 전부 이 파일의 함수에 의존한다. 안 돌리면
+   `consume_diagram_credit` 함수가 없어서 도형 추가인식이 500으로 죽는다.
 2. **이메일 확인 리디렉션 URL 등록** — Supabase 대시보드 Authentication > URL
    Configuration에 `{mathocr 배포 도메인}/auth/callback` 추가.
 3. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
