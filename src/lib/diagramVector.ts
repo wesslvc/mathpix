@@ -1,10 +1,14 @@
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
-// 주의: build.nvidia.com 카탈로그에 보이는 모델이라도 계정 키로 호출이 안 될
-// 수 있다. kimi-k2.6은 키를 새로 발급해도 404 "Function '...': Not found for
-// account '...'"가 계속 났다(계정 해시가 그대로라 권한도 그대로였음).
-// 그래서 모델을 바꿀 땐 이름으로 추측하지 말고, /api/diagram/models 를 열어
-// "이미지를 실제로 받아주는 모델"만 골라서 여기에 넣을 것.
-const NVIDIA_MODEL = "meta/llama-3.2-11b-vision-instruct";
+// 모델을 바꿀 땐 이름으로 추측하지 말고 /api/diagram/models 를 열어 "이미지를
+// 실제로 받아주는 모델"만 골라서 넣을 것. 이름에 vision/vl이 없어도 되고,
+// 있어도 안 되는 경우가 있다. 2026-07-30 실측 결과:
+//   - 이미지 OK: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning(30B, 활성 3B),
+//     nvidia/llama-3.1-nemotron-nano-vl-8b-v1(8B),
+//     meta/llama-3.2-11b-vision-instruct, meta/llama-3.2-90b-vision-instruct
+//   - 텍스트 전용: nemotron-3-super-120b-a12b, llama-3.3-nemotron-super-49b(-v1.5)
+//     → 500 "multimodal processing is not enabled" / 400 "not a multimodal model"
+//   - 계정 미제공(404): moonshotai/kimi-k2.6, nemotron-51b/70b/ultra-253b
+const NVIDIA_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
 이 도형을 원본과 최대한 똑같은 비율·각도·위치로, 깨끗한 벡터 그래픽으로 다시 그려주세요.
