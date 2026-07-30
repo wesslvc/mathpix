@@ -1,6 +1,10 @@
 // Gemini는 NVIDIA(OpenAI 호환)와 요청 형식이 완전히 다르다. 엔드포인트 경로에
 // 모델명이 들어가고, 이미지는 image_url이 아니라 inline_data(base64 원문)로 넣는다.
-const GEMINI_MODEL = "gemini-2.5-flash-lite";
+// 주의: /api/diagram/models 목록에 있어도 호출은 404가 날 수 있다. 2.5-flash-lite가
+// 목록엔 있었는데 "no longer available to new users"로 막혔다(구세대 은퇴).
+// 그래서 목록 중에서도 최신 세대를 고른다. 429가 잦으면 gemini-3.5-flash-lite나
+// gemini-flash-lite-latest로 내리고, 품질이 부족하면 gemini-3.6-flash 유지.
+const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
@@ -70,8 +74,8 @@ function describeApiError(status: number, body: string): string {
 }
 
 /**
- * 사용자가 직접 오려낸 도형 이미지(data URL)를 Gemini 2.5 Flash Lite에 보내
- * 깨끗한 SVG로 다시 그리게 한다.
+ * 사용자가 직접 오려낸 도형 이미지(data URL)를 Gemini에 보내 깨끗한 SVG로
+ * 다시 그리게 한다.
  *
  * 실패 시: 원인을 알 수 있는 경우(HTTP 에러)는 상태 코드와 API가 준 메시지를
  * 그대로 담아 throw하고(호출부가 크레딧을 환불하고 그 메시지를 사용자에게
@@ -81,8 +85,8 @@ function describeApiError(status: number, body: string): string {
  * 429가 계속 나 NVIDIA 카탈로그로 이동 → nemotron-nano-12b-v2-vl(품질 부족) →
  * llama-3.2-90b(너무 느림) → 11b → phi-3.5(카탈로그에 없는 모델이었음) →
  * kimi-k2.6(404, 계정 미제공) → nemotron-nano-vl-8b → 사용자 요청으로 다시
- * Gemini 2.5 Flash Lite. NVIDIA 계정에서 이미지 입력이 실제로 되는 모델은
- * /api/diagram/models 로 확인할 수 있게 해뒀다.)
+ * Gemini 2.5 Flash Lite(신규 사용자 미제공 404) → gemini-3.6-flash.
+ * 이 키로 실제 부를 수 있는 모델 목록은 /api/diagram/models 로 확인한다.)
  */
 export async function vectorizeDiagram(
   imageDataUrl: string,
