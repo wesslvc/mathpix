@@ -330,6 +330,134 @@ function closeBoxAtLine(
   return { head: line, rest: null };
 }
 
+/** 조건 박스로 묶을 줄 범위(양끝 포함). 줄 번호는 getTextLines()의 인덱스다. */
+export type BoxRange = { start: number; end: number };
+
+/** 사용자가 지정한 박스. `{ none: true }`는 "박스를 치지 않음"을 뜻한다. */
+export type BoxOverride = BoxRange | { none: true } | null;
+
+type Block = { lines: string[]; start: number };
+
+/**
+ * 빈 줄로 구분된 문단(블록)으로 나누되, 각 블록이 원래 몇 번째 줄에서
+ * 시작했는지도 같이 들고 있는다. 박스 범위를 줄 번호로 알려주려면 이 대응이
+ * 필요하다(예전엔 split만 해서 원래 위치를 잃어버렸다).
+ */
+function toBlocks(allLines: string[]): Block[] {
+  const blocks: Block[] = [];
+  let cur: string[] = [];
+  let curStart = 0;
+  for (let i = 0; i < allLines.length; i++) {
+    if (allLines[i].trim() === "") {
+      if (cur.length > 0) {
+        blocks.push({ lines: cur, start: curStart });
+        cur = [];
+      }
+      continue;
+    }
+    if (cur.length === 0) curStart = i;
+    cur.push(allLines[i]);
+  }
+  if (cur.length > 0) blocks.push({ lines: cur, start: curStart });
+  return blocks;
+}
+
+/**
+ * 박스 범위 편집 UI가 쓰는 줄 목록. 렌더러가 내부적으로 나누는 단위와 정확히
+ * 같아야 줄 번호가 어긋나지 않으므로, 여기서도 똑같이 델리미터 정규화 →
+ * 표/디스플레이 수식 보호를 거친 뒤 나눈다("$$...$$"가 여러 줄에 걸쳐 있어도
+ * 한 줄로 취급된다).
+ */
+export function getTextLines(input: string): string[] {
+  const { text: withoutTables } = protectTabular(normalizeDelimiters(input));
+  return protectDisplayMath(withoutTables).text.split("\n");
+}
+
+/** 줄 하나를 화면에 미리 보여주기 위한 HTML(수식은 실제로 렌더링해서 보여준다). */
+export function renderPreviewLine(line: string, input: string): string {
+  const { text: withoutTables } = protectTabular(normalizeDelimiters(input));
+  const { blocks } = protectDisplayMath(withoutTables);
+  return renderLineContent(line, blocks);
+}
+
+/** 빈 줄 아닌 줄들을 문단으로 묶어 렌더링한다(표 토큰은 형제 요소로 뺀다). */
+function renderPlainRange(
+  allLines: string[],
+  from: number,
+  to: number,
+  isFirst: boolean,
+  mathBlocks: string[],
+  tables: string[],
+): string {
+  if (to < from) return "";
+  let html = "";
+  let first = isFirst;
+  for (const block of toBlocks(allLines.slice(from, to + 1))) {
+    const lines = block.lines;
+    const tableLineIdx = lines.findIndex((line) =>
+      TABLE_PLACEHOLDER_ONLY.test(line.trim()),
+    );
+    if (tableLineIdx !== -1) {
+      const match = lines[tableLineIdx].trim().match(TABLE_PLACEHOLDER_ONLY)!;
+      const before = lines.slice(0, tableLineIdx);
+      const after = lines.slice(tableLineIdx + 1);
+      if (before.length > 0) {
+        html += `<p class="mmd-paragraph">${renderLines(before, first, mathBlocks)}</p>`;
+        first = false;
+      }
+      html += tables[Number(match[1])];
+      if (after.length > 0) {
+        html += `<p class="mmd-paragraph">${renderLines(after, false, mathBlocks)}</p>`;
+      }
+      first = false;
+      continue;
+    }
+    html += `<p class="mmd-paragraph">${renderLines(lines, first, mathBlocks)}</p>`;
+    first = false;
+  }
+  return html;
+}
+
+/**
+ * 사용자가 정한 범위대로만 박스를 친다. 자동 감지 규칙(마침표/질문줄 등)은
+ * 일절 적용하지 않는다 — 사용자가 이미 눈으로 보고 고른 결과이기 때문이다.
+ */
+function renderWithForcedBox(
+  allLines: string[],
+  range: BoxRange | null,
+  mathBlocks: string[],
+  tables: string[],
+): string {
+  if (range === null) {
+    return renderPlainRange(allLines, 0, allLines.length - 1, true, mathBlocks, tables);
+  }
+
+  const start = Math.max(0, Math.min(range.start, allLines.length - 1));
+  const end = Math.max(start, Math.min(range.end, allLines.length - 1));
+
+  let html = renderPlainRange(allLines, 0, start - 1, true, mathBlocks, tables);
+
+  // 박스 안에서는 빈 줄을 없애고(빈 줄이 있으면 박스가 어색하게 벌어진다)
+  // ">" 인용 표시가 남아 있으면 떼어낸다.
+  const boxLines = allLines
+    .slice(start, end + 1)
+    .filter((line) => line.trim() !== "")
+    .map((line) => line.replace(/^\s*>\s?/, ""));
+  if (boxLines.length > 0) {
+    html += `<div class="mmd-box">${renderLines(boxLines, false, mathBlocks)}</div>`;
+  }
+
+  html += renderPlainRange(
+    allLines,
+    end + 1,
+    allLines.length - 1,
+    start === 0 && boxLines.length === 0,
+    mathBlocks,
+    tables,
+  );
+  return html;
+}
+
 /**
  * 블록의 모든 줄이 ">"로 시작하면(조건 박스 등) 테두리 박스로 렌더링한다.
  * ">"가 없어도 "(가)/(나)/(다)" 같은 조건 표지로 시작하는 줄이 있으면, 그
@@ -352,21 +480,58 @@ function closeBoxAtLine(
  * 삼킬 수 있다 — 그 블록에서 바로 박스를 닫는다. 블록 경계를 넘는 것도
  * 한 번으로 제한한다(그 다음 블록에서도 마침표가 없으면 거기서 닫는다).
  */
-export function renderMathText(input: string): string {
+export function renderMathText(input: string, boxOverride?: BoxOverride): string {
+  return renderMathTextWithInfo(input, boxOverride).html;
+}
+
+/**
+ * 렌더링 결과와 함께 "조건 박스를 어디에 쳤는지"를 돌려준다. 사용자가 박스
+ * 범위를 손볼 수 있게 하려면 자동 감지 결과를 화면에 보여줘야 하는데, 그
+ * 규칙이 이 함수 안에 있으므로 렌더링하면서 같이 알려주는 편이 확실하다
+ * (같은 규칙을 UI 쪽에 한 번 더 구현하면 반드시 어긋난다).
+ *
+ * boxOverride를 주면 자동 감지를 아예 건너뛰고 지정한 범위만 박스로 만든다.
+ * `{ none: true }`는 "박스 없음"을 사용자가 명시한 경우다.
+ */
+export function renderMathTextWithInfo(
+  input: string,
+  boxOverride?: BoxOverride,
+): { html: string; box: BoxRange | null; lines: string[] } {
   const normalized = normalizeDelimiters(input);
   const { text: withoutTables, tables } = protectTabular(normalized);
   const { text, blocks: mathBlocks } = protectDisplayMath(withoutTables);
-  const blocks = text.trim().split(/\n\s*\n+/);
+  const canonicalLines = text.split("\n");
+  const blocks = toBlocks(canonicalLines);
+
+  // 사용자가 범위를 직접 정했으면 자동 감지 로직은 건드리지 않고 그대로 따른다.
+  if (boxOverride !== undefined && boxOverride !== null) {
+    const forced = "none" in boxOverride ? null : boxOverride;
+    return {
+      html: restoreTables(
+        renderWithForcedBox(canonicalLines, forced, mathBlocks, tables),
+        tables,
+      ),
+      box: forced,
+      lines: canonicalLines,
+    };
+  }
 
   let html = "";
   let isFirst = true;
   // 마침표를 못 찾아 아직 안 닫힌 박스의 줄들(여러 블록에 걸쳐 쌓인다). null이면
   // 현재 열린 박스가 없다는 뜻.
   let openBoxLines: string[] | null = null;
+  // 열린 박스가 시작된 canonical 줄 번호(박스 범위를 알려주기 위해 기록한다).
+  let openBoxStart = 0;
+  let box: BoxRange | null = null;
+  /** 첫 번째로 확정된 박스만 기록한다(문제 하나에 조건 박스는 보통 하나다). */
+  const recordBox = (start: number, end: number) => {
+    if (box === null && end >= start) box = { start, end };
+  };
 
   for (let bi = 0; bi < blocks.length; bi++) {
-    const block = blocks[bi];
-    const lines = block.split("\n");
+    const lines = blocks[bi].lines;
+    const offset = blocks[bi].start;
 
     if (openBoxLines !== null) {
       let closeIdx = -1;
@@ -389,6 +554,7 @@ export function renderMathText(input: string): string {
         const stopAt = hardStopIdx !== -1 ? hardStopIdx : lines.length;
         openBoxLines.push(...lines.slice(0, stopAt));
         html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
+        recordBox(openBoxStart, offset + stopAt - 1);
         openBoxLines = null;
 
         if (hardStopIdx !== -1) {
@@ -402,6 +568,7 @@ export function renderMathText(input: string): string {
       const { head, rest } = closeBoxAtLine(lines[closeIdx], mathBlocks);
       openBoxLines.push(...lines.slice(0, closeIdx), head);
       html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
+      recordBox(openBoxStart, offset + closeIdx);
       openBoxLines = null;
 
       const trailingLines = [
@@ -443,6 +610,7 @@ export function renderMathText(input: string): string {
     if (isBoxedAll) {
       const content = lines.map((line) => line.replace(/^\s*>\s?/, ""));
       html += `<div class="mmd-box">${renderLines(content, false, mathBlocks)}</div>`;
+      recordBox(offset, offset + lines.length - 1);
       isFirst = false;
       continue;
     }
@@ -484,8 +652,12 @@ export function renderMathText(input: string): string {
         // 열어둔 채 딱 한 블록만 더 넘어가 본다.
         if (hardStopIdx === -1) {
           const nextBlock = blocks[bi + 1];
-          if (nextBlock !== undefined && isPureMathPlaceholderBlock(nextBlock)) {
+          if (
+            nextBlock !== undefined &&
+            isPureMathPlaceholderBlock(nextBlock.lines.join("\n"))
+          ) {
             openBoxLines = lines.slice(firstIdx);
+            openBoxStart = offset + firstIdx;
             isFirst = false;
             continue;
           }
@@ -494,6 +666,7 @@ export function renderMathText(input: string): string {
         const stopAt = hardStopIdx !== -1 ? hardStopIdx : lines.length;
         const conditionLines = lines.slice(firstIdx, stopAt);
         html += `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
+        recordBox(offset + firstIdx, offset + stopAt - 1);
 
         if (hardStopIdx !== -1) {
           const trailingLines = lines.slice(hardStopIdx);
@@ -506,6 +679,7 @@ export function renderMathText(input: string): string {
       const { head, rest } = closeBoxAtLine(lines[closeIdx], mathBlocks);
       const conditionLines = [...lines.slice(firstIdx, closeIdx), head];
       html += `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
+      recordBox(offset + firstIdx, offset + closeIdx);
 
       const trailingLines = [
         ...(rest !== null ? [rest] : []),
@@ -526,7 +700,12 @@ export function renderMathText(input: string): string {
   // 그대로 박스로 닫아 최소한 내용이 사라지지 않게 한다.
   if (openBoxLines !== null) {
     html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
+    recordBox(openBoxStart, canonicalLines.length - 1);
   }
 
-  return restoreTables(html, tables);
+  return {
+    html: restoreTables(html, tables),
+    box,
+    lines: canonicalLines,
+  };
 }

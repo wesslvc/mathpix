@@ -7,6 +7,8 @@ import CropStage from "@/components/CropStage";
 import ResultStage from "@/components/ResultStage";
 import { createClient } from "@/lib/supabase/client";
 import type { RecognizeResponse } from "@/lib/types";
+import type { AnswerType } from "@/lib/answer";
+import type { BoxOverride } from "@/lib/renderMathText";
 
 type Stage = "idle" | "upload" | "crop" | "loading" | "result";
 
@@ -106,7 +108,17 @@ export default function AddProblemFlow({
     setStage("idle");
   }
 
-  async function handleSaveToCategory(pngDataUrl: string, answer: string) {
+  async function handleSaveToCategory({
+    pngDataUrl,
+    answer,
+    answerType,
+    boxOverride,
+  }: {
+    pngDataUrl: string;
+    answer: string;
+    answerType: AnswerType;
+    boxOverride: BoxOverride | undefined;
+  }) {
     const supabase = createClient();
     const {
       data: { user },
@@ -138,6 +150,9 @@ export default function AddProblemFlow({
       latex: result?.latex ?? null,
       text_content: result?.text ?? null,
       answer: answer || null,
+      answer_type: answerType,
+      // undefined면 "자동 감지에 맡김"이라 DB에도 null로 둔다.
+      box_range: boxOverride ?? null,
       sort_order: nextOrder,
     });
     if (insertError) {

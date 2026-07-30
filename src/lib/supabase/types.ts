@@ -17,6 +17,10 @@ export type Problem = {
   latex: string | null;
   text_content: string | null;
   answer: string | null;
+  /** 'choice'(객관식) | 'short'(주관식). 객관식이면 정답표에 원숫자로 표기한다. */
+  answer_type: string | null;
+  /** 사용자가 직접 정한 조건 박스 범위. null이면 자동 감지에 맡긴다. */
+  box_range: { start: number; end: number } | { none: true } | null;
   sort_order: number | null;
   created_at: string;
 };

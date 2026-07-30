@@ -21,12 +21,12 @@ const DENIAL: Record<string, { status: number; message: string }> = {
   not_paid: {
     status: 402,
     message:
-      "도형 추가인식은 이용권을 구매한 분만 쓸 수 있어요. 이용권을 구매하면 바로 사용할 수 있습니다.",
+      "flash(고화질) 도형 재구성은 이용권을 구매한 분만 쓸 수 있어요. lite를 선택하면 지금 바로 쓸 수 있습니다.",
   },
   no_credits: {
     status: 402,
     message:
-      "사진인식권이 부족해요. lite 도형 재구성에는 5장이 필요합니다.",
+      "사진인식권이 부족해요. lite 도형 재구성에는 5장이 필요합니다. (이용권을 구매하면 lite는 무료로 쓸 수 있어요.)",
   },
   flash_daily_exhausted: {
     status: 429,

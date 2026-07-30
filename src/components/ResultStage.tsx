@@ -2,11 +2,18 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
-import { renderMathText } from "@/lib/renderMathText";
+import { renderMathText, type BoxOverride } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import DiagramCropModal from "./DiagramCropModal";
 import type { DiagramQuota } from "@/app/api/diagram/quota/route";
+import BoxRangeEditor from "./BoxRangeEditor";
+import DiagramAdjuster, {
+  DEFAULT_DIAGRAM_LAYOUT,
+  diagramStyle,
+  type DiagramLayout,
+} from "./DiagramAdjuster";
+import { ANSWER_TYPE_LABEL, formatAnswer, type AnswerType } from "@/lib/answer";
 
 type DiagramModel = "flash" | "lite";
 
@@ -14,8 +21,13 @@ type Props = {
   result: RecognizeResponse;
   onBack: () => void;
   onRestart: () => void;
-  /** 지정하면 "오답으로 저장" 버튼이 나타나고, PNG data URL과 정답을 인자로 호출된다. */
-  onSaveToCategory?: (pngDataUrl: string, answer: string) => Promise<void>;
+  /** 지정하면 "오답으로 저장" 버튼이 나타나고, PNG data URL과 정답 정보를 인자로 호출된다. */
+  onSaveToCategory?: (payload: {
+    pngDataUrl: string;
+    answer: string;
+    answerType: AnswerType;
+    boxOverride: BoxOverride | undefined;
+  }) => Promise<void>;
   /** 복수 업로드 시 아직 처리하지 않은 이미지 수. */
   remainingCount?: number;
   /** 다음 대기 이미지로 넘어간다. */
@@ -71,12 +83,31 @@ export default function ResultStage({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [answer, setAnswer] = useState("");
+  // 객관식이면 정답표에 "1" 대신 "①"로 표기한다.
+  const [answerType, setAnswerType] = useState<AnswerType>("choice");
+  // 조건 박스 범위. undefined면 자동 감지에 맡긴다.
+  const [boxOverride, setBoxOverride] = useState<BoxOverride | undefined>(undefined);
+  const [showBoxEditor, setShowBoxEditor] = useState(false);
+  // 도형별 크기·위치. 키는 raster는 도형 id, 수동 SVG는 "svg:<index>".
+  const [layouts, setLayouts] = useState<Record<string, DiagramLayout>>({});
+
+  function layoutOf(key: string): DiagramLayout {
+    return layouts[key] ?? DEFAULT_DIAGRAM_LAYOUT;
+  }
+  function setLayout(key: string, next: DiagramLayout) {
+    setLayouts((prev) => ({ ...prev, [key]: next }));
+  }
   // Mathpix가 자동 감지한 도형 영역을 원본에서 그대로 오려낸 raster 이미지들
   // (도형 id -> data URL). 무료·자동, Gemini 재구성과는 별개다.
   const [rasterFallbacks, setRasterFallbacks] = useState<Record<string, string>>({});
   // "도형 추가인식"으로 사람이 직접 오려내 Gemini가 재구성한 SVG들. 클릭할
   // 때마다 하나씩 쌓인다(문제당 여러 도형이 있으면 여러 번 실행 가능).
-  const [manualDiagramSvgs, setManualDiagramSvgs] = useState<string[]>([]);
+  // 크기·위치 설정을 도형별로 따로 들고 있어야 해서 배열 인덱스가 아니라 고정
+  // id를 쓴다(인덱스로 키를 잡으면 하나를 지웠을 때 뒤 도형들의 설정이 한 칸씩
+  // 밀려 엉뚱한 도형에 적용된다).
+  const [manualDiagramSvgs, setManualDiagramSvgs] = useState<
+    { id: string; svg: string }[]
+  >([]);
   const [showDiagramCrop, setShowDiagramCrop] = useState(false);
   const [isVectorizing, setIsVectorizing] = useState(false);
   const [vectorizeError, setVectorizeError] = useState<string | null>(null);
@@ -129,9 +160,10 @@ export default function ResultStage({
     return () => clearInterval(id);
   }, [isVectorizing]);
 
+  const sourceText = result.text || result.latex;
   const html = useMemo(
-    () => renderMathText(result.text || result.latex),
-    [result.text, result.latex],
+    () => renderMathText(sourceText, boxOverride),
+    [sourceText, boxOverride],
   );
 
   // Mathpix가 텍스트로 옮길 수 없는 도형(원, 삼각형 등)을 감지하면 그 영역의
@@ -202,7 +234,10 @@ export default function ResultStage({
         );
       }
       if (!res.ok) throw new Error(json.error ?? "도형 재구성에 실패했습니다.");
-      setManualDiagramSvgs((prev) => [...prev, json.svg as string]);
+      setManualDiagramSvgs((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), svg: json.svg as string },
+      ]);
     } catch (err) {
       setVectorizeError(
         err instanceof Error ? err.message : "도형 재구성에 실패했습니다.",
@@ -240,7 +275,12 @@ export default function ResultStage({
         pixelRatio: 2,
         backgroundColor: "#ffffff",
       });
-      await onSaveToCategory(dataUrl, answer.trim());
+      await onSaveToCategory({
+        pngDataUrl: dataUrl,
+        answer: answer.trim(),
+        answerType,
+        boxOverride,
+      });
       setSaved(true);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "저장에 실패했습니다.");
@@ -312,95 +352,151 @@ export default function ResultStage({
                 key={d.id}
                 src={rasterFallbacks[d.id]}
                 alt="도형"
-                className="mx-auto mt-4 max-w-full"
+                style={diagramStyle(layoutOf(d.id))}
+                className="block max-w-full"
               />
             ) : null,
           )}
-          {manualDiagramSvgs.map((svg, idx) => (
+          {manualDiagramSvgs.map((d) => (
             <div
-              key={idx}
-              className="mx-auto mt-4 max-w-full [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
-              dangerouslySetInnerHTML={{ __html: svg }}
+              key={d.id}
+              style={diagramStyle(layoutOf(d.id))}
+              className="block max-w-full [&_svg]:h-auto [&_svg]:w-full"
+              dangerouslySetInnerHTML={{ __html: d.svg }}
             />
           ))}
         </div>
       </div>
 
+      {/* 조건 박스 범위 조절 — 자동 감지가 어긋났을 때 손으로 고친다. */}
+      <div className="rounded-lg border border-slate-200 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={() => setShowBoxEditor((v) => !v)}
+          className="flex w-full items-center justify-between text-xs font-medium text-slate-600"
+        >
+          <span>
+            조건 박스 조절
+            {boxOverride !== undefined && (
+              <span className="ml-1 font-normal text-blue-600">(직접 지정함)</span>
+            )}
+          </span>
+          <span className="text-slate-400">{showBoxEditor ? "닫기 ▲" : "열기 ▼"}</span>
+        </button>
+        {showBoxEditor && (
+          <div className="mt-2">
+            <BoxRangeEditor
+              text={sourceText}
+              value={boxOverride}
+              onChange={setBoxOverride}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* 도형 크기·위치 조절 — 카드에 실제로 붙은 도형이 있을 때만 보여준다. */}
+      {(Object.keys(rasterFallbacks).length > 0 ||
+        manualDiagramSvgs.length > 0) && (
+        <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
+          <p className="text-xs font-medium text-slate-500">도형 크기·위치</p>
+          {(result.diagrams ?? [])
+            .filter((d) => rasterFallbacks[d.id])
+            .map((d, i) => (
+              <DiagramAdjuster
+                key={d.id}
+                label={`자동 감지 도형 ${i + 1}`}
+                layout={layoutOf(d.id)}
+                onChange={(next) => setLayout(d.id, next)}
+              />
+            ))}
+          {manualDiagramSvgs.map((d, idx) => (
+            <DiagramAdjuster
+              key={d.id}
+              label={`추가인식 도형 ${idx + 1}`}
+              layout={layoutOf(d.id)}
+              onChange={(next) => setLayout(d.id, next)}
+              onRemove={() =>
+                setManualDiagramSvgs((prev) => prev.filter((p) => p.id !== d.id))
+              }
+            />
+          ))}
+        </div>
+      )}
+
       {sourceImage && !isVectorizing && (
         <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
-          {quota && !quota.paid ? (
-            // 결제자 전용 기능이다. 안 산 사람에게는 버튼 대신 구매 안내를 보여준다.
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-slate-600">
-                <span className="font-medium text-slate-700">도형 추가인식</span>은
-                이용권을 구매한 분만 쓸 수 있어요.
-              </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-slate-500">도형 화질</span>
+            {(["lite", "flash"] as const).map((m) => {
+              const selected = diagramModel === m;
+              // flash는 결제자 전용이라 미결제 상태면 아예 고를 수 없게 막는다.
+              const locked = m === "flash" && quota !== null && !quota.paid;
+              const exhausted =
+                quota !== null &&
+                (m === "flash"
+                  ? quota.flashRemaining <= 0
+                  : !quota.liteFree && quota.credits < quota.liteCost);
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  disabled={locked}
+                  onClick={() => setDiagramModel(m)}
+                  className={`rounded-lg border px-2.5 py-1 text-xs font-medium ${
+                    selected
+                      ? "border-blue-600 bg-blue-50 text-blue-700"
+                      : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                  } ${locked || exhausted ? "opacity-50" : ""}`}
+                >
+                  {MODEL_LABELS[m]}
+                  {m === "flash" ? " (고화질)" : " (기본)"}
+                  {locked && " 🔒"}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="text-[11px] text-slate-500">
+            {diagramModel === "flash" ? (
+              quota && !quota.paid ? (
+                <>flash는 이용권을 구매한 분만 쓸 수 있어요.</>
+              ) : (
+                <>
+                  플래시쿠폰 1장을 씁니다.
+                  {quota &&
+                    ` 오늘 ${quota.flashRemaining}/${quota.flashDailyLimit}장 남음 (매일 자정 초기화)`}
+                </>
+              )
+            ) : quota?.liteFree ? (
+              <>이용권 구매자는 lite를 무료로 쓸 수 있어요.</>
+            ) : (
+              <>
+                사진인식권 {quota?.liteCost ?? 5}장을 씁니다.
+                {quota && ` 남은 사진인식권 ${quota.credits}장`}
+              </>
+            )}
+          </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowDiagramCrop(true)}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+            >
+              도형 추가인식
+            </button>
+            {quota && !quota.paid && (
               <a
                 href="/api/checkout"
-                className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-center text-xs font-medium text-white hover:bg-amber-700"
+                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
               >
-                이용권 구매하기
+                이용권 구매 (lite 무료 + flash 사용)
               </a>
-            </div>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">도형 화질</span>
-                {(["lite", "flash"] as const).map((m) => {
-                  const selected = diagramModel === m;
-                  // 남은 수량이 0이면 고를 수는 있어도 못 쓴다는 걸 미리 알린다.
-                  const exhausted =
-                    quota !== null &&
-                    (m === "flash"
-                      ? quota.flashRemaining <= 0
-                      : quota.credits < quota.liteCost);
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setDiagramModel(m)}
-                      className={`rounded-lg border px-2.5 py-1 text-xs font-medium ${
-                        selected
-                          ? "border-blue-600 bg-blue-50 text-blue-700"
-                          : "border-slate-300 text-slate-600 hover:bg-slate-100"
-                      } ${exhausted ? "opacity-50" : ""}`}
-                    >
-                      {MODEL_LABELS[m]}
-                      {m === "flash" ? " (고화질)" : " (기본)"}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <p className="text-[11px] text-slate-500">
-                {diagramModel === "flash" ? (
-                  <>
-                    플래시쿠폰 1장을 씁니다.
-                    {quota &&
-                      ` 오늘 ${quota.flashRemaining}/${quota.flashDailyLimit}장 남음 (매일 자정 초기화)`}
-                  </>
-                ) : (
-                  <>
-                    사진인식권 {quota?.liteCost ?? 5}장을 씁니다.
-                    {quota && ` 남은 사진인식권 ${quota.credits}장`}
-                  </>
-                )}
-              </p>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowDiagramCrop(true)}
-                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  도형 추가인식
-                </button>
-                {vectorizeError && (
-                  <p className="text-xs text-red-600">{vectorizeError}</p>
-                )}
-              </div>
-            </>
-          )}
+            )}
+            {vectorizeError && (
+              <p className="text-xs text-red-600">{vectorizeError}</p>
+            )}
+          </div>
         </div>
       )}
 
@@ -446,16 +542,52 @@ export default function ResultStage({
       )}
 
       {onSaveToCategory && (
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <span className="shrink-0 font-medium">정답</span>
-          <input
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            disabled={saved}
-            placeholder="예: ③, 5, 12 (PDF 맨 뒤 정답표에 표기됩니다)"
-            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100"
-          />
-        </label>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 text-sm font-medium text-slate-700">
+              정답 유형
+            </span>
+            <div className="flex gap-1">
+              {(["choice", "short"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setAnswerType(t)}
+                  disabled={saved}
+                  className={`rounded-lg border px-2.5 py-1 text-xs font-medium disabled:opacity-50 ${
+                    answerType === t
+                      ? "border-blue-600 bg-blue-50 text-blue-700"
+                      : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {ANSWER_TYPE_LABEL[t]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <span className="shrink-0 font-medium">정답</span>
+            <input
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              disabled={saved}
+              placeholder={
+                answerType === "choice"
+                  ? "예: 3 → 정답표에 ③으로 표기됩니다"
+                  : "예: 12 (PDF 맨 뒤 정답표에 표기됩니다)"
+              }
+              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100"
+            />
+          </label>
+          {answer.trim() !== "" && (
+            <p className="text-[11px] text-slate-500">
+              정답표 표기:{" "}
+              <span className="text-sm font-medium text-ink">
+                {formatAnswer(answer, answerType)}
+              </span>
+            </p>
+          )}
+        </div>
       )}
 
       {/* 보조 도구: 저장 결과를 만드는 액션이 아니라 다시 시작/복사 같은
