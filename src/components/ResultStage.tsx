@@ -144,7 +144,17 @@ export default function ResultStage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image: croppedDataUrl }),
       });
-      const json = await res.json();
+      let json: { svg?: string; error?: string };
+      try {
+        json = await res.json();
+      } catch {
+        // Vercel이 함수 실�시간 초과 등으로 요청을 강제 종료하면 JSON이 아니라
+        // 자체 에러 페이지(HTML/텍스트)를 돌려준다 — 그걸 그대로 파싱하려다
+        // 나는 원본 파싱 에러 대신 원인을 짐작할 수 있는 메시지로 바꿔준다.
+        throw new Error(
+          "서버에서 정상적인 응답을 받지 못했어요. 시간이 너무 오래 걸려 요청이 중단됐을 수 있습니다. 잠시 후 다시 시도해주세요.",
+        );
+      }
       if (!res.ok) throw new Error(json.error ?? "도형 재구성에 실패했습니다.");
       setManualDiagramSvgs((prev) => [...prev, json.svg as string]);
     } catch (err) {

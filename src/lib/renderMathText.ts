@@ -276,6 +276,15 @@ function renderInline(text: string): string {
 // 그대로의 "."로만 판단한다. 소수점(예: "10.5")은 문장 끝이 아니므로 제외.
 const SENTENCE_END = /\.(?!\d)/;
 
+// (가)/(나) 조건이 마침표 없는 순수 수식으로 끝나는 문제(예: "(나) 2×sin(∠ECD)
+// =3×sin(∠EDC)")도 있다. 이때 마침표를 찾겠다고 뒤쪽 줄을 계속 뒤지면, 조건과
+// 무관한 실제 질문("DF의 값은?")이나 객관식 선택지(①~⑤, (1)~(5))에는 애당초
+// 마침표가 없으니 문서 끝까지(또는 다음 마침표가 나오는 아무 데나) 삼켜버릴
+// 위험이 있다. 그래서 마침표를 찾는 도중 이런 줄을 만나면 그 자리를 "조건
+// 목록이 끝났다"는 확실한 벽으로 보고, 마침표를 못 찾은 것과 동일하게 처리해
+// 더 뒤로는 절대 넘어가지 않는다.
+const QUESTION_OR_CHOICE_LINE = /[?？]|^\s*(?:[①②③④⑤⑥⑦⑧⑨⑩]|\(\d+\))/;
+
 /**
  * 마지막 조건 표지가 달린 줄을 "그 조건 문장의 마침표"에서 끓는다. 마침표
  * 뒤에 다른 문장(문제 본문)이 이어 붙어 있으면 그 부분은 박스 밖으로 빼다.
@@ -361,7 +370,12 @@ export function renderMathText(input: string): string {
 
     if (openBoxLines !== null) {
       let closeIdx = -1;
+      let hardStopIdx = -1;
       for (let i = 0; i < lines.length; i++) {
+        if (QUESTION_OR_CHOICE_LINE.test(lines[i])) {
+          hardStopIdx = i;
+          break;
+        }
         if (lineHasSentenceEnd(lines[i], mathBlocks)) {
           closeIdx = i;
           break;
@@ -371,9 +385,16 @@ export function renderMathText(input: string): string {
       if (closeIdx === -1) {
         // 블록 경계를 넘어가는 건 한 번만 허용한다(그 이상은 무관한 본문까지
         // 삼킬 위험이 있다) — 여기서도 마침표를 못 찾으면 그냥 여기서 닫는다.
-        openBoxLines.push(...lines);
+        // 실제 질문/선택지를 만났다면(hardStopIdx) 그 앞까지만 담는다.
+        const stopAt = hardStopIdx !== -1 ? hardStopIdx : lines.length;
+        openBoxLines.push(...lines.slice(0, stopAt));
         html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
         openBoxLines = null;
+
+        if (hardStopIdx !== -1) {
+          const trailingLines = lines.slice(hardStopIdx);
+          html += `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`;
+        }
         isFirst = false;
         continue;
       }
@@ -436,7 +457,12 @@ export function renderMathText(input: string): string {
       const lastIdx = markerIndices[markerIndices.length - 1];
 
       let closeIdx = -1;
+      let hardStopIdx = -1;
       for (let i = lastIdx; i < lines.length; i++) {
+        if (QUESTION_OR_CHOICE_LINE.test(lines[i])) {
+          hardStopIdx = i;
+          break;
+        }
         if (lineHasSentenceEnd(lines[i], mathBlocks)) {
           closeIdx = i;
           break;
@@ -449,21 +475,30 @@ export function renderMathText(input: string): string {
       }
 
       if (closeIdx === -1) {
-        // 이 블록 안에서 조건 문장이 끝나지 않았다. 바로 다음 블록이 순수
-        // 디스플레이 수식 플레이스홀더뿐이면(예: "(나)...이고" 다음에 오는
-        // "$$x=\alpha,...$$") 그 문장의 나머지일 가능성이 높으니 박스를
-        // 열어둔 채 딥 한 블록만 더 넘어가 본다. 아니면(예: (나)가 마침표
-        // 없는 순수 수식으로 끝나고 다음이 "DF의 값은?" 같은 무관한 본문인
-        // 경우) 여기서 바로 닫아야 뒤 문장이 따려 들어가지 않는다.
-        const nextBlock = blocks[bi + 1];
-        if (nextBlock !== undefined && isPureMathPlaceholderBlock(nextBlock)) {
-          openBoxLines = lines.slice(firstIdx);
-          isFirst = false;
-          continue;
+        // 이 블록 안에서 조건 문장이 끝나지 않았다. 실제 질문("DF의 값은?")이나
+        // 선택지(①~⑤, (1)~(5))를 만났다면(hardStopIdx) 그 앞에서 바로 닫는다
+        // — (가)/(나)가 마침표 없는 순수 수식으로 끝나는 문제가 이 경우다.
+        // 그런 벥을 안 만났고 블록이 그냥 끝난 것뿐이라면, 바로 다음 블록이
+        // 순수 디스플레이 수식 플레이스홀더뿐일 때만(예: "(나)...이고" 다음에
+        // 오는 "$$x=\alpha,...$$") 그 문장의 나머지일 가능성이 높으니 박스를
+        // 열어둔 채 딥 한 블록만 더 넘어가 본다.
+        if (hardStopIdx === -1) {
+          const nextBlock = blocks[bi + 1];
+          if (nextBlock !== undefined && isPureMathPlaceholderBlock(nextBlock)) {
+            openBoxLines = lines.slice(firstIdx);
+            isFirst = false;
+            continue;
+          }
         }
 
-        const conditionLines = lines.slice(firstIdx);
+        const stopAt = hardStopIdx !== -1 ? hardStopIdx : lines.length;
+        const conditionLines = lines.slice(firstIdx, stopAt);
         html += `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
+
+        if (hardStopIdx !== -1) {
+          const trailingLines = lines.slice(hardStopIdx);
+          html += `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`;
+        }
         isFirst = false;
         continue;
       }
