@@ -1,16 +1,7 @@
-const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
-// 모델을 바꿀 땀 이름으로 추측하지 말고 /api/diagram/models 를 열어 "이미지를
-// 실제로 받아주는 모델"만 골라서 넣을 것. 이름에 vision/vl이 없어도 되고,
-// 있어도 안 되는 경우가 있다. 2026-07-30 실측 결과:
-//   - 이미지 OK: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning(30B, 활성 3B),
-//     nvidia/llama-3.1-nemotron-nano-vl-8b-v1(8B),
-//     meta/llama-3.2-11b-vision-instruct, meta/llama-3.2-90b-vision-instruct
-//   - 텍스트 전용: nemotron-3-super-120b-a12b, llama-3.3-nemotron-super-49b(-v1.5)
-//     → 500 "multimodal processing is not enabled" / 400 "not a multimodal model"
-//   - 계정 미제공(404): moonshotai/kimi-k2.6, nemotron-51b/70b/ultra-253b
-// 30b-a3b-omni도 이미지 입력은 되지만 reasoning 모델이라 응답이 느릴 위험이
-// 있어(90b/k2.6이 60초 함수 제한에 걸린 전례) 전용 VL 모델인 8b로 간다.
-const NVIDIA_MODEL = "nvidia/llama-3.1-nemotron-nano-vl-8b-v1";
+// Gemini는 NVIDIA(OpenAI 호환)와 요청 형식이 완전히 다르다. 엔드포인트 경로에
+// 모델명이 들어가고, 이미지는 image_url이 아니라 inline_data(base64 원문)로 넣는다.
+const GEMINI_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
 이 도형을 원본과 최대한 똑같은 비율·각도·위치로, 깨끗한 벡터 그래픽으로 다시 그려주세요.
@@ -37,107 +28,114 @@ function sanitizeSvg(svg: string): string {
     .replace(/(href\s*=\s*["'])\s*javascript:[^"']*/gi, "$1");
 }
 
-/** NVIDIA API가 준 에러 본문에서 사람이 읽을 만한 메시지만 뽑아낸다. */
+/**
+ * "data:image/jpeg;base64,XXXX" 형태의 data URL을 Gemini가 요구하는
+ * { mimeType, data } 로 쪼개다. Gemini는 접두어 없는 순수 base64만 받는다.
+ */
+function parseDataUrl(
+  dataUrl: string,
+): { mimeType: string; data: string } | null {
+  const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
+}
+
+/** Gemini가 준 에러 본문에서 사람이 읽을 만한 메시지만 뽑아낸다. */
 function describeApiError(status: number, body: string): string {
   let detail = body.trim();
   try {
     const parsed = JSON.parse(body);
-    detail =
-      parsed?.error?.message ??
-      parsed?.detail ??
-      parsed?.message ??
-      parsed?.title ??
-      detail;
+    detail = parsed?.error?.message ?? parsed?.message ?? detail;
     if (typeof detail !== "string") detail = JSON.stringify(detail);
   } catch {
     // JSON이 아니면(HTML 에러 페이지 등) 원문 앞부분을 그대로 쓴다.
   }
   if (detail.length > 300) detail = `${detail.slice(0, 300)}...`;
 
-  // 상태 코드별로 "무엇을 확인해야 하는지"를 붙여준다. 특히 403은
-  // build.nvidia.com 모델 페이지에서 약관 동의(Acknowledge & Continue)를
-  // 안 눌렀을 때 자주 난다. 404는 카탈로그엔 있어도 계정에 미제공인 경우도 포함한다.
+  // 상태 코드별로 "무엇을 확인해야 하는지"를 붙여준다.
   const hint =
-    status === 401
-      ? " (NVIDIA_API_KEY가 잘못됐거나 만료됐습니다)"
+    status === 400
+      ? " (요청 형식이 맞지 않거나 API 키가 잘못됐습니다)"
       : status === 403
-        ? " (build.nvidia.com의 해당 모델 페이지에서 약관 동의가 필요할 수 있습니다)"
+        ? " (API 키 권한이 없거나 Generative Language API가 비활성 상태입니다)"
         : status === 404
-          ? ` (모델 "${NVIDIA_MODEL}"이 없거나 이 계정에 제공되지 않습니다. /api/diagram/models 로 호출 가능한 목록을 확인하세요)`
-          : status === 400 || status === 422
-            ? " (이 모델이 이미지 입력을 지원하지 않거나 요청 형식이 맞지 않습니다)"
+          ? ` (모델 "${GEMINI_MODEL}"이 이 키로 접근 가능한 목록에 없습니다)`
+          : status === 429
+            ? " (무료 사용량 한도를 초과했습니다. 잠시 후 다시 시도해주세요)"
             : status >= 500
-              ? " (NVIDIA 서버 오류입니다. 잠시 후 재시도해주세요)"
+              ? " (Gemini 서버 오류입니다. 잠시 후 재시도해주세요)"
               : "";
 
   return `도형 재구성 API 오류 ${status}${hint}: ${detail || "(응답 본문 없음)"}`;
 }
 
 /**
- * 사용자가 직접 오려낸 도형 이미지(data URL)를 NVIDIA API 카탈로그의
- * 비전 모델에 보내 깨끗한 SVG로 다시 그리게 한다. OpenAI 호환
- * chat/completions 형식이라 image_url에 data URL을 그대로 넣는다.
+ * 사용자가 직접 오려낸 도형 이미지(data URL)를 Gemini 2.5 Flash Lite에 보내
+ * 깨끗한 SVG로 다시 그리게 한다.
  *
- * 실패 시: 원인을 알 수 있는 경우(HTTP 에러)는 상태 코드와 API가 준
- * 메시지를 그대로 담아 throw하고(호출부가 크레딧을 환불하고 그 메시지를
- * 사용자에게 보여준다), 응답은 정상인데 SVG를 못 뽑은 경우만 null을
- * 반환한다. 예전엔 모든 실패를 null로 뭉개서 "왜 안 되는지"를 전혀 알
- * 수 없었기 때문에 이렇게 나눠둔 것이다.
+ * 실패 시: 원인을 알 수 있는 경우(HTTP 에러)는 상태 코드와 API가 준 메시지를
+ * 그대로 담아 throw하고(호출부가 크레딧을 환불하고 그 메시지를 사용자에게
+ * 보여준다), 응답은 정상인데 SVG를 못 뽑은 경우만 null을 반환한다.
+ *
+ * (모델 변경 이력: Gemini 2.0 Flash → 계정에서 사라져 2.5 Flash/Flash-Lite →
+ * 429가 계속 나 NVIDIA 카탈로그로 이동 → nemotron-nano-12b-v2-vl(품질 부족) →
+ * llama-3.2-90b(너무 느림) → 11b → phi-3.5(카탈로그에 없는 모델이었음) →
+ * kimi-k2.6(404, 계정 미제공) → nemotron-nano-vl-8b → 사용자 요청으로 다시
+ * Gemini 2.5 Flash Lite. NVIDIA 계정에서 이미지 입력이 실제로 되는 모델은
+ * /api/diagram/models 로 확인할 수 있게 해둑다.)
  */
 export async function vectorizeDiagram(
   imageDataUrl: string,
 ): Promise<string | null> {
-  const apiKey = process.env.NVIDIA_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  const res = await fetch(NVIDIA_ENDPOINT, {
+  const image = parseDataUrl(imageDataUrl);
+  if (!image) {
+    console.error("[diagramVector] data URL 형식이 아님");
+    return null;
+  }
+
+  const res = await fetch(GEMINI_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      "x-goog-api-key": apiKey,
     },
     body: JSON.stringify({
-      model: NVIDIA_MODEL,
-      messages: [
+      contents: [
         {
-          role: "user",
-          content: [
-            { type: "text", text: PROMPT },
-            { type: "image_url", image_url: { url: imageDataUrl } },
+          parts: [
+            { text: PROMPT },
+            { inline_data: { mime_type: image.mimeType, data: image.data } },
           ],
         },
       ],
-      temperature: 0.1,
-      max_tokens: 8192,
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8192,
+      },
     }),
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     console.error(
-      `[diagramVector] ${NVIDIA_MODEL} 호출 실패 ${res.status} ${res.statusText}: ${body.slice(0, 2000)}`,
+      `[diagramVector] ${GEMINI_MODEL} 호출 실패 ${res.status} ${res.statusText}: ${body.slice(0, 2000)}`,
     );
-
-    if (res.status === 429) {
-      // 계정 분당 요청 한도(RPM) 초과. 재시도하면 될 문제라 명확히 구분해
-      // 알려준다.
-      throw new Error(
-        "NVIDIA API 요청 한도(분당 요청 수)를 초과했습니다. 잠시 후 다시 시도해주세요.",
-      );
-    }
     throw new Error(describeApiError(res.status, body));
   }
 
   const json = await res.json();
-  const message = json.choices?.[0]?.message;
-  // 추론(reasoning) 모델은 본문을 content가 아니라 reasoning_content에 담아
-  // 보내기도 해서, content가 비면 그쪽도 확인한다.
-  const text: string | undefined =
-    message?.content || message?.reasoning_content;
+  const candidate = json?.candidates?.[0];
+  const text: string | undefined = candidate?.content?.parts
+    ?.map((p: { text?: string }) => p?.text ?? "")
+    .join("");
 
   if (!text) {
+    // 안전필터에 걸리면 parts 없이 finishReason만 온다. 원인을 남겨둔다.
     console.error(
-      `[diagramVector] ${NVIDIA_MODEL} 응답에 본문이 없음: ${JSON.stringify(json).slice(0, 2000)}`,
+      `[diagramVector] ${GEMINI_MODEL} 응답에 본문이 없음(finishReason=${candidate?.finishReason}): ${JSON.stringify(json).slice(0, 2000)}`,
     );
     return null;
   }
@@ -145,7 +143,7 @@ export async function vectorizeDiagram(
   const svg = extractSvg(text);
   if (!svg) {
     console.error(
-      `[diagramVector] ${NVIDIA_MODEL} 응답에서 <svg>를 못 찾음: ${text.slice(0, 1000)}`,
+      `[diagramVector] ${GEMINI_MODEL} 응답에서 <svg>를 못 찾음: ${text.slice(0, 1000)}`,
     );
     return null;
   }
