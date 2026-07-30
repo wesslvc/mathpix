@@ -3,38 +3,37 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
-// 아래 프로브가 실제 모델을 호출하므로 기본 제한 시간으론 부족할 수 있다.
+// 후보 모델들을 실제로 호출해보므로 기본 제한 시간으론 부족하다.
 export const maxDuration = 60;
 
 const NVIDIA_BASE = "https://integrate.api.nvidia.com/v1";
 
-/** 도형 재구성에 쓰는 모델. diagramVector.ts와 같은 값을 봐야 의미가 있다. */
-const TARGET_MODEL = "moonshotai/kimi-k2.6";
-
-/** 1x1 흰색 PNG. 이미지 입력이 되는지만 보려는 것이라 내용은 의미 없다. */
+/** 1x1 흰색 PNG. 이미지 입력을 받아주는지만 보려는 것이라 내용은 의미 없다. */
 const TINY_PNG =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-type Probe = {
-  ok: boolean;
+/** 후보를 무한정 찌르면 분당 요청 한도(RPM)에 걸리니 이 개수까지만 본다. */
+const MAX_PROBES = 14;
+/** 모델 하나가 느려도 전체가 타임아웃 나지 않도록 개별 호출을 끊는다. */
+const PROBE_TIMEOUT_MS = 12_000;
+
+/** 이름만 보고 이미지 입력이 될 법한 모델을 추린다(확정은 프로브 결과로 한다). */
+const VISION_NAME_HINT =
+  /vision|vlm?\b|-vl|multimodal|llava|pixtral|cosmos|nemotron.*(vl|vision)|kimi|gemma|qwen.*vl|phi/i;
+
+type ProbeResult = {
+  model: string;
+  acceptsImage: boolean;
   status: number;
-  body: string;
+  note: string;
 };
 
 /**
- * 같은 모델을 "텍스트만" / "이미지 포함" 두 가지로 실제 호출해본다.
- * NVIDIA는 (모델 + 입력 형태)에 따라 서로 다른 NIM function으로 라우팅하는
- * 것으로 보이는데, 404 메시지가 "Function '<uuid>': Not found for account"라
- * 텍스트는 되고 비전만 계정에 없을 수도 있다. 둘을 갈라 봐야 구분이 된다.
+ * 모델 하나에 "텍스트 + 1x1 이미지"를 보내 이미지 입력을 받아주는지 확인한다.
+ * 200이면 비전 입력이 되는 것이고, 404면 계정 미제공, 400/422면 이 모델이
+ * 이미지 형식을 안 받는 것이다.
  */
-async function probe(apiKey: string, withImage: boolean): Promise<Probe> {
-  const content = withImage
-    ? [
-        { type: "text", text: "hi" },
-        { type: "image_url", image_url: { url: TINY_PNG } },
-      ]
-    : "hi";
-
+async function probeModel(apiKey: string, model: string): Promise<ProbeResult> {
   try {
     const res = await fetch(`${NVIDIA_BASE}/chat/completions`, {
       method: "POST",
@@ -43,31 +42,55 @@ async function probe(apiKey: string, withImage: boolean): Promise<Probe> {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: TARGET_MODEL,
-        messages: [{ role: "user", content }],
+        model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "hi" },
+              { type: "image_url", image_url: { url: TINY_PNG } },
+            ],
+          },
+        ],
         max_tokens: 16,
       }),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
+
+    if (res.ok) {
+      return { model, acceptsImage: true, status: res.status, note: "이미지 입력 OK" };
+    }
     const body = await res.text().catch(() => "");
-    return { ok: res.ok, status: res.status, body: body.slice(0, 600) };
-  } catch (err) {
     return {
-      ok: false,
+      model,
+      acceptsImage: false,
+      status: res.status,
+      note: body.slice(0, 200),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      model,
+      acceptsImage: false,
       status: 0,
-      body: err instanceof Error ? err.message : String(err),
+      // 12초 안에 응답이 없으면 도형 재구성엔 어차피 너무 느린 모델이다.
+      note: /timeout|abort/i.test(message) ? `${PROBE_TIMEOUT_MS}ms 내 무응답(너무 느림)` : message,
     };
   }
 }
 
 /**
- * 이 계정의 NVIDIA_API_KEY로 "실제 호출 가능한" 모델 목록과, 대상 모델의
- * 텍스트/비전 호출 가능 여부를 함께 보여주는 진단용 엔드포인트.
+ * 이 계정의 NVIDIA_API_KEY로 실제 호출 가능한 모델을 나열하고, 그중 비전
+ * 후보들에 진짜 이미지를 보내 "도형 재구성에 쓸 수 있는 모델"을 가려낸다.
  *
- * build.nvidia.com 카탈로그에 보이는 것과 계정이 실제로 쓸 수 있는 것이 다를
- * 수 있어서(kimi-k2.6이 404 "Not found for account"였다) 모델을 고르기 전에
- * 여기서 먼저 확인한다. 키를 쓰는 엔드포인트라 로그인한 사용자만 볼 수 있게 한다.
+ * 카탈로그에 보이는 것과 계정이 쓸 수 있는 것이 다르고(kimi-k2.6이 404
+ * "Not found for account"였다), 이름에 vision이 있어도 실제로는 이미지를 안
+ * 받는 경우가 있어서 이름 추측 대신 실제 호출로 확인한다.
+ * 키를 쓰는 엔드포인트라 로그인한 사용자만 볼 수 있게 한다.
+ *
+ * ?q=nemotron 처럼 필터를 주면 그 문자열이 들어간 모델만 프로브한다.
  */
-export async function GET() {
+export async function GET(req: Request) {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -86,43 +109,43 @@ export async function GET() {
     }
   }
 
-  // 키가 바뀌었는지 눈으로 확인할 수 있게 앞 8자만 보여준다(전체 노출 금지).
-  const keyFingerprint = `${apiKey.slice(0, 8)}...(${apiKey.length}자)`;
-
   const listRes = await fetch(`${NVIDIA_BASE}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-
-  let models: { total: number; targetInList: boolean; visionCandidates: string[]; all: string[] } | { error: string } ;
   if (!listRes.ok) {
     const body = await listRes.text().catch(() => "");
-    models = { error: `목록 조회 실패 ${listRes.status}: ${body.slice(0, 500)}` };
-  } else {
-    const json = await listRes.json();
-    const ids: string[] = (json?.data ?? [])
-      .map((m: { id?: string }) => m?.id)
-      .filter((id: unknown): id is string => typeof id === "string")
-      .sort();
-    models = {
-      total: ids.length,
-      targetInList: ids.includes(TARGET_MODEL),
-      // 이름만 보고 "이미지 입력이 될 법한" 후보를 추려준다(확정은 아님).
-      visionCandidates: ids.filter((id) =>
-        /vision|vl\b|-vl|multimodal|kimi|llava|pixtral|phi|gemma|qwen.*vl/i.test(id),
-      ),
-      all: ids,
-    };
+    return NextResponse.json(
+      { error: `모델 목록 조회 실패 ${listRes.status}`, detail: body.slice(0, 500) },
+      { status: 502 },
+    );
   }
 
-  const [textOnly, withImage] = await Promise.all([
-    probe(apiKey, false),
-    probe(apiKey, true),
-  ]);
+  const json = await listRes.json();
+  const all: string[] = (json?.data ?? [])
+    .map((m: { id?: string }) => m?.id)
+    .filter((id: unknown): id is string => typeof id === "string")
+    .sort();
+
+  const filter = new URL(req.url).searchParams.get("q")?.toLowerCase();
+  const candidates = (
+    filter ? all.filter((id) => id.toLowerCase().includes(filter)) : all.filter((id) => VISION_NAME_HINT.test(id))
+  )
+    // NVIDIA 계열을 먼저 보고 싶다는 요구가 있어 nvidia/로 시작하는 걸 앞에 둔다.
+    .sort((a, b) => Number(b.startsWith("nvidia/")) - Number(a.startsWith("nvidia/")))
+    .slice(0, MAX_PROBES);
+
+  const probes = await Promise.all(
+    candidates.map((model) => probeModel(apiKey, model)),
+  );
+
+  const usable = probes.filter((p) => p.acceptsImage).map((p) => p.model);
 
   return NextResponse.json({
-    targetModel: TARGET_MODEL,
-    keyFingerprint,
-    probes: { textOnly, withImage },
-    models,
+    // 도형 재구성에 바로 쓸 수 있는 모델(이미지 입력 확인됨).
+    usableForDiagram: usable,
+    nvidiaUsable: usable.filter((m) => m.startsWith("nvidia/")),
+    probes,
+    totalModels: all.length,
+    all,
   });
 }

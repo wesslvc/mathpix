@@ -1,10 +1,10 @@
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
-// 주의: build.nvidia.com 카탈로그에 보이는 모델이라도 계정 키로 호출이
-// 안 될 수 있다. 예전 키로 kimi-k2.6을 호출했을 땐 404 "Function '...':
-// Not found for account '...'"가 났었다(카탈로그엔 있지만 그 계정엔 미제공).
-// 사용자가 API 키를 새로 발급해서 다시 k2.6으로 돌려놓은 상태다.
-// 또 404가 나면 /api/diagram/models 로 "이 키로 실제 호출 가능한 목록"을 확인할 것.
-const NVIDIA_MODEL = "moonshotai/kimi-k2.6";
+// 주의: build.nvidia.com 카탈로그에 보이는 모델이라도 계정 키로 호출이 안 될
+// 수 있다. kimi-k2.6은 키를 새로 발급해도 404 "Function '...': Not found for
+// account '...'"가 계속 났다(계정 해시가 그대로라 권한도 그대로였음).
+// 그래서 모델을 바꿀 땐 이름으로 추측하지 말고, /api/diagram/models 를 열어
+// "이미지를 실제로 받아주는 모델"만 골라서 여기에 넣을 것.
+const NVIDIA_MODEL = "meta/llama-3.2-11b-vision-instruct";
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
 이 도형을 원본과 최대한 똑같은 비율·각도·위치로, 깨끗한 벡터 그래픽으로 다시 그려주세요.
