@@ -4,11 +4,24 @@
 // 목록엔 있었는데 "no longer available to new users"로 막혔다(구세대 은퇴).
 // -latest 별칭을 쓰면 구글이 알아서 현행 세대로 라우팅해줘서 이 문제를 피한다.
 //
-// flash-latest로 도형 재구성이 정상 동작하는 것까지 확인했다(그게 품질 기준선).
-// 다만 무료 등급 RPD(하루 요청 수) 한도가 빠듯해서 한도가 더 넉넉한 flash-lite로
-// 내려본다. 도형 품질이 떨어지면 gemini-flash-latest로 되돌릴 것.
-const GEMINI_MODEL = "gemini-flash-lite-latest";
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+// 사용자가 두 모델 중 고른다. flash는 품질이 좋은 대신 무료 등급 RPD(하루 요청
+// 수)를 빨리 소진하므로 결제자에게 하루 5장(플래시쿠폰)으로 묶고, lite는
+// 사진인식권 5장을 받고 자유롭게 쓰게 한다. 과금·한도는 전부 서버에서
+// 강제한다(supabase/migrations/0010_diagram_model_quota.sql).
+export const DIAGRAM_MODELS = {
+  flash: "gemini-flash-latest",
+  lite: "gemini-flash-lite-latest",
+} as const;
+
+export type DiagramModel = keyof typeof DIAGRAM_MODELS;
+
+export function isDiagramModel(value: unknown): value is DiagramModel {
+  return value === "flash" || value === "lite";
+}
+
+function endpointFor(model: DiagramModel): string {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${DIAGRAM_MODELS[model]}:generateContent`;
+}
 
 // Gemini 3 계열은 thinking이 기본 ON이라 SVG를 뱉기 전에 추론 토큰을 잔뜩 쓴다.
 // 3.6-flash로 처음 돌렸을 때 출력 토큰이 10K 가까이 튀면서 8192 한도에 걸려
@@ -70,7 +83,11 @@ function parseDataUrl(
 }
 
 /** Gemini가 준 에러 본문에서 사람이 읽을 만한 메시지만 뽑아낸다. */
-function describeApiError(status: number, body: string): string {
+function describeApiError(
+  status: number,
+  body: string,
+  modelId: string,
+): string {
   let detail = body.trim();
   try {
     const parsed = JSON.parse(body);
@@ -88,7 +105,7 @@ function describeApiError(status: number, body: string): string {
       : status === 403
         ? " (API 키 권한이 없거나 Generative Language API가 비활성 상태입니다)"
         : status === 404
-          ? ` (모델 "${GEMINI_MODEL}"이 이 키로 접근 가능한 목록에 없습니다)`
+          ? ` (모델 "${modelId}"이 이 키로 접근 가능한 목록에 없습니다)`
           : status === 429
             ? " (무료 사용량 한도를 초과했습니다. 잠시 후 다시 시도해주세요)"
             : status >= 500
@@ -110,14 +127,19 @@ function describeApiError(status: number, body: string): string {
  * 429가 계속 나 NVIDIA 카탈로그로 이동 → nemotron-nano-12b-v2-vl(품질 부족) →
  * llama-3.2-90b(너무 느림) → 11b → phi-3.5(카탈로그에 없는 모델이었음) →
  * kimi-k2.6(404, 계정 미제공) → nemotron-nano-vl-8b → 사용자 요청으로 다시
- * Gemini 2.5 Flash Lite(신규 사용자 미제공 404) → gemini-3.6-flash.
+ * Gemini 2.5 Flash Lite(신규 사용자 미제공 404) → gemini-3.6-flash →
+ * -latest 별칭 2종(사용자가 flash/lite 중 선택).
  * 이 키로 실제 부를 수 있는 모델 목록은 /api/diagram/models 로 확인한다.)
  */
 export async function vectorizeDiagram(
   imageDataUrl: string,
+  model: DiagramModel,
 ): Promise<string | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
+
+  const modelId = DIAGRAM_MODELS[model];
+  const endpoint = endpointFor(model);
 
   const image = parseDataUrl(imageDataUrl);
   if (!image) {
@@ -127,7 +149,7 @@ export async function vectorizeDiagram(
 
   let res: Response | null = null;
   for (const thinking of THINKING_CONFIGS) {
-    res = await fetch(GEMINI_ENDPOINT, {
+    res = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -156,15 +178,15 @@ export async function vectorizeDiagram(
     if (isUnknownThinkingFieldError(res.status, body)) {
       // 이 세대가 모르는 필드였다. 다음 후보로 넘어간다.
       console.warn(
-        `[diagramVector] ${GEMINI_MODEL}이 ${JSON.stringify(thinking)}를 거부함, 다음 후보 시도: ${body.slice(0, 300)}`,
+        `[diagramVector] ${modelId}이 ${JSON.stringify(thinking)}를 거부함, 다음 후보 시도: ${body.slice(0, 300)}`,
       );
       continue;
     }
 
     console.error(
-      `[diagramVector] ${GEMINI_MODEL} 호출 실패 ${res.status} ${res.statusText}: ${body.slice(0, 2000)}`,
+      `[diagramVector] ${modelId} 호출 실패 ${res.status} ${res.statusText}: ${body.slice(0, 2000)}`,
     );
-    throw new Error(describeApiError(res.status, body));
+    throw new Error(describeApiError(res.status, body, modelId));
   }
 
   if (!res || !res.ok) {
@@ -186,7 +208,7 @@ export async function vectorizeDiagram(
   if (!text) {
     // 안전필터에 걸리면 parts 없이 finishReason만 온다. 원인을 남겨둔다.
     console.error(
-      `[diagramVector] ${GEMINI_MODEL} 응답에 본문이 없음(finishReason=${finishReason}): ${JSON.stringify(json).slice(0, 2000)}`,
+      `[diagramVector] ${modelId} 응답에 본문이 없음(finishReason=${finishReason}): ${JSON.stringify(json).slice(0, 2000)}`,
     );
     if (finishReason === "MAX_TOKENS") {
       throw new Error(
@@ -199,7 +221,7 @@ export async function vectorizeDiagram(
   const svg = extractSvg(text);
   if (!svg) {
     console.error(
-      `[diagramVector] ${GEMINI_MODEL} 응답에서 <svg>를 못 찾음(finishReason=${finishReason}): ${text.slice(0, 1000)}`,
+      `[diagramVector] ${modelId} 응답에서 <svg>를 못 찾음(finishReason=${finishReason}): ${text.slice(0, 1000)}`,
     );
     // 출력 한도에 걸리면 </svg>가 잘려서 여기로 온다. 원인을 사용자에게 알려준다.
     if (finishReason === "MAX_TOKENS") {
