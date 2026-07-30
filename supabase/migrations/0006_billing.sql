@@ -1,7 +1,7 @@
 -- 결제/이용권 (그로블 웹훅 연동) 스키마
 -- Supabase 대시보드 > SQL Editor 에서 이 파일 내용을 그대로 실행하세요.
 --
--- 무료 체험(오답 5개)을 넘으면 이용권을 결제해야 계속 쓸 수 있는 구조.
+-- 무료 체험(오답 5개)을 넘기면 이용권을 결제해야 계속 쓸 수 있는 구조.
 -- 결제 상태는 그로블 웹훅이 service_role 키로 기록한다(아래 테이블들은 사용자가
 -- 직접 못 쓰고 읽기만 가능, 쓰기는 서버 전용).
 
@@ -49,7 +49,7 @@ alter table public.groble_merchants enable row level security;
 create policy "groble_merchants_select_own" on public.groble_merchants
   for select using (auth.uid() = user_id);
 
--- 4) 웹훅 먱등 처리 (같은 이벤트 두 번 처리 방지, 서버 전용)
+-- 4) 웹훅 멱등 처리 (같은 이벤트 두 번 처리 방지, 서버 전용)
 create table if not exists public.groble_webhook_events (
   idempotency_key text primary key,
   event_id text,

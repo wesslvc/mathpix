@@ -4,8 +4,16 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toPng } from "html-to-image";
 import { createClient } from "@/lib/supabase/client";
-import { renderMathText } from "@/lib/renderMathText";
+import { renderMathText, type BoxOverride } from "@/lib/renderMathText";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
+import BoxRangeEditor from "./BoxRangeEditor";
+import LatexEditor from "./LatexEditor";
+import {
+  ANSWER_TYPE_LABEL,
+  formatAnswer,
+  toAnswerType,
+  type AnswerType,
+} from "@/lib/answer";
 
 export type GalleryProblem = {
   id: string;
@@ -13,6 +21,9 @@ export type GalleryProblem = {
   imagePath: string;
   text: string;
   sortOrder: number | null;
+  answer: string;
+  answerType: AnswerType;
+  boxRange: BoxOverride | null;
 };
 
 /** 같은 폴더 안에 새 파일명을 만든다. (덮어쓰기 대신 새 오브젝트로 저장) */
@@ -26,7 +37,7 @@ type Props = {
 };
 
 /**
- * 화면에 실제로 그려진(보이는) 노드를 PNG Blob으로 칵처한다.
+ * 화면에 실제로 그려진(보이는) 노드를 PNG Blob으로 캡처한다.
  * iOS Safari는 화면 밖/투명 요소나 첫 toPng 호출에서 빈 이미지를 내놓는
  * 경우가 있어, 이미 렌더된 요소를 대상으로 여러 번 호출해 안정화한다.
  */
@@ -51,6 +62,10 @@ export default function ProblemGallery({ problems }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editing, setEditing] = useState<GalleryProblem | null>(null);
   const [editText, setEditText] = useState("");
+  const [editAnswer, setEditAnswer] = useState("");
+  const [editAnswerType, setEditAnswerType] = useState<AnswerType>("choice");
+  // undefined = 자동 감지에 맡김. 그 외는 사용자가 직접 정한 범위.
+  const [editBox, setEditBox] = useState<BoxOverride | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -70,7 +85,7 @@ export default function ProblemGallery({ problems }: Props) {
 
     setBusyId(a.id);
 
-    // 두 문제의 sort_order 값을 서로 맞바꿔다.
+    // 두 문제의 sort_order 값을 서로 맞바꾼다.
     const next = [...list];
     next[index] = { ...b, sortOrder: a.sortOrder };
     next[j] = { ...a, sortOrder: b.sortOrder };
@@ -79,7 +94,7 @@ export default function ProblemGallery({ problems }: Props) {
     try {
       const supabase = createClient();
       // 서로 독립된 두 행 갱신이라 동시에 보내도 안전하다(순서대로 기다리면
-      // 왕복이 두 번 격쳐 느려진다).
+      // 왕복이 두 번 겹쳐 느려진다).
       const [{ error: e1 }, { error: e2 }] = await Promise.all([
         supabase.from("problems").update({ sort_order: b.sortOrder }).eq("id", a.id),
         supabase.from("problems").update({ sort_order: a.sortOrder }).eq("id", b.id),
@@ -99,6 +114,10 @@ export default function ProblemGallery({ problems }: Props) {
   function openEdit(problem: GalleryProblem) {
     setEditing(problem);
     setEditText(problem.text);
+    setEditAnswer(problem.answer);
+    setEditAnswerType(problem.answerType);
+    // DB에 null이면 저장할 때 자동 감지에 맡겼던 것이다.
+    setEditBox(problem.boxRange ?? undefined);
     setEditError(null);
   }
 
@@ -113,8 +132,8 @@ export default function ProblemGallery({ problems }: Props) {
       const supabase = createClient();
       const blob = await captureNode(node);
 
-      // 스토리지 버켓에 UPDATE 정책이 없어 덮어쓰기(upsert)는 RLS에 막힌다.
-      // 새 경로에 업로드하고 image_path를 바꿄 뒤 예전 파일을 지운다.
+      // 스토리지 버킷에 UPDATE 정책이 없어 덮어쓰기(upsert)는 RLS에 막힌다.
+      // 새 경로에 업로드하고 image_path를 바꾼 뒤 예전 파일을 지운다.
       const newPath = siblingPath(editing.imagePath);
       const { error: upErr } = await supabase.storage
         .from("problem-images")
@@ -127,6 +146,9 @@ export default function ProblemGallery({ problems }: Props) {
           image_path: newPath,
           text_content: editText,
           latex: editText,
+          answer: editAnswer.trim() || null,
+          answer_type: editAnswerType,
+          box_range: editBox ?? null,
         })
         .eq("id", editing.id);
       if (dbErr) {
@@ -241,33 +263,89 @@ export default function ProblemGallery({ problems }: Props) {
           onClick={() => !isSaving && setEditing(null)}
         >
           <div
-            className="flex max-h-[90vh] w-full max-w-3xl flex-col gap-4 overflow-auto rounded-2xl bg-white p-6 shadow-xl"
+            className="flex max-h-[90vh] w-full max-w-6xl flex-col gap-4 overflow-auto rounded-2xl bg-white p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-lg font-semibold text-ink">문제 내용 수정</h2>
             <p className="text-xs text-slate-500">
-              텍스트와 수식($...$, $$...$$)을 고치면 아래 미리보기처럼 이미지가
-              다시 만들어져 저장됩니다.
+              내용·정답·조건 박스를 고치면 아래 미리보기처럼 이미지가 다시
+              만들어져 저장됩니다.
             </p>
 
-            <textarea
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              rows={8}
-              className="w-full rounded-lg border border-slate-300 p-3 font-mono text-sm focus:border-blue-500 focus:outline-none"
-            />
+            {/* 넓은 화면에서는 편집기와 미리보기를 나란히 둬서 고치는 즉시
+                결과를 확인할 수 있게 한다(수식 편집이 특히 불편했던 부분). */}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="flex flex-col gap-4">
+                <LatexEditor value={editText} onChange={setEditText} />
 
-            <div>
-              <p className="mb-1 text-xs font-medium text-slate-500">
-                미리보기 (이 모습 그대로 저장됩니다)
-              </p>
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <div
-                  ref={previewRef}
-                  className="bg-white p-8 font-serif leading-relaxed text-ink"
-                  style={{ fontSize: 24, width: PROBLEM_CARD_WIDTH }}
-                  dangerouslySetInnerHTML={{ __html: renderMathText(editText) }}
-                />
+                <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 text-xs font-medium text-slate-500">
+                      정답 유형
+                    </span>
+                    {(["choice", "short"] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setEditAnswerType(t)}
+                        className={`rounded-lg border px-2.5 py-1 text-xs font-medium ${
+                          editAnswerType === t
+                            ? "border-blue-600 bg-blue-50 text-blue-700"
+                            : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                        }`}
+                      >
+                        {ANSWER_TYPE_LABEL[t]}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <span className="shrink-0 text-xs font-medium text-slate-500">
+                      정답
+                    </span>
+                    <input
+                      value={editAnswer}
+                      onChange={(e) => setEditAnswer(e.target.value)}
+                      placeholder={
+                        editAnswerType === "choice"
+                          ? "예: 3 → ③으로 표기"
+                          : "예: 12"
+                      }
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                    />
+                  </label>
+                  {editAnswer.trim() !== "" && (
+                    <p className="text-[11px] text-slate-500">
+                      정답표 표기:{" "}
+                      <span className="text-sm font-medium text-ink">
+                        {formatAnswer(editAnswer, editAnswerType)}
+                      </span>
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-slate-200 px-3 py-2.5">
+                  <BoxRangeEditor
+                    text={editText}
+                    value={editBox}
+                    onChange={setEditBox}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-500">
+                  미리보기 (이 모습 그대로 저장됩니다)
+                </p>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <div
+                    ref={previewRef}
+                    className="bg-white p-8 font-serif leading-relaxed text-ink"
+                    style={{ fontSize: 24, width: PROBLEM_CARD_WIDTH }}
+                    dangerouslySetInnerHTML={{
+                      __html: renderMathText(editText, editBox),
+                    }}
+                  />
+                </div>
               </div>
             </div>
 

@@ -217,7 +217,7 @@ export default function ExportComposer({
       const skipped: number[] = [];
 
       // 이미지를 한 장씩 순서대로 내려받으면 문제 수만큼 네트워크 왕복이
-      // 쌍여 느리다. 먼저 전부 동시에 내려받고, PDF에 그려 넣는(embedPng)
+      // 쌓여 느리다. 먼저 전부 동시에 내려받고, PDF에 그려 넣는(embedPng)
       // 단계만 순서대로 처리한다.
       const fetched = await Promise.all(
         order.map(async (problem) => {

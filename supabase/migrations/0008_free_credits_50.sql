@@ -25,11 +25,11 @@ begin
     where user_id = uid and credits > 0
     returning credits into remaining;
 
-  return remaining; -- null이면 크레딛 부족
+  return remaining; -- null이면 크레딧 부족
 end;
 $$;
 
--- 2) 아직 한 번도 결제하지 않은(active=false) 기존 사용자는 남은 크레딛을
+-- 2) 아직 한 번도 결제하지 않은(active=false) 기존 사용자는 남은 크레딧을
 --    50개로 맞춰준다. 이미 더 많이 남아있으면 건드리지 않고, 결제한 적
 --    있는(active=true) 사용자의 잔액도 건드리지 않는다.
 update public.entitlements

@@ -8,14 +8,14 @@ export const PAID_RECOGNITION_CREDITS = 1000;
 export type AccessState = {
   /** 남은 사진인식권(Mathpix 인식 API 호출 가능 횟수). */
   credits: number;
-  /** 인식 API를 호출할 수 있는지(크레딛이 남아있는지). */
+  /** 인식 API를 호출할 수 있는지(크레딧이 남아있는지). */
   canRecognize: boolean;
 };
 
 /**
  * 현재 로그인 사용자의 남은 사진인식권을 계산한다.
  * 아직 한 번도 인식을 시도하지 않은 사용자는 entitlements 행이 없을 수 있는데,
- * 이 경우 첫 호출 시 무료 크레딛으로 초기화되므로 그 값을 미리 보여준다.
+ * 이 경우 첫 호출 시 무료 크레딧으로 초기화되므로 그 값을 미리 보여준다.
  */
 export async function getAccessState(
   supabase: SupabaseClient,

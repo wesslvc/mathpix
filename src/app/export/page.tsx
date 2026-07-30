@@ -3,6 +3,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { categoryLabel, type Category, type Problem } from "@/lib/supabase/types";
 import { parseProblemNumber } from "@/lib/problemNumber";
+import { formatAnswer, toAnswerType } from "@/lib/answer";
 import ExportComposer, {
   type ComposerProblem,
 } from "@/components/ExportComposer";
@@ -86,7 +87,9 @@ export default async function ExportPage({
         imageUrl,
         source: cat ? categoryLabel(cat) : "출처",
         origNumber: parseProblemNumber(p.text_content || p.latex || ""),
-        answer: p.answer ?? "",
+        // 객관식이면 "1" -> "①"로 바꿔 정답표에 찍는다. 저장은 원문 그대로이고
+        // 변환은 표시할 때만 한다(유형을 바꾸면 되돌아가야 하므로).
+        answer: formatAnswer(p.answer, toAnswerType(p.answer_type)),
       };
     })
     .filter((p): p is ComposerProblem => p !== null);

@@ -7,15 +7,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export type DiagramQuota = {
-  /** 이용권을 결제했는지. false면 도형 추가인식 자체를 쓸 수 없다. */
+  /** 이용권을 결제했는지. flash는 결제자만 쓸 수 있다. */
   paid: boolean;
-  /** 남은 사진인식권(lite 도형 재구성에 쓰인다). */
+  /** 남은 사진인식권(무료 사용자의 lite 도형 재구성에 쓰인다). */
   credits: number;
-  /** 오늘 남은 플래시쿠폰. */
+  /** 이 사용자에게 lite가 공짜인지(결제자는 무료). */
+  liteFree: boolean;
+  /** 오늘 남은 플래시쿠폰. 미결제자는 0. */
   flashRemaining: number;
   /** 하루에 주어지는 플래시쿠폰 수. */
   flashDailyLimit: number;
-  /** lite 도형 재구성 1회당 차감되는 사진인식권 수. */
+  /** 무료 사용자가 lite 1회에 쓰는 사진인식권 수. */
   liteCost: number;
 };
 
@@ -47,6 +49,7 @@ export async function GET() {
   const quota: DiagramQuota = {
     paid: Boolean(raw.paid),
     credits: Number(raw.credits ?? 0),
+    liteFree: Boolean(raw.lite_free),
     flashRemaining: Number(raw.flash_remaining ?? 0),
     flashDailyLimit: Number(raw.flash_daily_limit ?? 0),
     liteCost: Number(raw.lite_cost ?? 0),

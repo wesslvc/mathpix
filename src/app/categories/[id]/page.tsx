@@ -9,6 +9,7 @@ import ProblemGallery, {
 } from "@/components/ProblemGallery";
 import BillingStatus from "@/components/BillingStatus";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
+import { toAnswerType } from "@/lib/answer";
 
 export default async function CategoryPage({
   params,
@@ -72,6 +73,9 @@ export default async function CategoryPage({
         imagePath: p.image_path,
         text: p.text_content || p.latex || "",
         sortOrder: p.sort_order,
+        answer: p.answer ?? "",
+        answerType: toAnswerType(p.answer_type),
+        boxRange: (p.box_range as GalleryProblem["boxRange"]) ?? null,
       };
     })
     .filter((p): p is GalleryProblem => p !== null);
