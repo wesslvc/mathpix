@@ -1,5 +1,9 @@
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
-const NVIDIA_MODEL = "moonshotai/kimi-k2.6";
+// 주의: build.nvidia.com 카탈로그에 보이는 모델이라도 계정 키로 호출이
+// 안 될 수 있다. kimi-k2.6을 넣었더니 404 "Function '...': Not found for
+// account '...'"가 났다(카탈로그엄 있지만 이 계정에 미제공). 모델을 바꾸기
+// 전에 /api/diagram/models 로 "이 키로 실제 호출 가능한 목록"을 먼저 확인할 것.
+const NVIDIA_MODEL = "meta/llama-3.2-11b-vision-instruct";
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
 이 도형을 원본과 최대한 똑같은 비율·각도·위치로, 깨끗한 벡터 그래픽으로 다시 그려주세요.
@@ -45,14 +49,14 @@ function describeApiError(status: number, body: string): string {
 
   // 상태 코드별로 "무엇을 확인해야 하는지"를 붙여준다. 특히 403은
   // build.nvidia.com 모델 페이지에서 약관 동의(Acknowledge & Continue)를
-  // 안 눌렀을 때 자주 난다.
+  // 안 눌렀을 때 자주 난다. 404는 카탈로그엔 있어도 계정에 미제공인 경우도 포함한다.
   const hint =
     status === 401
       ? " (NVIDIA_API_KEY가 잘못됐거나 만료됐습니다)"
       : status === 403
         ? " (build.nvidia.com의 해당 모델 페이지에서 약관 동의가 필요할 수 있습니다)"
         : status === 404
-          ? ` (모델 이름 "${NVIDIA_MODEL}"이 카탈로그에 없을 수 있습니다)`
+          ? ` (모델 "${NVIDIA_MODEL}"이 없거나 이 계정에 제공되지 않습니다. /api/diagram/models 로 호출 가능한 목록을 확인하세요)`
           : status === 400 || status === 422
             ? " (이 모델이 요청 형식/파라미터를 지원하지 않을 수 있습니다)"
             : status >= 500
@@ -64,8 +68,7 @@ function describeApiError(status: number, body: string): string {
 
 /**
  * 사용자가 직접 오려낸 도형 이미지(data URL)를 NVIDIA API 카탈로그의
- * kimi-k2.6(Moonshot AI, MoonViT 비전 인코더가 달린 네이티브 멀티모달
- * 모델)에 보내 깨끗한 SVG로 다시 그리게 한다. OpenAI 호환
+ * 비전 모델에 보내 깨끗한 SVG로 다시 그리게 한다. OpenAI 호환
  * chat/completions 형식이라 image_url에 data URL을 그대로 넣는다.
  *
  * 실패 시: 원인을 알 수 있는 경우(HTTP 에러)는 상태 코드와 API가 준
@@ -75,10 +78,10 @@ function describeApiError(status: number, body: string): string {
  * 수 없었기 때문에 이렇게 나눠둔 것이다.
  *
  * (모델 변경 이력: 가벼운 nemotron-nano-12b-v2-vl → 품질이 떨어져
- * llama-3.2-90b-vision-instruct → 너무 느려 11b → 중간에 실제로는 이
- * 카탈로그에 없는 phi-3.5-vision-instruct로 잘못 바꿨다가 11b로 되돌림
- * → 사용자 요청으로 kimi-k2.6. 같은 계정/키로 호출하는 무료 엔드포인트라
- * 비용 차이는 없음.)
+ * llama-3.2-90b-vision-instruct → 너무 느려 11b → 실제로는 카탈로그에 없는
+ * phi-3.5-vision-instruct로 잘못 바꿨다가 11b → kimi-k2.6을 시도했으나 404
+ * "Not found for account"로 계정 미제공 확인돼 다시 11b. 같은 계정/키로
+ * 호출하는 무료 엔드포인트라 비용 차이는 없음.)
  */
 export async function vectorizeDiagram(
   imageDataUrl: string,
