@@ -7,8 +7,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export type DiagramQuota = {
-  /** 이용권을 결제했는지. flash는 결제자만 쓸 수 있다. */
+  /** 이용권을 결제했는지(무제한 계정도 true). flash는 결제자만 쓸 수 있다. */
   paid: boolean;
+  /** 한도 없이 쓸 수 있는 계정인지(운영자 등). */
+  unlimited: boolean;
   /** 남은 사진인식권(무료 사용자의 lite 도형 재구성에 쓰인다). */
   credits: number;
   /** 이 사용자에게 lite가 공짜인지(결제자는 무료). */
@@ -48,6 +50,7 @@ export async function GET() {
   const raw = (data ?? {}) as Record<string, unknown>;
   const quota: DiagramQuota = {
     paid: Boolean(raw.paid),
+    unlimited: Boolean(raw.unlimited),
     credits: Number(raw.credits ?? 0),
     liteFree: Boolean(raw.lite_free),
     flashRemaining: Number(raw.flash_remaining ?? 0),

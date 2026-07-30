@@ -10,6 +10,8 @@ export type AccessState = {
   credits: number;
   /** 인식 API를 호출할 수 있는지(크레딧이 남아있는지). */
   canRecognize: boolean;
+  /** 한도 없이 쓸 수 있는 계정인지(운영자 등). 이때 credits는 의미가 없다. */
+  unlimited: boolean;
 };
 
 /**
@@ -22,13 +24,14 @@ export async function getAccessState(
 ): Promise<AccessState> {
   const { data } = await supabase
     .from("entitlements")
-    .select("credits")
+    .select("credits, unlimited")
     .maybeSingle();
 
   const credits =
     (data?.credits as number | undefined) ?? FREE_RECOGNITION_CREDITS;
+  const unlimited = Boolean(data?.unlimited);
 
-  return { credits, canRecognize: credits > 0 };
+  return { credits, unlimited, canRecognize: unlimited || credits > 0 };
 }
 
 /** 결제창(체크아웃)이 설정돼 실제로 결제로 넘어갈 수 있는지. */

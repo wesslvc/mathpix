@@ -2,14 +2,28 @@ type Props = {
   credits: number;
   /** 결제창이 설정돼 실제 구매로 넘어갈 수 있는지. */
   checkoutReady: boolean;
+  /** 한도 없이 쓸 수 있는 계정인지. 이때는 잔량 대신 "무제한"만 보여준다. */
+  unlimited?: boolean;
 };
 
 /**
  * 남은 사진인식권(Mathpix 인식 횟수) 배너. 0이면 이용권 구매 버튼을 강조해 보여준다.
  * 구매 버튼은 서버 라우트(/api/checkout)로 이동해 그로블 결제창을 연다.
  */
-export default function BillingStatus({ credits, checkoutReady }: Props) {
-  const empty = credits <= 0;
+export default function BillingStatus({
+  credits,
+  checkoutReady,
+  unlimited = false,
+}: Props) {
+  const empty = !unlimited && credits <= 0;
+
+  if (unlimited) {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        사진인식권 <span className="font-semibold">무제한</span> 계정입니다.
+      </div>
+    );
+  }
 
   return (
     <div
