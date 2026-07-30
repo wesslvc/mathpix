@@ -4,8 +4,8 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
-// 90b 비전 모델은 응답 생성이 느려 기본 서버리스 함수 제한 시간(대개 10초대)을
-// 넘길 수 있다. Vercel이 응답 도중 함수를 죽여버리지 않도록 여유를 둔다.
+// 비전 모델 응답이 느려 기본 서버리스 함수 제한 시간(대개 10초대)을 넘길 수
+// 있다. Vercel이 응답 도중 함수를 죽여버리지 않도록 여유를 둔다.
 export const maxDuration = 60;
 
 /** 도형 추가인식 1회당 차감되는 크레딧(OCR 1개와 별도). API 호출 비용이 커서 30으로 책정. */
@@ -29,10 +29,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!process.env.NVIDIA_API_KEY) {
-    console.error("[api/diagram] NVIDIA_API_KEY not set");
+  if (!process.env.GEMINI_API_KEY) {
+    console.error("[api/diagram] GEMINI_API_KEY not set");
     return NextResponse.json(
-      { error: "NVIDIA_API_KEY가 설정되지 않아 도형 재구성 기능을 쓸 수 없습니다." },
+      { error: "GEMINI_API_KEY가 설정되지 않아 도형 재구성 기능을 쓸 수 없습니다." },
       { status: 500 },
     );
   }
