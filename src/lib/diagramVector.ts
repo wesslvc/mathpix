@@ -8,7 +8,9 @@ const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
 //   - 텍스트 전용: nemotron-3-super-120b-a12b, llama-3.3-nemotron-super-49b(-v1.5)
 //     → 500 "multimodal processing is not enabled" / 400 "not a multimodal model"
 //   - 계정 미제공(404): moonshotai/kimi-k2.6, nemotron-51b/70b/ultra-253b
-const NVIDIA_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
+// 30b-a3b-omni도 이미지 입력은 되지만 reasoning 모델이라 응답이 느릴 위험이
+// 있어(90b/k2.6이 60초 함수 제한에 걸린 전례) 전용 VL 모델인 8b로 간다.
+const NVIDIA_MODEL = "nvidia/llama-3.1-nemotron-nano-vl-8b-v1";
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
 이 도형을 원본과 최대한 똑같은 비율·각도·위치로, 깨끗한 벡터 그래픽으로 다시 그려주세요.
