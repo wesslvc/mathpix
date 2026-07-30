@@ -29,10 +29,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!process.env.NVIDIA_API_KEY) {
-    console.error("[api/diagram] NVIDIA_API_KEY not set");
+  if (!process.env.GEMINI_API_KEY) {
+    console.error("[api/diagram] GEMINI_API_KEY not set");
     return NextResponse.json(
-      { error: "NVIDIA_API_KEY가 설정되지 않아 도형 재구성 기능을 쓸 수 없습니다." },
+      { error: "GEMINI_API_KEY가 설정되지 않아 도형 재구성 기능을 쓸 수 없습니다." },
       { status: 500 },
     );
   }

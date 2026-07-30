@@ -30,16 +30,16 @@ const FONT_SIZES = [
 // 도형 재구성은 보통 이 정도(초) 안에 끝난다. 실제 진행률을 알 수 없으니
 // 이 값을 기준으로 막대를 서서히 채우되(끝나기 전엔 100%를 보여주면 안
 // 되므로 90%에서 멈춘다), 정말 오래 걸리면 안내 문구로 이유를 알려준다.
-const VECTORIZE_EXPECTED_SEC = 45;
+const VECTORIZE_EXPECTED_SEC = 15;
 
 function vectorizeProgressPercent(elapsedSec: number): number {
   return Math.min(90, Math.round((elapsedSec / VECTORIZE_EXPECTED_SEC) * 90));
 }
 
 function vectorizeStatusText(elapsedSec: number): string {
-  if (elapsedSec < 8) return "이미지를 서버로 보내는 중...";
-  if (elapsedSec < 25) return "도형을 분석하고 있어요...";
-  if (elapsedSec < 50) return "벡터 이미지로 다시 그리는 중이에요...";
+  if (elapsedSec < 4) return "이미지를 서버로 보내는 중...";
+  if (elapsedSec < 10) return "도형을 분석하고 있어요...";
+  if (elapsedSec < 20) return "벡터 이미지로 다시 그리는 중이에요...";
   return "생각보다 오래 걸리네요. 조금만 더 기다려주세요...";
 }
 
@@ -309,7 +309,7 @@ export default function ResultStage({
             />
           </div>
           <p className="mt-1.5 text-[11px] text-slate-400">
-            도형 재구성은 보통 30~60초 정도 걸려요. 화면을 벗어나지 말고 잠시만 기다려주세요.
+            도형 재구성은 보통 10~20초 정도 걸려요. 화면을 벗어나지 말고 잠시만 기다려주세요.
           </p>
         </div>
       )}
