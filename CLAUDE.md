@@ -48,7 +48,7 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
   사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
   `src/lib/diagramVector.ts`가 **NVIDIA API 카탈로그**(build.nvidia.com)의
-  `meta/llama-3.2-90b-vision-instruct` 모델(OpenAI 호환 chat/completions 형식,
+  `meta/llama-3.2-11b-vision-instruct` 모델(OpenAI 호환 chat/completions 형식,
   `NVIDIA_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
   붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식 1회(클릭당) = 30개
   (NVIDIA API 호출 비용이 커서 비싸게 책정)
@@ -60,8 +60,11 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   `gemini-2.5-flash`도 첫 시도부터 429가 계속 나서, 분당 40회 무료 한도가
   있는 NVIDIA API 카탈로그로 교체함 — `GEMINI_API_KEY` 관련 코드는 이제
   안 씀. 처음엔 가벼운 `nvidia/nemotron-nano-12b-v2-vl`을 썼으나 도형
-  재구성 품질이 너무 떨어져 `meta/llama-3.2-90b-vision-instruct`로 올림
-  — 같은 계정/키로 쓰는 무료 엔드포인트라 비용 차이는 없음.)
+  재구성 품질이 너무 떨어져 `meta/llama-3.2-90b-vision-instruct`로 올렸다가,
+  90b는 응답이 몇십 초~1분 넘게 걸릴 만큼 느려서(그 대기 시간을 보여주려고
+  `ResultStage.tsx`에 경과시간+진행률 UI 추가함) 같은 Llama 3.2 Vision 계열의
+  더 작은 `meta/llama-3.2-11b-vision-instruct`로 다시 내림 — 같은 계정/키로
+  쓰는 무료 엔드포인트라 비용 차이는 없음.)
 
 ### 과거에 해결한 버그 (재발 시 참고)
 
