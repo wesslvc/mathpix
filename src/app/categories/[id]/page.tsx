@@ -104,7 +104,11 @@ export default async function CategoryPage({
         </Link>
       </header>
 
-      <BillingStatus credits={access.credits} checkoutReady={isCheckoutReady()} />
+      <BillingStatus
+        credits={access.credits}
+        unlimited={access.unlimited}
+        checkoutReady={isCheckoutReady()}
+      />
 
       <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
 

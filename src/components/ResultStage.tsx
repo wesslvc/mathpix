@@ -456,7 +456,9 @@ export default function ResultStage({
           </div>
 
           <p className="text-[11px] text-slate-500">
-            {diagramModel === "flash" ? (
+            {quota?.unlimited ? (
+              <>무제한 계정이라 차감 없이 쓸 수 있어요.</>
+            ) : diagramModel === "flash" ? (
               quota && !quota.paid ? (
                 <>flash는 이용권을 구매한 분만 쓸 수 있어요.</>
               ) : (
