@@ -48,7 +48,7 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
   사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
   `src/lib/diagramVector.ts`가 **NVIDIA API 카탈로그**(build.nvidia.com)의
-  `microsoft/phi-3.5-vision-instruct` 모델(OpenAI 호환 chat/completions 형식,
+  `meta/llama-3.2-11b-vision-instruct` 모델(OpenAI 호환 chat/completions 형식,
   `NVIDIA_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
   붙인다. **크레딧 정책**: OCR 1회 = 1개, 도형 추가인식 1회(클릭당) = 30개
   (NVIDIA API 호출 비용이 커서 비싸게 책정)
@@ -63,11 +63,15 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   재구성 품질이 너무 떨어져 `meta/llama-3.2-90b-vision-instruct`로 올렸다가,
   90b는 응답이 몇십 초~1분 넘게 걸릴 만큼 느려서(그 대기 시간을 보여주려고
   `ResultStage.tsx`에 경과시간+진행률 UI 추가함) 같은 Llama 3.2 Vision 계열의
-  더 작은 `meta/llama-3.2-11b-vision-instruct`로 내렸는데, 그마저 여전히
-  느려 Vercel 함수 타임아웃(비JSON 에러 응답, `handleDiagramCropConfirm`에서
-  파싱 실패 처리 추가함)으로 이어져서 아예 다른 계열인 Microsoft
-  `microsoft/phi-3.5-vision-instruct`(4.2B, 가벼운 모델)로 교체함 — 같은
-  계정/키로 쓰는 무료 엔드포인트라 비용 차이는 없음.)
+  더 작은 `meta/llama-3.2-11b-vision-instruct`로 내림. 그마저 여전히 느려
+  Vercel 함수 타임아웃(비JSON 에러 응답, `handleDiagramCropConfirm`에서 파싱
+  실패 처리 추가함)이 나서 "아예 다른 모델"로 `microsoft/phi-3.5-vision-instruct`
+  로 잠긄 바꾨었는데, **그 모델은 실제로 이 API 카탈로그에 없는 것으로
+  확인됨**(검증 없이 웹 검색만 믿고 넣은 실수) — 사용자가 build.nvidia.com에서
+  직접 확인한 코드 스니펫으로 `llama-3.2-11b-vision-instruct`의 존재를
+  재확인해줘서 다시 11b로 되돌림. 모델을 바꿀 때는 반드시 사용자가 카탈로그에서
+  직접 본 모델명만 쓸 것 — 웹 검색 결과만으로 존재를 추정하지 말 것.
+  (같은 계정/키로 쓰는 무료 엔드포인트라 비용 차이는 없음.)
 
 ### 과거에 해결한 버그 (재발 시 참고)
 
@@ -120,7 +124,7 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 - 이전 세션에서 중복 스캐폴드 브랜치 1개(`claude/math-problem-image-recognition-64hjax`)가
   원격에 남아 있음. 내용은 `main`에 모두 반영돼 있으니 무시해도 된다.
 - 사용자가 채팅에 API 키를 평문으로 붙여넣은 적 있음(Mathpix, Supabase anon key 등).
-  민감정보를 다루을 때 채팅에 노출하지 말 것.
+  민감정보를 다룰 때 채팅에 노출하지 말 것.
 
 ## 명령어
 
