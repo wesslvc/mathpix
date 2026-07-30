@@ -1,5 +1,5 @@
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
-const NVIDIA_MODEL = "meta/llama-3.2-11b-vision-instruct";
+const NVIDIA_MODEL = "microsoft/phi-3.5-vision-instruct";
 
 const PROMPT = `이 이미지는 수학 문제집에 있는 도형(원, 삼각형, 그래프 등)입니다.
 이 도형을 원본과 최대한 똑같은 비율·각도·위치로, 깨끗한 벡터 그래픽으로 다시 그려주세요.
@@ -28,13 +28,15 @@ function sanitizeSvg(svg: string): string {
 
 /**
  * 사용자가 직접 오려낸 도형 이미지(data URL)를 NVIDIA API 카탈로그의
- * llama-3.2-11b-vision-instruct에 보내 깨끗한 SVG로 다시 그리게 한다.
- * 실패하면 null을 반환한다(호출부에서 크레딧 환불 처리). OpenAI 호환
- * chat/completions 형식이라 image_url에 data URL을 그대로 넣는다.
+ * phi-3.5-vision-instruct에 보내 깨끗한 SVG로 다시 그리게 한다. 실패하면
+ * null을 반환한다(호출부에서 크레딧 환불 처리). OpenAI 호환 chat/completions
+ * 형식이라 image_url에 data URL을 그대로 넣는다.
  * (처음엔 가벼운 nemotron-nano-12b-v2-vl을 썼으나 도형 재구성 품질이
- * 떨어져 90b로 올렸는데, 이번엔 응답이 몇십 초~1분 넘게 걸릴 만큼 느려서
- * 같은 Llama 3.2 Vision 계열의 더 작은 11b로 내려 속도와 품질의 절충을
- * 시도함 — 같은 계정/키로 호출하는 무료 엔드포인트라 비용 차이는 없음.)
+ * 떨어져 llama-3.2-90b-vision-instruct로 올렸는데 응답이 몇십 초~1분 넘게
+ * 걸릴 만큼 느려서 같은 계열의 11b로 내렸다가, 그마저 여전히 느려
+ * Vercel 함수 타임아웃으로 이어져(비JSON 에러 응답) 아예 다른 계열인
+ * Microsoft Phi-3.5-vision-instruct(4.2B, 가벼운 모델)로 교체함 — 같은
+ * 계정/키로 호출하는 무료 엔드포인트라 비용 차이는 없음.)
  */
 export async function vectorizeDiagram(
   imageDataUrl: string,
