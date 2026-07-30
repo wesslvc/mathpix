@@ -3,7 +3,11 @@
 // 주의: /api/diagram/models 목록에 있어도 호출은 404가 날 수 있다. 2.5-flash-lite가
 // 목록엔 있었는데 "no longer available to new users"로 막혔다(구세대 은퇴).
 // -latest 별칭을 쓰면 구글이 알아서 현행 세대로 라우팅해줘서 이 문제를 피한다.
-const GEMINI_MODEL = "gemini-flash-latest";
+//
+// flash-latest로 도형 재구성이 정상 동작하는 것까지 확인했다(그게 품질 기준선).
+// 다만 무료 등급 RPD(하루 요청 수) 한도가 빠듯해서 한도가 더 넉넉한 flash-lite로
+// 내려본다. 도형 품질이 떨어지면 gemini-flash-latest로 되돌릴 것.
+const GEMINI_MODEL = "gemini-flash-lite-latest";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 // Gemini 3 계열은 thinking이 기본 ON이라 SVG를 뱉기 전에 추론 토큰을 잔뜩 쓴다.
