@@ -4,23 +4,53 @@
 // 목록엔 있었는데 "no longer available to new users"로 막혔다(구세대 은퇴).
 // -latest 별칭을 쓰면 구글이 알아서 현행 세대로 라우팅해줘서 이 문제를 피한다.
 //
-// 사용자가 두 모델 중 고른다. flash는 품질이 좋은 대신 무료 등급 RPD(하루 요청
-// 수)를 빨리 소진하므로 결제자에게 하루 5장(플래시쿠폰)으로 묶고, lite는
-// 사진인식권 5장을 받고 자유롭게 쓰게 한다. 과금·한도는 전부 서버에서
-// 강제한다(supabase/migrations/0010_diagram_model_quota.sql).
-export const DIAGRAM_MODELS = {
+// 사용자는 "flash"(고화질) / "lite"(기본) 둘 중 하나만 고른다. 그 선택이 실제로
+// 어떤 Gemini 모델로 나갈지는 서버가 정한다 — flash는 여러 세대를 순서대로
+// 늘어놓은 티어 목록(DB의 diagram_model_tiers)이고, 위 티어의 하루 예산이 차면
+// 아래 세대로 자동으로 내려간다. RPD(하루 요청 수)는 모델마다 따로 걸리므로
+// 세대를 갈아타면 그만큼 하루 용량이 늘어난다.
+//
+// 티어 목록을 코드가 아니라 DB에 둔 이유: 이 프로젝트에서 모델 이름을 기억이나
+// 웹 검색으로 고르다가 몇 번이나 404를 맞았다(phi-3.5, kimi-k2.6,
+// gemini-2.5-flash-lite). 이름이 틀렸을 때 재배포 없이 고칠 수 있어야 한다.
+export type DiagramModel = "flash" | "lite";
+
+/** flash 티어가 하나도 없을 때 쓰는 기본값(DB 시드 전에도 앱이 죽지 않게). */
+export const FALLBACK_MODEL_IDS: Record<DiagramModel, string> = {
   flash: "gemini-flash-latest",
   lite: "gemini-flash-lite-latest",
-} as const;
-
-export type DiagramModel = keyof typeof DIAGRAM_MODELS;
+};
 
 export function isDiagramModel(value: unknown): value is DiagramModel {
   return value === "flash" || value === "lite";
 }
 
-function endpointFor(model: DiagramModel): string {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${DIAGRAM_MODELS[model]}:generateContent`;
+function endpointFor(modelId: string): string {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`;
+}
+
+/**
+ * Gemini가 HTTP 오류를 준 경우. 상태 코드를 들고 다녀서 호출부가 "이 모델을
+ * 포기하고 다음 세대로 내려갈지"를 판단할 수 있게 한다.
+ */
+export class DiagramApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly modelId: string,
+  ) {
+    super(message);
+    this.name = "DiagramApiError";
+  }
+
+  /**
+   * 이 모델 자체를 오늘 더는 못 쓰는 상태인가.
+   * 404 = 이 키로 부를 수 없는 이름(은퇴했거나 오타), 429 = RPD/RPM 소진.
+   * 둘 다 같은 요청을 이 모델로 다시 보내봐야 소용없으니 다음 티어로 내려간다.
+   */
+  get shouldTryNextTier(): boolean {
+    return this.status === 404 || this.status === 429;
+  }
 }
 
 // Gemini 3 계열은 thinking이 기본 ON이라 SVG를 뱉기 전에 추론 토큰을 잔뜩 쓴다.
@@ -157,18 +187,17 @@ function describeApiError(
  * llama-3.2-90b(너무 느림) → 11b → phi-3.5(카탈로그에 없는 모델이었음) →
  * kimi-k2.6(404, 계정 미제공) → nemotron-nano-vl-8b → 사용자 요청으로 다시
  * Gemini 2.5 Flash Lite(신규 사용자 미제공 404) → gemini-3.6-flash →
- * -latest 별칭 2종(사용자가 flash/lite 중 선택).
+ * -latest 별칭 2종 → 세대별 티어 목록(DB에서 읽어 위에서부터 내려간다).
  * 이 키로 실제 부를 수 있는 모델 목록은 /api/diagram/models 로 확인한다.)
  */
 export async function vectorizeDiagram(
   imageDataUrl: string,
-  model: DiagramModel,
+  modelId: string,
 ): Promise<string | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  const modelId = DIAGRAM_MODELS[model];
-  const endpoint = endpointFor(model);
+  const endpoint = endpointFor(modelId);
 
   const image = parseDataUrl(imageDataUrl);
   if (!image) {
@@ -215,7 +244,11 @@ export async function vectorizeDiagram(
     console.error(
       `[diagramVector] ${modelId} 호출 실패 ${res.status} ${res.statusText}: ${body.slice(0, 2000)}`,
     );
-    throw new Error(describeApiError(res.status, body, modelId));
+    throw new DiagramApiError(
+      describeApiError(res.status, body, modelId),
+      res.status,
+      modelId,
+    );
   }
 
   if (!res || !res.ok) {
