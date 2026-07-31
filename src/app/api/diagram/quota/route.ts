@@ -17,8 +17,16 @@ export type DiagramQuota = {
   liteFree: boolean;
   /** 오늘 남은 플래시쿠폰. 미결제자는 0. */
   flashRemaining: number;
-  /** 하루에 주어지는 플래시쿠폰 수. */
+  /** 하루에 주어지는 플래시쿠폰 수(사용자 1명 기준). */
   flashDailyLimit: number;
+  /**
+   * 오늘 전체 사용자가 쓸 수 있는 flash 중 남은 수. Gemini 무료 등급 RPD가
+   * 계정 전체에 걸리는 값이라 사용자별 한도와 별개로 관리한다. 0이면 flash를
+   * 골라도 서버가 lite로 내려서 그린다.
+   */
+  flashGlobalRemaining: number;
+  /** 오늘 전체 사용자가 쓸 수 있는 flash 총량. */
+  flashGlobalLimit: number;
   /** 무료 사용자가 lite 1회에 쓰는 사진인식권 수. */
   liteCost: number;
 };
@@ -55,6 +63,8 @@ export async function GET() {
     liteFree: Boolean(raw.lite_free),
     flashRemaining: Number(raw.flash_remaining ?? 0),
     flashDailyLimit: Number(raw.flash_daily_limit ?? 0),
+    flashGlobalRemaining: Number(raw.flash_global_remaining ?? 0),
+    flashGlobalLimit: Number(raw.flash_global_limit ?? 0),
     liteCost: Number(raw.lite_cost ?? 0),
   };
   return NextResponse.json(quota);

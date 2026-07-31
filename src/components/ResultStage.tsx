@@ -111,6 +111,8 @@ export default function ResultStage({
   const [showDiagramCrop, setShowDiagramCrop] = useState(false);
   const [isVectorizing, setIsVectorizing] = useState(false);
   const [vectorizeError, setVectorizeError] = useState<string | null>(null);
+  // 실패는 아니지만 알려야 하는 일(예: flash 전역 한도가 차서 lite로 그림).
+  const [vectorizeNotice, setVectorizeNotice] = useState<string | null>(null);
   // 도형 재구성 API는 스트리밍 응답이 아니라 실제 진행률을 알 방법이 없다.
   // 대신 경과 시간을 세서 "멈춘 게 아니라 원래 오래 걸린다"를 보여준다.
   const [vectorizeElapsedSec, setVectorizeElapsedSec] = useState(0);
@@ -215,13 +217,21 @@ export default function ResultStage({
     setShowDiagramCrop(false);
     setIsVectorizing(true);
     setVectorizeError(null);
+    setVectorizeNotice(null);
     try {
       const res = await fetch("/api/diagram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image: croppedDataUrl, model: diagramModel }),
       });
-      let json: { svg?: string; error?: string };
+      let json: {
+        svg?: string;
+        error?: string;
+        /** 서버가 실제로 쓴 모델. 전역 예산이 바닥나면 flash 대신 lite가 온다. */
+        model?: DiagramModel;
+        /** 요청한 모델과 다르게 처리했을 때의 안내. */
+        notice?: string | null;
+      };
       try {
         json = await res.json();
       } catch {
@@ -237,6 +247,8 @@ export default function ResultStage({
         ...prev,
         { id: crypto.randomUUID(), svg: json.svg as string },
       ]);
+      // 실패는 아니지만 알려야 하는 경우(flash 전역 한도 소진 → lite로 대체).
+      setVectorizeNotice(json.notice ?? null);
     } catch (err) {
       setVectorizeError(
         err instanceof Error ? err.message : "도형 재구성에 실패했습니다.",
@@ -433,7 +445,7 @@ export default function ResultStage({
               const exhausted =
                 quota !== null &&
                 (m === "flash"
-                  ? quota.flashRemaining <= 0
+                  ? quota.flashRemaining <= 0 || quota.flashGlobalRemaining <= 0
                   : !quota.liteFree && quota.credits < quota.liteCost);
               return (
                 <button
@@ -456,18 +468,20 @@ export default function ResultStage({
           </div>
 
           <p className="text-[11px] text-slate-500">
-            {quota?.unlimited ? (
-              <>무제한 계정이라 차감 없이 쓸 수 있어요.</>
-            ) : diagramModel === "flash" ? (
+            {diagramModel === "flash" ? (
               quota && !quota.paid ? (
                 <>flash는 이용권을 구매한 분만 쓸 수 있어요.</>
               ) : (
                 <>
-                  플래시쿠폰 1장을 씁니다.
-                  {quota &&
+                  {quota?.unlimited
+                    ? "무제한 계정이라 쿠폰은 차감되지 않아요."
+                    : "플래시쿠폰 1장을 씁니다."}
+                  {quota && !quota.unlimited &&
                     ` 오늘 ${quota.flashRemaining}/${quota.flashDailyLimit}장 남음 (매일 자정 초기화)`}
                 </>
               )
+            ) : quota?.unlimited ? (
+              <>무제한 계정이라 차감 없이 쓸 수 있어요.</>
             ) : quota?.liteFree ? (
               <>이용권 구매자는 lite를 무료로 쓸 수 있어요.</>
             ) : (
@@ -477,6 +491,25 @@ export default function ResultStage({
               </>
             )}
           </p>
+
+          {/* 전역 예산은 개인 잔량과 무관하게 flash를 막으므로 따로 알린다.
+              무제한 계정도 예외가 아니다 — 이건 우리 지갑이 아니라 Gemini의
+              하루 요청 수 제한이라서 운영자라고 넘길 수 있는 게 아니다. */}
+          {diagramModel === "flash" && quota && quota.paid && (
+            <p
+              className={`text-[11px] ${
+                quota.flashGlobalRemaining <= 0
+                  ? "text-amber-700"
+                  : quota.flashGlobalRemaining <= 3
+                    ? "text-amber-600"
+                    : "text-slate-400"
+              }`}
+            >
+              {quota.flashGlobalRemaining <= 0
+                ? "오늘 전체 flash 사용량이 한도에 찼어요. 지금 누르면 lite로 그려집니다."
+                : `오늘 전체 flash 잔여 ${quota.flashGlobalRemaining}/${quota.flashGlobalLimit}건 (모든 사용자 합계)`}
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -496,6 +529,9 @@ export default function ResultStage({
             )}
             {vectorizeError && (
               <p className="text-xs text-red-600">{vectorizeError}</p>
+            )}
+            {vectorizeNotice && (
+              <p className="text-xs text-amber-700">{vectorizeNotice}</p>
             )}
           </div>
         </div>

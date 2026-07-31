@@ -35,6 +35,13 @@ const DENIAL: Record<string, { status: number; message: string }> = {
   },
 };
 
+/**
+ * flash 전역 예산(전체 사용자 합계)이 바닥났을 때 사용자에게 보여줄 안내.
+ * 이 경우엔 오류로 끝내지 않고 lite로 자동 전환해서 처리한다.
+ */
+const GLOBAL_FALLBACK_NOTICE =
+  "오늘 flash(고화질) 전체 사용량이 한도에 도달해 lite로 그렸어요. 내일 다시 flash를 쓸 수 있습니다.";
+
 type ConsumeResult = {
   ok?: boolean;
   reason?: string;
@@ -61,7 +68,10 @@ export async function POST(req: NextRequest) {
   }
 
   // 모델은 클라이언트가 고르지만, 그에 따른 과금·한도는 전적으로 DB가 정한다.
-  const model: DiagramModel = isDiagramModel(body.model) ? body.model : "lite";
+  const requested: DiagramModel = isDiagramModel(body.model) ? body.model : "lite";
+  // 전역 예산이 바닥나면 lite로 갈아탈 수 있으므로 실제로 쓴 모델을 따로 둔다.
+  let model: DiagramModel = requested;
+  let notice: string | null = null;
 
   if (!process.env.GEMINI_API_KEY) {
     console.error("[api/diagram] GEMINI_API_KEY not set");
@@ -81,17 +91,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
-    const { data, error: rpcError } = await supabase.rpc(
-      "consume_diagram_credit",
-      { p_model: model },
-    );
-    if (rpcError) {
-      // 원인 파악용 — 클라이언트에도 같은 메시지를 그대로 보여준다.
-      console.error("[api/diagram] consume_diagram_credit rpc error:", rpcError);
-      return NextResponse.json({ error: rpcError.message }, { status: 500 });
+    /** 한 모델로 1회분을 차감해본다. */
+    async function consume(m: DiagramModel) {
+      const { data, error } = await supabase!.rpc("consume_diagram_credit", {
+        p_model: m,
+      });
+      if (error) throw error;
+      return (data ?? {}) as ConsumeResult;
     }
 
-    const result = (data ?? {}) as ConsumeResult;
+    let result: ConsumeResult;
+    try {
+      result = await consume(requested);
+
+      // flash 전역 예산(전체 사용자 합계)이 바닥난 경우다. 이건 사용자 잘못이
+      // 아니라 우리 쪽 API 한도이므로, 오류로 끝내지 말고 lite로 내려서 그려준다.
+      if (!result.ok && result.reason === "flash_global_exhausted") {
+        model = "lite";
+        notice = GLOBAL_FALLBACK_NOTICE;
+        result = await consume("lite");
+      }
+    } catch (rpcError) {
+      // 원인 파악용 — 클라이언트에도 같은 메시지를 그대로 보여준다.
+      console.error("[api/diagram] consume_diagram_credit rpc error:", rpcError);
+      const message =
+        rpcError instanceof Error ? rpcError.message : "크레딧 차감에 실패했습니다.";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+
     if (!result.ok) {
       const denial = DENIAL[result.reason ?? ""] ?? {
         status: 402,
@@ -121,7 +148,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ svg });
+    // notice가 있으면 "요청한 모델이 아닌 걸로 그렸다"는 뜻이라 화면에 알린다.
+    return NextResponse.json({ svg, model, notice });
   } catch (err) {
     await refund();
     const message = err instanceof Error ? err.message : "알 수 없는 오류";
