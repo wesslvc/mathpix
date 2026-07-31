@@ -25,8 +25,10 @@ export type DiagramQuota = {
    * 골라도 서버가 lite로 내려서 그린다.
    */
   flashGlobalRemaining: number;
-  /** 오늘 전체 사용자가 쓸 수 있는 flash 총량. */
+  /** 오늘 전체 사용자가 쓸 수 있는 flash 총량(모든 세대의 한도 합). */
   flashGlobalLimit: number;
+  /** 지금 flash를 고르면 실제로 나갈 Gemini 모델. 예산이 다 차면 null. */
+  currentFlashModel: string | null;
   /** 무료 사용자가 lite 1회에 쓰는 사진인식권 수. */
   liteCost: number;
 };
@@ -65,6 +67,8 @@ export async function GET() {
     flashDailyLimit: Number(raw.flash_daily_limit ?? 0),
     flashGlobalRemaining: Number(raw.flash_global_remaining ?? 0),
     flashGlobalLimit: Number(raw.flash_global_limit ?? 0),
+    currentFlashModel:
+      typeof raw.current_flash_model === "string" ? raw.current_flash_model : null,
     liteCost: Number(raw.lite_cost ?? 0),
   };
   return NextResponse.json(quota);

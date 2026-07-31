@@ -506,8 +506,9 @@ export default function ResultStage({
               }`}
             >
               {quota.flashGlobalRemaining <= 0
-                ? "오늘 전체 flash 사용량이 한도에 찼어요. 지금 누르면 lite로 그려집니다."
-                : `오늘 전체 flash 잔여 ${quota.flashGlobalRemaining}/${quota.flashGlobalLimit}건 (모든 사용자 합계)`}
+                ? "오늘 flash 전 세대의 사용량이 한도에 찼어요. 지금 누르면 lite로 그려집니다."
+                : `오늘 전체 flash 잔여 ${quota.flashGlobalRemaining}/${quota.flashGlobalLimit}건 (모든 사용자 합계)` +
+                  (quota.currentFlashModel ? ` · 현재 ${quota.currentFlashModel}` : "")}
             </p>
           )}
 
