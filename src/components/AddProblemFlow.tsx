@@ -57,7 +57,9 @@ export default function AddProblemFlow({
     }
   }
 
-  // 저장 후 대기열에 남은 다음 이미지로 넘어간다. 없으면 처음 화면으로.
+  // 저장 후 대기열에 남은 다음 이미지로 넘어간다. 대기열이 비었으면 곧바로
+  // 업로드 화면을 띄운다 — "다음"을 누른 사람은 계속 넣겠다는 뜻이므로
+  // 처음 화면으로 되돌려 "+ 오답 추가"를 다시 누르게 할 이유가 없다.
   function advanceQueue() {
     setResult(null);
     setRecognizedSourceImage(null);
@@ -68,8 +70,17 @@ export default function AddProblemFlow({
       setImageSrc(next);
       setStage("crop");
     } else {
-      handleReset();
+      startAnother();
     }
+  }
+
+  /** 저장한 결과를 치우고 새 사진을 고르는 화면으로 바로 넘어간다. */
+  function startAnother() {
+    setImageSrc(null);
+    setResult(null);
+    setRecognizedSourceImage(null);
+    setError(null);
+    setStage("upload");
   }
 
   async function handleCropConfirm(croppedDataUrl: string) {
@@ -195,10 +206,21 @@ export default function AddProblemFlow({
       )}
 
       {stage === "upload" && (
-        <ImageUploader
-          onImagesSelected={handleImagesSelected}
-          onError={handleImageError}
-        />
+        <div className="flex flex-col gap-2">
+          <ImageUploader
+            onImagesSelected={handleImagesSelected}
+            onError={handleImageError}
+          />
+          {/* 저장 직후 자동으로 이 화면이 열리기도 하므로, 그만 넣고 싶을 때
+              빠져나갈 길을 둔다. */}
+          <button
+            type="button"
+            onClick={handleReset}
+            className="self-start text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+          >
+            그만 추가하기
+          </button>
+        </div>
       )}
 
       {queue.length > 0 && (stage === "crop" || stage === "loading") && (
@@ -231,6 +253,7 @@ export default function AddProblemFlow({
           onSaveToCategory={handleSaveToCategory}
           remainingCount={queue.length}
           onNext={advanceQueue}
+          onAddAnother={startAnother}
           sourceImage={recognizedSourceImage}
         />
       )}
