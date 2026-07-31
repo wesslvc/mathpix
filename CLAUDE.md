@@ -58,14 +58,29 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   - `lite` = `gemini-flash-lite-latest` (기본) — 사진인식권 5장
   - `flash` = `gemini-flash-latest` (고화질) — 플래시쿠폰 1장
 
-  **크레딧/한도 정책** (`supabase/migrations/0010_diagram_model_quota.sql`):
-  - OCR 1회 = 사진인식권 1장 (변경 없음, 무료 사용자도 가능)
-  - **도형 추가인식은 결제자 전용** — `entitlements.active = true`가 아니면
-    `not_paid`로 거부되고 화면엔 구매 버튼이 뜬다
-  - lite: 사진인식권 5장 차감, 잔액 있으면 횟수 제한 없음
-  - flash: 사진인식권 대신 **플래시쿠폰**, 결제자에게 **하루 5장**,
-    **KST 자정 초기화, 누적 안 됨**(누적시키면 몰아 써서 Gemini 무료 등급
-    RPD가 터진다 — 이게 flash를 일일 한도로 묶은 이유다)
+  **크레딧/한도 정책** (마이그레이션 0010 → 0011 → 0012 → 0013 순서대로 적용.
+  뒤 파일이 앞 파일의 함수를 통째로 덮어쓰므로 **순서를 지켜야 한다**):
+  - OCR 1회 = 사진인식권 1장 (무료 사용자도 가능)
+  - lite: 무료 사용자는 사진인식권 5장 차감, **결제자는 무료**
+  - flash: **결제자 전용**, 사진인식권 대신 **플래시쿠폰**으로 하루 5장,
+    KST 자정 초기화, 누적 안 됨
+  - `entitlements.unlimited = true`인 계정은 OCR·lite·flash 차감을 전부 건너뛴다
+    (0012에서 운영자 계정에 켜둠)
+
+  **전역 flash 예산이 따로 있다** (`0013`, 제일 헷갈리는 부분):
+  사용자별 한도(하루 5장)와 **별개로** 전체 사용자 합계 예산(`flash_global_daily_limit()`
+  = 20/일)이 있다. Gemini 무료 등급 RPD는 사용자가 아니라 **계정 전체**에 걸리는
+  값이라, 사용자별 한도만 두면 사용자 4명이 각자 5장씩 써서 그대로 터진다.
+  **무제한 계정도 이 예산은 못 넘는다** — 우리 지갑이 아니라 Google의 제한이다.
+  전역 예산이 바닥나면 `consume_diagram_credit`이 `flash_global_exhausted`를
+  돌려주고, `/api/diagram`이 **오류 대신 lite로 자동 재시도**해서 그려준다
+  (응답의 `notice`로 화면에 알린다). 차감 순서가 중요하다: 전역 카운트를 먼저
+  올리고 개인 자격을 확인하며, 개인 쪽에서 막히면 **올려둔 전역 카운트를 반드시
+  되돌린다**(안 그러면 아무도 안 쓴 몫이 증발한다).
+
+  사용 기록은 `diagram_usage_log`(누가 언제 뭘 썼는지)와
+  `diagram_daily_usage`(날짜·모델별 합계)에 남는다. 운영자(unlimited 계정)는
+  `/api/diagram/usage?days=7`로 사용자별 집계를 볼 수 있다.
 
   한도 숫자는 전부 DB 함수(`flash_diagram_daily_limit()`, `lite_diagram_cost()`)에
   있고 서버·화면이 그 값을 읽어 쓴다. **JS 쪽에 하드코딩하지 말 것** — 어긋난다.
