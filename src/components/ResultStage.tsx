@@ -32,6 +32,11 @@ type Props = {
   remainingCount?: number;
   /** 다음 대기 이미지로 넘어간다. */
   onNext?: () => void;
+  /**
+   * 저장 후 곧바로 새 사진을 올릴 수 있게 업로드 화면으로 보낸다.
+   * 여러 문제를 연달아 넣을 때 목록으로 돌아갔다 다시 들어오는 왕복을 없앤다.
+   */
+  onAddAnother?: () => void;
   /** Mathpix에 보낸 원본(크롭된) 이미지. 도형 영역을 오려내는 데 쓴다. */
   sourceImage?: string | null;
 };
@@ -72,6 +77,7 @@ export default function ResultStage({
   onSaveToCategory,
   remainingCount = 0,
   onNext,
+  onAddAnother,
   sourceImage,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -661,9 +667,41 @@ export default function ResultStage({
         </button>
       </div>
 
+      {/* 저장이 끝나면 "다음 문제"를 가장 크게 띄운다 — 여러 개를 연달아 넣는
+          것이 이 화면의 기본 사용 패턴이라, 목록으로 돌아갔다 다시 들어오는
+          왕복을 없앤다. */}
+      {saved && (onAddAnother || (onNext && remainingCount > 0)) && (
+        <div className="flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-medium text-emerald-900">
+            저장했어요. 이어서 추가할까요?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {onNext && remainingCount > 0 ? (
+              <button
+                type="button"
+                onClick={onNext}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+              >
+                다음 이미지 → ({remainingCount}장 남음)
+              </button>
+            ) : (
+              onAddAnother && (
+                <button
+                  type="button"
+                  onClick={onAddAnother}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                >
+                  + 다음 문제 추가
+                </button>
+              )
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 주요 액션: 결과를 실제로 저장/출력하는 버튼만 모아 눈에 띄게 둔다. */}
       <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
-        {onNext && remainingCount > 0 && (
+        {!saved && onNext && remainingCount > 0 && (
           <button
             type="button"
             onClick={onNext}
