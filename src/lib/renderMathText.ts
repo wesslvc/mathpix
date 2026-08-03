@@ -207,6 +207,63 @@ function restoreTables(html: string, tables: string[]): string {
   return html.replace(TABLE_PLACEHOLDER, (_, i) => tables[Number(i)]);
 }
 
+// 객관식 보기 표지. Mathpix는 문제집의 "①②③④⑤"를 그대로 주기도 하고
+// "(1) (2) ..." 나 "1) 2) ..." 로 풀어서 주기도 한다. 어느 쪽으로 오든 원숫자로 통일한다.
+const CHOICE_MARKER_AT_START =
+  /^\s*(?:[①-⑳]|\((\d{1,2})\)|(\d{1,2})\))\s*/;
+
+/** 이 줄이 객관식 보기로 시작하는가. */
+function isChoiceLine(line: string): boolean {
+  return CHOICE_MARKER_AT_START.test(line);
+}
+
+/**
+ * 보기 표지를 원숫자로 바꾼다. 보기 줄로 확인된 줄에만 적용한다 —
+ * 아무 줄에나 돌리면 좌표 "(1)"이나 수식 속 괄호까지 바꿔버린다.
+ * 줄 맨 앞이거나 공백 뒤에 오는 "(n)" / "n)" 만 표지로 본다.
+ */
+function toCircledMarkers(line: string): string {
+  return line.replace(
+    /(^|\s)(?:\((\d{1,2})\)|(\d{1,2})\))/g,
+    (whole, lead: string, paren?: string, bare?: string) => {
+      const n = Number(paren ?? bare);
+      const circled = n >= 1 && n <= 20 ? String.fromCharCode(0x245f + n) : null;
+      return circled ? `${lead}${circled}` : whole;
+    },
+  );
+}
+
+/**
+ * 연속된 객관식 보기 줄을 한 줄로 합친다.
+ *
+ * Mathpix는 보기를 줄마다 하나씩("(1) 1" 개행 "(2) 2" ...) 주는 경우가 많은데,
+ * 그대로 렌더링하면 보기가 세로로 길게 깔려 문제집 모양과 달라지고 한 페이지에
+ * 한 문제를 넣기도 어려워진다. 문제집처럼 한 줄에 나란히 놓고 띄어쓰기 하나로
+ * 잇는다.
+ */
+function mergeChoiceLines(lines: string[]): string[] {
+  const out: string[] = [];
+  let run: string[] = [];
+
+  const flush = () => {
+    if (run.length === 0) return;
+    // 조각마다 앞뒤 공백을 떼고 하나의 공백으로만 잇는다.
+    out.push(run.map((l) => toCircledMarkers(l).trim()).join(" "));
+    run = [];
+  };
+
+  for (const line of lines) {
+    if (isChoiceLine(line)) {
+      run.push(line);
+      continue;
+    }
+    flush();
+    out.push(line);
+  }
+  flush();
+  return out;
+}
+
 /** 한 줄(내부 줄바꿈 없음)을 렌더링한다. 순수 수식이면 통째로, 아니면 "$...$" 단위로. */
 function renderLineContent(line: string, mathBlocks: string[]): string {
   const restored = restoreDisplayMath(line, mathBlocks);
@@ -226,7 +283,9 @@ function renderLines(
   firstLineHasNumber: boolean,
   mathBlocks: string[],
 ): string {
-  return lines
+  // 보기는 한 줄로 합쳐서 문제집처럼 나란히 놓는다. 문제번호가 붙는 첫 줄은
+  // 보기 줄이 아니므로 합치기 뒤에도 인덱스 0 그대로다.
+  return mergeChoiceLines(lines)
     .map((line, i) => {
       let inner: string;
       if (firstLineHasNumber && i === 0) {
@@ -242,7 +301,9 @@ function renderLines(
       } else {
         inner = renderLineContent(line, mathBlocks);
       }
-      return `<span class="mmd-line">${inner}</span>`;
+      // 보기 줄은 줄 간격을 따로 주려고 표시해둔다(위 문장과 붙어 보이지 않게).
+      const cls = isChoiceLine(line) ? "mmd-line mmd-choices" : "mmd-line";
+      return `<span class="${cls}">${inner}</span>`;
     })
     .join("");
 }

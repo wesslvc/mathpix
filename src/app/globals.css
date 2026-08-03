@@ -48,6 +48,13 @@ body {
   font-size: 1.15em;
 }
 
+/* 객관식 보기 줄(①②③④⑤을 한 줄에 나란히). 보기가 길어 줄이 넘어가더라도
+   표지와 값이 갈라지지 않도록 넉넉한 단어 간격을 주고, 앞 문장과 조금 띄운다. */
+.mmd-choices {
+  margin-top: 1em;
+  word-spacing: 0.15em;
+}
+
 .mmd-box {
   margin: 1.1em 0;
   padding: 1.1em 1.4em;
