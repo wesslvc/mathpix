@@ -299,6 +299,8 @@ export default function ResultStage({
 
   async function handleSaveToCategory() {
     if (!cardRef.current || !onSaveToCategory) return;
+    // 자동 저장과 버튼이 겹쳐 두 번 저장되면 같은 문제가 두 개 생긴다.
+    if (isSaving || saved) return;
     setIsSaving(true);
     setSaveError(null);
     try {
@@ -661,6 +663,15 @@ export default function ResultStage({
             <input
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
+              // 정답을 치고 Enter를 누르면 저장 버튼을 따로 누르지 않아도 저장된다.
+              // 글자를 칠 때마다 저장하지 않는 이유: 저장은 PNG를 굽고 업로드까지
+              // 하는 무거운 동작이라 "12"를 치는 동안 "1"로 저장돼 버린다.
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                if (answer.trim() === "") return;
+                void handleSaveToCategory();
+              }}
               disabled={saved}
               placeholder={
                 answerType === "choice"
@@ -670,6 +681,12 @@ export default function ResultStage({
               className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100"
             />
           </label>
+          {!saved && (
+            <p className="text-[11px] text-slate-400">
+              정답을 입력하고 <kbd className="rounded border border-slate-300 bg-slate-50 px-1">Enter</kbd>
+              를 누르면 바로 저장돼요.
+            </p>
+          )}
           {answer.trim() !== "" && (
             <p className="text-[11px] text-slate-500">
               정답표 표기:{" "}
