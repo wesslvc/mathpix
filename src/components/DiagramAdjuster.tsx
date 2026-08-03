@@ -56,7 +56,7 @@ function Slider({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 text-[11px] text-slate-500">
+    <label className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-[#9aa0a6]">
       <span className="w-12 shrink-0">{label}</span>
       <input
         type="range"
@@ -67,7 +67,7 @@ function Slider({
         onChange={(e) => onChange(Number(e.target.value))}
         className="min-w-0 flex-1 accent-blue-600"
       />
-      <span className="w-12 shrink-0 text-right tabular-nums text-slate-400">
+      <span className="w-12 shrink-0 text-right tabular-nums text-slate-400 dark:text-[#80868b]">
         {value}
         {suffix}
       </span>
@@ -83,14 +83,14 @@ export default function DiagramAdjuster({
   onRemove,
 }: Props) {
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 px-3 py-2">
+    <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 dark:border-[#3c4043] px-3 py-2">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium text-slate-600">{label}</span>
+        <span className="text-[11px] font-medium text-slate-600 dark:text-[#bdc1c6]">{label}</span>
         <div className="flex gap-1">
           <button
             type="button"
             onClick={() => onChange(DEFAULT_DIAGRAM_LAYOUT)}
-            className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
+            className="rounded border border-slate-300 dark:border-[#4a4d51] px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-[#9aa0a6] hover:bg-slate-100 dark:hover:bg-[#303134]"
           >
             초기화
           </button>
@@ -98,7 +98,7 @@ export default function DiagramAdjuster({
             <button
               type="button"
               onClick={onRemove}
-              className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+              className="rounded border border-slate-300 dark:border-[#4a4d51] px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-[#9aa0a6] hover:border-red-300 hover:bg-red-50 hover:text-red-600"
             >
               삭제
             </button>

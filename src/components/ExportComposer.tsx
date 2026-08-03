@@ -397,27 +397,27 @@ export default function ExportComposer({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 dark:border-[#3c4043] bg-white dark:bg-[#1f1f1f] p-4">
+        <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-[#e8eaed]">
           제목
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={multi ? "제목을 입력하세요 (예: 미적분 오답 모음)" : "제목"}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            className="rounded-lg border border-slate-300 dark:border-[#4a4d51] px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
           />
         </label>
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-slate-400 dark:text-[#80868b]">
           시행일 : {formatDate(examDate)} (실모 추가 시 정한 날짜)
         </p>
       </div>
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-[#e8eaed]">
             인쇄 순서 ({order.length}문제)
           </h2>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-slate-400 dark:text-[#80868b]">
             순서를 바꾸지 않으면 추가한 순서대로 인쇄됩니다.
           </span>
         </div>
@@ -426,18 +426,18 @@ export default function ExportComposer({
           {order.map((problem, index) => (
             <li
               key={problem.id}
-              className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2"
+              className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-[#3c4043] bg-white dark:bg-[#1f1f1f] p-2"
             >
-              <span className="w-6 shrink-0 text-center text-sm font-medium text-slate-500">
+              <span className="w-6 shrink-0 text-center text-sm font-medium text-slate-500 dark:text-[#9aa0a6]">
                 {index + 1}
               </span>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={problem.imageUrl}
                 alt="오답"
-                className="h-16 w-16 shrink-0 rounded border border-slate-200 object-contain"
+                className="h-16 w-16 shrink-0 rounded border border-slate-200 dark:border-[#3c4043] object-contain"
               />
-              <span className="min-w-0 flex-1 truncate text-sm text-slate-700">
+              <span className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-[#e8eaed]">
                 {labelFor(problem, index)}
               </span>
               <div className="flex shrink-0 items-center gap-1">
@@ -445,7 +445,7 @@ export default function ExportComposer({
                   type="button"
                   onClick={() => move(index, -1)}
                   disabled={index === 0}
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  className="rounded border border-slate-300 dark:border-[#4a4d51] px-2 py-1 text-xs text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134] disabled:opacity-40"
                 >
                   ↑
                 </button>
@@ -453,7 +453,7 @@ export default function ExportComposer({
                   type="button"
                   onClick={() => move(index, 1)}
                   disabled={index === order.length - 1}
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  className="rounded border border-slate-300 dark:border-[#4a4d51] px-2 py-1 text-xs text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134] disabled:opacity-40"
                 >
                   ↓
                 </button>
@@ -463,7 +463,7 @@ export default function ExportComposer({
         </ol>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-300">{error}</p>}
 
       <div className="flex justify-end">
         <button

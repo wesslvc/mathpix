@@ -80,7 +80,7 @@ export default function Logo({ size = 28, iconOnly = false, className }: Props) 
 
       {!iconOnly && (
         <span
-          className="font-semibold tracking-tight text-ink"
+          className="font-semibold tracking-tight text-ink dark:text-[#e8eaed]"
           style={{ fontSize: size * 0.62 }}
         >
           Reprint

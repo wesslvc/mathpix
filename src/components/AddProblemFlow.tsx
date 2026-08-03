@@ -181,7 +181,7 @@ export default function AddProblemFlow({
   return (
     <div className="flex flex-col gap-4">
       {error && (
-        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-lg border border-red-300 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
@@ -197,7 +197,7 @@ export default function AddProblemFlow({
       )}
 
       {stage === "idle" && !canAdd && (
-        <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="flex flex-col gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
           <p>사진인식권이 모두 소진돼 오답을 더 추가할 수 없어요. 이용권을 구매하면 1000개가 충전돼요.</p>
           <a
             href="/api/checkout"
@@ -219,7 +219,7 @@ export default function AddProblemFlow({
           <button
             type="button"
             onClick={handleReset}
-            className="self-start text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+            className="self-start text-xs text-slate-500 dark:text-[#9aa0a6] underline-offset-2 hover:text-slate-700 dark:hover:text-[#e8eaed] hover:underline"
           >
             그만 추가하기
           </button>
@@ -227,7 +227,7 @@ export default function AddProblemFlow({
       )}
 
       {queue.length > 0 && (stage === "crop" || stage === "loading") && (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-slate-500 dark:text-[#9aa0a6]">
           이 문제를 저장하면 다음 이미지로 넘어갑니다 · {queue.length}장 남음
         </p>
       )}
@@ -242,8 +242,8 @@ export default function AddProblemFlow({
       )}
 
       {stage === "loading" && (
-        <div className="flex flex-col items-center gap-3 py-16 text-slate-500">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
+        <div className="flex flex-col items-center gap-3 py-16 text-slate-500 dark:text-[#9aa0a6]">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 dark:border-[#4a4d51] border-t-blue-600" />
           <p>Mathpix로 문제를 인식하는 중입니다...</p>
         </div>
       )}

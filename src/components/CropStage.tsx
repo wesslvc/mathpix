@@ -69,10 +69,10 @@ export default function CropStage({ imageSrc, onConfirm, onCancel, onError }: Pr
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-ink">
+          <h2 className="text-lg font-semibold text-ink dark:text-[#e8eaed]">
             문제 영역 확인 및 조정
           </h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-500 dark:text-[#9aa0a6]">
             {autoDetected
               ? "자동으로 문제 영역을 인식했습니다. 필요하면 손잡이를 끌어 범위를 조정하세요."
               : "이미지를 분석하는 중입니다..."}
@@ -81,13 +81,13 @@ export default function CropStage({ imageSrc, onConfirm, onCancel, onError }: Pr
         <button
           type="button"
           onClick={handleResetToFull}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+          className="rounded-lg border border-slate-300 dark:border-[#4a4d51] px-3 py-1.5 text-sm text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134]"
         >
           전체 이미지로 리셋
         </button>
       </div>
 
-      <div className="flex justify-center rounded-2xl bg-slate-100 p-4">
+      <div className="flex justify-center rounded-2xl bg-slate-100 dark:bg-[#303134] p-4">
         <ReactCrop
           crop={crop}
           onChange={(_, percentCrop) => setCrop(percentCrop)}
@@ -108,7 +108,7 @@ export default function CropStage({ imageSrc, onConfirm, onCancel, onError }: Pr
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+          className="rounded-lg border border-slate-300 dark:border-[#4a4d51] px-4 py-2 text-sm font-medium text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134]"
         >
           다른 이미지 선택
         </button>

@@ -338,7 +338,7 @@ export default function ResultStage({
   return (
     <div className="flex flex-col gap-4">
       {result.mock && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="rounded-lg border border-amber-300 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
           Mathpix API 키가 설정되어 있지 않아 예시(mock) 결과를 표시하고
           있습니다. <code>.env.local</code>에 <code>MATHPIX_APP_ID</code>,{" "}
           <code>MATHPIX_APP_KEY</code>를 설정하면 실제 인식 결과가
@@ -347,8 +347,8 @@ export default function ResultStage({
       )}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-ink">인식 결과</h2>
-        <div className="flex items-center gap-1 rounded-lg border border-slate-300 p-1">
+        <h2 className="text-lg font-semibold text-ink dark:text-[#e8eaed]">인식 결과</h2>
+        <div className="flex items-center gap-1 rounded-lg border border-slate-300 dark:border-[#4a4d51] p-1">
           {FONT_SIZES.map((f, idx) => (
             <button
               key={f.label}
@@ -369,10 +369,12 @@ export default function ResultStage({
       <div className="overflow-x-auto">
         <div
           ref={cardRef}
-          className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
+          className="problem-surface rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
           style={{ width: PROBLEM_CARD_WIDTH }}
         >
           <div
+            /* 이 카드는 PNG로 캡처돼 인쇄되므로 다크모드에서도 검은 글자를
+               유지한다(dark: 변형을 붙이면 흰 종이에 흰 글자가 된다). */
             className="font-serif leading-relaxed text-ink"
             style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
             dangerouslySetInnerHTML={{ __html: html }}
@@ -401,19 +403,19 @@ export default function ResultStage({
       </div>
 
       {/* 인식 결과를 바로 고친다. 저장 후 갤러리에서 다시 여는 왕복을 없앤다. */}
-      <div className="rounded-lg border border-slate-200 px-3 py-2.5">
+      <div className="rounded-lg border border-slate-200 dark:border-[#3c4043] px-3 py-2.5">
         <button
           type="button"
           onClick={() => setShowTextEditor((v) => !v)}
-          className="flex w-full items-center justify-between text-xs font-medium text-slate-600"
+          className="flex w-full items-center justify-between text-xs font-medium text-slate-600 dark:text-[#bdc1c6]"
         >
           <span>
             내용 수정
             {sourceText !== (result.text || result.latex) && (
-              <span className="ml-1 font-normal text-blue-600">(수정됨)</span>
+              <span className="ml-1 font-normal text-blue-600 dark:text-blue-300">(수정됨)</span>
             )}
           </span>
-          <span className="text-slate-400">
+          <span className="text-slate-400 dark:text-[#80868b]">
             {showTextEditor ? "닫기 ▲" : "열기 ▼"}
           </span>
         </button>
@@ -424,7 +426,7 @@ export default function ResultStage({
               type="button"
               onClick={() => setSourceText(result.text || result.latex)}
               disabled={sourceText === (result.text || result.latex)}
-              className="self-start rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+              className="self-start rounded border border-slate-300 dark:border-[#4a4d51] px-2 py-1 text-[11px] text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134] disabled:opacity-40"
             >
               인식 결과로 되돌리기
             </button>
@@ -433,19 +435,19 @@ export default function ResultStage({
       </div>
 
       {/* 조건 박스 범위 조절 — 자동 감지가 어긋났을 때 손으로 고친다. */}
-      <div className="rounded-lg border border-slate-200 px-3 py-2.5">
+      <div className="rounded-lg border border-slate-200 dark:border-[#3c4043] px-3 py-2.5">
         <button
           type="button"
           onClick={() => setShowBoxEditor((v) => !v)}
-          className="flex w-full items-center justify-between text-xs font-medium text-slate-600"
+          className="flex w-full items-center justify-between text-xs font-medium text-slate-600 dark:text-[#bdc1c6]"
         >
           <span>
             조건 박스 조절
             {boxOverride !== undefined && (
-              <span className="ml-1 font-normal text-blue-600">(직접 지정함)</span>
+              <span className="ml-1 font-normal text-blue-600 dark:text-blue-300">(직접 지정함)</span>
             )}
           </span>
-          <span className="text-slate-400">{showBoxEditor ? "닫기 ▲" : "열기 ▼"}</span>
+          <span className="text-slate-400 dark:text-[#80868b]">{showBoxEditor ? "닫기 ▲" : "열기 ▼"}</span>
         </button>
         {showBoxEditor && (
           <div className="mt-2">
@@ -461,8 +463,8 @@ export default function ResultStage({
       {/* 도형 크기·위치 조절 — 카드에 실제로 붙은 도형이 있을 때만 보여준다. */}
       {(Object.keys(rasterFallbacks).length > 0 ||
         manualDiagramSvgs.length > 0) && (
-        <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
-          <p className="text-xs font-medium text-slate-500">도형 크기·위치</p>
+        <div className="flex flex-col gap-2 rounded-lg border border-slate-200 dark:border-[#3c4043] px-3 py-2.5">
+          <p className="text-xs font-medium text-slate-500 dark:text-[#9aa0a6]">도형 크기·위치</p>
           {(result.diagrams ?? [])
             .filter((d) => rasterFallbacks[d.id])
             .map((d, i) => (
@@ -488,9 +490,9 @@ export default function ResultStage({
       )}
 
       {!isVectorizing && (
-        <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
+        <div className="flex flex-col gap-2 rounded-lg border border-slate-200 dark:border-[#3c4043] px-3 py-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-slate-500">도형 화질</span>
+            <span className="text-xs font-medium text-slate-500 dark:text-[#9aa0a6]">도형 화질</span>
             {(["lite", "flash"] as const).map((m) => {
               const selected = diagramModel === m;
               // flash는 결제자 전용이라 미결제 상태면 아예 고를 수 없게 막는다.
@@ -520,7 +522,7 @@ export default function ResultStage({
             })}
           </div>
 
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-slate-500 dark:text-[#9aa0a6]">
             {diagramModel === "flash" ? (
               quota && !quota.paid ? (
                 <>flash는 이용권을 구매한 분만 쓸 수 있어요.</>
@@ -569,34 +571,34 @@ export default function ResultStage({
             <button
               type="button"
               onClick={() => setShowDiagramCrop(true)}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+              className="rounded-lg border border-slate-300 dark:border-[#4a4d51] px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134]"
             >
               도형 추가인식
             </button>
             {quota && !quota.paid && (
               <a
                 href="/api/checkout"
-                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                className="rounded-lg border border-amber-300 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-100"
               >
                 이용권 구매 (lite 무료 + flash 사용)
               </a>
             )}
             {vectorizeError && (
-              <p className="text-xs text-red-600">{vectorizeError}</p>
+              <p className="text-xs text-red-600 dark:text-red-300">{vectorizeError}</p>
             )}
             {vectorizeNotice && (
-              <p className="text-xs text-amber-700">{vectorizeNotice}</p>
+              <p className="text-xs text-amber-700 dark:text-amber-300">{vectorizeNotice}</p>
             )}
           </div>
         </div>
       )}
 
       {isVectorizing && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+        <div className="rounded-lg border border-slate-200 dark:border-[#3c4043] bg-slate-50 dark:bg-[#2a2b2e] px-4 py-3">
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-[#bdc1c6]">
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 dark:border-[#4a4d51] border-t-blue-600" />
             <span>{vectorizeStatusText(vectorizeElapsedSec)}</span>
-            <span className="ml-auto tabular-nums text-slate-400">
+            <span className="ml-auto tabular-nums text-slate-400 dark:text-[#80868b]">
               {vectorizeElapsedSec}초 경과
             </span>
           </div>
@@ -606,7 +608,7 @@ export default function ResultStage({
               style={{ width: `${vectorizeProgressPercent(vectorizeElapsedSec)}%` }}
             />
           </div>
-          <p className="mt-1.5 text-[11px] text-slate-400">
+          <p className="mt-1.5 text-[11px] text-slate-400 dark:text-[#80868b]">
             도형 재구성은 보통 10~20초 정도 걸려요. 화면을 벗어나지 말고 잠시만 기다려주세요.
           </p>
         </div>
@@ -621,13 +623,13 @@ export default function ResultStage({
       )}
 
       {result.confidence !== null && (
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-slate-400 dark:text-[#80868b]">
           인식 신뢰도: {(result.confidence * 100).toFixed(0)}%
         </p>
       )}
 
       {saveError && (
-        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-lg border border-red-300 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {saveError}
         </div>
       )}
@@ -635,7 +637,7 @@ export default function ResultStage({
       {onSaveToCategory && (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <span className="shrink-0 text-sm font-medium text-slate-700">
+            <span className="shrink-0 text-sm font-medium text-slate-700 dark:text-[#e8eaed]">
               정답 유형
             </span>
             <div className="flex gap-1">
@@ -656,7 +658,7 @@ export default function ResultStage({
               ))}
             </div>
           </div>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
+          <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-[#e8eaed]">
             <span className="shrink-0 font-medium">정답</span>
             <input
               value={answer}
@@ -667,13 +669,13 @@ export default function ResultStage({
                   ? "예: 3 → 정답표에 ③으로 표기됩니다"
                   : "예: 12 (PDF 맨 뒤 정답표에 표기됩니다)"
               }
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100"
+              className="min-w-0 flex-1 rounded-lg border border-slate-300 dark:border-[#4a4d51] px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100"
             />
           </label>
           {answer.trim() !== "" && (
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-slate-500 dark:text-[#9aa0a6]">
               정답표 표기:{" "}
-              <span className="text-sm font-medium text-ink">
+              <span className="text-sm font-medium text-ink dark:text-[#e8eaed]">
                 {formatAnswer(answer, answerType)}
               </span>
             </p>
@@ -687,28 +689,28 @@ export default function ResultStage({
         <button
           type="button"
           onClick={onRestart}
-          className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+          className="text-xs text-slate-500 dark:text-[#9aa0a6] underline-offset-2 hover:text-slate-700 dark:hover:text-[#e8eaed] hover:underline"
         >
           새 이미지로 시작
         </button>
         <button
           type="button"
           onClick={onBack}
-          className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+          className="text-xs text-slate-500 dark:text-[#9aa0a6] underline-offset-2 hover:text-slate-700 dark:hover:text-[#e8eaed] hover:underline"
         >
           크롭 다시하기
         </button>
         <button
           type="button"
           onClick={handleCopyLatex}
-          className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+          className="text-xs text-slate-500 dark:text-[#9aa0a6] underline-offset-2 hover:text-slate-700 dark:hover:text-[#e8eaed] hover:underline"
         >
           {copied ? "복사됨!" : "LaTeX 복사"}
         </button>
         <button
           type="button"
           onClick={handleCopyText}
-          className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+          className="text-xs text-slate-500 dark:text-[#9aa0a6] underline-offset-2 hover:text-slate-700 dark:hover:text-[#e8eaed] hover:underline"
         >
           {textCopied ? "복사됨!" : "텍스트 복사"}
         </button>
@@ -718,8 +720,8 @@ export default function ResultStage({
           것이 이 화면의 기본 사용 패턴이라, 목록으로 돌아갔다 다시 들어오는
           왕복을 없앤다. */}
       {saved && (onAddAnother || (onNext && remainingCount > 0)) && (
-        <div className="flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm font-medium text-emerald-900">
+        <div className="flex flex-col gap-2 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
             저장했어요. 이어서 추가할까요?
           </p>
           <div className="flex flex-wrap gap-2">
@@ -747,7 +749,7 @@ export default function ResultStage({
       )}
 
       {/* 주요 액션: 결과를 실제로 저장/출력하는 버튼만 모아 눈에 띄게 둔다. */}
-      <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
+      <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 dark:border-[#2f3134] pt-3">
         {!saved && onNext && remainingCount > 0 && (
           <button
             type="button"

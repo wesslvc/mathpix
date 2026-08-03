@@ -22,7 +22,7 @@ export default async function CategoryPage({
   if (!isSupabaseConfigured()) {
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 text-center">
-        <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p className="rounded-lg border border-amber-300 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
           Supabase 설정이 아직 완료되지 않았습니다.
         </p>
       </main>
@@ -84,22 +84,22 @@ export default async function CategoryPage({
   const access = await getAccessState(supabase);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10">
       <header className="flex items-start justify-between gap-4">
         <div>
           <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline">
             ← 목록으로
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-ink">
+          <h1 className="mt-1 text-2xl font-bold text-ink dark:text-[#e8eaed]">
             {categoryLabel(category)}
           </h1>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-500 dark:text-[#9aa0a6]">
             문제 {problems?.length ?? 0}개 저장됨
           </p>
         </div>
         <Link
           href={`/export?ids=${category.id}`}
-          className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+          className="shrink-0 rounded-lg border border-slate-300 dark:border-[#4a4d51] bg-white dark:bg-[#1f1f1f] px-4 py-2 text-sm font-medium text-ink dark:text-[#e8eaed] hover:bg-slate-50 dark:hover:bg-[#2a2b2e]"
         >
           PDF 만들기
         </Link>

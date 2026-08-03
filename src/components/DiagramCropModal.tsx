@@ -77,12 +77,12 @@ export default function DiagramCropModal({ imageSrc, onConfirm, onCancel }: Prop
       onClick={onCancel}
     >
       <div
-        className="flex max-h-[90vh] w-full max-w-3xl flex-col gap-4 overflow-auto rounded-2xl bg-white p-6 shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-6xl flex-col gap-4 overflow-auto rounded-2xl bg-white dark:bg-[#1f1f1f] p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div>
-          <h2 className="text-lg font-semibold text-ink">도형 영역 오려내기</h2>
-          <p className="text-sm text-slate-500">
+          <h2 className="text-lg font-semibold text-ink dark:text-[#e8eaed]">도형 영역 오려내기</h2>
+          <p className="text-sm text-slate-500 dark:text-[#9aa0a6]">
             원, 삼각형 같은 도형 부분만 정확히 드래그해서 선택해주세요. 선택한
             부분만 Gemini가 깨끗한 그림으로 다시 그려줍니다.
           </p>
@@ -121,12 +121,12 @@ export default function DiagramCropModal({ imageSrc, onConfirm, onCancel }: Prop
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+            className="rounded-lg border border-slate-300 dark:border-[#4a4d51] px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134]"
           >
             🖼 다른 사진 선택
           </button>
           {newPhoto !== null && (
-            <span className="text-[11px] text-slate-400">새로 찍은 사진 사용 중</span>
+            <span className="text-[11px] text-slate-400 dark:text-[#80868b]">새로 찍은 사진 사용 중</span>
           )}
         </div>
 
@@ -156,16 +156,16 @@ export default function DiagramCropModal({ imageSrc, onConfirm, onCancel }: Prop
         />
 
         {loadError && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <p className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
             {loadError}
           </p>
         )}
 
-        <div className="flex justify-center rounded-2xl bg-slate-100 p-4">
+        <div className="flex justify-center rounded-2xl bg-slate-100 dark:bg-[#303134] p-4">
           {isLoading ? (
-            <p className="py-16 text-sm text-slate-500">사진을 불러오는 중...</p>
+            <p className="py-16 text-sm text-slate-500 dark:text-[#9aa0a6]">사진을 불러오는 중...</p>
           ) : activeSrc === null ? (
-            <p className="py-16 text-center text-sm text-slate-500">
+            <p className="py-16 text-center text-sm text-slate-500 dark:text-[#9aa0a6]">
               위의 <span className="font-medium">📷 카메라로 찍기</span>를 눌러
               도형을 찍어주세요.
             </p>
@@ -193,7 +193,7 @@ export default function DiagramCropModal({ imageSrc, onConfirm, onCancel }: Prop
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
+            className="rounded-lg border border-slate-300 dark:border-[#4a4d51] px-4 py-2 text-sm text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134]"
           >
             취소
           </button>
