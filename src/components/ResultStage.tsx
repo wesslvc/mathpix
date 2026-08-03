@@ -8,6 +8,7 @@ import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import DiagramCropModal from "./DiagramCropModal";
 import type { DiagramQuota } from "@/app/api/diagram/quota/route";
 import BoxRangeEditor from "./BoxRangeEditor";
+import LatexEditor from "./LatexEditor";
 import DiagramAdjuster, {
   DEFAULT_DIAGRAM_LAYOUT,
   diagramStyle,
@@ -24,6 +25,8 @@ type Props = {
   /** 지정하면 "오답으로 저장" 버튼이 나타나고, PNG data URL과 정답 정보를 인자로 호출된다. */
   onSaveToCategory?: (payload: {
     pngDataUrl: string;
+    /** 사용자가 손본 최종 본문(mmd). 저장되는 텍스트는 이 값이다. */
+    text: string;
     answer: string;
     answerType: AnswerType;
     boxOverride: BoxOverride | undefined;
@@ -167,7 +170,18 @@ export default function ResultStage({
     return () => clearInterval(id);
   }, [isVectorizing]);
 
-  const sourceText = result.text || result.latex;
+  // 인식 결과를 그 자리에서 고칠 수 있게 한다. 저장 후 갤러리에서 다시 여는
+  // 왕복 없이, 잘못 읽힌 수식을 보면서 바로 손보는 게 훨씬 빠르다.
+  const [sourceText, setSourceText] = useState(result.text || result.latex);
+  const [showTextEditor, setShowTextEditor] = useState(false);
+
+  // 다음 이미지로 넘어가면 새 인식 결과로 갈아끼운다.
+  useEffect(() => {
+    setSourceText(result.text || result.latex);
+    setShowTextEditor(false);
+    setBoxOverride(undefined);
+  }, [result]);
+
   const html = useMemo(
     () => renderMathText(sourceText, boxOverride),
     [sourceText, boxOverride],
@@ -294,6 +308,7 @@ export default function ResultStage({
       });
       await onSaveToCategory({
         pngDataUrl: dataUrl,
+        text: sourceText,
         answer: answer.trim(),
         answerType,
         boxOverride,
@@ -315,7 +330,7 @@ export default function ResultStage({
   /** 렌더링에 실제로 쓰인 원문(mmd)을 복사한다. 줄바꿈/박스 등 렌더링 문제를
    * 알려줄 때 이 텍스트가 필요하다. */
   async function handleCopyText() {
-    await navigator.clipboard.writeText(result.text || result.latex);
+    await navigator.clipboard.writeText(sourceText);
     setTextCopied(true);
     setTimeout(() => setTextCopied(false), 1500);
   }
@@ -383,6 +398,38 @@ export default function ResultStage({
             />
           ))}
         </div>
+      </div>
+
+      {/* 인식 결과를 바로 고친다. 저장 후 갤러리에서 다시 여는 왕복을 없앤다. */}
+      <div className="rounded-lg border border-slate-200 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={() => setShowTextEditor((v) => !v)}
+          className="flex w-full items-center justify-between text-xs font-medium text-slate-600"
+        >
+          <span>
+            내용 수정
+            {sourceText !== (result.text || result.latex) && (
+              <span className="ml-1 font-normal text-blue-600">(수정됨)</span>
+            )}
+          </span>
+          <span className="text-slate-400">
+            {showTextEditor ? "닫기 ▲" : "열기 ▼"}
+          </span>
+        </button>
+        {showTextEditor && (
+          <div className="mt-2 flex flex-col gap-2">
+            <LatexEditor value={sourceText} onChange={setSourceText} rows={10} />
+            <button
+              type="button"
+              onClick={() => setSourceText(result.text || result.latex)}
+              disabled={sourceText === (result.text || result.latex)}
+              className="self-start rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+            >
+              인식 결과로 되돌리기
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 조건 박스 범위 조절 — 자동 감지가 어긋났을 때 손으로 고친다. */}
@@ -705,7 +752,7 @@ export default function ResultStage({
           <button
             type="button"
             onClick={onNext}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="g-btn g-btn-primary"
           >
             다음 이미지 → ({remainingCount}장 남음)
           </button>
@@ -714,7 +761,7 @@ export default function ResultStage({
           type="button"
           onClick={handleExport}
           disabled={isExporting}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+          className="g-btn g-btn-outline"
         >
           {isExporting ? "저장 중..." : "이미지로 저장"}
         </button>

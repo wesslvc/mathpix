@@ -13,7 +13,9 @@ const config: Config = {
         ],
       },
       colors: {
-        ink: "#1a1d29",
+        // 구글 본문 색과 맞춘다(globals.css의 --g-text와 같은 값).
+        ink: "#202124",
+        gblue: "#1a73e8",
       },
     },
   },

@@ -6,7 +6,10 @@ import { PDFDocument, rgb } from "pdf-lib";
 export type ComposerProblem = {
   id: string;
   imageUrl: string;
+  /** 점수까지 붙은 출처 표기(예: "강대2회(96/100)"). */
   source: string;
+  /** 점수를 뺀 출처(예: "강대2회"). 같은 출처가 반복될 때 쓴다. */
+  sourceBase: string;
   origNumber: number | null;
   answer: string;
 };
@@ -186,9 +189,21 @@ export default function ExportComposer({
     return multi ? index + 1 : (problem.origNumber ?? index + 1);
   }
 
-  /** 각 문제 라벨 (예: "강대2회(96/100) 3번"). */
+  /**
+   * 각 문제 라벨.
+   *
+   * 같은 내용을 페이지마다 반복하지 않는 것이 원칙이다.
+   * - 단일 묶음: 출처와 점수가 이미 첫 페이지 제목에 있으므로 번호만 적는다.
+   * - 여러 묶음: 출처는 문제마다 다를 수 있으니 남기되, 점수는 그 출처가 처음
+   *   나오는 페이지에서 한 번만 적는다.
+   */
   function labelFor(problem: ComposerProblem, index: number): string {
-    return `${problem.source} ${numberFor(problem, index)}번`;
+    const n = numberFor(problem, index);
+    if (!multi) return `${n}번`;
+
+    const firstOfSource =
+      order.findIndex((p) => p.sourceBase === problem.sourceBase) === index;
+    return `${firstOfSource ? problem.source : problem.sourceBase} ${n}번`;
   }
 
   async function generate() {

@@ -6,9 +6,107 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 구글 계열 UI 색·형태. 문제 본문(나눔명조)과 앱 UI를 분리해서,
+   UI는 시스템 산세리프로 또렷하게 두고 문제 카드만 명조를 쓴다. */
+:root {
+  --g-blue: #1a73e8;
+  --g-blue-hover: #1765cc;
+  --g-red: #d93025;
+  --g-green: #1e8e3e;
+  --g-yellow: #f9ab00;
+  --g-surface: #ffffff;
+  --g-bg: #f8f9fa;
+  --g-border: #dadce0;
+  --g-text: #202124;
+  --g-text-muted: #5f6368;
+}
+
 html,
 body {
-  background-color: #f5f6f8;
+  background-color: var(--g-bg);
+  color: var(--g-text);
+  font-family: "Google Sans", Roboto, "Noto Sans KR", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 구글 스타일 표면: 테두리는 얇게, 그림자는 아주 옅게, 모서리는 넉넉하게. */
+.g-card {
+  background: var(--g-surface);
+  border: 1px solid var(--g-border);
+  border-radius: 12px;
+}
+
+/* 알약 모양 기본 버튼 */
+.g-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 9999px;
+  padding: 0.5rem 1.1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.g-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.g-btn-primary {
+  background: var(--g-blue);
+  color: #fff;
+}
+
+.g-btn-primary:hover:not(:disabled) {
+  background: var(--g-blue-hover);
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3);
+}
+
+.g-btn-outline {
+  border: 1px solid var(--g-border);
+  background: var(--g-surface);
+  color: var(--g-blue);
+}
+
+.g-btn-outline:hover:not(:disabled) {
+  background: #f1f6fe;
+  border-color: #c6dafc;
+}
+
+.g-btn-text {
+  color: var(--g-blue);
+  padding: 0.4rem 0.7rem;
+}
+
+.g-btn-text:hover:not(:disabled) {
+  background: #f1f6fe;
+}
+
+/* 접근성: 키보드 포커스는 항상 눈에 보이게 둔다. */
+.g-btn:focus-visible,
+.g-input:focus-visible {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 2px;
+}
+
+.g-input {
+  border: 1px solid var(--g-border);
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.875rem;
+  background: var(--g-surface);
+}
+
+.g-input:focus {
+  border-color: var(--g-blue);
+  outline: none;
 }
 
 /* KaTeX 수식이 본문 텍스트와 잘 어우러지도록 여백을 살짝 조정 */

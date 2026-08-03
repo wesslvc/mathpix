@@ -86,6 +86,8 @@ export default async function ExportPage({
         id: p.id,
         imageUrl,
         source: cat ? categoryLabel(cat) : "출처",
+        // 점수를 뺀 출처. 같은 출처가 여러 페이지에 걸칠 때 점수를 반복하지 않는다.
+        sourceBase: cat?.source ?? "출처",
         origNumber: parseProblemNumber(p.text_content || p.latex || ""),
         // 객관식이면 "1" -> "①"로 바꿔 정답표에 찍는다. 저장은 원문 그대로이고
         // 변환은 표시할 때만 한다(유형을 바꾸면 되돌아가야 하므로).
@@ -108,7 +110,7 @@ export default async function ExportPage({
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
       <header>
-        <Link href="/" className="text-sm text-blue-600 underline">
+        <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline">
           ← 목록으로
         </Link>
         <h1 className="mt-1 text-2xl font-bold text-ink">PDF 만들기</h1>

@@ -6,13 +6,14 @@ import NewCategoryForm from "@/components/NewCategoryForm";
 import LogoutButton from "@/components/LogoutButton";
 import CategoryList from "@/components/CategoryList";
 import BillingStatus from "@/components/BillingStatus";
+import Logo from "@/components/Logo";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
 
 export default async function DashboardPage() {
   if (!isSupabaseConfigured()) {
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
-        <h1 className="text-xl font-bold text-ink">수학오답프린트 제작</h1>
+        <Logo size={30} />
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Supabase 설정이 아직 완료되지 않아 로그인/저장 기능을 사용할 수
           없습니다. <code>NEXT_PUBLIC_SUPABASE_URL</code>,{" "}
@@ -50,10 +51,10 @@ export default async function DashboardPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
-      <header className="flex items-start justify-between">
+      <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-ink">수학오답프린트 제작</h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <Logo size={30} />
+          <p className="mt-2 text-sm text-slate-500">
             실모(출처)별로 오답을 모아두고, 나중에 한 번에 PDF로 인쇄하세요.
           </p>
         </div>
