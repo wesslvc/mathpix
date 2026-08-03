@@ -195,7 +195,7 @@ export default function ProblemGallery({ problems }: Props) {
 
   if (list.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+      <p className="rounded-xl border border-dashed border-slate-300 dark:border-[#4a4d51] px-4 py-8 text-center text-sm text-slate-500 dark:text-[#9aa0a6]">
         아직 저장된 오답이 없습니다. 위에서 오답을 추가해보세요.
       </p>
     );
@@ -207,7 +207,7 @@ export default function ProblemGallery({ problems }: Props) {
         {list.map((problem, index) => (
           <div
             key={problem.id}
-            className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
+            className="flex flex-col gap-2 rounded-lg border border-slate-200 dark:border-[#3c4043] bg-white dark:bg-[#1f1f1f] p-2 shadow-sm"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -216,14 +216,14 @@ export default function ProblemGallery({ problems }: Props) {
               className="w-full rounded object-contain"
             />
             <div className="flex flex-wrap items-center justify-between gap-1 px-1 pb-1">
-              <span className="text-xs text-slate-400">{index + 1}번</span>
+              <span className="text-xs text-slate-400 dark:text-[#80868b]">{index + 1}번</span>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => move(index, -1)}
                   disabled={index === 0 || busyId === problem.id}
                   aria-label="앞으로"
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  className="rounded border border-slate-300 dark:border-[#4a4d51] px-2 py-1 text-xs text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134] disabled:opacity-40"
                 >
                   ↑
                 </button>
@@ -232,14 +232,14 @@ export default function ProblemGallery({ problems }: Props) {
                   onClick={() => move(index, 1)}
                   disabled={index === list.length - 1 || busyId === problem.id}
                   aria-label="뒤로"
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  className="rounded border border-slate-300 dark:border-[#4a4d51] px-2 py-1 text-xs text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134] disabled:opacity-40"
                 >
                   ↓
                 </button>
                 <button
                   type="button"
                   onClick={() => openEdit(problem)}
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+                  className="rounded border border-slate-300 dark:border-[#4a4d51] px-2 py-1 text-xs text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134]"
                 >
                   수정
                 </button>
@@ -247,7 +247,7 @@ export default function ProblemGallery({ problems }: Props) {
                   type="button"
                   onClick={() => remove(problem)}
                   disabled={busyId === problem.id}
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                  className="rounded border border-slate-300 dark:border-[#4a4d51] px-2 py-1 text-xs text-slate-500 dark:text-[#9aa0a6] hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
                 >
                   삭제
                 </button>
@@ -263,11 +263,11 @@ export default function ProblemGallery({ problems }: Props) {
           onClick={() => !isSaving && setEditing(null)}
         >
           <div
-            className="flex max-h-[90vh] w-full max-w-6xl flex-col gap-4 overflow-auto rounded-2xl bg-white p-6 shadow-xl"
+            className="flex max-h-[90vh] w-full max-w-6xl flex-col gap-4 overflow-auto rounded-2xl bg-white dark:bg-[#1f1f1f] p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-lg font-semibold text-ink">문제 내용 수정</h2>
-            <p className="text-xs text-slate-500">
+            <h2 className="text-lg font-semibold text-ink dark:text-[#e8eaed]">문제 내용 수정</h2>
+            <p className="text-xs text-slate-500 dark:text-[#9aa0a6]">
               내용·정답·조건 박스를 고치면 아래 미리보기처럼 이미지가 다시
               만들어져 저장됩니다.
             </p>
@@ -278,9 +278,9 @@ export default function ProblemGallery({ problems }: Props) {
               <div className="flex flex-col gap-4">
                 <LatexEditor value={editText} onChange={setEditText} />
 
-                <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
+                <div className="flex flex-col gap-2 rounded-lg border border-slate-200 dark:border-[#3c4043] px-3 py-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="shrink-0 text-xs font-medium text-slate-500">
+                    <span className="shrink-0 text-xs font-medium text-slate-500 dark:text-[#9aa0a6]">
                       정답 유형
                     </span>
                     {(["choice", "short"] as const).map((t) => (
@@ -298,8 +298,8 @@ export default function ProblemGallery({ problems }: Props) {
                       </button>
                     ))}
                   </div>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <span className="shrink-0 text-xs font-medium text-slate-500">
+                  <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-[#e8eaed]">
+                    <span className="shrink-0 text-xs font-medium text-slate-500 dark:text-[#9aa0a6]">
                       정답
                     </span>
                     <input
@@ -310,20 +310,20 @@ export default function ProblemGallery({ problems }: Props) {
                           ? "예: 3 → ③으로 표기"
                           : "예: 12"
                       }
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 dark:border-[#4a4d51] px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                     />
                   </label>
                   {editAnswer.trim() !== "" && (
-                    <p className="text-[11px] text-slate-500">
+                    <p className="text-[11px] text-slate-500 dark:text-[#9aa0a6]">
                       정답표 표기:{" "}
-                      <span className="text-sm font-medium text-ink">
+                      <span className="text-sm font-medium text-ink dark:text-[#e8eaed]">
                         {formatAnswer(editAnswer, editAnswerType)}
                       </span>
                     </p>
                   )}
                 </div>
 
-                <div className="rounded-lg border border-slate-200 px-3 py-2.5">
+                <div className="rounded-lg border border-slate-200 dark:border-[#3c4043] px-3 py-2.5">
                   <BoxRangeEditor
                     text={editText}
                     value={editBox}
@@ -333,13 +333,13 @@ export default function ProblemGallery({ problems }: Props) {
               </div>
 
               <div>
-                <p className="mb-1 text-xs font-medium text-slate-500">
+                <p className="mb-1 text-xs font-medium text-slate-500 dark:text-[#9aa0a6]">
                   미리보기 (이 모습 그대로 저장됩니다)
                 </p>
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-[#3c4043]">
                   <div
                     ref={previewRef}
-                    className="bg-white p-8 font-serif leading-relaxed text-ink"
+                    className="problem-surface bg-white p-8 font-serif leading-relaxed text-ink"
                     style={{ fontSize: 24, width: PROBLEM_CARD_WIDTH }}
                     dangerouslySetInnerHTML={{
                       __html: renderMathText(editText, editBox),
@@ -349,7 +349,7 @@ export default function ProblemGallery({ problems }: Props) {
               </div>
             </div>
 
-            {editError && <p className="text-sm text-red-600">{editError}</p>}
+            {editError && <p className="text-sm text-red-600 dark:text-red-300">{editError}</p>}
 
             <div className="flex justify-end gap-2">
               <button

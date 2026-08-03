@@ -69,7 +69,7 @@ export default function LatexEditor({ value, onChange, rows = 14 }: Props) {
             type="button"
             title={s.title}
             onClick={() => insert(s.insert)}
-            className="rounded border border-slate-300 bg-white px-2 py-1 font-mono text-[11px] text-slate-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
+            className="rounded border border-slate-300 dark:border-[#4a4d51] bg-white dark:bg-[#1f1f1f] px-2 py-1 font-mono text-[11px] text-slate-600 dark:text-[#bdc1c6] hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
           >
             {s.label}
           </button>
@@ -82,9 +82,9 @@ export default function LatexEditor({ value, onChange, rows = 14 }: Props) {
         rows={rows}
         spellCheck={false}
         wrap="off"
-        className="w-full resize-y overflow-x-auto rounded-lg border border-slate-300 bg-slate-50 p-3 font-mono text-[13px] leading-7 tracking-tight text-ink focus:border-blue-500 focus:bg-white focus:outline-none"
+        className="w-full resize-y overflow-x-auto rounded-lg border border-slate-300 dark:border-[#4a4d51] bg-slate-50 dark:bg-[#2a2b2e] p-3 font-mono text-[13px] leading-7 tracking-tight text-ink dark:text-[#e8eaed] focus:border-blue-500 focus:bg-white focus:outline-none"
       />
-      <p className="text-[11px] text-slate-400">
+      <p className="text-[11px] text-slate-400 dark:text-[#80868b]">
         수식은 <code className="font-mono">$...$</code>(문장 안) 또는{" "}
         <code className="font-mono">$$...$$</code>(가운데 정렬)로 감싸세요. 줄을
         바꾸면 그대로 줄바꿈되고, 빈 줄을 넣으면 문단이 나뉩니다.

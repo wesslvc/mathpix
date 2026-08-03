@@ -33,7 +33,7 @@ export default function CategoryList({
 
   if (categories.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+      <p className="rounded-xl border border-dashed border-slate-300 dark:border-[#4a4d51] px-4 py-8 text-center text-sm text-slate-500 dark:text-[#9aa0a6]">
         아직 등록된 실모가 없습니다. 위에서 실모를 추가해보세요.
       </p>
     );
@@ -42,7 +42,7 @@ export default function CategoryList({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-slate-400 dark:text-[#80868b]">
           여러 실모를 체크하면 오답을 한 번에 PDF로 모을 수 있습니다.
         </p>
         <button
@@ -58,28 +58,28 @@ export default function CategoryList({
       {categories.map((category) => (
         <div
           key={category.id}
-          className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm"
+          className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-[#3c4043] bg-white dark:bg-[#1f1f1f] px-4 py-4 shadow-sm"
         >
           <input
             type="checkbox"
             checked={selected.has(category.id)}
             onChange={() => toggle(category.id)}
-            className="h-4 w-4 shrink-0 rounded border-slate-300"
+            className="h-4 w-4 shrink-0 rounded border-slate-300 dark:border-[#4a4d51]"
             aria-label="선택"
           />
           <Link
             href={`/categories/${category.id}`}
             className="min-w-0 flex-1"
           >
-            <p className="truncate font-semibold text-ink">
+            <p className="truncate font-semibold text-ink dark:text-[#e8eaed]">
               {categoryLabel(category)}
               {category.is_exam && (
-                <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
+                <span className="ml-2 rounded bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-300">
                   실모
                 </span>
               )}
             </p>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-400 dark:text-[#80868b]">
               {new Date(category.created_at).toLocaleDateString("ko-KR")} 생성
             </p>
           </Link>
@@ -90,7 +90,7 @@ export default function CategoryList({
             />
             <Link
               href={`/categories/${category.id}`}
-              className="text-sm text-blue-600"
+              className="text-sm text-blue-600 dark:text-blue-300"
             >
               열기 →
             </Link>
