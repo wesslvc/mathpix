@@ -19,7 +19,7 @@ export default function BillingStatus({
 
   if (unlimited) {
     return (
-      <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 px-4 py-3 text-sm text-emerald-900 dark:text-emerald-200">
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
         사진인식권 <span className="font-semibold">무제한</span> 계정입니다.
       </div>
     );
@@ -58,7 +58,7 @@ export default function BillingStatus({
           이용권 구매하기 (+1000개)
         </a>
       ) : (
-        empty && <span className="shrink-0 text-xs text-amber-700 dark:text-amber-300">결제 준비 중</span>
+        empty && <span className="shrink-0 text-xs text-amber-700">결제 준비 중</span>
       )}
     </div>
   );

@@ -21,7 +21,7 @@ export default function LoginPage() {
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
         <Logo size={40} />
-        <p className="rounded-lg border border-amber-300 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Supabase 설정이 아직 완료되지 않아 로그인 기능을 사용할 수 없습니다.
           <br />
           <code>NEXT_PUBLIC_SUPABASE_URL</code>, <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>를
@@ -73,7 +73,7 @@ export default function LoginPage() {
     <main className="mx-auto flex min-h-screen max-w-sm flex-col items-center justify-center gap-6 px-4 text-center">
       <div>
         <Logo size={52} />
-        <p className="mt-2 text-sm text-slate-500 dark:text-[#9aa0a6]">
+        <p className="mt-2 text-sm text-slate-500">
           오답과 실전모의고사를 모아 깔끔한 PDF로 인쇄해보세요.
         </p>
       </div>
@@ -85,7 +85,7 @@ export default function LoginPage() {
           placeholder="이메일"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="rounded-lg border border-slate-300 dark:border-[#4a4d51] px-3 py-2 text-sm outline-none focus:border-blue-500"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
         />
         <input
           type="password"
@@ -94,10 +94,10 @@ export default function LoginPage() {
           placeholder="비밀번호 (6자 이상)"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="rounded-lg border border-slate-300 dark:border-[#4a4d51] px-3 py-2 text-sm outline-none focus:border-blue-500"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
         />
 
-        {error && <p className="text-sm text-red-600 dark:text-red-300">{error}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
         {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
         <button
@@ -116,7 +116,7 @@ export default function LoginPage() {
           setError(null);
           setNotice(null);
         }}
-        className="text-sm text-slate-500 dark:text-[#9aa0a6] hover:text-slate-700 dark:hover:text-[#e8eaed]"
+        className="text-sm text-slate-500 hover:text-slate-700"
       >
         {mode === "login"
           ? "계정이 없으신가요? 회원가입"

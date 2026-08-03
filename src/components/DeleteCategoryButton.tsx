@@ -57,7 +57,7 @@ export default function DeleteCategoryButton({ categoryId, label }: Props) {
       onClick={handleDelete}
       disabled={isDeleting}
       aria-label="실모 삭제"
-      className="rounded-lg border border-slate-300 dark:border-[#4a4d51] px-2.5 py-1.5 text-xs font-medium text-slate-500 dark:text-[#9aa0a6] hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+      className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
     >
       {isDeleting ? "삭제 중..." : "삭제"}
     </button>

@@ -52,10 +52,10 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-medium text-slate-500 dark:text-[#9aa0a6]">
+        <p className="text-xs font-medium text-slate-500">
           조건 박스 범위
           {value === undefined && (
-            <span className="ml-1 font-normal text-slate-400 dark:text-[#80868b]">(자동 감지됨)</span>
+            <span className="ml-1 font-normal text-slate-400">(자동 감지됨)</span>
           )}
         </p>
         <div className="flex gap-1">
@@ -63,7 +63,7 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
             type="button"
             onClick={() => onChange(undefined)}
             disabled={value === undefined}
-            className="rounded border border-slate-300 dark:border-[#4a4d51] px-2 py-1 text-[11px] text-slate-600 dark:text-[#bdc1c6] hover:bg-slate-100 dark:hover:bg-[#303134] disabled:opacity-40"
+            className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100 disabled:opacity-40"
           >
             자동으로 되돌리기
           </button>
@@ -81,13 +81,13 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
         </div>
       </div>
 
-      <p className="text-[11px] text-slate-400 dark:text-[#80868b]">
+      <p className="text-[11px] text-slate-400">
         각 줄의 <span className="font-medium">시작</span> /{" "}
         <span className="font-medium">끝</span>을 눌러 박스 범위를 조절하세요.
         파란 배경이 박스에 들어갈 줄입니다.
       </p>
 
-      <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 dark:border-[#3c4043]">
+      <div className="max-h-64 overflow-auto rounded-lg border border-slate-200">
         {lines.map((line, i) => {
           const blank = line.trim() === "";
           const inBox =
@@ -99,10 +99,10 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
                 inBox ? "bg-blue-50" : "bg-white"
               }`}
             >
-              <span className="w-6 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-slate-400 dark:text-[#80868b]">
+              <span className="w-6 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-slate-400">
                 {i + 1}
               </span>
-              <div className="min-w-0 flex-1 overflow-x-auto text-[13px] leading-snug text-ink dark:text-[#e8eaed]">
+              <div className="min-w-0 flex-1 overflow-x-auto text-[13px] leading-snug text-ink">
                 {blank ? (
                   <span className="text-slate-300">(빈 줄)</span>
                 ) : (

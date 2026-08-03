@@ -21,50 +21,8 @@
   --g-text-muted: #5f6368;
 }
 
-/* 다크 테마 토큰. 구글 다크(#202124 배경 / #1f1f1f 표면 / #8ab4f8 파랑)를 따른다.
-   밝은 파랑(#1a73e8)은 어두운 배경에서 대비가 모자라 눈이 아프므로 톤을 올린다. */
-.dark {
-  --g-blue: #8ab4f8;
-  --g-blue-hover: #a8c7fa;
-  --g-red: #f28b82;
-  --g-green: #81c995;
-  --g-yellow: #fdd663;
-  --g-surface: #1f1f1f;
-  --g-bg: #202124;
-  --g-border: #3c4043;
-  --g-text: #e8eaed;
-  --g-text-muted: #9aa0a6;
-}
-
-/* 다크에서 기본 버튼은 "밝은 파랑 배경 + 어두운 글자"가 구글 방식이다. */
-.dark .g-btn-primary {
-  background: var(--g-blue);
-  color: #202124;
-}
-
-.dark .g-btn-primary:hover:not(:disabled) {
-  background: var(--g-blue-hover);
-}
-
-.dark .g-btn-outline,
-.dark .g-input {
-  background: var(--g-surface);
-  color: var(--g-blue);
-  border-color: var(--g-border);
-}
-
-.dark .g-input {
-  color: var(--g-text);
-}
-
-.dark .g-btn-outline:hover:not(:disabled),
-.dark .g-btn-text:hover:not(:disabled) {
-  background: #2d2f31;
-  border-color: #5f6368;
-}
-
-/* 문제 카드는 PNG로 캡처돼 그대로 인쇄되므로 다크에서도 반드시 흰 종이여야 한다.
-   상위에서 색을 물려받아 글자가 흰색이 되는 사고를 막으려고 여기서 못박는다. */
+/* 문제 카드는 PNG로 캡처돼 그대로 인쇄되는 면이다. 주변 UI 색을 물려받아
+   종이가 어두워지거나 글자색이 바뀌는 일이 없도록 여기서 못박아 둔다. */
 .problem-surface {
   background: #ffffff;
   color: #202124;
