@@ -1,8 +1,6 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  // <html class="dark">로 다크모드를 켠다(기본값이 다크).
-  darkMode: "class",
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {

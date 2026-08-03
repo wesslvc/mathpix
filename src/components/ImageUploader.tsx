@@ -95,16 +95,16 @@ export default function ImageUploader({ onImagesSelected, onError }: Props) {
       tabIndex={0}
     >
       <div className="text-5xl">📷</div>
-      <p className="text-lg font-semibold text-ink dark:text-[#e8eaed]">
+      <p className="text-lg font-semibold text-ink">
         문제 이미지를 여기에 끌어다 놓거나 클릭해서 선택하세요
       </p>
-      <p className="text-sm text-slate-500 dark:text-[#9aa0a6]">
+      <p className="text-sm text-slate-500">
         여러 장을 한 번에 선택하거나, 캡처한 사진을{" "}
-        <kbd className="rounded border border-slate-300 dark:border-[#4a4d51] bg-slate-50 dark:bg-[#2a2b2e] px-1 text-xs">
+        <kbd className="rounded border border-slate-300 bg-slate-50 px-1 text-xs">
           Ctrl
         </kbd>
         +
-        <kbd className="rounded border border-slate-300 dark:border-[#4a4d51] bg-slate-50 dark:bg-[#2a2b2e] px-1 text-xs">
+        <kbd className="rounded border border-slate-300 bg-slate-50 px-1 text-xs">
           V
         </kbd>{" "}
         로 붙여넣어도 됩니다. 문제 영역은 자동으로 인식됩니다.

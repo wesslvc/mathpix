@@ -14,7 +14,7 @@ export default async function DashboardPage() {
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
         <Logo size={44} />
-        <p className="rounded-lg border border-amber-300 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Supabase 설정이 아직 완료되지 않아 로그인/저장 기능을 사용할 수
           없습니다. <code>NEXT_PUBLIC_SUPABASE_URL</code>,{" "}
           <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>를 설정해주세요.
@@ -31,9 +31,9 @@ export default async function DashboardPage() {
   if (!user) {
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 text-center">
-        <p className="text-sm text-slate-500 dark:text-[#9aa0a6]">
+        <p className="text-sm text-slate-500">
           로그인이 필요합니다.{" "}
-          <Link href="/login" className="text-blue-600 dark:text-blue-300 underline">
+          <Link href="/login" className="text-blue-600 underline">
             로그인 페이지로 이동
           </Link>
         </p>
@@ -54,7 +54,7 @@ export default async function DashboardPage() {
       <header className="flex items-start justify-between gap-4">
         <div>
           <Logo size={44} />
-          <p className="mt-2 text-sm text-slate-500 dark:text-[#9aa0a6]">
+          <p className="mt-2 text-sm text-slate-500">
             실모(출처)별로 오답을 모아두고, 나중에 한 번에 PDF로 인쇄하세요.
           </p>
         </div>
