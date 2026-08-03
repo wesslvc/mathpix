@@ -212,6 +212,17 @@ function restoreTables(html: string, tables: string[]): string {
 const CHOICE_MARKER_AT_START =
   /^\s*(?:[①-⑳]|\((\d{1,2})\)|(\d{1,2})\))\s*/;
 
+/**
+ * 보기 사이를 잇는 구분자 = 공백 두 칸.
+ *
+ * HTML은 연달아 있는 보통 공백을 하나로 합쳐버려서 "  "로는 두 칸이 되지 않는다.
+ * 그래서 "줄바꿈 안 되는 공백(NBSP) + 보통 공백" 순서로 넣는다 — NBSP가 앞 보기에
+ * 붙어 두 칸을 만들고, 뒤의 보통 공백에서 줄이 넘어갈 수 있어 보기가 화면을 넘칠 때
+ * 표지와 값이 갈라지지 않는다. (소스에 NBSP를 그대로 두면 눈에 안 보여 실수로
+ * 지워지기 쉬우므로 이스케이프로 적는다.)
+ */
+const CHOICE_SEPARATOR = "\u00A0 ";
+
 /** 이 줄이 객관식 보기로 시작하는가. */
 function isChoiceLine(line: string): boolean {
   return CHOICE_MARKER_AT_START.test(line);
@@ -247,8 +258,8 @@ function mergeChoiceLines(lines: string[]): string[] {
 
   const flush = () => {
     if (run.length === 0) return;
-    // 조각마다 앞뒤 공백을 떼고 하나의 공백으로만 잇는다.
-    out.push(run.map((l) => toCircledMarkers(l).trim()).join(" "));
+    // 조각마다 앞뒤 공백을 떼고 공백 두 칸(CHOICE_SEPARATOR)으로 잇는다.
+    out.push(run.map((l) => toCircledMarkers(l).trim()).join(CHOICE_SEPARATOR));
     run = [];
   };
 
