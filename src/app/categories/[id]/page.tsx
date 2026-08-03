@@ -8,6 +8,7 @@ import ProblemGallery, {
   type GalleryProblem,
 } from "@/components/ProblemGallery";
 import BillingStatus from "@/components/BillingStatus";
+import Logo from "@/components/Logo";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 
@@ -86,7 +87,7 @@ export default async function CategoryPage({
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <Link href="/" className="text-sm text-blue-600 underline">
+          <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline">
             ← 목록으로
           </Link>
           <h1 className="mt-1 text-2xl font-bold text-ink">

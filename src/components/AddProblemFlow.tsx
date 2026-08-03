@@ -121,11 +121,13 @@ export default function AddProblemFlow({
 
   async function handleSaveToCategory({
     pngDataUrl,
+    text,
     answer,
     answerType,
     boxOverride,
   }: {
     pngDataUrl: string;
+    text: string;
     answer: string;
     answerType: AnswerType;
     boxOverride: BoxOverride | undefined;
@@ -158,8 +160,9 @@ export default function AddProblemFlow({
       category_id: categoryId,
       user_id: user.id,
       image_path: path,
-      latex: result?.latex ?? null,
-      text_content: result?.text ?? null,
+      // 사용자가 결과 화면에서 손본 최종 본문을 저장한다(원본 인식값이 아니라).
+      latex: text || result?.latex || null,
+      text_content: text || result?.text || null,
       answer: answer || null,
       answer_type: answerType,
       // undefined면 "자동 감지에 맡김"이라 DB에도 null로 둔다.
@@ -187,7 +190,7 @@ export default function AddProblemFlow({
         <button
           type="button"
           onClick={() => setStage("upload")}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="g-btn g-btn-primary self-start"
         >
           + 오답 추가
         </button>

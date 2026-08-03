@@ -356,7 +356,7 @@ export default function ProblemGallery({ problems }: Props) {
                 type="button"
                 onClick={() => setEditing(null)}
                 disabled={isSaving}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                className="g-btn g-btn-outline"
               >
                 취소
               </button>
@@ -364,7 +364,7 @@ export default function ProblemGallery({ problems }: Props) {
                 type="button"
                 onClick={saveEdit}
                 disabled={isSaving}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                className="g-btn g-btn-primary"
               >
                 {isSaving ? "저장 중..." : "저장"}
               </button>
