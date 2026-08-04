@@ -55,6 +55,10 @@ const FONT_SIZES = [
 // 되므로 90%에서 멈춘다), 정말 오래 걸리면 안내 문구로 이유를 알려준다.
 const VECTORIZE_EXPECTED_SEC = 15;
 
+// 정답 입력이 멎고 이만큼 지나면 자동 저장한다. 너무 짧으면 아직 타는 중에
+// 저장되고, 너무 길면 자동 저장을 기다리다 답답하다.
+const AUTO_SAVE_SEC = 3;
+
 // 모델 선택 UI 문구. 실제 과금·한도는 서버(0010 마이그레이션의 RPC)가 정하고,
 // 여기 숫자는 quota 응답으로 채워 넣는다 — 하드코딩하면 서버와 어긋난다.
 const MODEL_LABELS: Record<DiagramModel, string> = {
@@ -186,6 +190,38 @@ export default function ResultStage({
     () => renderMathText(sourceText, boxOverride),
     [sourceText, boxOverride],
   );
+
+  // 정답을 적고 잠시 가만히 있으면 저장 버튼을 누르지 않아도 저장한다.
+  // 글자마다 저장하면 "12"를 치는 동안 "1"로 저장되므로 입력이 멎을 때까지 기다린다.
+  // 도형·박스를 더 만지려던 참이면 아래 안내에 남은 시간이 보이고, 취소할 수 있다.
+  const [autoSaveLeftSec, setAutoSaveLeftSec] = useState<number | null>(null);
+  const [autoSaveOff, setAutoSaveOff] = useState(false);
+
+  useEffect(() => {
+    if (!onSaveToCategory || autoSaveOff || saved || isSaving) return;
+    if (answer.trim() === "") {
+      setAutoSaveLeftSec(null);
+      return;
+    }
+
+    setAutoSaveLeftSec(AUTO_SAVE_SEC);
+    const tick = setInterval(() => {
+      setAutoSaveLeftSec((v) => (v === null ? null : Math.max(0, v - 1)));
+    }, 1000);
+    const timer = setTimeout(() => {
+      setAutoSaveLeftSec(null);
+      void handleSaveToCategory();
+    }, AUTO_SAVE_SEC * 1000);
+
+    // 정답을 더 고치면 타이머를 처음부터 다시 센다.
+    return () => {
+      clearInterval(tick);
+      clearTimeout(timer);
+    };
+    // handleSaveToCategory는 매 렌더 새로 만들어지므로 의존성에 넣지 않는다
+    // (넣으면 타이머가 렌더마다 초기화돼 영영 저장되지 않는다).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answer, answerType, autoSaveOff, saved, isSaving, onSaveToCategory]);
 
   // Mathpix가 텍스트로 옮길 수 없는 도형(원, 삼각형 등)을 감지하면 그 영역의
   // 좌표를 함께 알려준다. OCR로는 도형을 재구성할 수 없으니, 보낸 원본
@@ -682,10 +718,31 @@ export default function ResultStage({
             />
           </label>
           {!saved && (
-            <p className="text-[11px] text-slate-400">
-              정답을 입력하고 <kbd className="rounded border border-slate-300 bg-slate-50 px-1">Enter</kbd>
-              를 누르면 바로 저장돼요.
-            </p>
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              {autoSaveLeftSec !== null ? (
+                <>
+                  <span className="text-blue-700">
+                    {autoSaveLeftSec}초 후 자동으로 저장돼요.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAutoSaveOff(true)}
+                    className="rounded border border-slate-300 px-1.5 py-0.5 text-slate-600 hover:bg-slate-100"
+                  >
+                    자동 저장 끄기
+                  </button>
+                </>
+              ) : (
+                <span className="text-slate-400">
+                  정답을 입력하면 잠시 뒤 자동 저장돼요.{" "}
+                  <kbd className="rounded border border-slate-300 bg-slate-50 px-1">
+                    Enter
+                  </kbd>
+                  를 누르면 바로 저장됩니다.
+                  {autoSaveOff && " (자동 저장 꺼짐)"}
+                </span>
+              )}
+            </div>
           )}
           {answer.trim() !== "" && (
             <p className="text-[11px] text-slate-500">
