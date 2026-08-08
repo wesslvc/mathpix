@@ -227,17 +227,19 @@ revoke all on function public.diagram_quota() from public;
 grant execute on function public.diagram_quota() to authenticated;
 
 -- ---------------------------------------------------------------------------
--- 5) 내 계정을 무제한으로 만든다.
+-- 5) 운영자 계정을 무제한으로 만든다.
 --
---    아래 이메일을 본인 계정 이메일로 바꿔서 실행하세요.
+--    이 저장소는 공개이므로 실제 이메일은 여기에 적지 않는다.
+--    아래 자리표시자를 본인 계정 이메일로 바꿔서 대시보드 SQL Editor에서만
+--    실행하고, 파일에는 자리표시자인 채로 남겨둘 것.
 --    (auth.users는 대시보드 SQL Editor에서 조회할 수 있습니다.)
 --    되돌리려면 unlimited = false 로 다시 실행하면 됩니다.
 -- ---------------------------------------------------------------------------
-insert into public.entitlements (user_id, credits, active, unlimited)
-select id, 999999, true, true
-  from auth.users
- where email = 'wes1128slvc@gmail.com'
-on conflict (user_id) do update
-  set unlimited = true,
-      active = true,
-      updated_at = now();
+-- insert into public.entitlements (user_id, credits, active, unlimited)
+-- select id, 999999, true, true
+--   from auth.users
+--  where email = 'YOUR_EMAIL_HERE'
+-- on conflict (user_id) do update
+--   set unlimited = true,
+--       active = true,
+--       updated_at = now();
