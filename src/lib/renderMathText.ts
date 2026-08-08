@@ -213,15 +213,15 @@ const CHOICE_MARKER_AT_START =
   /^\s*(?:[①-⑳]|\((\d{1,2})\)|(\d{1,2})\))\s*/;
 
 /**
- * 보기 사이를 잇는 구분자 = 공백 두 칸.
- *
- * HTML은 연달아 있는 보통 공백을 하나로 합쳐버려서 "  "로는 두 칸이 되지 않는다.
- * 그래서 "줄바꿈 안 되는 공백(NBSP) + 보통 공백" 순서로 넣는다 — NBSP가 앞 보기에
- * 붙어 두 칸을 만들고, 뒤의 보통 공백에서 줄이 넘어갈 수 있어 보기가 화면을 넘칠 때
- * 표지와 값이 갈라지지 않는다. (소스에 NBSP를 그대로 두면 눈에 안 보여 실수로
- * 지워지기 쉬우므로 이스케이프로 적는다.)
+ * 합쳐진 보기 줄에서 각 보기를 나누는 자리(원숫자 표지 바로 앞).
+ * 보기 사이 간격은 글자가 아니라 CSS(.mmd-choice-gap)로 준다 — 공백 개수로
+ * 벌리면 글자 크기를 바꿀 때마다 간격이 어긋나고, 넓이를 조절하려면 매번
+ * 코드를 고쳐야 한다.
  */
-const CHOICE_SEPARATOR = "\u00A0 ";
+const CHOICE_SPLIT = /(?=[\u2460-\u2473])/;
+
+/** 원문에서 보기를 이어붙일 때 쓰는 구분자(화면 간격은 CSS가 정한다). */
+const CHOICE_SEPARATOR = " ";
 
 /** 이 줄이 객관식 보기로 시작하는가. */
 function isChoiceLine(line: string): boolean {
@@ -285,6 +285,24 @@ function renderLineContent(line: string, mathBlocks: string[]): string {
 }
 
 /**
+ * 보기 줄을 원숫자 표지마다 잘라 각각 렌더링하고, 사이에 빈 span을 끼워
+ * 넣는다. 간격을 CSS(.mmd-choice-gap)가 정하므로 글자 크기를 바꿔도 비율이
+ * 유지되고, 넓이를 조절할 때 코드가 아니라 스타일만 고치면 된다.
+ * (공백 문자로 벌리면 폰트마다 폭이 달라 문제집처럼 고르게 나오지 않는다.)
+ */
+function renderChoiceLine(line: string, mathBlocks: string[]): string {
+  const parts = line.split(CHOICE_SPLIT).filter((p) => p.trim() !== "");
+  if (parts.length <= 1) return renderLineContent(line, mathBlocks);
+  // 각 보기를 통째로 묶어 표지(⑤)와 값(12)이 서로 다른 줄로 갈라지지 않게 한다.
+  return parts
+    .map(
+      (p) =>
+        `<span class="mmd-choice">${renderLineContent(p.trim(), mathBlocks)}</span>`,
+    )
+    .join('<span class="mmd-choice-gap"></span>');
+}
+
+/**
  * 블록 안의 각 줄을 "이미 줄바꿈된" 단위로 보고 한 줄씩 렌더링한다.
  * 원본에 줄바꿈이 있던 자리에만 여백(.mmd-line)을 줘서 위아래 수식이 너무
  * 붙지 않게 하고, 한 줄 안의 띄어쓰기는 그대로 둔다(새 줄바꿈을 만들지 않음).
@@ -309,6 +327,8 @@ function renderLines(
         } else {
           inner = renderLineContent(line, mathBlocks);
         }
+      } else if (isChoiceLine(line)) {
+        inner = renderChoiceLine(line, mathBlocks);
       } else {
         inner = renderLineContent(line, mathBlocks);
       }
