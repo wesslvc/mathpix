@@ -249,6 +249,108 @@ export default function ResultStage({
     });
   }, [blocks]);
 
+  // ── 손으로 끌어 옮기기 ────────────────────────────────────────────────
+  // 미리보기의 그림을 그대로 잡아 끌면 좌우로 움직이고, 놓는 높이에 따라
+  // 어느 문단 사이로 들어갈지 정해진다.
+  //
+  // 끄는 동안에는 React state를 건드리지 않고 DOM 스타일만 직접 바꾼다.
+  // 본문은 dangerouslySetInnerHTML 한 덩어리라, state가 바뀌어 문자열이
+  // 달라지면 React가 innerHTML을 통째로 갈아치우고 — 그러면 지금 잡고 있는
+  // 그 요소가 사라져서 포인터 캡처가 끊기고 드래그가 중간에 죽는다.
+  // 최종 위치는 손을 뗄 때 한 번만 state에 반영한다.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const cardWrapRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    id: string;
+    el: HTMLElement;
+    startX: number;
+    startOffsetX: number;
+    slot: number;
+  } | null>(null);
+  /** 드래그 중 "여기로 들어갑니다" 선의 위치(px). null이면 드래그 중이 아니다. */
+  const [dropLineTop, setDropLineTop] = useState<number | null>(null);
+
+  /** 본문 문단 요소들(그림은 뺀다). 문서 순서가 곧 blocks 순서다. */
+  function blockElements(): HTMLElement[] {
+    const c = contentRef.current;
+    if (!c) return [];
+    return Array.from(c.children).filter(
+      (el): el is HTMLElement =>
+        el instanceof HTMLElement && !el.classList.contains("problem-figure"),
+    );
+  }
+
+  /** 화면 세로 좌표가 몇 번째 문단 사이인지. 문단의 중간선을 기준으로 가른다. */
+  function slotAtY(clientY: number): number {
+    const els = blockElements();
+    for (let i = 0; i < els.length; i++) {
+      const r = els[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return i;
+    }
+    return els.length;
+  }
+
+  function dropLineFor(slot: number): number | null {
+    const wrap = cardWrapRef.current;
+    const els = blockElements();
+    if (!wrap || els.length === 0) return null;
+    const wrapTop = wrap.getBoundingClientRect().top;
+    if (slot >= els.length) {
+      return els[els.length - 1].getBoundingClientRect().bottom - wrapTop;
+    }
+    return els[slot].getBoundingClientRect().top - wrapTop;
+  }
+
+  function handleFigurePointerDown(e: React.PointerEvent) {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-fig-id]");
+    const id = el?.dataset.figId;
+    if (!el || !id) return;
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    const slot = positionOf(id);
+    dragRef.current = {
+      id,
+      el,
+      startX: e.clientX,
+      startOffsetX: layoutOf(id).offsetX,
+      slot,
+    };
+    setDropLineTop(dropLineFor(slot));
+  }
+
+  function handleFigurePointerMove(e: React.PointerEvent) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    e.preventDefault();
+
+    // 좌우: 끈 만큼 그대로. 슬라이더와 같은 범위 안에 가둔다.
+    const dx = e.clientX - drag.startX;
+    const offsetX = Math.max(-300, Math.min(300, drag.startOffsetX + dx));
+    const scale = layoutOf(drag.id).scale;
+    drag.el.style.marginLeft = `calc(${(100 - scale) / 2}% + ${offsetX}px)`;
+
+    // 위아래: 놓을 자리를 정하고 안내선을 옮긴다.
+    drag.slot = slotAtY(e.clientY);
+    setDropLineTop(dropLineFor(drag.slot));
+  }
+
+  function handleFigurePointerUp(e: React.PointerEvent) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    dragRef.current = null;
+    setDropLineTop(null);
+    try {
+      drag.el.releasePointerCapture(e.pointerId);
+    } catch {
+      // 이미 풀렸으면 그만이다.
+    }
+
+    const dx = e.clientX - drag.startX;
+    const offsetX = Math.max(-300, Math.min(300, drag.startOffsetX + dx));
+    setLayout(drag.id, { ...layoutOf(drag.id), offsetX });
+    setFigurePos((prev) => ({ ...prev, [drag.id]: drag.slot }));
+  }
+
   /** 본문 문단 사이사이에 도형·자료를 끼워 넣은 최종 카드 HTML. */
   const cardHtml = useMemo(() => {
     const atSlot = (slot: number) =>
@@ -256,7 +358,7 @@ export default function ResultStage({
         .filter((f) => positionOf(f.id) === slot)
         .map(
           (f) =>
-            `<div class="problem-figure" style="${diagramStyleCss(
+            `<div class="problem-figure" data-fig-id="${f.id}" style="${diagramStyleCss(
               layoutOf(f.id),
             )}">${f.markup}</div>`,
         )
@@ -287,7 +389,13 @@ export default function ResultStage({
     const tick = setInterval(() => {
       setAutoSaveLeftSec((v) => (v === null ? null : Math.max(0, v - 1)));
     }, 1000);
-    const timer = setTimeout(() => {
+    // setTimeout이 아니라 setInterval인 이유: 그림을 끌고 있는 중이면 저장을
+    // 미뤄야 하는데(끄는 동안에는 DOM만 바꿔둔 상태라 지금 캡처하면 어중간한
+    // 위치가 이미지로 굳는다), 한 번만 재는 타이머로 건너뛰면 영영 저장되지
+    // 않는다. 손을 뗄 때까지 같은 간격으로 다시 확인한다.
+    const timer = setInterval(() => {
+      if (dragRef.current) return;
+      clearInterval(timer);
       setAutoSaveLeftSec(null);
       void handleSaveToCategory();
     }, AUTO_SAVE_SEC * 1000);
@@ -295,7 +403,7 @@ export default function ResultStage({
     // 정답을 더 고치면 타이머를 처음부터 다시 센다.
     return () => {
       clearInterval(tick);
-      clearTimeout(timer);
+      clearInterval(timer);
     };
     // handleSaveToCategory는 매 렌더 새로 만들어지므로 의존성에 넣지 않는다
     // (넣으면 타이머가 렌더마다 초기화돼 영영 저장되지 않는다).
@@ -484,20 +592,41 @@ export default function ResultStage({
       </div>
 
       <div className="overflow-x-auto">
+        {/* 드래그 안내선을 카드 위에 겹쳐 놓기 위한 껍데기. 안내선은 cardRef
+            바깥에 두어야 PNG로 캡처될 때 같이 찍히지 않는다. */}
         <div
-          ref={cardRef}
-          className="problem-surface rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
+          ref={cardWrapRef}
+          className="relative"
           style={{ width: PROBLEM_CARD_WIDTH }}
         >
-          {/* 본문과 도형·자료를 한 덩어리로 만들어 넣는다. React 요소로 따로
-              두면 도형을 문단 사이에 놓을 수 없고, 문단마다 감싸는 <div>가
-              생겨 ".mmd-paragraph:last-child" 같은 규칙이 어긋나 문단 간격이
-              무너진다. */}
           <div
-            className="font-serif leading-relaxed text-ink"
-            style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
-            dangerouslySetInnerHTML={{ __html: cardHtml }}
-          />
+            ref={cardRef}
+            className="problem-surface rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
+            style={{ width: PROBLEM_CARD_WIDTH }}
+          >
+            {/* 본문과 도형·자료를 한 덩어리로 만들어 넣는다. React 요소로 따로
+                두면 도형을 문단 사이에 놓을 수 없고, 문단마다 감싸는 <div>가
+                생겨 ".mmd-paragraph:last-child" 같은 규칙이 어긋나 문단 간격이
+                무너진다. */}
+            <div
+              ref={contentRef}
+              className="font-serif leading-relaxed text-ink"
+              style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
+              onPointerDown={handleFigurePointerDown}
+              onPointerMove={handleFigurePointerMove}
+              onPointerUp={handleFigurePointerUp}
+              onPointerCancel={handleFigurePointerUp}
+              dangerouslySetInnerHTML={{ __html: cardHtml }}
+            />
+          </div>
+
+          {/* 놓으면 여기로 들어간다는 안내선. */}
+          {dropLineTop !== null && (
+            <div
+              className="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded bg-blue-500"
+              style={{ top: dropLineTop }}
+            />
+          )}
         </div>
       </div>
 
@@ -565,6 +694,10 @@ export default function ResultStage({
         <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
           <p className="text-xs font-medium text-slate-500">
             {subject === "science" ? "자료 크기·위치" : "도형 크기·위치"}
+          </p>
+          <p className="text-[11px] text-slate-400">
+            위 미리보기에서 그림을 손가락(또는 마우스)으로 잡아 끌면 원하는 문단
+            사이로 옮길 수 있어요. 파란 선이 들어갈 자리입니다.
           </p>
           {(result.diagrams ?? [])
             .filter((d) => rasterFallbacks[d.id])

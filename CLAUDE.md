@@ -153,9 +153,24 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 도형에 붙는 클래스가 Tailwind 유틸리티가 아니라 `.problem-figure`(globals.css)인
 것도 같은 이유다. HTML 문자열에는 클래스명만 적을 수 있다.
 
-**드래그가 아니라 ▲▼ 버튼과 목록으로 고르게 했다.** 카드가 가로 스크롤
-영역 안에 있고 주 사용 환경이 휴대폰이라, 터치 드래그는 스크롤과 엉켜
-제대로 잡히지 않는다.
+**미리보기에서 그림을 손으로 끌어 옮긴다.** 처음엔 ▲▼ 버튼으로 만들었다가
+불편하다고 해서 드래그로 바꿨다. 조절 패널의 목록은 지금 어디에 놓였는지
+보여주는 표시 겸 보조 수단으로만 남겼다.
+
+구현에서 조심할 점 — **끄는 동안에는 React state를 건드리지 않는다.** 본문은
+`dangerouslySetInnerHTML` 한 덩어리라, state가 바뀌어 `cardHtml` 문자열이
+달라지면 React가 innerHTML을 통째로 갈아치우고 지금 잡고 있는 그 DOM 요소가
+사라진다. 그러면 포인터 캡처가 끊겨 드래그가 중간에 죽는다. 끄는 동안에는
+`drag.el.style.marginLeft`만 직접 바꾸고, 최종 위치는 손을 뗄 때 한 번만
+state에 반영한다. 안내선 위치는 state로 두어도 되는데, `cardHtml`의 의존성이
+아니라 문자열이 그대로여서 React가 DOM을 손대지 않기 때문이다.
+
+터치가 스크롤로 먹히지 않게 `.problem-figure`에 `touch-action: none`이 필요하다.
+안내선은 `cardRef` **바깥**(감싸는 relative 껍데기)에 둔다 — 안에 두면 PNG
+캡처에 파란 줄이 같이 찍힌다. 자동 저장도 드래그 중에는 미룬다(끄는 중에는
+DOM만 바뀐 상태라 지금 캡처하면 어중간한 위치가 이미지로 굳는다).
+
+실제 포인터 입력(Playwright, 마우스 + 모바일 터치)으로 15가지를 확인했다.
 
 ### 과목 모드 (수학 / 사과탐)
 
@@ -180,11 +195,28 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 건드리지 않는 게 원칙이다. 결과가 둘 다 SVG 문자열이라 문제 카드에 붙고
 저장되는 뒷단(`manualDiagramSvgs`)만 공유한다.
 
-- `src/lib/figureVector.ts` — OpenAI Chat Completions 호출. 이미지는 Gemini와
-  달리 `image_url`에 **data URL 접두어를 포함한 채로** 넣는다.
+- `src/lib/figureImageGen.ts` — OpenAI **이미지 편집** API(`/v1/images/edits`)
+  호출. multipart/form-data이고 Content-Type을 직접 지정하면 안 된다(fetch가
+  경계값까지 붙여준다).
 - `src/app/api/figure/route.ts` — 인증·과금·모델 폴백. `maxDuration = 60`.
 - `src/app/api/figure/models/route.ts` — **프로브 엔드포인트**(로그인 필요).
 - `src/components/FigurePanel.tsx` — UI 전체.
+
+**SVG가 아니라 이미지 생성을 쓴다.** 처음에는 비전 모델에게 SVG 마크업을
+뱉게 했는데(`figureVector.ts`, 지금은 삭제) 사용자가 실제로 써보고 품질이
+부족하다고 판단했다. 차이가 근본적이다 — SVG 방식은 모델이 그림을 "코드로
+설명"해야 해서 좌표를 하나하나 지어내야 하지만, 이미지 편집은 원본 이미지를
+그대로 입력으로 받아 정리한 그림을 낸다. 되돌리려면 git 이력에서
+`figureVector.ts`를 찾을 것.
+
+대신 결과가 래스터라 확대하면 흐려지고, **이미지 생성 모델은 한글 라벨을
+잘못 쓰는 경우가 있다.** 글자가 중요한 자료는 "원본 그대로 붙이기"가 여전히
+가장 정확하다. 완성된 그림은 원본 크롭과 똑같이 `rasterToSvg`로 감싸서
+크기·위치 조절과 PNG 캡처가 두 경로에서 같은 방식으로 돌게 한다.
+
+이미지 생성은 느려서 **60초 제한에 걸릴 수 있다.** 그래서 `PARAM_VARIANTS`의
+첫 조합이 `quality: "medium"`이다. 파라미터 이름·값도 모델마다 다르므로
+(size / quality / input_fidelity) 400이 나면 다음 조합으로 내려간다.
 
 **비용 설계 (이게 이 기능의 핵심이다)**
 
@@ -192,8 +224,7 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
    "AI로 다시 그리기(사진인식권 5장)" 중 사용자가 고른다. 무료 쪽이 기본이자
    앞에 있다 — 사진·현미경 사진·지도는 다시 그리면 정보가 사라지므로 원본이
    정답이고, 사과탐에는 그런 자료가 아주 많다.
-2. **입력 축소** — 긴 변 768px(`MODEL_INPUT_DIM`)로 줄여 보낸다. 라벨 글자를
-   읽어야 해서 `detail: "high"`는 유지하되 이미지 자체를 작게 만든다.
+2. **입력 축소** — 긴 변 768px(`MODEL_INPUT_DIM`)로 줄여 보낸다.
 3. **캐시** — 같은 자료는 한 번만 보낸다(`figureCache.ts`, sessionStorage).
    사과탐은 자료 하나에 문항이 2~3개 딸린 세트가 흔해서 실제로 자주 걸린다.
 4. **출력 상한** — `MAX_OUTPUT_TOKENS = 8000`. 비용의 대부분이 출력 토큰이다.
@@ -206,20 +237,14 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 임계값을 잡아도 정상 자료를 막거나 사진을 통과시킨다. 다시 시도하려면
 `figureImage.ts` 주석의 수치부터 읽을 것.
 
-**모델 이름은 여기서도 추측하지 말 것.** `figureVector.ts`의
-`DEFAULT_MODEL_IDS` 맨 앞은 `gpt-5.6-luna`(사용자 지정)인데 이건 `/v1/models`
-목록에만 있고 **실제 호출로 검증되지 않았다**. 그 아래 6종
-(`gpt-5-mini`, `gpt-4.1-mini`, `gpt-4o-mini`, `gpt-5`, `gpt-4.1`, `gpt-4o`)은
-2026-08 프로브에서 200을 확인한 것들이라 폴백으로 남겨뒀다. 로그인 후
+**모델 이름은 여기서도 추측하지 말 것.** `figureImageGen.ts`의
+`DEFAULT_IMAGE_MODEL_IDS`는 계정의 `/v1/models` 목록에서 가져왔을 뿐
+**실제 호출로 검증되지 않았다.** `/api/figure/models`가 후보마다 8×8 PNG로
+진짜 편집 요청을 보내보고 결과를 알려준다. 로그인 후
 `/api/figure/models`를 열면 ① `/v1/models` 목록과 ② 후보마다 1×1 PNG를
 **실제로 보내본** 프로브 결과가 같이 나온다. `usable`에 나온 이름을
-`OPENAI_FIGURE_MODELS` 환경변수에 쉼표로 넣으면 **재배포 없이** 적용된다.
+`OPENAI_FIGURE_IMAGE_MODELS` 환경변수에 쉼표로 넣으면 **재배포 없이** 적용된다.
 호출 중 404/403/429가 나면 그 자리에서 다음 후보로 자동으로 내려간다.
-
-파라미터 이름도 세대마다 다르다(`max_completion_tokens` vs `max_tokens`,
-`temperature` 미지원 모델, `reasoning_effort`). 모르는 걸 보내면 400이 나므로
-`PARAM_VARIANTS`를 순서대로 시도하고, 통한 조합은 모델별로 기억해 다음
-요청부터 바로 쓴다(Gemini의 `THINKING_CONFIGS`와 같은 패턴).
 
 과금은 **새 마이그레이션 없이** 기존 `consume_recognition_credit(p_amount)`를
 쓴다(사진인식권). 차감은 요청당 딱 한 번이고 — 모델을 갈아타는 건 우리
