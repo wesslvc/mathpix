@@ -114,8 +114,11 @@ const CONDITION_MARKER = /^\s*\([가나다라마바사아자차카타파하]\)\s
 const BOGI_HEADER = /^\s*[<〈[]\s*보\s*기\s*[>〉\]]\s*$/;
 
 // "ㄱ.", "ㄴ)", "ㄷ," 처럼 자음 하나로 시작하는 보기 항목 줄.
-// 자음과 뒤에 붙는 문장부호를 따로 잡는다 — 자음만 키워야 하기 때문이다.
-const BOGI_ITEM = /^\s*([ㄱ-ㅎ])\s*([.,)])/;
+//
+// 한때 표지를 span으로 감싸 1.3배로 키웠다(낱자는 나눔명조에서 음절보다 작게
+// 그려진다). 사용자가 그냥 1배가 낫다고 해서 되돌렸다 — 표지는 본문과 같은
+// 크기로 그린다. 다시 시도할 거면 globals.css 이력의 .mmd-bogi-marker 참고.
+const BOGI_ITEM = /^\s*[ㄱ-ㅎ]\s*[.,)]/;
 
 /**
  * Mathpix가 보기 표지를 "조합용 자모"(U+1100~, ᄀᄂᄃ)로 주는 경우가 있다.
@@ -370,17 +373,6 @@ function renderLines(
         }
       } else if (isChoiceLine(line)) {
         inner = renderChoiceLine(line, mathBlocks);
-      } else if (BOGI_ITEM.test(line)) {
-        // 보기 표지(ㄱ, ㄴ, ㄷ)는 낱자 코드라 나눔명조에서 본문 글자보다
-        // 작고 가늘게 그려진다(잉크 높이가 음절의 0.7배). 표지만 따로 감싸
-        // CSS로 크기를 맞춘다.
-        const m = line.match(BOGI_ITEM)!;
-        const rest = line.slice(m[0].length).replace(/^\s+/, "");
-        // 자음만 키운다. 마침표까지 같이 키우면 점이 유난히 굵고 낮게 앉아
-        // 오히려 더 어색해진다.
-        inner =
-          `<span class="mmd-bogi-marker">${escapeHtml(m[1])}</span>${escapeHtml(m[2])} ` +
-          renderLineContent(rest, mathBlocks);
       } else {
         inner = renderLineContent(line, mathBlocks);
       }

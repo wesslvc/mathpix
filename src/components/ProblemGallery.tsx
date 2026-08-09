@@ -8,6 +8,7 @@ import { renderMathText, type BoxOverride } from "@/lib/renderMathText";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import BoxRangeEditor from "./BoxRangeEditor";
 import LatexEditor from "./LatexEditor";
+import ScaledCard from "./ScaledCard";
 import {
   ANSWER_TYPE_LABEL,
   formatAnswer,
@@ -336,15 +337,19 @@ export default function ProblemGallery({ problems }: Props) {
                 <p className="mb-1 text-xs font-medium text-slate-500">
                   미리보기 (이 모습 그대로 저장됩니다)
                 </p>
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                  <div
-                    ref={previewRef}
-                    className="problem-surface bg-white p-8 font-serif leading-relaxed text-ink"
-                    style={{ fontSize: 24, width: PROBLEM_CARD_WIDTH }}
-                    dangerouslySetInnerHTML={{
-                      __html: renderMathText(editText, editBox),
-                    }}
-                  />
+                {/* 휴대폰에서 가로로 밀지 않고 한눈에 보이도록 축소한다.
+                    카드 너비는 고정이라 저장되는 결과는 달라지지 않는다. */}
+                <div className="rounded-lg border border-slate-200">
+                  <ScaledCard width={PROBLEM_CARD_WIDTH}>
+                    <div
+                      ref={previewRef}
+                      className="problem-surface bg-white p-8 font-serif leading-relaxed text-ink"
+                      style={{ fontSize: 24, width: PROBLEM_CARD_WIDTH }}
+                      dangerouslySetInnerHTML={{
+                        __html: renderMathText(editText, editBox),
+                      }}
+                    />
+                  </ScaledCard>
                 </div>
               </div>
             </div>

@@ -53,6 +53,79 @@ export async function prepareFigureForModel(dataUrl: string): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 
+/** 이 밝기 이상이면 "빈 여백"으로 본다(0~255). */
+const BLANK_LUMINANCE = 244;
+
+/**
+ * 그림 둘레의 빈 여백을 잘라낸다.
+ *
+ * 이미지 생성 모델은 요청한 자료가 가로로 길든 세로로 길든 자기 비율(대개
+ * 정사각형)에 맞춰 그려서, 실제 그림 둘레에 흰 여백을 잔뜩 붙여 돌려준다.
+ * 그대로 문제에 끼우면 그림보다 여백이 더 커져서 문단 사이가 갑자기 휑하게
+ * 벌어진다. 내용이 있는 부분만 남기고 잘라낸다.
+ *
+ * 자를 게 없거나(이미 꽉 찬 그림) 거의 다 비어 보이면 원본을 그대로 돌려준다.
+ */
+export async function trimBlankBorder(dataUrl: string): Promise<string> {
+  const img = await loadImage(dataUrl);
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (w === 0 || h === 0) return dataUrl;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return dataUrl;
+  // 배경을 흰색으로 깔아 투명한 여백도 빈 곳으로 취급되게 한다.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0);
+
+  const { data } = ctx.getImageData(0, 0, w, h);
+  let top = -1;
+  let bottom = -1;
+  let left = w;
+  let right = -1;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (lum < BLANK_LUMINANCE) {
+        if (top === -1) top = y;
+        bottom = y;
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+    }
+  }
+
+  if (top === -1 || right < left) return dataUrl; // 전부 비어 있다
+
+  // 잘라낸 뒤 숨 쉴 틈을 조금 남긴다(선이 테두리에 딱 붙으면 답답하다).
+  const pad = Math.round(Math.min(w, h) * 0.02);
+  const x0 = Math.max(0, left - pad);
+  const y0 = Math.max(0, top - pad);
+  const x1 = Math.min(w, right + 1 + pad);
+  const y1 = Math.min(h, bottom + 1 + pad);
+  const cw = x1 - x0;
+  const ch = y1 - y0;
+
+  // 거의 안 잘리면 굳이 다시 인코딩하지 않는다.
+  if (cw >= w * 0.98 && ch >= h * 0.98) return dataUrl;
+
+  const out = document.createElement("canvas");
+  out.width = cw;
+  out.height = ch;
+  const octx = out.getContext("2d");
+  if (!octx) return dataUrl;
+  octx.fillStyle = "#ffffff";
+  octx.fillRect(0, 0, cw, ch);
+  octx.drawImage(canvas, x0, y0, cw, ch, 0, 0, cw, ch);
+  return out.toDataURL("image/png");
+}
+
 /**
  * 오려낸 원본 이미지를 SVG로 감싼다.
  *
