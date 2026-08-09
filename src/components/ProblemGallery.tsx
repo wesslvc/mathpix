@@ -4,7 +4,13 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toPng } from "html-to-image";
 import { createClient } from "@/lib/supabase/client";
-import { renderMathText, type BoxOverride } from "@/lib/renderMathText";
+import {
+  renderMathText,
+  toBoxRanges,
+  type BoxOverride,
+} from "@/lib/renderMathText";
+import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
+import FontSizeControl from "./FontSizeControl";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import BoxRangeEditor from "./BoxRangeEditor";
 import TextEditTabs from "./TextEditTabs";
@@ -25,6 +31,8 @@ export type GalleryProblem = {
   answer: string;
   answerType: AnswerType;
   boxRange: BoxOverride | null;
+  /** 저장된 글자 크기(pt). */
+  fontPt: number;
 };
 
 /** 같은 폴더 안에 새 파일명을 만든다. (덮어쓰기 대신 새 오브젝트로 저장) */
@@ -67,6 +75,7 @@ export default function ProblemGallery({ problems }: Props) {
   const [editAnswerType, setEditAnswerType] = useState<AnswerType>("choice");
   // undefined = 자동 감지에 맡김. 그 외는 사용자가 직접 정한 범위.
   const [editBox, setEditBox] = useState<BoxOverride | undefined>(undefined);
+  const [editFontPt, setEditFontPt] = useState(DEFAULT_FONT_PT);
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -119,6 +128,9 @@ export default function ProblemGallery({ problems }: Props) {
     setEditAnswerType(problem.answerType);
     // DB에 null이면 저장할 때 자동 감지에 맡겼던 것이다.
     setEditBox(problem.boxRange ?? undefined);
+    // 저장할 때의 크기로 연다. 예전에는 24px로 고정돼 있어서 수정만 하면
+    // 글씨가 저 혼자 커졌다.
+    setEditFontPt(problem.fontPt);
     setEditError(null);
   }
 
@@ -149,7 +161,7 @@ export default function ProblemGallery({ problems }: Props) {
           latex: editText,
           answer: editAnswer.trim() || null,
           answer_type: editAnswerType,
-          box_range: editBox ?? null,
+          box_range: { ranges: toBoxRanges(editBox), fontPt: editFontPt },
         })
         .eq("id", editing.id);
       if (dbErr) {
@@ -334,9 +346,12 @@ export default function ProblemGallery({ problems }: Props) {
               </div>
 
               <div>
-                <p className="mb-1 text-xs font-medium text-slate-500">
-                  미리보기 (이 모습 그대로 저장됩니다)
-                </p>
+                <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-slate-500">
+                    미리보기 (이 모습 그대로 저장됩니다)
+                  </p>
+                  <FontSizeControl value={editFontPt} onChange={setEditFontPt} />
+                </div>
                 {/* 휴대폰에서 가로로 밀지 않고 한눈에 보이도록 축소한다.
                     카드 너비는 고정이라 저장되는 결과는 달라지지 않는다. */}
                 <div className="rounded-lg border border-slate-200">
@@ -344,7 +359,10 @@ export default function ProblemGallery({ problems }: Props) {
                     <div
                       ref={previewRef}
                       className="problem-surface bg-white p-8 font-serif leading-relaxed text-ink"
-                      style={{ fontSize: 24, width: PROBLEM_CARD_WIDTH }}
+                      style={{
+                        fontSize: ptToPx(editFontPt),
+                        width: PROBLEM_CARD_WIDTH,
+                      }}
                       dangerouslySetInnerHTML={{
                         __html: renderMathText(editText, editBox),
                       }}

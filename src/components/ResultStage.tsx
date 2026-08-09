@@ -5,6 +5,7 @@ import { toPng } from "html-to-image";
 import {
   blockToHtml,
   renderMathTextWithInfo,
+  toBoxRanges,
   type BoxOverride,
 } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
@@ -33,6 +34,8 @@ import DiagramAdjuster, {
 } from "./DiagramAdjuster";
 import type { AnswerType } from "@/lib/answer";
 import AnswerInput from "./AnswerInput";
+import FontSizeControl from "./FontSizeControl";
+import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 
 type Props = {
   result: RecognizeResponse;
@@ -74,12 +77,6 @@ type ManualFigure = {
   svg: string;
 };
 
-const FONT_SIZES = [
-  { label: "보통", px: 20 },
-  { label: "크게", px: 24 },
-  { label: "아주 크게", px: 30 },
-] as const;
-
 // 정답 입력이 멎고 이만큼 지나면 자동 저장한다. 너무 짧으면 아직 타는 중에
 // 저장되고, 너무 길면 자동 저장을 기다리다 답답하다.
 const AUTO_SAVE_SEC = 1;
@@ -95,7 +92,7 @@ export default function ResultStage({
   sourceImage,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const [fontSizeIdx, setFontSizeIdx] = useState(0);
+  const [fontPt, setFontPt] = useState(DEFAULT_FONT_PT);
   const [isExporting, setIsExporting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [textCopied, setTextCopied] = useState(false);
@@ -580,7 +577,7 @@ export default function ResultStage({
       spec: {
         text: sourceText,
         boxOverride,
-        fontSizePx: FONT_SIZES[fontSizeIdx].px,
+        fontSizePx: ptToPx(fontPt),
         figures: cardFigures,
       },
     });
@@ -590,7 +587,7 @@ export default function ResultStage({
     savedId,
     sourceText,
     boxOverride,
-    fontSizeIdx,
+    fontPt,
     cardFigures,
   ]);
 
@@ -609,7 +606,7 @@ export default function ResultStage({
     manualDiagramSvgs,
     layouts,
     figurePos,
-    fontSizeIdx,
+    fontPt,
   ]);
 
   async function handleSaveToCategory() {
@@ -630,7 +627,9 @@ export default function ResultStage({
         text: sourceText,
         answer: answer.trim(),
         answerType,
-        boxOverride,
+        // 박스 범위와 글자 크기를 한 값에 담아 저장한다(자세한 이유는
+        // src/lib/fontSize.ts 주석). ranges가 null이면 박스는 자동 감지.
+        boxOverride: { ranges: toBoxRanges(boxOverride), fontPt },
         problemId: savedId,
       });
       setSavedId(id);
@@ -669,22 +668,7 @@ export default function ResultStage({
 
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-ink">인식 결과</h2>
-        <div className="flex items-center gap-1 rounded-lg border border-slate-300 p-1">
-          {FONT_SIZES.map((f, idx) => (
-            <button
-              key={f.label}
-              type="button"
-              onClick={() => setFontSizeIdx(idx)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-                idx === fontSizeIdx
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-600 hover:bg-slate-100"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+        <FontSizeControl value={fontPt} onChange={setFontPt} />
       </div>
 
       {/* 휴대폰에서도 가로로 밀지 않고 한눈에 보이도록 통째로 축소한다.
@@ -709,7 +693,7 @@ export default function ResultStage({
             <div
               ref={contentRef}
               className="font-serif leading-relaxed text-ink"
-              style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
+              style={{ fontSize: ptToPx(fontPt) }}
               onPointerDown={handleFigurePointerDown}
               onPointerMove={handleFigurePointerMove}
               onPointerUp={handleFigurePointerUp}

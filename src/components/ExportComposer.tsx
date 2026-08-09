@@ -29,6 +29,71 @@ const MARGIN_BOTTOM = 34;
 const COLUMN_GAP = 16;
 const LABEL_GAP = 10;
 const COLUMN_WIDTH = PAGE_WIDTH / 2 - COLUMN_GAP - MARGIN_X;
+/** 슬롯 사이 세로 간격(한 페이지에 여러 문제를 넣을 때). */
+const ROW_GAP = 18;
+
+/**
+ * 한 페이지에 문제를 몇 개 넣을지.
+ *
+ * 원래는 무조건 1개였다(왼쪽에 문제, 오른쪽은 풀이 공간). 탐구처럼 문제가
+ * 짧은 과목에서는 종이가 너무 남아서 선택할 수 있게 했다.
+ *   1개 — 왼쪽에 문제, 오른쪽은 통째로 풀이 공간 (기존 동작)
+ *   2개 — 왼쪽에 위아래로 두 문제, 오른쪽은 그대로 풀이 공간
+ *   4개 — 양쪽 2단씩. 풀이 공간이 없어 모아보기·복습용
+ */
+const PER_PAGE_OPTIONS = [1, 2, 4] as const;
+type PerPage = (typeof PER_PAGE_OPTIONS)[number];
+
+const PER_PAGE_LABEL: Record<PerPage, string> = {
+  1: "1개 (풀이 공간 넓게)",
+  2: "2개 (오른쪽 풀이 공간)",
+  4: "4개 (모아보기)",
+};
+
+type Slot = { x: number; top: number; width: number; height: number };
+
+/**
+ * 이 페이지에서 문제를 놓을 자리들. top은 위쪽 y좌표(PDF는 아래가 0이라
+ * 아래로 내려갈수록 값이 작아진다).
+ */
+function slotsFor(perPage: PerPage, contentTop: number): Slot[] {
+  const usableHeight = contentTop - MARGIN_BOTTOM;
+  const rightX = PAGE_WIDTH / 2 + COLUMN_GAP;
+
+  if (perPage === 1) {
+    return [
+      { x: MARGIN_X, top: contentTop, width: COLUMN_WIDTH, height: usableHeight },
+    ];
+  }
+  const rowHeight = (usableHeight - ROW_GAP) / 2;
+  if (perPage === 2) {
+    return [
+      { x: MARGIN_X, top: contentTop, width: COLUMN_WIDTH, height: rowHeight },
+      {
+        x: MARGIN_X,
+        top: contentTop - rowHeight - ROW_GAP,
+        width: COLUMN_WIDTH,
+        height: rowHeight,
+      },
+    ];
+  }
+  return [
+    { x: MARGIN_X, top: contentTop, width: COLUMN_WIDTH, height: rowHeight },
+    { x: rightX, top: contentTop, width: COLUMN_WIDTH, height: rowHeight },
+    {
+      x: MARGIN_X,
+      top: contentTop - rowHeight - ROW_GAP,
+      width: COLUMN_WIDTH,
+      height: rowHeight,
+    },
+    {
+      x: rightX,
+      top: contentTop - rowHeight - ROW_GAP,
+      width: COLUMN_WIDTH,
+      height: rowHeight,
+    },
+  ];
+}
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -175,6 +240,7 @@ export default function ExportComposer({
   const [order, setOrder] = useState<ComposerProblem[]>(problems);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [perPage, setPerPage] = useState<PerPage>(1);
 
   function move(index: number, dir: -1 | 1) {
     const j = index + dir;
@@ -245,6 +311,12 @@ export default function ExportComposer({
         }),
       );
 
+      // 페이지와 슬롯을 직접 굴린다. 슬롯이 차면 새 페이지를 만든다.
+      let page: ReturnType<typeof pdfDoc.addPage> | null = null;
+      let slots: Slot[] = [];
+      let slotIndex = 0;
+      let isFirstPage = true;
+
       for (let i = 0; i < order.length; i++) {
         const problem = order[i];
         const bytes = fetched[i];
@@ -260,42 +332,50 @@ export default function ExportComposer({
           continue;
         }
 
-        const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-        const isFirst = i === 0;
+        if (page === null || slotIndex >= slots.length) {
+          page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+          let contentTop = PAGE_HEIGHT - MARGIN_TOP;
 
-        // 첫 페이지 상단에 제목 + 시행일
-        let contentTop = PAGE_HEIGHT - MARGIN_TOP;
-        if (isFirst) {
-          const tImg = await pdfDoc.embedPng(
-            await (await fetch(titleImg.dataUrl)).arrayBuffer(),
-          );
-          page.drawImage(tImg, {
-            x: (PAGE_WIDTH - titleImg.width) / 2,
-            y: contentTop - titleImg.height,
-            width: titleImg.width,
-            height: titleImg.height,
-          });
-          contentTop -= titleImg.height + 6;
+          // 첫 페이지 상단에 제목 + 시행일
+          if (isFirstPage) {
+            const tImg = await pdfDoc.embedPng(
+              await (await fetch(titleImg.dataUrl)).arrayBuffer(),
+            );
+            page.drawImage(tImg, {
+              x: (PAGE_WIDTH - titleImg.width) / 2,
+              y: contentTop - titleImg.height,
+              width: titleImg.width,
+              height: titleImg.height,
+            });
+            contentTop -= titleImg.height + 6;
 
-          const dImg = await pdfDoc.embedPng(
-            await (await fetch(dateImg.dataUrl)).arrayBuffer(),
-          );
-          page.drawImage(dImg, {
-            x: (PAGE_WIDTH - dateImg.width) / 2,
-            y: contentTop - dateImg.height,
-            width: dateImg.width,
-            height: dateImg.height,
+            const dImg = await pdfDoc.embedPng(
+              await (await fetch(dateImg.dataUrl)).arrayBuffer(),
+            );
+            page.drawImage(dImg, {
+              x: (PAGE_WIDTH - dateImg.width) / 2,
+              y: contentTop - dateImg.height,
+              width: dateImg.width,
+              height: dateImg.height,
+            });
+            contentTop -= dateImg.height + 18;
+            isFirstPage = false;
+          }
+
+          // 가운데 세로 구분선. 4개씩 넣을 때는 오른쪽도 문제 자리라
+          // 단 사이 구분선 역할을 그대로 한다.
+          page.drawLine({
+            start: { x: PAGE_WIDTH / 2, y: MARGIN_BOTTOM },
+            end: { x: PAGE_WIDTH / 2, y: contentTop },
+            thickness: 0.7,
+            color: rgb(0.78, 0.78, 0.78),
           });
-          contentTop -= dateImg.height + 18;
+
+          slots = slotsFor(perPage, contentTop);
+          slotIndex = 0;
         }
 
-        // 가운데 세로 구분선
-        page.drawLine({
-          start: { x: PAGE_WIDTH / 2, y: MARGIN_BOTTOM },
-          end: { x: PAGE_WIDTH / 2, y: contentTop },
-          thickness: 0.7,
-          color: rgb(0.78, 0.78, 0.78),
-        });
+        const slot = slots[slotIndex++];
 
         // 문제 라벨 (예: "강기원모의고사2회 22번")
         const label = renderCanvasText(labelFor(problem, i), {
@@ -307,23 +387,23 @@ export default function ExportComposer({
           await (await fetch(label.dataUrl)).arrayBuffer(),
         );
         page.drawImage(labelImg, {
-          x: MARGIN_X,
-          y: contentTop - label.height,
+          x: slot.x,
+          y: slot.top - label.height,
           width: label.width,
           height: label.height,
         });
 
-        // 문제 이미지: 라벨 아래, 왼쪽 컬럼. 저장 이미지는 2배 해상도라 0.5가 자연 크기.
-        const imgTop = contentTop - label.height - LABEL_GAP;
-        const maxImgHeight = imgTop - MARGIN_BOTTOM;
+        // 문제 이미지: 라벨 아래. 저장 이미지는 2배 해상도라 0.5가 자연 크기.
+        const imgTop = slot.top - label.height - LABEL_GAP;
+        const maxImgHeight = imgTop - (slot.top - slot.height);
         const scale = Math.min(
-          COLUMN_WIDTH / image.width,
+          slot.width / image.width,
           maxImgHeight / image.height,
           0.5,
         );
         const drawWidth = image.width * scale;
         const drawHeight = image.height * scale;
-        const imgX = MARGIN_X;
+        const imgX = slot.x;
         const imgY = imgTop - drawHeight;
         page.drawImage(image, {
           x: imgX,
@@ -461,6 +541,30 @@ export default function ExportComposer({
             </li>
           ))}
         </ol>
+      </div>
+
+      {/* 한 페이지에 몇 문제를 넣을지. 탐구처럼 문제가 짧으면 1개는 종이가
+          너무 남는다. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-slate-700">
+          페이지당 문제 수
+        </span>
+        <div className="flex gap-1">
+          {PER_PAGE_OPTIONS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setPerPage(n)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                perPage === n
+                  ? "border-blue-600 bg-blue-50 text-blue-700"
+                  : "border-slate-300 text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              {PER_PAGE_LABEL[n]}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
