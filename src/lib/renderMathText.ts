@@ -114,7 +114,40 @@ const CONDITION_MARKER = /^\s*\([가나다라마바사아자차카타파하]\)\s
 const BOGI_HEADER = /^\s*[<〈[]\s*보\s*기\s*[>〉\]]\s*$/;
 
 // "ㄱ.", "ㄴ)", "ㄷ," 처럼 자음 하나로 시작하는 보기 항목 줄.
-const BOGI_ITEM = /^\s*[ㄱ-ㅎ]\s*[.,)]/;
+// 자음과 뒤에 붙는 문장부호를 따로 잡는다 — 자음만 키워야 하기 때문이다.
+const BOGI_ITEM = /^\s*([ㄱ-ㅎ])\s*([.,)])/;
+
+/**
+ * Mathpix가 보기 표지를 "조합용 자모"(U+1100~, ᄀᄂᄃ)로 주는 경우가 있다.
+ * 이건 음절을 조립할 때 쓰는 코드라 홀로 쓰면 위첨자처럼 아주 작게 그려져
+ * 눈에 띄게 깨져 보이고, 위의 BOGI_ITEM(U+3131~)에도 걸리지 않아 박스 감지
+ * 자체가 안 된다. 겉보기가 같은 "호환용 자모"(U+3131~)로 바꿔 둔다.
+ *
+ * 유니코드 정규화(NFKC)로는 안 된다 — 표준이 정한 방향이 반대라서
+ * ㄱ(3131) → ᄀ(1100)으로 가버린다. 그래서 표를 직접 들고 있는다.
+ * 두 문자열은 같은 순서의 초성 19자다.
+ */
+const CHOSEONG_JAMO = "ᄀᄁᄂᄃᄄᄅᄆᄇᄈᄉᄊᄋᄌᄍᄎᄏᄐᄑᄒ";
+const COMPAT_JAMO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
+
+function normalizeJamo(input: string): string {
+  return input.replace(/[ᄀ-ᄒ]/g, (ch) => {
+    const i = CHOSEONG_JAMO.indexOf(ch);
+    return i === -1 ? ch : COMPAT_JAMO[i];
+  });
+}
+
+/**
+ * 보기 표지("ㄷ.")의 길이. 표지가 아니면 0.
+ *
+ * 표지에 붙은 마침표는 문장의 끝이 아니다. 이걸 구분하지 않으면
+ * "ㄷ. 교점은 두 개이다."에서 첫 마침표(표지의 것)를 문장 끝으로 보고
+ * 박스를 거기서 닫아, 표지만 박스에 남고 정작 내용이 박스 밖으로 빠진다.
+ */
+function markerPrefixLength(line: string): number {
+  const m = line.match(BOGI_ITEM);
+  return m ? m[0].length : 0;
+}
 
 // 한글/CJK 문자(수식이 아니라 설명 텍스트로 간주).
 const CJK_PATTERN = /[　-〿㐀-鿿가-힯＀-￯]/;
@@ -337,6 +370,17 @@ function renderLines(
         }
       } else if (isChoiceLine(line)) {
         inner = renderChoiceLine(line, mathBlocks);
+      } else if (BOGI_ITEM.test(line)) {
+        // 보기 표지(ㄱ, ㄴ, ㄷ)는 낱자 코드라 나눔명조에서 본문 글자보다
+        // 작고 가늘게 그려진다(잉크 높이가 음절의 0.7배). 표지만 따로 감싸
+        // CSS로 크기를 맞춘다.
+        const m = line.match(BOGI_ITEM)!;
+        const rest = line.slice(m[0].length).replace(/^\s+/, "");
+        // 자음만 키운다. 마침표까지 같이 키우면 점이 유난히 굵고 낮게 앉아
+        // 오히려 더 어색해진다.
+        inner =
+          `<span class="mmd-bogi-marker">${escapeHtml(m[1])}</span>${escapeHtml(m[2])} ` +
+          renderLineContent(rest, mathBlocks);
       } else {
         inner = renderLineContent(line, mathBlocks);
       }
@@ -391,11 +435,13 @@ const QUESTION_OR_CHOICE_LINE = /[?？]|^\s*(?:[①②③④⑤⑥⑦⑧⑨⑩]|
  * 마침표가 없으면(원본에 마침표가 없는 경우) 줄 전체를 그대로 박스에 둔다.
  */
 function splitAtSentenceEnd(line: string): { head: string; rest: string | null } {
-  const match = line.match(SENTENCE_END);
+  // 보기 표지("ㄷ.")의 마침표는 건너뛰고 그 뒤에서 문장 끝을 찾는다.
+  const from = markerPrefixLength(line);
+  const match = line.slice(from).match(SENTENCE_END);
   if (!match || match.index === undefined) {
     return { head: line, rest: null };
   }
-  const cut = match.index + 1;
+  const cut = from + match.index + 1;
   const head = line.slice(0, cut);
   const rest = line.slice(cut).trim();
   return { head, rest: rest.length > 0 ? rest : null };
@@ -409,7 +455,9 @@ function splitAtSentenceEnd(line: string): { head: string; rest: string | null }
  * 복원한(플레이스홀더를 실제 수식으로 되돌린) 내용까지 확인한다.
  */
 function lineHasSentenceEnd(line: string, mathBlocks: string[]): boolean {
-  return SENTENCE_END.test(restoreDisplayMath(line, mathBlocks));
+  const restored = restoreDisplayMath(line, mathBlocks);
+  // 보기 표지의 마침표는 문장 끝이 아니다.
+  return SENTENCE_END.test(restored.slice(markerPrefixLength(restored)));
 }
 
 /**
@@ -424,7 +472,7 @@ function closeBoxAtLine(
   line: string,
   mathBlocks: string[],
 ): { head: string; rest: string | null } {
-  if (SENTENCE_END.test(line)) {
+  if (SENTENCE_END.test(line.slice(markerPrefixLength(line)))) {
     return splitAtSentenceEnd(line);
   }
   return { head: line, rest: null };
@@ -538,13 +586,13 @@ function toBlocks(allLines: string[]): Block[] {
  * 한 줄로 취급된다).
  */
 export function getTextLines(input: string): string[] {
-  const { text: withoutTables } = protectTabular(normalizeDelimiters(input));
+  const { text: withoutTables } = protectTabular(normalizeDelimiters(normalizeJamo(input)));
   return protectDisplayMath(withoutTables).text.split("\n");
 }
 
 /** 줄 하나를 화면에 미리 보여주기 위한 HTML(수식은 실제로 렌더링해서 보여준다). */
 export function renderPreviewLine(line: string, input: string): string {
-  const { text: withoutTables } = protectTabular(normalizeDelimiters(input));
+  const { text: withoutTables } = protectTabular(normalizeDelimiters(normalizeJamo(input)));
   const { blocks } = protectDisplayMath(withoutTables);
   return renderLineContent(line, blocks);
 }
@@ -711,7 +759,9 @@ export function renderMathTextWithInfo(
   input: string,
   boxOverride?: BoxOverride,
 ): { html: string; blocks: string[]; boxes: BoxRange[]; lines: string[] } {
-  const normalized = normalizeDelimiters(input);
+  // 조합용 자모를 먼저 호환용으로 바꾼다. 1:1 치환이라 줄 수가 달라지지 않아
+  // 박스 범위의 줄 번호에 영향을 주지 않는다.
+  const normalized = normalizeDelimiters(normalizeJamo(input));
   const { text: withoutTables, tables } = protectTabular(normalized);
   const { text, blocks: mathBlocks } = protectDisplayMath(withoutTables);
   const canonicalLines = text.split("\n");
