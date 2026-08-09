@@ -362,6 +362,23 @@ CRC까지 검사한 뒤 넣을 것.
 
 `ResultStage`(인식 결과)와 `ProblemGallery`(수정 모달) 두 곳에서 쓴다.
 
+### 도형·자료를 놓을 수 있는 자리 (anchors)
+
+문단 사이뿐 아니라 **조건 박스·보기 박스 안의 줄 사이**도 자리가 된다.
+문제집에서는 자료가 박스 안에 들어가는 경우가 흔하다.
+
+그러려면 박스가 통짜 HTML이면 안 된다. `renderMathTextWithInfo`가 돌려주는
+`blocks`는 `RenderedBlock[]`이고, 박스는 `{ kind: "box", lines: string[] }`로
+줄 배열을 그대로 들고 있는다(`blockToHtml()`로 합칠 수 있다).
+
+`ResultStage`의 `anchors`가 자리 목록이고, `figurePos[id]`는 그 배열의
+인덱스다. `line`이 null이면 그 블록 앞(박스라면 테두리 **바깥**), 숫자면 박스
+안 그 줄 앞이다(`lines.length`면 박스 안 맨 끝).
+
+**세 곳이 정확히 같은 순서로 훑어야 한다** — `anchors` 생성, `cardHtml` 조립,
+드래그의 `anchorPoints()`. 하나라도 어긋나면 그림이 엉뚱한 자리에 붙는다.
+드래그 판정은 "가장 가까운 자리"로 한다(자리마다 y를 재서 최솟값).
+
 ### 이미지 생성 결과의 빈 여백
 
 이미지 생성 모델은 자료가 가로로 길든 세로로 길든 자기 비율(대개 정사각형)에
