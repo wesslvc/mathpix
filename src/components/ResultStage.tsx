@@ -23,7 +23,6 @@ import {
   readFigureCache,
   writeFigureCache,
 } from "@/lib/figureCache";
-import type { Subject } from "@/lib/subject";
 import type { TokenStatus } from "@/app/api/tokens/route";
 import BoxRangeEditor from "./BoxRangeEditor";
 import TextEditTabs from "./TextEditTabs";
@@ -61,11 +60,6 @@ type Props = {
   onAddAnother?: () => void;
   /** Mathpix에 보낸 원본(크롭된) 이미지. 도형 영역을 오려내는 데 쓴다. */
   sourceImage?: string | null;
-  /**
-   * 과목 모드. 그림을 다루는 도구만 이 값에 따라 갈린다 —
-   * 그림을 다시 그리는 도구는 같고 프롬프트와 화면 문구만 갈린다.
-   */
-  subject?: Subject;
 };
 
 /**
@@ -78,7 +72,6 @@ type Props = {
 type ManualFigure = {
   id: string;
   svg: string;
-  kind: "math" | "figure";
 };
 
 const FONT_SIZES = [
@@ -100,7 +93,6 @@ export default function ResultStage({
   onNext,
   onAddAnother,
   sourceImage,
-  subject = "math",
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [fontSizeIdx, setFontSizeIdx] = useState(0);
@@ -530,7 +522,7 @@ export default function ResultStage({
     const svg = await rasterToSvg(crop);
     setManualDiagramSvgs((prev) => [
       ...prev,
-      { id, svg, kind: subject === "math" ? "math" : "figure" },
+      { id, svg },
     ]);
     if (useAi) {
       // 큐는 이 화면 바깥(FigureJobsProvider)에 있다. 그래야 다음 문제로
@@ -539,7 +531,6 @@ export default function ResultStage({
         id,
         problemKey,
         label: problemLabel,
-        subject,
         crop,
       });
     }
@@ -800,7 +791,7 @@ export default function ResultStage({
         manualDiagramSvgs.length > 0) && (
         <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
           <p className="text-xs font-medium text-slate-500">
-            {subject === "science" ? "자료 크기·위치" : "도형 크기·위치"}
+            그림 크기·위치
           </p>
           <p className="text-[11px] text-slate-400">
             위 미리보기에서 그림을 손가락(또는 마우스)으로 잡아 끌면 원하는 문단
@@ -811,11 +802,7 @@ export default function ResultStage({
             .map((d, i) => (
               <DiagramAdjuster
                 key={d.id}
-                label={
-                  subject === "science"
-                    ? `자동 감지 자료 ${i + 1}`
-                    : `자동 감지 도형 ${i + 1}`
-                }
+                label={`자동 감지 그림 ${i + 1}`}
                 layout={layoutOf(d.id)}
                 onChange={(next) => setLayout(d.id, next)}
                 position={positionOf(d.id)}
@@ -829,7 +816,7 @@ export default function ResultStage({
             <DiagramAdjuster
               key={d.id}
               label={
-                (d.kind === "figure" ? `자료 ${idx + 1}` : `도형 ${idx + 1}`) +
+                `그림 ${idx + 1}` +
                 (jobOf(d.id)?.status === "running"
                   ? " · AI가 그리는 중…"
                   : jobOf(d.id)?.status === "pending"
@@ -865,7 +852,6 @@ export default function ResultStage({
 
 
       <FigurePanel
-        subject={subject}
         imageSrc={sourceImage ?? null}
         status={tokenStatus}
         queuedCount={pendingJobCount}

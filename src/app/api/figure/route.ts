@@ -3,7 +3,6 @@ import {
   FigureImageError,
   figureImageModelIds,
   generateFigureImage,
-  type FigureSubject,
 } from "@/lib/figureImageGen";
 import { FIGURE_TOKEN_COST } from "@/lib/tokens";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -26,7 +25,7 @@ export const maxDuration = 60;
 const MAX_MODEL_ATTEMPTS = 2;
 
 export async function POST(req: NextRequest) {
-  let body: { image?: string; subject?: string };
+  let body: { image?: string };
   try {
     body = await req.json();
   } catch {
@@ -43,8 +42,6 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-
-  const subject: FigureSubject = body.subject === "math" ? "math" : "science";
 
   if (!process.env.OPENAI_API_KEY) {
     console.error("[api/figure] OPENAI_API_KEY not set");
@@ -112,7 +109,7 @@ export async function POST(req: NextRequest) {
   for (let i = 0; i < Math.min(modelIds.length, MAX_MODEL_ATTEMPTS); i++) {
     const modelId = modelIds[i];
     try {
-      const result = await generateFigureImage(image, modelId, subject);
+      const result = await generateFigureImage(image, modelId);
       if (!result) {
         await refund();
         return NextResponse.json(
@@ -120,7 +117,7 @@ export async function POST(req: NextRequest) {
           { status: 502 },
         );
       }
-      console.info(`[api/figure] ok model=${modelId} subject=${subject}`);
+      console.info(`[api/figure] ok model=${modelId}`);
       return NextResponse.json({ image: result.dataUrl, modelId });
     } catch (err) {
       // 404(없는 이름)/403(권한 없음)/429(한도)면 이 모델로는 안 된다.
