@@ -3,11 +3,9 @@
 import { useState } from "react";
 import DiagramCropModal from "./DiagramCropModal";
 import TokenGauge from "./TokenGauge";
-import type { Subject } from "@/lib/subject";
 import type { TokenStatus } from "@/app/api/tokens/route";
 
 type Props = {
-  subject: Subject;
   /** 문제를 인식할 때 쓴 사진. null이면 카메라로 새로 찍어서만 쓸 수 있다. */
   imageSrc: string | null;
   status: TokenStatus | null;
@@ -33,7 +31,6 @@ type Props = {
  * 멀쩡한 이미지**가 저장된다. 빈 자리가 인쇄될 일이 없다.
  */
 export default function FigurePanel({
-  subject,
   imageSrc,
   status,
   queuedCount,
@@ -48,7 +45,6 @@ export default function FigurePanel({
   const unlimited = status?.unlimited ?? false;
   const tokens = status?.tokens ?? null;
   const notEnough = !unlimited && tokens !== null && tokens < cost;
-  const noun = subject === "math" ? "도형" : "자료";
 
   function choose(useAi: boolean) {
     if (!pending) return;
@@ -59,13 +55,13 @@ export default function FigurePanel({
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-medium text-slate-500">{noun} 넣기</p>
+        <p className="text-xs font-medium text-slate-500">그림 넣기</p>
         <button
           type="button"
           onClick={() => setShowCrop(true)}
           className="g-btn g-btn-outline text-xs"
         >
-          + {noun} 추가
+          + 그림 추가
         </button>
       </div>
 
@@ -76,8 +72,8 @@ export default function FigurePanel({
       />
 
       <p className="text-[11px] text-slate-400">
-        {noun} 부분을 오려서 문제에 붙입니다. 원본을 그대로 붙이면 무료이고, AI로
-        다시 그리면 {cost}토큰을 씁니다. Mathpix가 자동으로 잡아낸 {noun}은 이미
+        도형·자료 부분을 오려서 문제에 붙입니다. 원본을 그대로 붙이면 무료이고, AI로
+        다시 그리면 {cost}토큰을 씁니다. Mathpix가 자동으로 잡아낸 그림은 이미
         원본 그대로 붙어 있으니, 그걸로 충분하면 따로 추가하지 않아도 됩니다.
       </p>
 
@@ -89,12 +85,12 @@ export default function FigurePanel({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={pending}
-              alt={`오려낸 ${noun}`}
+              alt="오려낸 그림"
               className="max-h-48 w-auto object-contain"
             />
           </div>
 
-          <p className="text-[11px] text-slate-600">이 {noun}을 어떻게 넣을까요?</p>
+          <p className="text-[11px] text-slate-600">이 그림을 어떻게 넣을까요?</p>
 
           <div className="flex flex-col gap-2">
             <button
@@ -142,7 +138,6 @@ export default function FigurePanel({
       {showCrop && (
         <DiagramCropModal
           imageSrc={imageSrc}
-          purpose={subject === "math" ? "math" : "figure"}
           onConfirm={(cropped) => {
             setShowCrop(false);
             setPending(cropped);

@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import katex from "katex";
 import {
+  buildTextFraction,
   joinMathTokens,
+  parseTextFraction,
   tokenizeMath,
   type MathToken,
 } from "@/lib/mathTokens";
@@ -54,6 +56,28 @@ export default function VisualTextEditor({ value, onChange }: Props) {
     commit(tokens.map((t, idx) => (idx === i ? token : t)));
   }
 
+  /**
+   * 글자 조각의 커서 자리에 글씨 분수를 끼워 넣는다.
+   *
+   * "분자/분모가 한글 문장인 분수"는 Mathpix가 자주 놓치는데(분모를 반쯤 읽다
+   * 흘린다) 손으로 고치려면 LaTeX를 쳐야 해서 사실상 불가능했다. 여기서
+   * 만들면 분자·분모를 그냥 글로 쓰면 된다.
+   */
+  function insertFractionAt(i: number, before: string, after: string) {
+    const next: MathToken[] = [
+      ...tokens.slice(0, i),
+      { kind: "text", value: before },
+      {
+        kind: "math",
+        latex: buildTextFraction("분자", "분모"),
+        display: false,
+      },
+      { kind: "text", value: after },
+      ...tokens.slice(i + 1),
+    ];
+    commit(next);
+  }
+
   function removeAt(i: number) {
     // 수식을 지우면 앞뒤 글자 조각이 서로 붙어야 다음 편집이 자연스럽다.
     const next = tokens.filter((_, idx) => idx !== i);
@@ -71,9 +95,11 @@ export default function VisualTextEditor({ value, onChange }: Props) {
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-[11px] text-slate-400">
-        보이는 글씨를 그대로 고치면 됩니다. 수식은 하나의 덩어리라 눌러서 따로
-        고치거나 지울 수 있어요.
+      <p className="text-[11px] leading-snug text-slate-400">
+        보이는 글씨를 그대로 고치면 됩니다. 줄바꿈(Enter)과 띄어쓰기도 친 대로
+        인쇄돼요. 수식은 하나의 덩어리라 눌러서 따로 고치거나 지울 수 있고,
+        글자로 된 분수는 <span className="font-medium">분수 넣기</span>로
+        만듭니다.
       </p>
 
       <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-2">
@@ -83,6 +109,7 @@ export default function VisualTextEditor({ value, onChange }: Props) {
               key={i}
               value={t.value}
               onChange={(v) => updateAt(i, { kind: "text", value: v })}
+              onInsertFraction={(before, after) => insertFractionAt(i, before, after)}
             />
           ) : (
             <MathChip
@@ -102,9 +129,11 @@ export default function VisualTextEditor({ value, onChange }: Props) {
 function TextChunk({
   value,
   onChange,
+  onInsertFraction,
 }: {
   value: string;
   onChange: (v: string) => void;
+  onInsertFraction: (before: string, after: string) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -117,14 +146,30 @@ function TextChunk({
   }, [value]);
 
   return (
-    <textarea
-      ref={ref}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      rows={1}
-      spellCheck={false}
-      className="w-full resize-none rounded border border-transparent bg-transparent px-1.5 py-1 font-serif text-[15px] leading-7 text-ink outline-none hover:border-slate-200 focus:border-blue-400 focus:bg-blue-50/30"
-    />
+    <div className="group relative">
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={1}
+        spellCheck={false}
+        className="w-full resize-none rounded border border-transparent bg-transparent px-1.5 py-1 pr-20 font-serif text-[15px] leading-7 text-ink outline-none hover:border-slate-200 focus:border-blue-400 focus:bg-blue-50/30"
+      />
+      <button
+        type="button"
+        // mousedown에서 막지 않으면 버튼을 누르는 순간 textarea가 포커스를
+        // 잃으면서 커서 위치(selectionStart)가 0으로 초기화된다.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          const el = ref.current;
+          const at = el ? (el.selectionStart ?? value.length) : value.length;
+          onInsertFraction(value.slice(0, at), value.slice(at));
+        }}
+        className="absolute right-1 top-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500 opacity-0 transition-opacity hover:bg-slate-100 focus:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
+      >
+        분수 넣기
+      </button>
+    </div>
   );
 }
 
@@ -142,6 +187,9 @@ function MathChip({
   const [draft, setDraft] = useState(token.latex);
 
   useEffect(() => setDraft(token.latex), [token.latex]);
+
+  // 글씨 분수면 LaTeX 대신 분자·분모 칸으로 고치게 한다.
+  const fraction = parseTextFraction(token.latex);
 
   const html = (() => {
     try {
@@ -171,7 +219,7 @@ function MathChip({
           )}
         </button>
         <span className="shrink-0 text-[10px] text-slate-400">
-          {token.display ? "수식(줄)" : "수식"}
+          {fraction !== null ? "분수" : token.display ? "수식(줄)" : "수식"}
         </span>
         <button
           type="button"
@@ -183,7 +231,37 @@ function MathChip({
         </button>
       </div>
 
-      {open && (
+      {open && fraction !== null ? (
+        <div className="flex flex-col gap-1 border-t border-slate-200 px-1.5 py-1.5">
+          <label className="flex items-center gap-1.5">
+            <span className="w-8 shrink-0 text-[10px] text-slate-500">분자</span>
+            <input
+              value={fraction.numerator}
+              onChange={(e) =>
+                onChange(buildTextFraction(e.target.value, fraction.denominator))
+              }
+              className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-blue-500"
+            />
+          </label>
+          <label className="flex items-center gap-1.5">
+            <span className="w-8 shrink-0 text-[10px] text-slate-500">분모</span>
+            <input
+              value={fraction.denominator}
+              onChange={(e) =>
+                onChange(buildTextFraction(fraction.numerator, e.target.value))
+              }
+              className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-blue-500"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="self-end rounded bg-blue-600 px-2 py-1 text-[10px] text-white hover:bg-blue-700"
+          >
+            완료
+          </button>
+        </div>
+      ) : open ? (
         <div className="flex items-center gap-1.5 border-t border-slate-200 px-1.5 py-1.5">
           <input
             value={draft}
@@ -209,7 +287,7 @@ function MathChip({
             적용
           </button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

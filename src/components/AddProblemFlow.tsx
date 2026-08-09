@@ -9,13 +9,6 @@ import { createClient } from "@/lib/supabase/client";
 import type { RecognizeResponse } from "@/lib/types";
 import type { AnswerType } from "@/lib/answer";
 import type { BoxOverride } from "@/lib/renderMathText";
-import {
-  loadSubject,
-  saveSubject,
-  SUBJECT_HINT,
-  SUBJECT_LABEL,
-  type Subject,
-} from "@/lib/subject";
 
 type Stage = "idle" | "upload" | "crop" | "loading" | "result";
 
@@ -38,19 +31,6 @@ export default function AddProblemFlow({
   const [error, setError] = useState<string | null>(null);
   // 여러 장을 한 번에 올리면 첫 장부터 크롭→인식→저장하고, 나머지는 여기 대기.
   const [queue, setQueue] = useState<string[]>([]);
-  // 과목 모드. 저장된 값은 브라우저에 있으므로 첫 렌더에서 읽으면 서버가 그린
-  // HTML과 어긋난다(하이드레이션 오류). 마운트 뒤에 불러온다.
-  const [subject, setSubject] = useState<Subject>("math");
-
-  useEffect(() => {
-    setSubject(loadSubject(categoryId));
-  }, [categoryId]);
-
-  function chooseSubject(next: Subject) {
-    setSubject(next);
-    saveSubject(categoryId, next);
-  }
-
   function readAsDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -232,32 +212,6 @@ export default function AddProblemFlow({
         </div>
       )}
 
-      {/* 과목 모드. 텍스트·수식 인식(Mathpix)은 두 모드가 똑같고, 그림을
-          어떻게 처리할지만 갈라진다. 실모별로 기억해두므로 보통은 한 번만
-          고르면 된다. */}
-      {canAdd && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-slate-500">과목</span>
-          {(["math", "science"] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => chooseSubject(s)}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
-                subject === s
-                  ? "border-blue-600 bg-blue-50 text-blue-700"
-                  : "border-slate-300 text-slate-600 hover:bg-slate-100"
-              }`}
-            >
-              {SUBJECT_LABEL[s]}
-            </button>
-          ))}
-          <span className="text-[11px] text-slate-400">
-            {SUBJECT_HINT[subject]}
-          </span>
-        </div>
-      )}
-
       {stage === "idle" && canAdd && (
         <button
           type="button"
@@ -350,7 +304,6 @@ export default function AddProblemFlow({
           onNext={advanceQueue}
           onAddAnother={startAnother}
           sourceImage={recognizedSourceImage}
-          subject={subject}
         />
         </div>
       )}

@@ -9,6 +9,18 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * 연속된 공백을 살린다.
+ *
+ * HTML은 공백 여러 칸을 한 칸으로 붙여버려서, 사용자가 본문에서 간격을 벌려
+ * 놔도 화면에는 반영되지 않았다. 마지막 한 칸만 보통 공백으로 두고 나머지를
+ * 줄바꿈 없는 공백으로 바꾸면, 간격은 그대로 유지되면서 줄바꿈은 정상적으로
+ * 일어난다(전부 NBSP로 바꾸면 긴 공백에서 줄이 안 넘어가 카드가 삐져나간다).
+ */
+function preserveSpaces(escaped: string): string {
+  return escaped.replace(/ {2,}/g, (run) => "\u00a0".repeat(run.length - 1) + " ");
+}
+
 // 독립적으로 떨어진 숫자(예: "1", "3.5")는 본문 글자가 아니라 수식 폰트로 보여준다.
 // 단, 한글/알파벳에 붙은 숫자("2점", "x1", "22.")는 건드리지 않는다.
 const WORDISH = /[\wㄱ-ㅎ가-힣]/;
@@ -31,7 +43,7 @@ function textToInlineHtml(str: string): string {
         continue;
       }
     }
-    html += escapeHtml(token).replace(/\n/g, "<br />");
+    html += preserveSpaces(escapeHtml(token)).replace(/\n/g, "<br />");
   }
   return html;
 }

@@ -51,3 +51,32 @@ export function joinMathTokens(tokens: MathToken[]): string {
     )
     .join("");
 }
+
+// ── 글씨 분수 ────────────────────────────────────────────────────────────
+// "현재로부터 0.5억 년 후 Q에 포함된 X의 함량(%)" 처럼 분자·분모가 통째로
+// 한글 문장인 분수는 수능 사과탐·수학에 자주 나오는데, Mathpix가 이걸 자주
+// 놓친다(분모를 반쯤 읽다 흘리거나 아예 한 줄로 이어붙인다). 그래서 사용자가
+// 손으로 만들 수 있어야 하는데, LaTeX로 "\dfrac{\text{...}}{\text{...}}"를
+// 직접 치라고 하는 건 무리다. 아래 두 함수가 그 왕복을 대신한다.
+
+/** 분자·분모에 그대로 넣어도 되는 글자인가(중괄호가 있으면 LaTeX가 깨진다). */
+function isPlainText(s: string): boolean {
+  return !/[{}\\$]/.test(s);
+}
+
+export function buildTextFraction(numerator: string, denominator: string): string {
+  return `\\dfrac{\\text{${numerator}}}{\\text{${denominator}}}`;
+}
+
+/** 글씨 분수면 분자·분모를 돌려주고, 아니면 null(=일반 수식으로 다룬다). */
+export function parseTextFraction(
+  latex: string,
+): { numerator: string; denominator: string } | null {
+  const m = latex
+    .trim()
+    .match(/^\\d?frac\{\\text\{([^{}]*)\}\}\{\\text\{([^{}]*)\}\}$/);
+  if (!m) return null;
+  return { numerator: m[1], denominator: m[2] };
+}
+
+export { isPlainText };

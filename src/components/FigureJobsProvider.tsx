@@ -21,7 +21,6 @@ import {
 } from "@/lib/figureCache";
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import type { CardSpec } from "@/lib/cardHtml";
-import type { Subject } from "@/lib/subject";
 
 export type FigureJob = {
   id: string;
@@ -29,7 +28,6 @@ export type FigureJob = {
   problemKey: string;
   /** 목록에 보여줄 이름(문제 번호 등). */
   label: string;
-  subject: Subject;
   /** 모델에 보낼 원본 크롭. 재시도에도 쓴다. */
   crop: string;
   status: "pending" | "running" | "done" | "error";
@@ -196,7 +194,7 @@ export default function FigureJobsProvider({
           const res = await fetch("/api/figure", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: forModel, subject: next.subject }),
+            body: JSON.stringify({ image: forModel }),
           });
           let json: { image?: string; error?: string };
           try {
