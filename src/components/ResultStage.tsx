@@ -6,6 +6,7 @@ import { renderMathText, type BoxOverride } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import DiagramCropModal from "./DiagramCropModal";
+import FigurePanel from "./FigurePanel";
 import type { DiagramQuota } from "@/app/api/diagram/quota/route";
 import BoxRangeEditor from "./BoxRangeEditor";
 import LatexEditor from "./LatexEditor";
@@ -118,8 +119,10 @@ export default function ResultStage({
   // 크기·위치 설정을 도형별로 따로 들고 있어야 해서 배열 인덱스가 아니라 고정
   // id를 쓴다(인덱스로 키를 잡으면 하나를 지웠을 때 뒤 도형들의 설정이 한 칸씩
   // 밀려 엉뚱한 도형에 적용된다).
+  // kind는 조절 목록에 붙는 이름에만 쓴다(수학 도형인지 사과탐 자료인지).
+  // 붙는 방식·저장 경로는 둘이 완전히 같다.
   const [manualDiagramSvgs, setManualDiagramSvgs] = useState<
-    { id: string; svg: string }[]
+    { id: string; svg: string; kind: "math" | "figure" }[]
   >([]);
   const [showDiagramCrop, setShowDiagramCrop] = useState(false);
   const [isVectorizing, setIsVectorizing] = useState(false);
@@ -301,7 +304,7 @@ export default function ResultStage({
       if (!res.ok) throw new Error(json.error ?? "도형 재구성에 실패했습니다.");
       setManualDiagramSvgs((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), svg: json.svg as string },
+        { id: crypto.randomUUID(), svg: json.svg as string, kind: "math" },
       ]);
       // 실패는 아니지만 알려야 하는 경우(flash 전역 한도 소진 → lite로 대체).
       setVectorizeNotice(json.notice ?? null);
@@ -514,7 +517,11 @@ export default function ResultStage({
           {manualDiagramSvgs.map((d, idx) => (
             <DiagramAdjuster
               key={d.id}
-              label={`추가인식 도형 ${idx + 1}`}
+              label={
+                d.kind === "figure"
+                  ? `탐구 자료 ${idx + 1}`
+                  : `추가인식 도형 ${idx + 1}`
+              }
               layout={layoutOf(d.id)}
               onChange={(next) => setLayout(d.id, next)}
               onRemove={() =>
@@ -655,6 +662,24 @@ export default function ResultStage({
           imageSrc={sourceImage ?? null}
           onConfirm={handleDiagramCropConfirm}
           onCancel={() => setShowDiagramCrop(false)}
+        />
+      )}
+
+      {/* 사과탐 자료. 위의 수학 도형과 완전히 별개 경로(다른 API, 다른 모델)지만
+          결과가 같은 SVG 문자열이라 manualDiagramSvgs에 그대로 합류한다 —
+          크기·위치 조절, PNG 캡처, 저장이 전부 그대로 따라온다. */}
+      {!isVectorizing && (
+        <FigurePanel
+          imageSrc={sourceImage ?? null}
+          credits={quota?.credits ?? null}
+          unlimited={quota?.unlimited ?? false}
+          onAdd={(svg) =>
+            setManualDiagramSvgs((prev) => [
+              ...prev,
+              { id: crypto.randomUUID(), svg, kind: "figure" },
+            ])
+          }
+          onCreditsUsed={() => void refreshQuota()}
         />
       )}
 

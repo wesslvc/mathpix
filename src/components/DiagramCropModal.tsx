@@ -6,12 +6,39 @@ import "react-image-crop/dist/ReactCrop.css";
 import { cropImageToDataUrl, fileToDataUrl } from "@/lib/cropImage";
 import type { CropRect } from "@/lib/types";
 
+/**
+ * 무엇을 오려내는 중인가. 오려내는 동작은 똑같고 안내 문구와 확인 버튼만 다르다.
+ *   math   : 수학 도형 → Gemini가 재구성 (기존 동작)
+ *   figure : 사과탐 자료 → OpenAI가 재구성하거나, 원본을 그대로 붙임
+ */
+export type CropPurpose = "math" | "figure";
+
+const COPY: Record<
+  CropPurpose,
+  { title: string; description: string; confirm: string }
+> = {
+  math: {
+    title: "도형 영역 오려내기",
+    description:
+      "원, 삼각형 같은 도형 부분만 정확히 드래그해서 선택해주세요. 선택한 부분만 Gemini가 깨끗한 그림으로 다시 그려줍니다.",
+    confirm: "이 영역으로 재구성",
+  },
+  figure: {
+    title: "자료 영역 오려내기",
+    description:
+      "실험 장치, 모식도, 그래프, 표 같은 자료 부분만 드래그해서 선택해주세요. 다음 화면에서 원본을 그대로 붙일지 다시 그릴지 고를 수 있습니다.",
+    confirm: "이 영역 사용",
+  },
+};
+
 type Props = {
   /**
    * 문제를 인식할 때 쓴 원본(크롭된) 사진. 여기서 도형을 오려낼 수 있다.
    * null이면(원본을 못 쓰는 경우) 새로 찍은 사진만 쓸 수 있다.
    */
   imageSrc: string | null;
+  /** 안내 문구를 어느 쪽으로 보여줄지. 기본은 기존 동작(수학). */
+  purpose?: CropPurpose;
   onConfirm: (croppedDataUrl: string) => void;
   onCancel: () => void;
 };
@@ -27,7 +54,13 @@ type Props = {
  *                작게/흐리게 나왔거나, 아예 다른 지면에 있는 도형을 붙이고
  *                싶을 때 쓴다.
  */
-export default function DiagramCropModal({ imageSrc, onConfirm, onCancel }: Props) {
+export default function DiagramCropModal({
+  imageSrc,
+  purpose = "math",
+  onConfirm,
+  onCancel,
+}: Props) {
+  const copy = COPY[purpose];
   const imgRef = useRef<HTMLImageElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -81,11 +114,8 @@ export default function DiagramCropModal({ imageSrc, onConfirm, onCancel }: Prop
         onClick={(e) => e.stopPropagation()}
       >
         <div>
-          <h2 className="text-lg font-semibold text-ink">도형 영역 오려내기</h2>
-          <p className="text-sm text-slate-500">
-            원, 삼각형 같은 도형 부분만 정확히 드래그해서 선택해주세요. 선택한
-            부분만 Gemini가 깨끗한 그림으로 다시 그려줍니다.
-          </p>
+          <h2 className="text-lg font-semibold text-ink">{copy.title}</h2>
+          <p className="text-sm text-slate-500">{copy.description}</p>
         </div>
 
         {/* 어느 사진에서 오려낼지 고른다. */}
@@ -203,7 +233,7 @@ export default function DiagramCropModal({ imageSrc, onConfirm, onCancel }: Prop
             disabled={!crop?.width || !crop?.height || isLoading || activeSrc === null}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            이 영역으로 재구성
+            {copy.confirm}
           </button>
         </div>
       </div>

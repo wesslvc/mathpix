@@ -134,6 +134,57 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   노출), 응답은 정상인데 SVG를 못 뽑은 경우만 `null`을 반환한다. 예전엔
   전부 `return null`이라 k2.6이 왜 안 되는지 몇 번을 잘못 짚었다.
 
+### 사회탐구·과학탐구 자료 (수학 도형과 완전히 별개)
+
+수학 도형은 Gemini, **사과탐 자료는 OpenAI**(`OPENAI_API_KEY`)를 쓴다. 두
+경로는 코드가 겹치지 않는다 — 수학 쪽은 이미 안정적으로 돌아가고 있어서
+건드리지 않는 게 원칙이다. 결과가 둘 다 SVG 문자열이라 문제 카드에 붙고
+저장되는 뒷단(`manualDiagramSvgs`)만 공유한다.
+
+- `src/lib/figureVector.ts` — OpenAI Chat Completions 호출. 이미지는 Gemini와
+  달리 `image_url`에 **data URL 접두어를 포함한 채로** 넣는다.
+- `src/app/api/figure/route.ts` — 인증·과금·모델 폴백. `maxDuration = 60`.
+- `src/app/api/figure/models/route.ts` — **프로브 엔드포인트**(로그인 필요).
+- `src/components/FigurePanel.tsx` — UI 전체.
+
+**비용 설계 (이게 이 기능의 핵심이다)**
+
+1. **자료를 오려낸 뒤 바로 보내지 않는다.** "원본 그대로 붙이기(무료)"와
+   "AI로 다시 그리기(사진인식권 5장)" 중 사용자가 고른다. 무료 쪽이 기본이자
+   앞에 있다 — 사진·현미경 사진·지도는 다시 그리면 정보가 사라지므로 원본이
+   정답이고, 사과탐에는 그런 자료가 아주 많다.
+2. **입력 축소** — 긴 변 768px(`MODEL_INPUT_DIM`)로 줄여 보낸다. 라벨 글자를
+   읽어야 해서 `detail: "high"`는 유지하되 이미지 자체를 작게 만든다.
+3. **캐시** — 같은 자료는 한 번만 보낸다(`figureCache.ts`, sessionStorage).
+   사과탐은 자료 하나에 문항이 2~3개 딸린 세트가 흔해서 실제로 자주 걸린다.
+4. **출력 상한** — `MAX_OUTPUT_TOKENS = 8000`. 비용의 대부분이 출력 토큰이다.
+
+**자동 판별기는 일부러 안 넣었다.** "사진형이면 호출을 막자"고 픽셀 통계로
+선화/사진을 가르려 했는데 두 방법 다 실패했다: ① 국소 평탄도 → 부드러운
+그라디언트 사진이 1.00으로 선화(0.90~0.95)보다 높게 나온다(그라디언트는
+국소적으로 가장 평탄하다). ② 상위 N개 색 점유율 → "색칠된 지층 단면도를
+어두운 조명에서 찍은 사진"이 0.59로 사진 범위(≤0.63)에 파묻힌다. 어느
+임계값을 잡아도 정상 자료를 막거나 사진을 통과시킨다. 다시 시도하려면
+`figureImage.ts` 주석의 수치부터 읽을 것.
+
+**모델 이름은 여기서도 추측하지 말 것.** `figureVector.ts`의
+`DEFAULT_MODEL_IDS`는 검증된 목록이 **아니다**. 로그인 후
+`/api/figure/models`를 열면 ① `/v1/models` 목록과 ② 후보마다 1×1 PNG를
+**실제로 보내본** 프로브 결과가 같이 나온다. `usable`에 나온 이름을
+`OPENAI_FIGURE_MODELS` 환경변수에 쉼표로 넣으면 **재배포 없이** 적용된다.
+호출 중 404/403/429가 나면 그 자리에서 다음 후보로 자동으로 내려간다.
+
+파라미터 이름도 세대마다 다르다(`max_completion_tokens` vs `max_tokens`,
+`temperature` 미지원 모델, `reasoning_effort`). 모르는 걸 보내면 400이 나므로
+`PARAM_VARIANTS`를 순서대로 시도하고, 통한 조합은 모델별로 기억해 다음
+요청부터 바로 쓴다(Gemini의 `THINKING_CONFIGS`와 같은 패턴).
+
+과금은 **새 마이그레이션 없이** 기존 `consume_recognition_credit(p_amount)`를
+쓴다(사진인식권). 차감은 요청당 딱 한 번이고 — 모델을 갈아타는 건 우리
+사정이지 사용자가 더 낼 이유가 아니다 — 실패하면 `refund_recognition_credit`로
+되돌린다. 장수는 `FIGURE_CREDIT_COST`(기본 5), 화면은 `/api/figure/config`로
+그 값을 읽어간다. **JS에 하드코딩하지 말 것.**
+
 ### 과거에 해결한 버그 (재발 시 참고)
 
 - Mathpix가 `latex_styled`만 주거나 `\( \)` / `\[ \]` 델리미터를 쓰면 LaTeX가 그대로
