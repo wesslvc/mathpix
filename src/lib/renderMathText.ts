@@ -227,8 +227,11 @@ function isPureMathPlaceholderBlock(block: string): boolean {
 // 있는데($$\begin{tabular}...$$), 표만 토큰으로 바꾸고 "$$"를 남겨두면
 // "$$\x00TABLE0\x00$$"가 되어 KaTeX가 NUL 문자를 파싱하다 실패하고,
 // 실패한 원문("\displaystyle ...")이 빨간 글씨로 그대로 화면에 찍힌다.
+// 열 지정 앞에 배치 옵션이 붙기도 하고(\begin{tabular}[t]{|l|l|}), 열 지정
+// 안에 중괄호가 또 들어가기도 한다(@{}ll@{}). 둘 다 안 받으면 패턴이 안 걸려
+// 표가 통째로 KaTeX로 넘어가고, 거기서 실패해 원문이 화면에 찍힌다.
 const TABULAR_PATTERN =
-  /(?:\$\$)?\s*\\begin\{tabular\}\{[^}]*\}([\s\S]*?)\\end\{tabular\}\s*(?:\$\$)?/g;
+  /(?:\$\$)?\s*\\begin\{tabular\}\s*(?:\[[^\]]*\])?\s*\{(?:[^{}]|\{[^{}]*\})*\}([\s\S]*?)\\end\{tabular\}\s*(?:\$\$)?/g;
 
 function tabularToTableHtml(body: string): string {
   const rows = body
