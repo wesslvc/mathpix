@@ -19,8 +19,17 @@ export type Problem = {
   answer: string | null;
   /** 'choice'(객관식) | 'short'(주관식). 객관식이면 정답표에 원숫자로 표기한다. */
   answer_type: string | null;
-  /** 사용자가 직접 정한 조건 박스 범위. null이면 자동 감지에 맡긴다. */
-  box_range: { start: number; end: number } | { none: true } | null;
+  /**
+   * 사용자가 직접 정한 조건 박스 범위. null이면 자동 감지에 맡긴다.
+   * 지금 저장되는 형태는 `{ ranges: [...] }`(빈 배열 = 박스 없음)이고,
+   * 나머지 둘은 박스를 하나만 만들 수 있던 시절의 옛 값이라 읽기만 한다.
+   * 형태 구분은 renderMathText의 toBoxRanges()가 전부 흡수한다.
+   */
+  box_range:
+    | { ranges: { start: number; end: number }[] }
+    | { start: number; end: number }
+    | { none: true }
+    | null;
   sort_order: number | null;
   created_at: string;
 };
