@@ -39,7 +39,7 @@ const ROW_GAP = 18;
  * 짧은 과목에서는 종이가 너무 남아서 선택할 수 있게 했다.
  *   1개 — 왼쪽에 문제, 오른쪽은 통째로 풀이 공간 (기존 동작)
  *   2개 — 왼쪽 단과 오른쪽 단에 하나씩 나란히
- *   4개 — 양쪽 2단씩(위아래로도 나눠 넷)
+ *   4개 — 양쪽 2단씩. 좌상 → 좌하 → 우상 → 우하 순으로 채운다
  */
 const PER_PAGE_OPTIONS = [1, 2, 4] as const;
 type PerPage = (typeof PER_PAGE_OPTIONS)[number];
@@ -73,22 +73,15 @@ function slotsFor(perPage: PerPage, contentTop: number): Slot[] {
     ];
   }
 
+  // 좌상 → 좌하 → 우상 → 우하. 왼쪽 단을 세로로 다 채운 뒤 오른쪽으로 넘어간다
+  // (신문처럼 읽는 순서라 문제 번호가 위아래로 이어진다).
   const rowHeight = (usableHeight - ROW_GAP) / 2;
+  const bottomTop = contentTop - rowHeight - ROW_GAP;
   return [
     { x: MARGIN_X, top: contentTop, width: COLUMN_WIDTH, height: rowHeight },
+    { x: MARGIN_X, top: bottomTop, width: COLUMN_WIDTH, height: rowHeight },
     { x: rightX, top: contentTop, width: COLUMN_WIDTH, height: rowHeight },
-    {
-      x: MARGIN_X,
-      top: contentTop - rowHeight - ROW_GAP,
-      width: COLUMN_WIDTH,
-      height: rowHeight,
-    },
-    {
-      x: rightX,
-      top: contentTop - rowHeight - ROW_GAP,
-      width: COLUMN_WIDTH,
-      height: rowHeight,
-    },
+    { x: rightX, top: bottomTop, width: COLUMN_WIDTH, height: rowHeight },
   ];
 }
 
