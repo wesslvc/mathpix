@@ -13,6 +13,7 @@ import FigureJobsProvider from "@/components/FigureJobsProvider";
 import FigureJobsPanel from "@/components/FigureJobsPanel";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
+import { readFontPt } from "@/lib/fontSize";
 
 export default async function CategoryPage({
   params,
@@ -79,6 +80,7 @@ export default async function CategoryPage({
         answer: p.answer ?? "",
         answerType: toAnswerType(p.answer_type),
         boxRange: (p.box_range as GalleryProblem["boxRange"]) ?? null,
+        fontPt: readFontPt(p.box_range),
       };
     })
     .filter((p): p is GalleryProblem => p !== null);

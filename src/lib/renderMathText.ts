@@ -589,7 +589,7 @@ export type BoxRange = { start: number; end: number };
  * 그대로 열리게 하려고 남겨둔다.
  */
 export type BoxOverride =
-  | { ranges: BoxRange[] }
+  | { ranges: BoxRange[] | null; fontPt?: number }
   | BoxRange
   | { none: true }
   | null;
@@ -638,6 +638,9 @@ export function toBoxRanges(
 ): BoxRange[] | null {
   if (override === undefined || override === null) return null;
   if ("ranges" in override) {
+    // ranges가 null이면 "박스는 자동 감지에 맡긴다"는 뜻이다. 글자 크기 같은
+    // 다른 설정만 저장하려고 객체를 쓰는 경우가 있어서 필요하다.
+    if (override.ranges === null) return null;
     return normalizeBoxRanges(
       Array.isArray(override.ranges) ? override.ranges : [],
     );
