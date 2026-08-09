@@ -26,13 +26,14 @@ import {
 import type { Subject } from "@/lib/subject";
 import type { TokenStatus } from "@/app/api/tokens/route";
 import BoxRangeEditor from "./BoxRangeEditor";
-import LatexEditor from "./LatexEditor";
+import TextEditTabs from "./TextEditTabs";
 import DiagramAdjuster, {
   DEFAULT_DIAGRAM_LAYOUT,
   diagramStyleCss,
   type DiagramLayout,
 } from "./DiagramAdjuster";
-import { ANSWER_TYPE_LABEL, formatAnswer, type AnswerType } from "@/lib/answer";
+import type { AnswerType } from "@/lib/answer";
+import AnswerInput from "./AnswerInput";
 
 type Props = {
   result: RecognizeResponse;
@@ -755,7 +756,7 @@ export default function ResultStage({
         </button>
         {showTextEditor && (
           <div className="mt-2 flex flex-col gap-2">
-            <LatexEditor value={sourceText} onChange={setSourceText} rows={10} />
+            <TextEditTabs value={sourceText} onChange={setSourceText} />
             <button
               type="button"
               onClick={() => setSourceText(result.text || result.latex)}
@@ -885,51 +886,15 @@ export default function ResultStage({
 
       {onSaveToCategory && (
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <span className="shrink-0 text-sm font-medium text-slate-700">
-              정답 유형
-            </span>
-            <div className="flex gap-1">
-              {(["choice", "short"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setAnswerType(t)}
-                  disabled={false}
-                  className={`rounded-lg border px-2.5 py-1 text-xs font-medium disabled:opacity-50 ${
-                    answerType === t
-                      ? "border-blue-600 bg-blue-50 text-blue-700"
-                      : "border-slate-300 text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  {ANSWER_TYPE_LABEL[t]}
-                </button>
-              ))}
-            </div>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <span className="shrink-0 font-medium">정답</span>
-            <input
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              // 정답을 치고 Enter를 누르면 저장 버튼을 따로 누르지 않아도 저장된다.
-              // 글자를 칠 때마다 저장하지 않는 이유: 저장은 PNG를 굽고 업로드까지
-              // 하는 무거운 동작이라 "12"를 치는 동안 "1"로 저장돼 버린다.
-              onKeyDown={(e) => {
-                if (e.key !== "Enter") return;
-                e.preventDefault();
-                if (answer.trim() === "") return;
-                void handleSaveToCategory();
-              }}
-              disabled={false}
-              placeholder={
-                answerType === "choice"
-                  ? "예: 3 → 정답표에 ③으로 표기됩니다"
-                  : "예: 12 (PDF 맨 뒤 정답표에 표기됩니다)"
-              }
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100"
-            />
-          </label>
+          <AnswerInput
+            answer={answer}
+            answerType={answerType}
+            onChange={(next, type) => {
+              setAnswer(next);
+              setAnswerType(type);
+            }}
+            onSubmit={() => void handleSaveToCategory()}
+          />
           {savedId === null && (
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
               {autoSaveLeftSec !== null ? (
@@ -956,14 +921,6 @@ export default function ResultStage({
                 </span>
               )}
             </div>
-          )}
-          {answer.trim() !== "" && (
-            <p className="text-[11px] text-slate-500">
-              정답표 표기:{" "}
-              <span className="text-sm font-medium text-ink">
-                {formatAnswer(answer, answerType)}
-              </span>
-            </p>
           )}
         </div>
       )}

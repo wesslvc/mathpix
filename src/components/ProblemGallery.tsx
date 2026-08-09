@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { renderMathText, type BoxOverride } from "@/lib/renderMathText";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import BoxRangeEditor from "./BoxRangeEditor";
-import LatexEditor from "./LatexEditor";
+import TextEditTabs from "./TextEditTabs";
 import ScaledCard from "./ScaledCard";
 import {
   ANSWER_TYPE_LABEL,
@@ -277,7 +277,7 @@ export default function ProblemGallery({ problems }: Props) {
                 결과를 확인할 수 있게 한다(수식 편집이 특히 불편했던 부분). */}
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="flex flex-col gap-4">
-                <LatexEditor value={editText} onChange={setEditText} />
+                <TextEditTabs value={editText} onChange={setEditText} />
 
                 <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
                   <div className="flex items-center gap-2">
