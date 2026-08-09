@@ -15,7 +15,13 @@ export const runtime = "nodejs";
 // quality를 낮춰 시간을 줄인다. figureImageGen.ts의 PARAM_VARIANTS 참고.)
 export const maxDuration = 60;
 
-/** 모델을 갈아타며 재시도할 최대 횟수. 60초 안에 끝나야 하므로 넉넉히 안 잡는다. */
+/**
+ * 모델을 갈아타며 재시도할 최대 횟수.
+ *
+ * 기본 설정에서는 모델이 하나뿐이라 실제로는 한 번만 시도한다. 예전에 후보를
+ * 여러 개 두고 실패하면 다음으로 내려가게 했다가, 고른 적도 없는 모델에
+ * 요금이 나갔다. 폴백은 OPENAI_FIGURE_IMAGE_MODELS로 명시했을 때만 생긴다.
+ */
 const MAX_MODEL_ATTEMPTS = 2;
 
 export async function POST(req: NextRequest) {

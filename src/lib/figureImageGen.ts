@@ -16,19 +16,26 @@
 const ENDPOINT = "https://api.openai.com/v1/images/edits";
 
 /**
- * 후보 이미지 생성 모델. 앞에서부터 쓰고 못 부르면 다음으로 내려간다.
+ * 쓸 모델. **딱 하나다.**
  *
- * 2026-08 프로브에서 네 이름 모두 이 계정에 존재함을 확인했다(400은 프로브가
- * 보낸 이미지가 불량이어서 난 것이지 모델 문제가 아니었다 — models/route.ts의
- * TINY_PNG_BASE64 주석 참고). 사용자가 gpt-image-2를 쓰기로 정했고, 나머지는
- * 그게 막혔을 때를 위한 폴백이다.
+ * 예전에는 여기에 후보를 여러 개 늘어놓고 앞의 것이 실패하면 다음으로
+ * 내려가게 했다. 이름을 틀려도 기능이 죽지 않게 하려던 것인데, 그 대가가
+ * 컸다 — 고른 적도 없는 모델(gpt-4o-mini, gpt-4.1 등)에 요금이 나갔다.
+ * 실패했을 때 조용히 다른 모델로 갈아타는 것보다, 실패했다고 알리고 멈추는
+ * 편이 낫다. 폴백이 필요하면 OPENAI_FIGURE_IMAGE_MODELS로 명시할 것.
  */
-const DEFAULT_IMAGE_MODEL_IDS = [
-  "gpt-image-2",
-  "gpt-image-1.5",
-  "gpt-image-1",
-  "gpt-image-1-mini",
-];
+const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2"];
+
+/**
+ * 이미지 생성 모델만 통과시킨다.
+ *
+ * 환경변수에 오타가 나거나 누가 실수로 채팅 모델 이름을 넣어도 그쪽으로는
+ * 요청이 나가지 않게 하는 마지막 방어선이다. 이 프로젝트에서 실제로 의도치
+ * 않은 모델에 요금이 나간 적이 있어서 둔다.
+ */
+function isImageModel(id: string): boolean {
+  return id.startsWith("gpt-image");
+}
 
 export function figureImageModelIds(): string[] {
   const raw = process.env.OPENAI_FIGURE_IMAGE_MODELS;
@@ -36,7 +43,8 @@ export function figureImageModelIds(): string[] {
   const ids = raw
     .split(",")
     .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .filter((s) => s.length > 0)
+    .filter(isImageModel);
   return ids.length > 0 ? ids : DEFAULT_IMAGE_MODEL_IDS;
 }
 
@@ -173,6 +181,14 @@ export async function generateFigureImage(
 ): Promise<FigureImageResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
+
+  // 호출 직전에 한 번 더 확인한다. 위에서 걸렀더라도 여기까지 이미지 모델이
+  // 아닌 이름이 오면 요금이 나가므로 그냥 막는다.
+  if (!isImageModel(modelId)) {
+    throw new Error(
+      `이미지 생성 모델이 아닌 이름으로는 요청하지 않습니다: ${modelId}`,
+    );
+  }
 
   const source = dataUrlToBlob(imageDataUrl);
   if (!source) {
