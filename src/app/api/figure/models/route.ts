@@ -137,9 +137,10 @@ export async function GET() {
   ]);
 
   return NextResponse.json({
+    probedModels: candidates,
     usable: probes.filter((p) => p.ok).map((p) => p.id),
     probes,
     listedImageModels: listed,
-    hint: "usable에 나온 이름을 OPENAI_FIGURE_IMAGE_MODELS 환경변수에 쉼표로 넣으면 재배포 없이 적용됩니다. listed에 있어도 probe가 실패하면 못 쓰는 모델입니다. status가 400이면 모델은 있으니 note에 적힌 거부 사유를 보세요.",
+    hint: "probes는 후보 모델마다 실제 요청을 한 번씩 보낸 결과라 아주 적지만 요금이 나갑니다(64x64 이미지). 지금 설정된 후보만 찔러보며, 목록 조회(listedImageModels)는 무료입니다. usable에 나온 이름을 OPENAI_FIGURE_IMAGE_MODELS 환경변수에 넣으면 재배포 없이 적용됩니다. status가 400이면 모델은 있으니 note의 거부 사유를 보세요.",
   });
 }
