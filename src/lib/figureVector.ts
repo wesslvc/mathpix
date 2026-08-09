@@ -31,6 +31,12 @@ const ENDPOINT = "https://api.openai.com/v1/chat/completions";
  * 앞쪽이 싸고 뒤로 갈수록 품질이 높은 순서로 둔다.
  */
 const DEFAULT_MODEL_IDS = [
+  // 사용자가 지정한 모델. 계정의 /v1/models 목록에는 있지만 **실제 호출로는
+  // 아직 검증되지 않았다** — 목록에 있어도 못 부르는 경우가 이 프로젝트에서
+  // 여러 번 있었다. 다음 배포 뒤 /api/figure/models 를 열어 probe가 ok인지
+  // 확인할 것. 못 부르면 404가 나는 순간 아래 후보로 자동으로 내려간다.
+  "gpt-5.6-luna",
+  // 여기부터는 2026-08 프로브에서 200을 확인한 이름들(폴백).
   "gpt-5-mini",
   "gpt-4.1-mini",
   "gpt-4o-mini",
