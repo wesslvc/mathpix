@@ -11,6 +11,8 @@ import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import FigurePanel from "./FigurePanel";
 import ScaledCard from "./ScaledCard";
+import { useFigureJobs } from "./FigureJobsProvider";
+import { buildAnchors, buildCardHtml } from "@/lib/cardHtml";
 import {
   prepareFigureForModel,
   rasterToSvg,
@@ -76,13 +78,6 @@ type ManualFigure = {
   id: string;
   svg: string;
   kind: "math" | "figure";
-  /** AI 작업이 걸려 있으면 그 상태. 없으면 원본을 그대로 쓰는 그림이다. */
-  job?: {
-    /** 모델에 보낼 원본 크롭. 실패 후 재시도에도 쓴다. */
-    crop: string;
-    status: "pending" | "running" | "error";
-    error?: string;
-  };
 };
 
 const FONT_SIZES = [
@@ -145,8 +140,18 @@ export default function ResultStage({
   // kind는 조절 목록에 붙는 이름에만 쓴다(수학 도형인지 사과탐 자료인지).
   // 붙는 방식·저장 경로는 둘이 완전히 같다.
   const [manualDiagramSvgs, setManualDiagramSvgs] = useState<ManualFigure[]>([]);
-  // 지금 AI가 그리고 있는 그림의 id. 한 번에 하나씩만 돌린다(순차 처리).
-  const runningJobRef = useRef<string | null>(null);
+
+  // AI 그림 작업은 이 화면 바깥(FigureJobsProvider)에서 돈다. 작업이 도는 동안
+  // 다음 문제로 넘어가도 계속되어야 하기 때문이다.
+  const { jobs, enqueue, retry, putSnapshot } = useFigureJobs();
+  /** 이 문제를 가리키는 키. 결과가 바뀔 때마다(=다음 이미지) 새로 만든다. */
+  const problemKey = useMemo(() => crypto.randomUUID(), [result]);
+  const problemLabel = useMemo(() => {
+    const first = (result.text || result.latex || "").trim().split("\n")[0];
+    return first.slice(0, 20) || "문제";
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result]);
+  const jobOf = (figureId: string) => jobs.find((j) => j.id === figureId);
   /** 남은 토큰과 기능별 소모량. null이면 아직 못 불러온 상태. */
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
 
@@ -205,19 +210,7 @@ export default function ResultStage({
    * line이 null이면 그 블록 **앞**(박스라면 테두리 바깥), 숫자면 그 박스 안의
    * 몇 번째 줄 앞이다(lines.length면 박스 안 맨 끝).
    */
-  const anchors = useMemo(() => {
-    const out: { block: number; line: number | null }[] = [];
-    blocks.forEach((b, bi) => {
-      out.push({ block: bi, line: null });
-      if (b.kind === "box") {
-        for (let li = 0; li <= b.lines.length; li++) {
-          out.push({ block: bi, line: li });
-        }
-      }
-    });
-    out.push({ block: blocks.length, line: null });
-    return out;
-  }, [blocks]);
+  const anchors = useMemo(() => buildAnchors(blocks), [blocks]);
 
   // 도형·자료를 어느 자리에 놓을지(anchors의 인덱스). 지정하지 않으면 맨 아래.
   const [figurePos, setFigurePos] = useState<Record<string, number>>({});
@@ -415,40 +408,25 @@ export default function ResultStage({
     setFigurePos((prev) => ({ ...prev, [drag.id]: drag.slot }));
   }
 
-  /** 문단 사이와 박스 안 줄 사이에 도형·자료를 끼워 넣은 최종 카드 HTML. */
-  const cardHtml = useMemo(() => {
-    const atSlot = (slot: number) =>
-      figures
-        .filter((f) => positionOf(f.id) === slot)
-        .map(
-          (f) =>
-            `<div class="problem-figure" data-fig-id="${f.id}" style="${diagramStyleCss(
-              layoutOf(f.id),
-            )}">${f.markup}</div>`,
-        )
-        .join("");
-
-    // anchors와 정확히 같은 순서로 훑어야 자리 번호가 어긋나지 않는다.
-    let slot = 0;
-    let out = "";
-    for (const block of blocks) {
-      out += atSlot(slot++);
-      if (block.kind === "plain") {
-        out += block.html;
-        continue;
-      }
-      let inner = "";
-      for (const line of block.lines) {
-        inner += atSlot(slot++) + line;
-      }
-      inner += atSlot(slot++); // 박스 안 맨 끝
-      out += `<div class="mmd-box">${inner}</div>`;
-    }
-    out += atSlot(slot);
-    return out;
-    // positionOf/layoutOf는 아래 두 state를 읽는다.
+  /** 카드에 붙을 그림들을 위치·크기와 함께 정리한다. 저장·재저장에 그대로 쓴다. */
+  const cardFigures = useMemo(
+    () =>
+      figures.map((f) => ({
+        id: f.id,
+        markup: f.markup,
+        layout: layoutOf(f.id),
+        position: positionOf(f.id),
+      })),
+    // layoutOf/positionOf는 아래 두 state를 읽는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blocks, anchors, figures, figurePos, layouts]);
+    [figures, layouts, figurePos, anchors],
+  );
+
+  /** 문단 사이와 박스 안 줄 사이에 그림을 끼워 넣은 최종 카드 HTML. */
+  const cardHtml = useMemo(
+    () => buildCardHtml(blocks, cardFigures),
+    [blocks, cardFigures],
+  );
 
   // 정답을 적고 잠시 가만히 있으면 저장 버튼을 누르지 않아도 저장한다.
   // 글자마다 저장하면 "12"를 치는 동안 "1"로 저장되므로 입력이 멎을 때까지 기다린다.
@@ -532,9 +510,11 @@ export default function ResultStage({
     };
   }, [sourceImage, result.diagrams]);
 
-  /** 아직 AI가 손대지 않은(또는 돌고 있는) 그림 수. 게이지에 쓴다. */
-  const pendingJobCount = manualDiagramSvgs.filter(
-    (f) => f.job?.status === "pending" || f.job?.status === "running",
+  /** 이 문제에서 아직 처리되지 않은 AI 작업 수. 게이지에 쓴다. */
+  const pendingJobCount = jobs.filter(
+    (j) =>
+      j.problemKey === problemKey &&
+      (j.status === "pending" || j.status === "running"),
   ).length;
 
   /**
@@ -545,106 +525,25 @@ export default function ResultStage({
    * 사용자는 본문을 고치거나 다음 그림을 오려낼 수 있다.
    */
   async function addFigure(crop: string, useAi: boolean) {
+    const id = crypto.randomUUID();
     const svg = await rasterToSvg(crop);
     setManualDiagramSvgs((prev) => [
       ...prev,
-      {
-        id: crypto.randomUUID(),
-        svg,
-        kind: subject === "math" ? "math" : "figure",
-        job: useAi ? { crop, status: "pending" } : undefined,
-      },
+      { id, svg, kind: subject === "math" ? "math" : "figure" },
     ]);
+    if (useAi) {
+      // 큐는 이 화면 바깥(FigureJobsProvider)에 있다. 그래야 다음 문제로
+      // 넘어가도 작업이 계속 돈다.
+      enqueue({
+        id,
+        problemKey,
+        label: problemLabel,
+        subject,
+        crop,
+      });
+    }
   }
 
-  /** 실패한 그림을 다시 시도한다. 이미 차감된 토큰은 서버가 환불한 상태다. */
-  function retryFigure(id: string) {
-    setManualDiagramSvgs((prev) =>
-      prev.map((f) =>
-        f.id === id && f.job
-          ? { ...f, job: { ...f.job, status: "pending", error: undefined } }
-          : f,
-      ),
-    );
-  }
-
-  /** AI 작업을 하나씩 순서대로 처리하는 일꾼. */
-  useEffect(() => {
-    if (runningJobRef.current !== null) return;
-    const next = manualDiagramSvgs.find((f) => f.job?.status === "pending");
-    if (!next?.job) return;
-
-    const id = next.id;
-    const crop = next.job.crop;
-    runningJobRef.current = id;
-    setManualDiagramSvgs((prev) =>
-      prev.map((f) =>
-        f.id === id && f.job ? { ...f, job: { ...f.job, status: "running" } } : f,
-      ),
-    );
-
-    (async () => {
-      try {
-        // 입력 토큰을 줄이려고 긴 변을 768px로 낮춰 보낸다.
-        const forModel = await prepareFigureForModel(crop);
-
-        // 같은 그림을 이미 그린 적이 있으면 그대로 쓴다. 사과탐은 자료 하나에
-        // 문항이 여러 개 딸린 세트가 흔해서 이 경우가 실제로 자주 나온다.
-        const key = await figureCacheKey(forModel);
-        const cached = readFigureCache(key);
-        if (cached) {
-          setManualDiagramSvgs((prev) =>
-            prev.map((f) => (f.id === id ? { ...f, svg: cached, job: undefined } : f)),
-          );
-          return;
-        }
-
-        const res = await fetch("/api/figure", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: forModel, subject }),
-        });
-
-        let json: { image?: string; error?: string };
-        try {
-          json = await res.json();
-        } catch {
-          throw new Error(
-            "서버에서 정상적인 응답을 받지 못했어요. 이미지 생성이 60초를 넘겨 요청이 끊겼을 수 있습니다. 영역을 더 좁게 잘라 다시 시도해주세요.",
-          );
-        }
-        if (!res.ok) throw new Error(json.error ?? "그림을 그리지 못했습니다.");
-        if (typeof json.image !== "string" || !json.image.startsWith("data:image/")) {
-          throw new Error(
-            "서버가 이미지를 돌려주지 않았어요. 페이지를 새로고침한 뒤 다시 시도해주세요.",
-          );
-        }
-
-        // 이미지 생성 모델은 자기 비율(대개 정사각형)에 맞춰 그려서 둘레에 흰
-        // 여백을 잔뜩 붙여 준다. 그대로 두면 그림보다 여백이 커진다.
-        const finished = await rasterToSvg(await trimBlankBorder(json.image));
-        writeFigureCache(key, finished);
-        setManualDiagramSvgs((prev) =>
-          prev.map((f) => (f.id === id ? { ...f, svg: finished, job: undefined } : f)),
-        );
-      } catch (err) {
-        // 실패해도 원본은 그대로 남는다 — 그림이 사라지지는 않는다.
-        const message =
-          err instanceof Error ? err.message : "그림을 그리지 못했습니다.";
-        setManualDiagramSvgs((prev) =>
-          prev.map((f) =>
-            f.id === id && f.job
-              ? { ...f, job: { ...f.job, status: "error", error: message } }
-              : f,
-          ),
-        );
-      } finally {
-        runningJobRef.current = null;
-        void refreshTokens();
-      }
-    })();
-    // manualDiagramSvgs가 바뀔 때마다 다음 작업이 있는지 다시 본다.
-  }, [manualDiagramSvgs, subject]);
 
   async function handleExport() {
     if (!cardRef.current) return;
@@ -662,6 +561,46 @@ export default function ResultStage({
       setIsExporting(false);
     }
   }
+
+  // 뒤에서 돌던 AI 작업이 끝나면 그 자리를 완성된 그림으로 갈아끼운다.
+  // 화면이 열려 있는 동안은 여기서 반영되고, dirty로 표시돼 자동으로 다시
+  // 저장된다. 화면이 닫혀 있으면 Provider가 저장본을 직접 갱신한다.
+  useEffect(() => {
+    const done = jobs.filter((j) => j.status === "done" && j.svg);
+    if (done.length === 0) return;
+    setManualDiagramSvgs((prev) => {
+      let changed = false;
+      const next = prev.map((f) => {
+        const j = done.find((d) => d.id === f.id);
+        if (!j?.svg || j.svg === f.svg) return f;
+        changed = true;
+        return { ...f, svg: j.svg };
+      });
+      return changed ? next : prev;
+    });
+  }, [jobs]);
+
+  // 이 문제의 최신 상태를 큐에 계속 알려둔다. 화면을 떠난 뒤 작업이 끝나면
+  // Provider가 이 값만으로 카드를 다시 그려 저장본을 갱신한다.
+  useEffect(() => {
+    putSnapshot(problemKey, {
+      problemId: savedId,
+      spec: {
+        text: sourceText,
+        boxOverride,
+        fontSizePx: FONT_SIZES[fontSizeIdx].px,
+        figures: cardFigures,
+      },
+    });
+  }, [
+    putSnapshot,
+    problemKey,
+    savedId,
+    sourceText,
+    boxOverride,
+    fontSizeIdx,
+    cardFigures,
+  ]);
 
   // 저장한 뒤에 무엇이든 바뀌면 "다시 저장할 거리가 있다"고 표시한다.
   // AI가 그림을 완성해 자리를 갈아끼우는 것도 여기에 걸려서, 처리가 끝나면
@@ -890,17 +829,22 @@ export default function ResultStage({
               key={d.id}
               label={
                 (d.kind === "figure" ? `자료 ${idx + 1}` : `도형 ${idx + 1}`) +
-                (d.job?.status === "running"
+                (jobOf(d.id)?.status === "running"
                   ? " · AI가 그리는 중…"
-                  : d.job?.status === "pending"
+                  : jobOf(d.id)?.status === "pending"
                     ? " · 차례 기다리는 중"
-                    : d.job?.status === "error"
+                    : jobOf(d.id)?.status === "error"
                       ? " · AI 실패(원본 사용 중)"
                       : "")
               }
-              note={d.job?.error}
-              busy={d.job?.status === "running" || d.job?.status === "pending"}
-              onRetry={d.job?.status === "error" ? () => retryFigure(d.id) : undefined}
+              note={jobOf(d.id)?.error}
+              busy={
+                jobOf(d.id)?.status === "running" ||
+                jobOf(d.id)?.status === "pending"
+              }
+              onRetry={
+                jobOf(d.id)?.status === "error" ? () => retry(d.id) : undefined
+              }
               layout={layoutOf(d.id)}
               onChange={(next) => setLayout(d.id, next)}
               position={positionOf(d.id)}
