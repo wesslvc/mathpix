@@ -31,11 +31,29 @@ export function diagramStyle(layout: DiagramLayout): React.CSSProperties {
   };
 }
 
+/**
+ * 위와 같은 스타일을 CSS 문자열로. 도형·자료를 본문 문단 **사이**에 끼워
+ * 넣으려면 본문 HTML 문자열에 함께 이어붙여야 해서 React 스타일 객체를
+ * 쓸 수 없다.
+ */
+export function diagramStyleCss(layout: DiagramLayout): string {
+  return [
+    `width:${layout.scale}%`,
+    `margin-left:calc(${(100 - layout.scale) / 2}% + ${layout.offsetX}px)`,
+    `margin-top:${layout.offsetY}px`,
+  ].join(";");
+}
+
 type Props = {
   label: string;
   layout: DiagramLayout;
   onChange: (next: DiagramLayout) => void;
   onRemove?: () => void;
+  /** 본문에서 몇 번째 문단 앞에 놓을지(0 = 맨 위, slotCount = 맨 아래). */
+  position?: number;
+  /** 놓을 수 있는 자리 이름들. 길이는 문단 수 + 1. */
+  slotLabels?: string[];
+  onPositionChange?: (next: number) => void;
 };
 
 function Slider({
@@ -81,7 +99,18 @@ export default function DiagramAdjuster({
   layout,
   onChange,
   onRemove,
+  position,
+  slotLabels,
+  onPositionChange,
 }: Props) {
+  // 위치 조절은 놓을 자리가 둘 이상일 때만 의미가 있다.
+  const canMove =
+    position !== undefined &&
+    slotLabels !== undefined &&
+    onPositionChange !== undefined &&
+    slotLabels.length > 1;
+  const lastSlot = (slotLabels?.length ?? 1) - 1;
+
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 px-3 py-2">
       <div className="flex items-center justify-between">
@@ -105,6 +134,45 @@ export default function DiagramAdjuster({
           )}
         </div>
       </div>
+      {/* 본문 어디에 끼워 넣을지. 문제집처럼 자료가 문장 사이에 와야 하는
+          경우가 많은데, 예전에는 무조건 맨 아래에만 붙었다.
+          드래그가 아니라 버튼·목록으로 고르게 한 이유: 이 카드는 가로
+          스크롤 영역 안에 있고 주 사용 환경이 휴대폰이라, 터치 드래그는
+          스크롤과 엉켜 제대로 잡히지 않는다. */}
+      {canMove && (
+        <div className="flex items-center gap-1.5">
+          <span className="w-12 shrink-0 text-[11px] text-slate-500">위치</span>
+          <button
+            type="button"
+            onClick={() => onPositionChange(Math.max(0, position - 1))}
+            disabled={position <= 0}
+            aria-label="위로 옮기기"
+            className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            onClick={() => onPositionChange(Math.min(lastSlot, position + 1))}
+            disabled={position >= lastSlot}
+            aria-label="아래로 옮기기"
+            className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+          >
+            ▼
+          </button>
+          <select
+            value={position}
+            onChange={(e) => onPositionChange(Number(e.target.value))}
+            className="min-w-0 flex-1 rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-600"
+          >
+            {slotLabels.map((slotLabel, i) => (
+              <option key={i} value={i}>
+                {slotLabel}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <Slider
         label="크기"
         value={layout.scale}

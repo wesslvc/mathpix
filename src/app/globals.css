@@ -136,6 +136,21 @@ body {
   font-family: KaTeX_Main, "Nanum Myeongjo", serif;
 }
 
+/* 문제 카드에 끼워 넣는 도형·자료. 본문 문단 사이에 놓으려고 본문 HTML
+   문자열에 함께 이어붙이기 때문에, Tailwind 유틸리티 대신 실제 클래스가
+   필요하다(문자열에는 클래스명만 적을 수 있다). */
+.problem-figure {
+  display: block;
+  max-width: 100%;
+}
+
+.problem-figure > svg,
+.problem-figure > img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .mmd-paragraph {
   margin: 0 0 1.1em;
   line-height: 1.7;

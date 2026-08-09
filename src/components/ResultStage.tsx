@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
-import { renderMathText, type BoxOverride } from "@/lib/renderMathText";
+import { renderMathTextWithInfo, type BoxOverride } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import DiagramCropModal from "./DiagramCropModal";
@@ -13,7 +13,7 @@ import BoxRangeEditor from "./BoxRangeEditor";
 import LatexEditor from "./LatexEditor";
 import DiagramAdjuster, {
   DEFAULT_DIAGRAM_LAYOUT,
-  diagramStyle,
+  diagramStyleCss,
   type DiagramLayout,
 } from "./DiagramAdjuster";
 import { ANSWER_TYPE_LABEL, formatAnswer, type AnswerType } from "@/lib/answer";
@@ -197,10 +197,78 @@ export default function ResultStage({
     setBoxOverride(undefined);
   }, [result]);
 
-  const html = useMemo(
-    () => renderMathText(sourceText, boxOverride),
+  // blocks는 최상위 요소(문단/조건 박스/표) 하나씩이다. 도형·자료를 그 사이에
+  // 끼워 넣기 위해 경계가 필요하다.
+  const { blocks } = useMemo(
+    () => renderMathTextWithInfo(sourceText, boxOverride),
     [sourceText, boxOverride],
   );
+
+  // 도형·자료를 본문 어디에 놓을지. 값은 "이 문단 앞"이라 0 = 맨 위,
+  // blocks.length = 맨 아래다. 지정하지 않으면 맨 아래(예전 동작 그대로).
+  const [figurePos, setFigurePos] = useState<Record<string, number>>({});
+
+  function positionOf(id: string): number {
+    // 본문을 고치면 문단 수가 달라지므로 항상 현재 범위로 가둔다.
+    return Math.min(Math.max(figurePos[id] ?? blocks.length, 0), blocks.length);
+  }
+
+  /**
+   * 카드에 그릴 것들을 위에서부터 순서대로 늘어놓는다. Mathpix가 자동으로
+   * 잡아낸 원본 크롭이 먼저, 사람이 추가한 것이 뒤에 온다.
+   */
+  const figures = useMemo(
+    () => [
+      ...(result.diagrams ?? [])
+        .filter((d) => rasterFallbacks[d.id])
+        .map((d) => ({
+          id: d.id,
+          markup: `<img src="${rasterFallbacks[d.id]}" alt="" />`,
+        })),
+      ...manualDiagramSvgs.map((d) => ({ id: d.id, markup: d.svg })),
+    ],
+    [result.diagrams, rasterFallbacks, manualDiagramSvgs],
+  );
+
+  /** 자리 고르는 목록에 보여줄 이름. 앞 문단의 첫 글자들을 붙여 알아보기 쉽게. */
+  const slotLabels = useMemo(() => {
+    const preview = (blockHtml: string): string => {
+      if (typeof document === "undefined") return "";
+      const el = document.createElement("div");
+      el.innerHTML = blockHtml;
+      // KaTeX는 같은 수식을 MathML로도 함께 내보내서, 그냥 textContent를 읽으면
+      // 수식이 두 번 나온다. 화면에 안 보이는 쪽을 떼고 읽는다.
+      el.querySelectorAll(".katex-mathml").forEach((n) => n.remove());
+      return (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 14);
+    };
+    return Array.from({ length: blocks.length + 1 }, (_, i) => {
+      if (i === 0) return "맨 위";
+      if (i === blocks.length) return "맨 아래";
+      const text = preview(blocks[i - 1]);
+      return text ? `${i}번째 문단 뒤 · ${text}…` : `${i}번째 문단 뒤`;
+    });
+  }, [blocks]);
+
+  /** 본문 문단 사이사이에 도형·자료를 끼워 넣은 최종 카드 HTML. */
+  const cardHtml = useMemo(() => {
+    const atSlot = (slot: number) =>
+      figures
+        .filter((f) => positionOf(f.id) === slot)
+        .map(
+          (f) =>
+            `<div class="problem-figure" style="${diagramStyleCss(
+              layoutOf(f.id),
+            )}">${f.markup}</div>`,
+        )
+        .join("");
+
+    return (
+      blocks.map((block, i) => atSlot(i) + block).join("") +
+      atSlot(blocks.length)
+    );
+    // positionOf/layoutOf는 아래 두 state를 읽는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks, figures, figurePos, layouts]);
 
   // 정답을 적고 잠시 가만히 있으면 저장 버튼을 누르지 않아도 저장한다.
   // 글자마다 저장하면 "12"를 치는 동안 "1"로 저장되므로 입력이 멎을 때까지 기다린다.
@@ -421,31 +489,15 @@ export default function ResultStage({
           className="problem-surface rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
           style={{ width: PROBLEM_CARD_WIDTH }}
         >
+          {/* 본문과 도형·자료를 한 덩어리로 만들어 넣는다. React 요소로 따로
+              두면 도형을 문단 사이에 놓을 수 없고, 문단마다 감싸는 <div>가
+              생겨 ".mmd-paragraph:last-child" 같은 규칙이 어긋나 문단 간격이
+              무너진다. */}
           <div
             className="font-serif leading-relaxed text-ink"
             style={{ fontSize: FONT_SIZES[fontSizeIdx].px }}
-            dangerouslySetInnerHTML={{ __html: html }}
+            dangerouslySetInnerHTML={{ __html: cardHtml }}
           />
-          {(result.diagrams ?? []).map((d) =>
-            rasterFallbacks[d.id] ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={d.id}
-                src={rasterFallbacks[d.id]}
-                alt="도형"
-                style={diagramStyle(layoutOf(d.id))}
-                className="block max-w-full"
-              />
-            ) : null,
-          )}
-          {manualDiagramSvgs.map((d) => (
-            <div
-              key={d.id}
-              style={diagramStyle(layoutOf(d.id))}
-              className="block max-w-full [&_svg]:h-auto [&_svg]:w-full"
-              dangerouslySetInnerHTML={{ __html: d.svg }}
-            />
-          ))}
         </div>
       </div>
 
@@ -526,6 +578,11 @@ export default function ResultStage({
                 }
                 layout={layoutOf(d.id)}
                 onChange={(next) => setLayout(d.id, next)}
+                position={positionOf(d.id)}
+                slotLabels={slotLabels}
+                onPositionChange={(p) =>
+                  setFigurePos((prev) => ({ ...prev, [d.id]: p }))
+                }
               />
             ))}
           {manualDiagramSvgs.map((d, idx) => (
@@ -538,6 +595,11 @@ export default function ResultStage({
               }
               layout={layoutOf(d.id)}
               onChange={(next) => setLayout(d.id, next)}
+              position={positionOf(d.id)}
+              slotLabels={slotLabels}
+              onPositionChange={(p) =>
+                setFigurePos((prev) => ({ ...prev, [d.id]: p }))
+              }
               onRemove={() =>
                 setManualDiagramSvgs((prev) => prev.filter((p) => p.id !== d.id))
               }
