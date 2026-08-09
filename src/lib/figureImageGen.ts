@@ -18,10 +18,10 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
 /**
  * 후보 이미지 생성 모델. 앞에서부터 쓰고 못 부르면 다음으로 내려간다.
  *
- * **검증된 목록이 아니다.** 이름은 사용자 계정의 /v1/models 목록에서 가져왔지만,
- * 이 저장소에서 "목록에 있는데 호출은 404"인 경우를 여러 번 겪었다.
- * /api/figure/models 가 후보마다 실제로 작은 이미지를 보내보고 결과를 알려주니
- * 그걸로 확인한 뒤 OPENAI_FIGURE_IMAGE_MODELS 환경변수에 넣을 것(재배포 불필요).
+ * 2026-08 프로브에서 네 이름 모두 이 계정에 존재함을 확인했다(400은 프로브가
+ * 보낸 이미지가 불량이어서 난 것이지 모델 문제가 아니었다 — models/route.ts의
+ * TINY_PNG_BASE64 주석 참고). 사용자가 gpt-image-2를 쓰기로 정했고, 나머지는
+ * 그게 막혔을 때를 위한 폴백이다.
  */
 const DEFAULT_IMAGE_MODEL_IDS = [
   "gpt-image-2",
@@ -60,20 +60,27 @@ export class FigureImageError extends Error {
  * 모델마다 받는 파라미터가 다르고, 모르는 값을 보내면 400이 난다.
  * 앞에서부터 시도하고 파라미터 때문에 난 400이면 다음 조합으로 넘어간다.
  *
- * 앞쪽에 quality를 낮춰 두는 이유: 이미지 생성은 느리고 비싸다. Vercel
- * 함수 제한이 60초라 고품질로 오래 끌면 응답을 못 받고 잘린다.
+ * quality는 일부러 보내지 않는다. 한때 시간을 아끼려고 medium을 넣었는데,
+ * 자료는 글자와 가는 선이 살아야 쓸모가 있어서 품질을 낮추면 안 된다.
+ * (60초 안에 끝나는 게 정상이다 — 안 끝나면 quality를 낮출 게 아니라 자료를
+ * 더 좁게 잘라야 한다.) 지정하지 않으면 모델 기본값이 쓰인다.
+ *
  * input_fidelity는 "원본을 얼마나 그대로 따라갈지"라 자료 재현에는 높을수록
- * 좋지만, 받지 않는 모델이면 바로 다음 조합으로 내려간다.
+ * 좋지만, 받지 않는 모델이면 400이 나므로 다음 조합으로 내려간다.
  */
 const PARAM_VARIANTS: Record<string, string>[] = [
-  { size: "auto", quality: "medium", input_fidelity: "high" },
-  { size: "auto", quality: "medium" },
+  { size: "auto", input_fidelity: "high" },
   { size: "auto" },
+  { input_fidelity: "high" },
   {},
 ];
 
 function isUnsupportedParamError(status: number, body: string): boolean {
   if (status !== 400) return false;
+  // 파라미터 이름이 언급된 400만 "다음 조합으로"의 대상이다. 이미지 파일
+  // 자체가 거부된 400("Invalid image file or mode")은 조합을 바꿔봐야
+  // 소용없으므로 걸러낸다 — 안 그러면 같은 실패를 네 번 반복하고 시간만 쓴다.
+  if (/invalid image|image file/i.test(body)) return false;
   return /size|quality|input_fidelity|unsupported|unknown|unrecognized|invalid_value/i.test(
     body,
   );

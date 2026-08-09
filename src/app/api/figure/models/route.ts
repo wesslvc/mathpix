@@ -23,9 +23,17 @@ export const maxDuration = 60;
  * 400을 받으면 그 메시지를 그대로 실어준다 — 어떤 값이 거부됐는지 바로 보인다.
  */
 
-/** 8×8 흰색 PNG. 프로브 비용을 최소로 만들기 위한 것. */
+/**
+ * 64×64 흰색 RGBA PNG. 프로브 비용을 최소로 하려는 것이다.
+ *
+ * **이 값을 손으로 고치지 말 것.** 처음엔 기억에 의존해 8×8 PNG base64를
+ * 적었는데 IDAT 청크의 CRC가 깨진 잘린 파일이었고, 그 결과 네 모델 전부가
+ * "Invalid image file or mode"로 400을 냈다. 모델이 멀쩡한데 프로브가 못
+ * 쓴다고 보고한 셈이라, 진단 도구로서 최악의 실패였다.
+ * 바꿔야 하면 실제로 파일을 만들어 CRC까지 검사한 뒤 넣을 것.
+ */
 const TINY_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR42mP8/58BDzCOKhhVMDwUAADbfxoDlvpRBAAAAABJRU5ErkJggg==";
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAYElEQVR42u3QAQ0AAAwCIPuX1hzfIQLpcxEgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQLuG0bQw7Ko2TvAAAAAAElFTkSuQmCC";
 
 type Probe = {
   id: string;
