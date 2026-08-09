@@ -211,7 +211,12 @@ function isPureMathPlaceholderBlock(block: string): boolean {
 // 깨진 글자로 노출됐다. 문단/줄 분리 전에 tabular 블록 전체를 실제 HTML
 // <table>로 미리 변환해 플레이스홀더 토큰(줄바꿈 없는 한 줄)으로 바꿔두고,
 // renderBlock에서 그 줄을 찾아 표만 따로 떼어 형제 요소로 내보낸다.
-const TABULAR_PATTERN = /\\begin\{tabular\}\{[^}]*\}([\s\S]*?)\\end\{tabular\}/g;
+// 앞뒤의 "$$"까지 같이 먹는다. Mathpix가 표를 수식 안에 넣어 보내는 경우가
+// 있는데($$\begin{tabular}...$$), 표만 토큰으로 바꾸고 "$$"를 남겨두면
+// "$$\x00TABLE0\x00$$"가 되어 KaTeX가 NUL 문자를 파싱하다 실패하고,
+// 실패한 원문("\displaystyle ...")이 빨간 글씨로 그대로 화면에 찍힌다.
+const TABULAR_PATTERN =
+  /(?:\$\$)?\s*\\begin\{tabular\}\{[^}]*\}([\s\S]*?)\\end\{tabular\}\s*(?:\$\$)?/g;
 
 function tabularToTableHtml(body: string): string {
   const rows = body
@@ -233,14 +238,89 @@ function tabularToTableHtml(body: string): string {
   return `<table class="mmd-table">${rowsHtml}</table>`;
 }
 
-function protectTabular(input: string): { text: string; tables: string[] } {
+// Mathpix의 기본 출력(mmd)은 표를 **마크다운**으로 준다. 이게 지금까지
+// 전혀 처리되지 않아서 "| z | P |" 같은 줄이 글자 그대로 찍혔다.
+//   | $z$ | $P$ |
+//   | :---: | :---: |
+//   | 1.0 | 0.3413 |
+const MD_TABLE_ROW = /^\s*\|(.+)\|\s*$/;
+/** 머리글과 본문을 가르는 줄. 셀이 ---, :---:, ---: 중 하나여야 한다. */
+const MD_TABLE_SEPARATOR = /^\s*\|[\s:|-]+\|\s*$/;
+
+/**
+ * 마크다운 표의 한 줄을 셀로 쪼갠다.
+ * "$...$" 안의 "|"는 구분자가 아니다(절댓값 기호 등).
+ */
+function splitMarkdownRow(line: string): string[] {
+  const inner = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  const cells: string[] = [];
+  let cur = "";
+  let inMath = false;
+  for (const ch of inner) {
+    if (ch === "$") inMath = !inMath;
+    if (ch === "|" && !inMath) {
+      cells.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+function markdownTableHtml(header: string[], rows: string[][]): string {
+  const head = `<tr>${header.map((c) => `<th>${renderInline(c)}</th>`).join("")}</tr>`;
+  const body = rows
+    .map((r) => `<tr>${r.map((c) => `<td>${renderInline(c)}</td>`).join("")}</tr>`)
+    .join("");
+  return `<table class="mmd-table">${head}${body}</table>`;
+}
+
+/**
+ * 표(LaTeX tabular, 마크다운) 전부를 미리 HTML로 바꿔 토큰으로 감춘다.
+ *
+ * 문단/줄 분리를 하기 전에 처리해야 한다 — 안 그러면 표 안의 개행이 각각
+ * 별도 줄로 쪼개져 표가 사라지거나 깨진 글자로 노출된다.
+ */
+function protectTables(input: string): { text: string; tables: string[] } {
   const tables: string[] = [];
-  const text = input.replace(TABULAR_PATTERN, (_match, body: string) => {
+
+  const withoutTabular = input.replace(TABULAR_PATTERN, (_match, body: string) => {
     const token = `\x00TABLE${tables.length}\x00`;
     tables.push(tabularToTableHtml(body));
     return token;
   });
-  return { text, tables };
+
+  const lines = withoutTabular.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const isTableStart =
+      MD_TABLE_ROW.test(lines[i]) &&
+      i + 1 < lines.length &&
+      MD_TABLE_SEPARATOR.test(lines[i + 1]);
+    if (!isTableStart) {
+      out.push(lines[i]);
+      continue;
+    }
+
+    const header = splitMarkdownRow(lines[i]);
+    const rows: string[][] = [];
+    let j = i + 2;
+    while (
+      j < lines.length &&
+      MD_TABLE_ROW.test(lines[j]) &&
+      !MD_TABLE_SEPARATOR.test(lines[j])
+    ) {
+      rows.push(splitMarkdownRow(lines[j]));
+      j++;
+    }
+    out.push(`\x00TABLE${tables.length}\x00`);
+    tables.push(markdownTableHtml(header, rows));
+    i = j - 1;
+  }
+
+  return { text: out.join("\n"), tables };
 }
 
 const TABLE_PLACEHOLDER_ONLY = /^\x00TABLE(\d+)\x00$/;
@@ -592,13 +672,13 @@ function toBlocks(allLines: string[]): Block[] {
  * 한 줄로 취급된다).
  */
 export function getTextLines(input: string): string[] {
-  const { text: withoutTables } = protectTabular(normalizeDelimiters(normalizeJamo(input)));
+  const { text: withoutTables } = protectTables(normalizeDelimiters(normalizeJamo(input)));
   return protectDisplayMath(withoutTables).text.split("\n");
 }
 
 /** 줄 하나를 화면에 미리 보여주기 위한 HTML(수식은 실제로 렌더링해서 보여준다). */
 export function renderPreviewLine(line: string, input: string): string {
-  const { text: withoutTables } = protectTabular(normalizeDelimiters(normalizeJamo(input)));
+  const { text: withoutTables } = protectTables(normalizeDelimiters(normalizeJamo(input)));
   const { blocks } = protectDisplayMath(withoutTables);
   return renderLineContent(line, blocks);
 }
@@ -788,7 +868,7 @@ export function renderMathTextWithInfo(
   // 조합용 자모를 먼저 호환용으로 바꾼다. 1:1 치환이라 줄 수가 달라지지 않아
   // 박스 범위의 줄 번호에 영향을 주지 않는다.
   const normalized = normalizeDelimiters(normalizeJamo(input));
-  const { text: withoutTables, tables } = protectTabular(normalized);
+  const { text: withoutTables, tables } = protectTables(normalized);
   const { text, blocks: mathBlocks } = protectDisplayMath(withoutTables);
   const canonicalLines = text.split("\n");
   const blocks = toBlocks(canonicalLines);
