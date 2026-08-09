@@ -109,7 +109,6 @@ export default function DiagramAdjuster({
     slotLabels !== undefined &&
     onPositionChange !== undefined &&
     slotLabels.length > 1;
-  const lastSlot = (slotLabels?.length ?? 1) - 1;
 
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 px-3 py-2">
@@ -134,32 +133,12 @@ export default function DiagramAdjuster({
           )}
         </div>
       </div>
-      {/* 본문 어디에 끼워 넣을지. 문제집처럼 자료가 문장 사이에 와야 하는
-          경우가 많은데, 예전에는 무조건 맨 아래에만 붙었다.
-          드래그가 아니라 버튼·목록으로 고르게 한 이유: 이 카드는 가로
-          스크롤 영역 안에 있고 주 사용 환경이 휴대폰이라, 터치 드래그는
-          스크롤과 엉켜 제대로 잡히지 않는다. */}
+      {/* 위치는 미리보기에서 그림을 손으로 끌어 옮기는 게 기본이다. 여기
+          목록은 지금 어디에 놓였는지 보여주는 표시이자, 손이 아니라 정확히
+          몇 번째 문단인지로 고르고 싶을 때 쓰는 보조 수단이다. */}
       {canMove && (
         <div className="flex items-center gap-1.5">
           <span className="w-12 shrink-0 text-[11px] text-slate-500">위치</span>
-          <button
-            type="button"
-            onClick={() => onPositionChange(Math.max(0, position - 1))}
-            disabled={position <= 0}
-            aria-label="위로 옮기기"
-            className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-          >
-            ▲
-          </button>
-          <button
-            type="button"
-            onClick={() => onPositionChange(Math.min(lastSlot, position + 1))}
-            disabled={position >= lastSlot}
-            aria-label="아래로 옮기기"
-            className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-          >
-            ▼
-          </button>
           <select
             value={position}
             onChange={(e) => onPositionChange(Number(e.target.value))}

@@ -1,25 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  FigureApiError,
-  figureModelIds,
-  vectorizeFigure,
-} from "@/lib/figureVector";
+  FigureImageError,
+  figureImageModelIds,
+  generateFigureImage,
+} from "@/lib/figureImageGen";
 import { FIGURE_CREDIT_COST } from "@/lib/figureCost";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
-// 비전 모델은 응답 생성이 느려 기본 서버리스 제한(대개 10초대)을 넘긴다.
-// 넘기면 Vercel이 JSON이 아닌 에러 페이지를 돌려줘서 클라이언트의 res.json()이
-// 깨진다. (Hobby 플랜은 60초가 상한이라 더 늘릴 수 없다.)
+// 이미지 생성은 느리다. 기본 서버리스 제한(대개 10초대)을 넘기면 Vercel이
+// JSON이 아닌 에러 페이지를 돌려줘서 클라이언트의 res.json()이 깨진다.
+// (Hobby 플랜은 60초가 상한이라 더 늘릴 수 없다 — 그래서 요청 파라미터에서
+// quality를 낮춰 시간을 줄인다. figureImageGen.ts의 PARAM_VARIANTS 참고.)
 export const maxDuration = 60;
 
-/**
- * 모델을 갈아타며 재시도할 최대 횟수.
- * 404/403은 즉시 떨어지지만, 실제 생성까지 갔다가 429가 나는 경우도 있어서
- * 60초 안에 끝나도록 넉넉하게 잡지 않는다.
- */
-const MAX_MODEL_ATTEMPTS = 3;
+/** 모델을 갈아타며 재시도할 최대 횟수. 60초 안에 끝나야 하므로 넉넉히 안 잡는다. */
+const MAX_MODEL_ATTEMPTS = 2;
 
 export async function POST(req: NextRequest) {
   let body: { image?: string };
@@ -62,9 +59,8 @@ export async function POST(req: NextRequest) {
   }
 
   // 자료 재구성은 실제로 돈이 나가는 유료 API라 사진인식권으로 과금한다.
-  // 수학 도형(도형 추가인식)과 같은 크레딧 통을 쓰되, 여기서는 모델 티어별
-  // 하루 예산 같은 게 없어서 차감은 딱 한 번만 한다 — 모델을 갈아타며
-  // 재시도하는 것은 우리 사정이지 사용자가 더 낼 이유가 아니다.
+  // 수학 도형과 같은 크레딧 통을 쓰되, 차감은 요청당 딱 한 번만 한다 —
+  // 모델을 갈아타며 재시도하는 것은 우리 사정이지 사용자가 더 낼 이유가 아니다.
   let charged = false;
   if (supabase) {
     try {
@@ -101,13 +97,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const modelIds = figureModelIds();
+  const modelIds = figureImageModelIds();
   let lastError: string | null = null;
 
   for (let i = 0; i < Math.min(modelIds.length, MAX_MODEL_ATTEMPTS); i++) {
     const modelId = modelIds[i];
     try {
-      const result = await vectorizeFigure(image, modelId);
+      const result = await generateFigureImage(image, modelId);
       if (!result) {
         await refund();
         return NextResponse.json(
@@ -115,21 +111,11 @@ export async function POST(req: NextRequest) {
           { status: 502 },
         );
       }
-      // 비용은 거의 전부 출력 토큰에서 나온다. 어느 자료가 비쌌는지 알 수 있게
-      // 남겨둔다(사용자 화면이 아니라 서버 로그).
-      console.info(
-        `[api/figure] ok model=${modelId} in=${result.inputTokens} out=${result.outputTokens}`,
-      );
-      return NextResponse.json({
-        svg: result.svg,
-        modelId,
-        inputTokens: result.inputTokens,
-        outputTokens: result.outputTokens,
-      });
+      console.info(`[api/figure] ok model=${modelId}`);
+      return NextResponse.json({ image: result.dataUrl, modelId });
     } catch (err) {
       // 404(없는 이름)/403(권한 없음)/429(한도)면 이 모델로는 안 된다.
-      // 다음 후보로 내려가 재시도한다 — 사용자에겐 오류를 보이지 않는다.
-      if (err instanceof FigureApiError && err.shouldTryNextModel) {
+      if (err instanceof FigureImageError && err.shouldTryNextModel) {
         console.warn(
           `[api/figure] ${modelId} 사용 불가(${err.status}), 다음 모델로 내려감`,
         );
@@ -144,15 +130,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 후보를 다 써도 못 불렀다. 이름이 틀렸을 가능성이 높으니 확인 방법을 알려준다.
   await refund();
   console.error(
-    `[api/figure] 쓸 수 있는 모델을 찾지 못함. 후보=${modelIds.join(", ")}`,
+    `[api/figure] 쓸 수 있는 이미지 모델을 찾지 못함. 후보=${modelIds.join(", ")}`,
   );
   return NextResponse.json(
     {
       error:
-        "쓸 수 있는 자료 재구성 모델을 찾지 못했습니다. 관리자는 /api/figure/models 에서 이 키로 부를 수 있는 모델을 확인하고 OPENAI_FIGURE_MODELS 환경변수에 넣어주세요." +
+        "쓸 수 있는 자료 생성 모델을 찾지 못했습니다. 관리자는 /api/figure/models 에서 이 키로 부를 수 있는 이미지 모델을 확인하고 OPENAI_FIGURE_IMAGE_MODELS 환경변수에 넣어주세요." +
         (lastError ? ` (마지막 오류: ${lastError})` : ""),
     },
     { status: 503 },

@@ -22,13 +22,16 @@ type Props = {
   onCreditsUsed: () => void;
 };
 
-/** 진행률은 알 수 없으니 경과 시간으로 "멈춘 게 아니다"를 보여준다. */
-const EXPECTED_SEC = 35;
+/**
+ * 진행률은 알 수 없으니 경과 시간으로 "멈춘 게 아니다"를 보여준다.
+ * 이미지 생성은 벡터(SVG)보다 느려서 넉넉하게 잡는다.
+ */
+const EXPECTED_SEC = 45;
 
 function statusText(sec: number): string {
   if (sec < 4) return "자료를 서버로 보내는 중...";
-  if (sec < 12) return "자료를 읽고 있어요...";
-  if (sec < 25) return "벡터 그림으로 다시 그리는 중이에요...";
+  if (sec < 15) return "자료를 읽고 있어요...";
+  if (sec < 35) return "그림을 새로 그리는 중이에요...";
   return "거의 다 됐어요. 자료가 복잡하면 조금 더 걸립니다...";
 }
 
@@ -138,18 +141,20 @@ export default function FigurePanel({
         body: JSON.stringify({ image: forModel }),
       });
 
-      let json: { svg?: string; error?: string };
+      let json: { image?: string; error?: string };
       try {
         json = await res.json();
       } catch {
         // 실행시간 초과 등으로 Vercel이 JSON이 아닌 에러 페이지를 돌려준 경우.
         throw new Error(
-          "서버에서 정상적인 응답을 받지 못했어요. 자료가 복잡해 시간이 오래 걸렸을 수 있습니다. 영역을 더 좁게 잘라 다시 시도하거나, 원본을 그대로 붙여주세요.",
+          "서버에서 정상적인 응답을 받지 못했어요. 이미지 생성이 60초를 넘겨 요청이 끊겼을 수 있습니다. 영역을 더 좁게 잘라 다시 시도하거나, 원본을 그대로 붙여주세요.",
         );
       }
       if (!res.ok) throw new Error(json.error ?? "자료 재구성에 실패했습니다.");
 
-      const svg = json.svg as string;
+      // 완성된 그림도 원본과 똑같이 SVG로 감싸 둔다 — 크기·위치 조절과 PNG
+      // 캡처가 두 경로에서 완전히 같은 방식으로 동작한다.
+      const svg = await rasterToSvg(json.image as string);
       writeFigureCache(key, svg);
       onAdd(svg);
       setPending(null);
@@ -230,7 +235,8 @@ export default function FigurePanel({
             </button>
             <p className="px-1 text-[11px] text-slate-500">
               선과 글자로 된 도식·그래프·회로도라면 이쪽이 훨씬 깨끗하게
-              인쇄됩니다.
+              인쇄됩니다. 다만 이미지 생성 모델이 한글 라벨을 잘못 쓰는 경우가
+              있으니, 완성된 그림의 글자는 꼭 확인해주세요.
               {config?.configured === false &&
                 " (지금은 OPENAI_API_KEY가 설정되지 않아 쓸 수 없습니다.)"}
               {notEnough &&
