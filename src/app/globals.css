@@ -225,6 +225,15 @@ body {
   height: auto;
 }
 
+/* 같은 자리에 놓인 것들을 가로로 나란히. 표와 그림을 옆에 세울 때 쓴다.
+   위쪽을 맞춰야 높이가 다른 둘이 나란히 봤을 때 자연스럽다. */
+.problem-figure-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 16px;
+}
+
 .mmd-paragraph {
   margin: 0 0 1.1em;
   line-height: 1.7;
@@ -288,6 +297,21 @@ body {
 }
 
 .mmd-table:last-child {
+  margin-bottom: 0;
+}
+
+/* 표도 그림과 똑같이 끌어 옮길 수 있다. 껍데기만 씌우고 표 자신의 바깥
+   여백은 그대로 두어, 손대지 않았을 때 예전과 같은 간격이 나오게 한다.
+   위의 ".mmd-table:last-child"보다 **뒤에** 있어야 한다 — 특정도가 같아서
+   앞에 두면 그 규칙이 이겨 표 아래 여백이 통째로 사라진다(껍데기 안에서는
+   표가 늘 마지막 자식이라 그 규칙이 항상 걸린다). */
+.problem-figure--table > .mmd-table {
+  margin-bottom: 1.1em;
+  /* 크기를 줄이면 표도 같이 줄어야 한다(칸 너비가 알아서 좁아진다). */
+  max-width: 100%;
+}
+
+.problem-figure--table:last-child > .mmd-table {
   margin-bottom: 0;
 }
 

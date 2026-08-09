@@ -230,8 +230,14 @@ function isPureMathPlaceholderBlock(block: string): boolean {
 // 열 지정 앞에 배치 옵션이 붙기도 하고(\begin{tabular}[t]{|l|l|}), 열 지정
 // 안에 중괄호가 또 들어가기도 한다(@{}ll@{}). 둘 다 안 받으면 패턴이 안 걸려
 // 표가 통째로 KaTeX로 넘어가고, 거기서 실패해 원문이 화면에 찍힌다.
+//
+// 앞뒤 공백은 **"$$"에 붙은 것만** 먹는다. 예전에는 그냥 "\s*"라 표 앞뒤의
+// 빈 줄까지 삼켰고, 그러면 토큰이 앞 문장과 같은 줄에 붙어버려 표가 문단
+// 안에 갇혔다 — 마크다운 표는 제 줄에 남아 별도 블록이 되는데 tabular만
+// 그러지 못해, 같은 표인데 어느 형식으로 왔느냐에 따라 다르게 그려졌다.
+// 표를 손으로 끌어 옮기려면 표가 제 블록이어야 한다.
 const TABULAR_PATTERN =
-  /(?:\$\$)?\s*\\begin\{tabular\}\s*(?:\[[^\]]*\])?\s*\{(?:[^{}]|\{[^{}]*\})*\}([\s\S]*?)\\end\{tabular\}\s*(?:\$\$)?/g;
+  /(?:\$\$\s*)?\\begin\{tabular\}\s*(?:\[[^\]]*\])?\s*\{(?:[^{}]|\{[^{}]*\})*\}([\s\S]*?)\\end\{tabular\}(?:\s*\$\$)?/g;
 
 function tabularToTableHtml(body: string): string {
   const rows = body
@@ -734,7 +740,11 @@ function renderPlainRange(
         });
         first = false;
       }
-      parts.push({ kind: "plain", html: tables[Number(match[1])] });
+      parts.push({
+        kind: "table",
+        id: tableBlockId(Number(match[1])),
+        html: tables[Number(match[1])],
+      });
       if (after.length > 0) {
         parts.push({
           kind: "plain",
@@ -761,13 +771,24 @@ function renderPlainRange(
  */
 export type RenderedBlock =
   | { kind: "plain"; html: string }
+  /**
+   * 표는 문단과 따로 구분한다 — 도형·자료처럼 손으로 끌어 옮길 수 있어야 해서,
+   * 카드를 조립하는 쪽이 "이건 옮길 수 있는 물건"임을 알아야 한다.
+   * id는 원문에서 몇 번째 표인지로 만든다(같은 원문이면 항상 같은 값이라
+   * 다시 그려도 놓아둔 자리가 유지된다).
+   */
+  | { kind: "table"; id: string; html: string }
   | { kind: "box"; lines: string[] };
 
 /** 블록 하나를 최종 HTML로. 사이에 아무것도 끼우지 않을 때 쓴다. */
 export function blockToHtml(block: RenderedBlock): string {
-  return block.kind === "plain"
-    ? block.html
-    : `<div class="mmd-box">${block.lines.join("")}</div>`;
+  if (block.kind === "plain" || block.kind === "table") return block.html;
+  return `<div class="mmd-box">${block.lines.join("")}</div>`;
+}
+
+/** 표 블록 하나. 표를 옮길 수 있게 하려고 자리 계산에서 따로 다룬다. */
+export function tableBlockId(index: number): string {
+  return `table-${index}`;
 }
 
 /** 박스 한 개를 그린다. 안이 빈 줄뿐이면 아무것도 그리지 않는다(빈 테두리 방지). */
@@ -893,11 +914,13 @@ export function renderMathTextWithInfo(
 
   /** 최상위 요소(문단/박스/표) 하나씩. 도형·자료를 그 사이에 끼워 넣는다. */
   const finish = (raw: RenderedBlock[]) => {
-    const restored: RenderedBlock[] = raw.map((part) =>
-      part.kind === "plain"
+    const restored: RenderedBlock[] = raw.map((part) => {
+      // 표 블록은 이미 실제 <table> 마크업이라 되돌릴 토큰이 없다.
+      if (part.kind === "table") return part;
+      return part.kind === "plain"
         ? { kind: "plain", html: restoreTables(part.html, tables) }
-        : { kind: "box", lines: part.lines.map((l) => restoreTables(l, tables)) },
-    );
+        : { kind: "box", lines: part.lines.map((l) => restoreTables(l, tables)) };
+    });
     return { html: restored.map(blockToHtml).join(""), blocks: restored };
   };
 
@@ -1005,7 +1028,11 @@ export function renderMathTextWithInfo(
       html: `<p class="mmd-paragraph">${renderLines(beforeLines, isFirst, mathBlocks)}</p>`,
     });
       }
-      parts.push({ kind: "plain", html: tableHtml });
+      parts.push({
+        kind: "table",
+        id: tableBlockId(Number(tableMatch[1])),
+        html: tableHtml,
+      });
       if (afterLines.length > 0) {
         parts.push({
       kind: "plain",
