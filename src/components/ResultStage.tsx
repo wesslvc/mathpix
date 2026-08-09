@@ -9,11 +9,20 @@ import {
 } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
-import DiagramCropModal from "./DiagramCropModal";
 import FigurePanel from "./FigurePanel";
 import ScaledCard from "./ScaledCard";
+import {
+  prepareFigureForModel,
+  rasterToSvg,
+  trimBlankBorder,
+} from "@/lib/figureImage";
+import {
+  figureCacheKey,
+  readFigureCache,
+  writeFigureCache,
+} from "@/lib/figureCache";
 import type { Subject } from "@/lib/subject";
-import type { DiagramQuota } from "@/app/api/diagram/quota/route";
+import type { TokenStatus } from "@/app/api/tokens/route";
 import BoxRangeEditor from "./BoxRangeEditor";
 import LatexEditor from "./LatexEditor";
 import DiagramAdjuster, {
@@ -22,8 +31,6 @@ import DiagramAdjuster, {
   type DiagramLayout,
 } from "./DiagramAdjuster";
 import { ANSWER_TYPE_LABEL, formatAnswer, type AnswerType } from "@/lib/answer";
-
-type DiagramModel = "flash" | "lite";
 
 type Props = {
   result: RecognizeResponse;
@@ -37,7 +44,9 @@ type Props = {
     answer: string;
     answerType: AnswerType;
     boxOverride: BoxOverride | undefined;
-  }) => Promise<void>;
+    /** 이미 저장한 문제면 그 id. 새로 만들지 않고 갱신한다. */
+    problemId?: string | null;
+  }) => Promise<string>;
   /** 복수 업로드 시 아직 처리하지 않은 이미지 수. */
   remainingCount?: number;
   /** 다음 대기 이미지로 넘어간다. */
@@ -51,10 +60,29 @@ type Props = {
   sourceImage?: string | null;
   /**
    * 과목 모드. 그림을 다루는 도구만 이 값에 따라 갈린다 —
-   * math면 수학 도형(Gemini), science면 사과탐 자료(OpenAI).
-   * 텍스트·수식은 두 모드 모두 Mathpix가 이미 읽어온 뒤라 차이가 없다.
+   * 그림을 다시 그리는 도구는 같고 프롬프트와 화면 문구만 갈린다.
    */
   subject?: Subject;
+};
+
+/**
+ * 카드에 붙은 그림 하나.
+ *
+ * svg는 **항상 유효한 마크업**이다. AI로 다시 그리기를 골라도 처음에는 오려낸
+ * 원본이 들어가 있고, 완성되면 그 자리를 갈아끼운다. 덕분에 처리가 끝나기 전에
+ * 저장해도 빈 자리가 아니라 원본이 든 멀쩡한 이미지가 저장된다.
+ */
+type ManualFigure = {
+  id: string;
+  svg: string;
+  kind: "math" | "figure";
+  /** AI 작업이 걸려 있으면 그 상태. 없으면 원본을 그대로 쓰는 그림이다. */
+  job?: {
+    /** 모델에 보낼 원본 크롭. 실패 후 재시도에도 쓴다. */
+    crop: string;
+    status: "pending" | "running" | "error";
+    error?: string;
+  };
 };
 
 const FONT_SIZES = [
@@ -63,32 +91,9 @@ const FONT_SIZES = [
   { label: "아주 크게", px: 30 },
 ] as const;
 
-// 도형 재구성은 보통 이 정도(초) 안에 끝난다. 실제 진행률을 알 수 없으니
-// 이 값을 기준으로 막대를 서서히 채우되(끝나기 전엔 100%를 보여주면 안
-// 되므로 90%에서 멈춘다), 정말 오래 걸리면 안내 문구로 이유를 알려준다.
-const VECTORIZE_EXPECTED_SEC = 15;
-
 // 정답 입력이 멎고 이만큼 지나면 자동 저장한다. 너무 짧으면 아직 타는 중에
 // 저장되고, 너무 길면 자동 저장을 기다리다 답답하다.
-const AUTO_SAVE_SEC = 3;
-
-// 모델 선택 UI 문구. 실제 과금·한도는 서버(0010 마이그레이션의 RPC)가 정하고,
-// 여기 숫자는 quota 응답으로 채워 넣는다 — 하드코딩하면 서버와 어긋난다.
-const MODEL_LABELS: Record<DiagramModel, string> = {
-  lite: "lite",
-  flash: "flash",
-};
-
-function vectorizeProgressPercent(elapsedSec: number): number {
-  return Math.min(90, Math.round((elapsedSec / VECTORIZE_EXPECTED_SEC) * 90));
-}
-
-function vectorizeStatusText(elapsedSec: number): string {
-  if (elapsedSec < 4) return "이미지를 서버로 보내는 중...";
-  if (elapsedSec < 10) return "도형을 분석하고 있어요...";
-  if (elapsedSec < 20) return "벡터 이미지로 다시 그리는 중이에요...";
-  return "생각보다 오래 걸리네요. 조금만 더 기다려주세요...";
-}
+const AUTO_SAVE_SEC = 1;
 
 export default function ResultStage({
   result,
@@ -108,7 +113,12 @@ export default function ResultStage({
   const [textCopied, setTextCopied] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  // 저장된 문제의 id. null이면 아직 저장 전이다. 저장 후에도 계속 고칠 수
+  // 있어야 해서 boolean이 아니라 id를 들고 있는다 — 다시 저장하면 새 문제를
+  // 만드는 게 아니라 이 행을 갱신한다.
+  const [savedId, setSavedId] = useState<string | null>(null);
+  // 마지막 저장 이후 바뀐 게 있는지. 있으면 다시 저장할 거리가 있다는 뜻.
+  const [dirty, setDirty] = useState(false);
   const [answer, setAnswer] = useState("");
   // 객관식이면 정답표에 "1" 대신 "①"로 표기한다.
   const [answerType, setAnswerType] = useState<AnswerType>("choice");
@@ -125,41 +135,29 @@ export default function ResultStage({
     setLayouts((prev) => ({ ...prev, [key]: next }));
   }
   // Mathpix가 자동 감지한 도형 영역을 원본에서 그대로 오려낸 raster 이미지들
-  // (도형 id -> data URL). 무료·자동, Gemini 재구성과는 별개다.
+  // (도형 id -> data URL). 무료·자동, AI 재구성과는 별개다.
   const [rasterFallbacks, setRasterFallbacks] = useState<Record<string, string>>({});
-  // "도형 추가인식"으로 사람이 직접 오려내 Gemini가 재구성한 SVG들. 클릭할
-  // 때마다 하나씩 쌓인다(문제당 여러 도형이 있으면 여러 번 실행 가능).
+  // 사람이 직접 오려내 붙인 그림들. 원본 그대로일 수도, AI가 다시 그린
+  // 것일 수도 있다(문제당 여러 개 가능).
   // 크기·위치 설정을 도형별로 따로 들고 있어야 해서 배열 인덱스가 아니라 고정
   // id를 쓴다(인덱스로 키를 잡으면 하나를 지웠을 때 뒤 도형들의 설정이 한 칸씩
   // 밀려 엉뚱한 도형에 적용된다).
   // kind는 조절 목록에 붙는 이름에만 쓴다(수학 도형인지 사과탐 자료인지).
   // 붙는 방식·저장 경로는 둘이 완전히 같다.
-  const [manualDiagramSvgs, setManualDiagramSvgs] = useState<
-    { id: string; svg: string; kind: "math" | "figure" }[]
-  >([]);
-  const [showDiagramCrop, setShowDiagramCrop] = useState(false);
-  const [isVectorizing, setIsVectorizing] = useState(false);
-  const [vectorizeError, setVectorizeError] = useState<string | null>(null);
-  // 실패는 아니지만 알려야 하는 일(예: flash 전역 한도가 차서 lite로 그림).
-  const [vectorizeNotice, setVectorizeNotice] = useState<string | null>(null);
-  // 도형 재구성 API는 스트리밍 응답이 아니라 실제 진행률을 알 방법이 없다.
-  // 대신 경과 시간을 세서 "멈춘 게 아니라 원래 오래 걸린다"를 보여준다.
-  const [vectorizeElapsedSec, setVectorizeElapsedSec] = useState(0);
-  // 어떤 모델로 도형을 재구성할지. 기본은 사진인식권만 쓰는 lite로 둔다
-  // (플래시쿠폰은 하루 5장뿐이라 사용자가 의식하고 골라 쓰게 한다).
-  const [diagramModel, setDiagramModel] = useState<DiagramModel>("lite");
-  // 결제 여부와 남은 수량. null이면 아직 못 불러온 상태.
-  const [quota, setQuota] = useState<DiagramQuota | null>(null);
+  const [manualDiagramSvgs, setManualDiagramSvgs] = useState<ManualFigure[]>([]);
+  // 지금 AI가 그리고 있는 그림의 id. 한 번에 하나씩만 돌린다(순차 처리).
+  const runningJobRef = useRef<string | null>(null);
+  /** 남은 토큰과 기능별 소모량. null이면 아직 못 불러온 상태. */
+  const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
 
-  // 결제 상태와 남은 수량을 불러온다. 도형 기능은 원본 사진이 없어도 카메라로
-  // 새로 찍어 쓸 수 있으므로 항상 보여주고, 한 번 쓰고 나면 다시 불러
-  // 남은 수량을 갱신한다(refreshQuota).
+  // 남은 토큰을 불러온다. 그림 기능은 원본 사진이 없어도 카메라로 새로 찍어
+  // 쓸 수 있으므로 항상 보여주고, 한 번 쓰고 나면 다시 불러 잔량을 갱신한다.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/diagram/quota")
+    fetch("/api/tokens")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled && data) setQuota(data as DiagramQuota);
+        if (!cancelled && data) setTokenStatus(data as TokenStatus);
       })
       .catch(() => {
         // 잔량을 못 불러와도 버튼은 눌러볼 수 있게 둔다(서버가 최종 판단한다).
@@ -169,26 +167,14 @@ export default function ResultStage({
     };
   }, []);
 
-  async function refreshQuota() {
+  async function refreshTokens() {
     try {
-      const res = await fetch("/api/diagram/quota");
-      if (res.ok) setQuota((await res.json()) as DiagramQuota);
+      const res = await fetch("/api/tokens");
+      if (res.ok) setTokenStatus((await res.json()) as TokenStatus);
     } catch {
       // 갱신 실패는 무시 — 다음 렌더에서 다시 시도된다.
     }
   }
-
-  useEffect(() => {
-    if (!isVectorizing) {
-      setVectorizeElapsedSec(0);
-      return;
-    }
-    const startedAt = Date.now();
-    const id = setInterval(() => {
-      setVectorizeElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [isVectorizing]);
 
   // 인식 결과를 그 자리에서 고칠 수 있게 한다. 저장 후 갤러리에서 다시 여는
   // 왕복 없이, 잘못 읽힌 수식을 보면서 바로 손보는 게 훨씬 빠르다.
@@ -471,7 +457,9 @@ export default function ResultStage({
   const [autoSaveOff, setAutoSaveOff] = useState(false);
 
   useEffect(() => {
-    if (!onSaveToCategory || autoSaveOff || saved || isSaving) return;
+    if (!onSaveToCategory || autoSaveOff || isSaving) return;
+    // 아직 저장한 적이 있고 바뀐 게 없으면 다시 저장할 이유가 없다.
+    if (savedId !== null && !dirty) return;
     if (answer.trim() === "") {
       setAutoSaveLeftSec(null);
       return;
@@ -500,7 +488,7 @@ export default function ResultStage({
     // handleSaveToCategory는 매 렌더 새로 만들어지므로 의존성에 넣지 않는다
     // (넣으면 타이머가 렌더마다 초기화돼 영영 저장되지 않는다).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [answer, answerType, autoSaveOff, saved, isSaving, onSaveToCategory]);
+  }, [answer, answerType, autoSaveOff, savedId, dirty, isSaving, onSaveToCategory]);
 
   // Mathpix가 텍스트로 옮길 수 없는 도형(원, 삼각형 등)을 감지하면 그 영역의
   // 좌표를 함께 알려준다. OCR로는 도형을 재구성할 수 없으니, 보낸 원본
@@ -544,56 +532,119 @@ export default function ResultStage({
     };
   }, [sourceImage, result.diagrams]);
 
+  /** 아직 AI가 손대지 않은(또는 돌고 있는) 그림 수. 게이지에 쓴다. */
+  const pendingJobCount = manualDiagramSvgs.filter(
+    (f) => f.job?.status === "pending" || f.job?.status === "running",
+  ).length;
+
   /**
-   * 사람이 오려낸 도형 영역을 Gemini로 보내 깨끗한 SVG로 재구성한다.
-   * 과금은 서버가 한다 — lite는 사진인식권 5장, flash는 플래시쿠폰 1장.
+   * 자리를 잡는다.
+   *
+   * 오려낸 원본을 곧바로 카드에 붙인다. AI를 쓰기로 했으면 작업만 걸어두고
+   * 바로 돌아온다 — 실제 생성은 아래 일꾼이 순서대로 처리한다. 기다리는 동안
+   * 사용자는 본문을 고치거나 다음 그림을 오려낼 수 있다.
    */
-  async function handleDiagramCropConfirm(croppedDataUrl: string) {
-    setShowDiagramCrop(false);
-    setIsVectorizing(true);
-    setVectorizeError(null);
-    setVectorizeNotice(null);
-    try {
-      const res = await fetch("/api/diagram", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: croppedDataUrl, model: diagramModel }),
-      });
-      let json: {
-        svg?: string;
-        error?: string;
-        /** 서버가 실제로 쓴 모델. 전역 예산이 바닥나면 flash 대신 lite가 온다. */
-        model?: DiagramModel;
-        /** 요청한 모델과 다르게 처리했을 때의 안내. */
-        notice?: string | null;
-      };
-      try {
-        json = await res.json();
-      } catch {
-        // Vercel이 함수 실행시간 초과 등으로 요청을 강제 종료하면 JSON이 아니라
-        // 자체 에러 페이지(HTML/텍스트)를 돌려준다 — 그걸 그대로 파싱하려다
-        // 나는 원본 파싱 에러 대신 원인을 짐작할 수 있는 메시지로 바꿔준다.
-        throw new Error(
-          "서버에서 정상적인 응답을 받지 못했어요. 시간이 너무 오래 걸려 요청이 중단됐을 수 있습니다. 잠시 후 다시 시도해주세요.",
-        );
-      }
-      if (!res.ok) throw new Error(json.error ?? "도형 재구성에 실패했습니다.");
-      setManualDiagramSvgs((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), svg: json.svg as string, kind: "math" },
-      ]);
-      // 실패는 아니지만 알려야 하는 경우(flash 전역 한도 소진 → lite로 대체).
-      setVectorizeNotice(json.notice ?? null);
-    } catch (err) {
-      setVectorizeError(
-        err instanceof Error ? err.message : "도형 재구성에 실패했습니다.",
-      );
-    } finally {
-      setIsVectorizing(false);
-      // 성공이든 실패(=환불)든 서버 잔량이 바뀌었을 수 있으니 다시 읽는다.
-      void refreshQuota();
-    }
+  async function addFigure(crop: string, useAi: boolean) {
+    const svg = await rasterToSvg(crop);
+    setManualDiagramSvgs((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        svg,
+        kind: subject === "math" ? "math" : "figure",
+        job: useAi ? { crop, status: "pending" } : undefined,
+      },
+    ]);
   }
+
+  /** 실패한 그림을 다시 시도한다. 이미 차감된 토큰은 서버가 환불한 상태다. */
+  function retryFigure(id: string) {
+    setManualDiagramSvgs((prev) =>
+      prev.map((f) =>
+        f.id === id && f.job
+          ? { ...f, job: { ...f.job, status: "pending", error: undefined } }
+          : f,
+      ),
+    );
+  }
+
+  /** AI 작업을 하나씩 순서대로 처리하는 일꾼. */
+  useEffect(() => {
+    if (runningJobRef.current !== null) return;
+    const next = manualDiagramSvgs.find((f) => f.job?.status === "pending");
+    if (!next?.job) return;
+
+    const id = next.id;
+    const crop = next.job.crop;
+    runningJobRef.current = id;
+    setManualDiagramSvgs((prev) =>
+      prev.map((f) =>
+        f.id === id && f.job ? { ...f, job: { ...f.job, status: "running" } } : f,
+      ),
+    );
+
+    (async () => {
+      try {
+        // 입력 토큰을 줄이려고 긴 변을 768px로 낮춰 보낸다.
+        const forModel = await prepareFigureForModel(crop);
+
+        // 같은 그림을 이미 그린 적이 있으면 그대로 쓴다. 사과탐은 자료 하나에
+        // 문항이 여러 개 딸린 세트가 흔해서 이 경우가 실제로 자주 나온다.
+        const key = await figureCacheKey(forModel);
+        const cached = readFigureCache(key);
+        if (cached) {
+          setManualDiagramSvgs((prev) =>
+            prev.map((f) => (f.id === id ? { ...f, svg: cached, job: undefined } : f)),
+          );
+          return;
+        }
+
+        const res = await fetch("/api/figure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: forModel, subject }),
+        });
+
+        let json: { image?: string; error?: string };
+        try {
+          json = await res.json();
+        } catch {
+          throw new Error(
+            "서버에서 정상적인 응답을 받지 못했어요. 이미지 생성이 60초를 넘겨 요청이 끊겼을 수 있습니다. 영역을 더 좁게 잘라 다시 시도해주세요.",
+          );
+        }
+        if (!res.ok) throw new Error(json.error ?? "그림을 그리지 못했습니다.");
+        if (typeof json.image !== "string" || !json.image.startsWith("data:image/")) {
+          throw new Error(
+            "서버가 이미지를 돌려주지 않았어요. 페이지를 새로고침한 뒤 다시 시도해주세요.",
+          );
+        }
+
+        // 이미지 생성 모델은 자기 비율(대개 정사각형)에 맞춰 그려서 둘레에 흰
+        // 여백을 잔뜩 붙여 준다. 그대로 두면 그림보다 여백이 커진다.
+        const finished = await rasterToSvg(await trimBlankBorder(json.image));
+        writeFigureCache(key, finished);
+        setManualDiagramSvgs((prev) =>
+          prev.map((f) => (f.id === id ? { ...f, svg: finished, job: undefined } : f)),
+        );
+      } catch (err) {
+        // 실패해도 원본은 그대로 남는다 — 그림이 사라지지는 않는다.
+        const message =
+          err instanceof Error ? err.message : "그림을 그리지 못했습니다.";
+        setManualDiagramSvgs((prev) =>
+          prev.map((f) =>
+            f.id === id && f.job
+              ? { ...f, job: { ...f.job, status: "error", error: message } }
+              : f,
+          ),
+        );
+      } finally {
+        runningJobRef.current = null;
+        void refreshTokens();
+      }
+    })();
+    // manualDiagramSvgs가 바뀔 때마다 다음 작업이 있는지 다시 본다.
+  }, [manualDiagramSvgs, subject]);
 
   async function handleExport() {
     if (!cardRef.current) return;
@@ -612,10 +663,30 @@ export default function ResultStage({
     }
   }
 
+  // 저장한 뒤에 무엇이든 바뀌면 "다시 저장할 거리가 있다"고 표시한다.
+  // AI가 그림을 완성해 자리를 갈아끼우는 것도 여기에 걸려서, 처리가 끝나면
+  // 완성된 그림으로 자동으로 다시 저장된다.
+  useEffect(() => {
+    if (savedId !== null) setDirty(true);
+    // savedId는 일부러 뺀다 — 저장 직후에 곧바로 dirty가 되면 안 된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    sourceText,
+    answer,
+    answerType,
+    boxOverride,
+    manualDiagramSvgs,
+    layouts,
+    figurePos,
+    fontSizeIdx,
+  ]);
+
   async function handleSaveToCategory() {
     if (!cardRef.current || !onSaveToCategory) return;
-    // 자동 저장과 버튼이 겹쳐 두 번 저장되면 같은 문제가 두 개 생긴다.
-    if (isSaving || saved) return;
+    // 자동 저장과 버튼이 겹쳐 동시에 두 번 저장되는 것만 막는다. 이미 저장한
+    // 문제를 다시 저장하는 건 막지 않는다 — 그건 "고쳐서 다시 저장"이고,
+    // 같은 행을 갱신하므로 문제가 두 개 생기지 않는다.
+    if (isSaving) return;
     setIsSaving(true);
     setSaveError(null);
     try {
@@ -623,14 +694,16 @@ export default function ResultStage({
         pixelRatio: 2,
         backgroundColor: "#ffffff",
       });
-      await onSaveToCategory({
+      const id = await onSaveToCategory({
         pngDataUrl: dataUrl,
         text: sourceText,
         answer: answer.trim(),
         answerType,
         boxOverride,
+        problemId: savedId,
       });
-      setSaved(true);
+      setSavedId(id);
+      setDirty(false);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "저장에 실패했습니다.");
     } finally {
@@ -816,10 +889,18 @@ export default function ResultStage({
             <DiagramAdjuster
               key={d.id}
               label={
-                d.kind === "figure"
-                  ? `탐구 자료 ${idx + 1}`
-                  : `추가인식 도형 ${idx + 1}`
+                (d.kind === "figure" ? `자료 ${idx + 1}` : `도형 ${idx + 1}`) +
+                (d.job?.status === "running"
+                  ? " · AI가 그리는 중…"
+                  : d.job?.status === "pending"
+                    ? " · 차례 기다리는 중"
+                    : d.job?.status === "error"
+                      ? " · AI 실패(원본 사용 중)"
+                      : "")
               }
+              note={d.job?.error}
+              busy={d.job?.status === "running" || d.job?.status === "pending"}
+              onRetry={d.job?.status === "error" ? () => retryFigure(d.id) : undefined}
               layout={layoutOf(d.id)}
               onChange={(next) => setLayout(d.id, next)}
               position={positionOf(d.id)}
@@ -835,159 +916,16 @@ export default function ResultStage({
         </div>
       )}
 
-      {/* 수학 모드에서만 보이는 도형 도구(Gemini). 사과탐 모드에서는 아래
-          FigurePanel이 대신 나온다 — 두 도구를 같이 두면 어느 걸 눌러야
-          할지 헷갈리고 엉뚱한 모델에 크레딧을 쓰게 된다. */}
-      {subject === "math" && !isVectorizing && (
-        <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-slate-500">도형 화질</span>
-            {(["lite", "flash"] as const).map((m) => {
-              const selected = diagramModel === m;
-              // flash는 결제자 전용이라 미결제 상태면 아예 고를 수 없게 막는다.
-              const locked = m === "flash" && quota !== null && !quota.paid;
-              const exhausted =
-                quota !== null &&
-                (m === "flash"
-                  ? quota.flashRemaining <= 0 || quota.flashGlobalRemaining <= 0
-                  : !quota.liteFree && quota.credits < quota.liteCost);
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  disabled={locked}
-                  onClick={() => setDiagramModel(m)}
-                  className={`rounded-lg border px-2.5 py-1 text-xs font-medium ${
-                    selected
-                      ? "border-blue-600 bg-blue-50 text-blue-700"
-                      : "border-slate-300 text-slate-600 hover:bg-slate-100"
-                  } ${locked || exhausted ? "opacity-50" : ""}`}
-                >
-                  {MODEL_LABELS[m]}
-                  {m === "flash" ? " (고화질)" : " (기본)"}
-                  {locked && " 🔒"}
-                </button>
-              );
-            })}
-          </div>
 
-          <p className="text-[11px] text-slate-500">
-            {diagramModel === "flash" ? (
-              quota && !quota.paid ? (
-                <>flash는 이용권을 구매한 분만 쓸 수 있어요.</>
-              ) : (
-                <>
-                  {quota?.unlimited
-                    ? "무제한 계정이라 쿠폰은 차감되지 않아요."
-                    : "플래시쿠폰 1장을 씁니다."}
-                  {quota && !quota.unlimited &&
-                    ` 오늘 ${quota.flashRemaining}/${quota.flashDailyLimit}장 남음 (매일 자정 초기화)`}
-                </>
-              )
-            ) : quota?.unlimited ? (
-              <>무제한 계정이라 차감 없이 쓸 수 있어요.</>
-            ) : quota?.liteFree ? (
-              <>이용권 구매자는 lite를 무료로 쓸 수 있어요.</>
-            ) : (
-              <>
-                사진인식권 {quota?.liteCost ?? 5}장을 씁니다.
-                {quota && ` 남은 사진인식권 ${quota.credits}장`}
-              </>
-            )}
-          </p>
 
-          {/* 전역 예산은 개인 잔량과 무관하게 flash를 막으므로 따로 알린다.
-              무제한 계정도 예외가 아니다 — 이건 우리 지갑이 아니라 Gemini의
-              하루 요청 수 제한이라서 운영자라고 넘길 수 있는 게 아니다. */}
-          {diagramModel === "flash" && quota && quota.paid && (
-            <p
-              className={`text-[11px] ${
-                quota.flashGlobalRemaining <= 0
-                  ? "text-amber-700"
-                  : quota.flashGlobalRemaining <= 3
-                    ? "text-amber-600"
-                    : "text-slate-400"
-              }`}
-            >
-              {quota.flashGlobalRemaining <= 0
-                ? "오늘 flash 전 세대의 사용량이 한도에 찼어요. 지금 누르면 lite로 그려집니다."
-                : `오늘 전체 flash 잔여 ${quota.flashGlobalRemaining}/${quota.flashGlobalLimit}건 (모든 사용자 합계)` +
-                  (quota.currentFlashModel ? ` · 현재 ${quota.currentFlashModel}` : "")}
-            </p>
-          )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowDiagramCrop(true)}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
-            >
-              도형 추가인식
-            </button>
-            {quota && !quota.paid && (
-              <a
-                href="/api/checkout"
-                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
-              >
-                이용권 구매 (lite 무료 + flash 사용)
-              </a>
-            )}
-            {vectorizeError && (
-              <p className="text-xs text-red-600">{vectorizeError}</p>
-            )}
-            {vectorizeNotice && (
-              <p className="text-xs text-amber-700">{vectorizeNotice}</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {isVectorizing && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
-            <span>{vectorizeStatusText(vectorizeElapsedSec)}</span>
-            <span className="ml-auto tabular-nums text-slate-400">
-              {vectorizeElapsedSec}초 경과
-            </span>
-          </div>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-            <div
-              className="h-full rounded-full bg-blue-600 transition-all duration-1000 ease-linear"
-              style={{ width: `${vectorizeProgressPercent(vectorizeElapsedSec)}%` }}
-            />
-          </div>
-          <p className="mt-1.5 text-[11px] text-slate-400">
-            도형 재구성은 보통 10~20초 정도 걸려요. 화면을 벗어나지 말고 잠시만 기다려주세요.
-          </p>
-        </div>
-      )}
-
-      {subject === "math" && showDiagramCrop && (
-        <DiagramCropModal
-          imageSrc={sourceImage ?? null}
-          onConfirm={handleDiagramCropConfirm}
-          onCancel={() => setShowDiagramCrop(false)}
-        />
-      )}
-
-      {/* 사과탐 자료. 위의 수학 도형과 완전히 별개 경로(다른 API, 다른 모델)지만
-          결과가 같은 SVG 문자열이라 manualDiagramSvgs에 그대로 합류한다 —
-          크기·위치 조절, PNG 캡처, 저장이 전부 그대로 따라온다. */}
-      {subject === "science" && (
-        <FigurePanel
-          imageSrc={sourceImage ?? null}
-          credits={quota?.credits ?? null}
-          unlimited={quota?.unlimited ?? false}
-          onAdd={(svg) =>
-            setManualDiagramSvgs((prev) => [
-              ...prev,
-              { id: crypto.randomUUID(), svg, kind: "figure" },
-            ])
-          }
-          onCreditsUsed={() => void refreshQuota()}
-        />
-      )}
+      <FigurePanel
+        subject={subject}
+        imageSrc={sourceImage ?? null}
+        status={tokenStatus}
+        queuedCount={pendingJobCount}
+        onAdd={addFigure}
+      />
 
       {result.confidence !== null && (
         <p className="text-xs text-slate-400">
@@ -1013,7 +951,7 @@ export default function ResultStage({
                   key={t}
                   type="button"
                   onClick={() => setAnswerType(t)}
-                  disabled={saved}
+                  disabled={false}
                   className={`rounded-lg border px-2.5 py-1 text-xs font-medium disabled:opacity-50 ${
                     answerType === t
                       ? "border-blue-600 bg-blue-50 text-blue-700"
@@ -1039,7 +977,7 @@ export default function ResultStage({
                 if (answer.trim() === "") return;
                 void handleSaveToCategory();
               }}
-              disabled={saved}
+              disabled={false}
               placeholder={
                 answerType === "choice"
                   ? "예: 3 → 정답표에 ③으로 표기됩니다"
@@ -1048,7 +986,7 @@ export default function ResultStage({
               className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-slate-100"
             />
           </label>
-          {!saved && (
+          {savedId === null && (
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
               {autoSaveLeftSec !== null ? (
                 <>
@@ -1122,7 +1060,7 @@ export default function ResultStage({
       {/* 저장이 끝나면 "다음 문제"를 가장 크게 띄운다 — 여러 개를 연달아 넣는
           것이 이 화면의 기본 사용 패턴이라, 목록으로 돌아갔다 다시 들어오는
           왕복을 없앤다. */}
-      {saved && (onAddAnother || (onNext && remainingCount > 0)) && (
+      {savedId !== null && (onAddAnother || (onNext && remainingCount > 0)) && (
         <div className="flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm font-medium text-emerald-900">
             저장했어요. 이어서 추가할까요?
@@ -1153,7 +1091,7 @@ export default function ResultStage({
 
       {/* 주요 액션: 결과를 실제로 저장/출력하는 버튼만 모아 눈에 띄게 둔다. */}
       <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
-        {!saved && onNext && remainingCount > 0 && (
+        {onNext && remainingCount > 0 && (
           <button
             type="button"
             onClick={onNext}
@@ -1174,10 +1112,16 @@ export default function ResultStage({
           <button
             type="button"
             onClick={handleSaveToCategory}
-            disabled={isSaving || saved}
+            disabled={isSaving || (savedId !== null && !dirty)}
             className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
           >
-            {saved ? "저장됨!" : isSaving ? "저장 중..." : "오답으로 저장"}
+            {isSaving
+              ? "저장 중..."
+              : savedId === null
+                ? "오답으로 저장"
+                : dirty
+                  ? "수정 내용 저장"
+                  : "저장됨!"}
           </button>
         )}
       </div>

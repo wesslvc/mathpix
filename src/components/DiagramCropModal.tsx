@@ -8,8 +8,9 @@ import type { CropRect } from "@/lib/types";
 
 /**
  * 무엇을 오려내는 중인가. 오려내는 동작은 똑같고 안내 문구와 확인 버튼만 다르다.
- *   math   : 수학 도형 → Gemini가 재구성 (기존 동작)
- *   figure : 사과탐 자료 → OpenAI가 재구성하거나, 원본을 그대로 붙임
+ *   math   : 수학 도형
+ *   figure : 사과탐 자료
+ * 어느 쪽이든 뒤 화면에서 "원본 그대로"와 "AI로 다시 그리기"를 고른다.
  */
 export type CropPurpose = "math" | "figure";
 
@@ -18,9 +19,9 @@ const COPY: Record<
   { title: string; description: string; confirm: string }
 > = {
   math: {
-    title: "도형 영역 오려내기",
+    title: "도형 오려내기",
     description:
-      "원, 삼각형 같은 도형 부분만 정확히 드래그해서 선택해주세요. 선택한 부분만 Gemini가 깨끗한 그림으로 다시 그려줍니다.",
+      "원, 삼각형 같은 도형 부분만 정확히 드래그해서 선택해주세요. 다음 화면에서 원본을 그대로 붙일지 AI로 다시 그릴지 고를 수 있습니다.",
     confirm: "이 영역으로 재구성",
   },
   figure: {
@@ -45,8 +46,8 @@ type Props = {
 
 /**
  * 도형 부분만 사람이 직접 오려내게 하는 모달.
- * Mathpix의 자동 감지 영역에 기대지 않고, 사용자가 지정한 영역만 Gemini로
- * 보내야 재구성 결과가 원본과 정확히 일치한다.
+ * Mathpix의 자동 감지 영역에 기대지 않고, 사용자가 지정한 영역만 보내야
+ * 재구성 결과가 원본과 정확히 일치한다.
  *
  * 오려낼 사진은 두 가지 중에 고른다:
  *   - 기존 사진 : 문제를 인식할 때 쓴 그 사진

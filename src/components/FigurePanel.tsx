@@ -1,241 +1,105 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import DiagramCropModal from "./DiagramCropModal";
-import {
-  prepareFigureForModel,
-  rasterToSvg,
-  trimBlankBorder,
-} from "@/lib/figureImage";
-import {
-  figureCacheKey,
-  readFigureCache,
-  writeFigureCache,
-} from "@/lib/figureCache";
-import type { FigureConfig } from "@/app/api/figure/config/route";
+import TokenGauge from "./TokenGauge";
+import type { Subject } from "@/lib/subject";
+import type { TokenStatus } from "@/app/api/tokens/route";
 
 type Props = {
+  subject: Subject;
   /** 문제를 인식할 때 쓴 사진. null이면 카메라로 새로 찍어서만 쓸 수 있다. */
   imageSrc: string | null;
-  /** 남은 사진인식권. 모르면 null. */
-  credits: number | null;
-  unlimited: boolean;
-  /** 완성된 자료(SVG 문자열)를 문제 카드에 붙인다. */
-  onAdd: (svg: string) => void;
-  /** 크레딧을 썼으니 잔량을 다시 읽어달라. */
-  onCreditsUsed: () => void;
+  status: TokenStatus | null;
+  /** 아직 처리되지 않은 AI 작업 수(게이지에 곧 빠질 양을 보여주려고). */
+  queuedCount: number;
+  /**
+   * 자리를 잡는다. 원본은 곧바로 카드에 붙고, useAi면 뒤에서 순서대로
+   * AI가 다시 그려 그 자리를 채운다.
+   */
+  onAdd: (crop: string, useAi: boolean) => void;
 };
 
 /**
- * 진행률은 알 수 없으니 경과 시간으로 "멈춘 게 아니다"를 보여준다.
- * 이미지 생성은 벡터(SVG)보다 느려서 넉넉하게 잡는다.
- */
-const EXPECTED_SEC = 45;
-
-function statusText(sec: number): string {
-  if (sec < 4) return "자료를 서버로 보내는 중...";
-  if (sec < 15) return "자료를 읽고 있어요...";
-  if (sec < 35) return "그림을 새로 그리는 중이에요...";
-  if (sec < 55) return "거의 다 됐어요...";
-  // 60초를 넘기면 Vercel이 요청을 끊는다. 기다리다 끊기는 것보다 왜 그런지
-  // 미리 알려주는 편이 낫다.
-  return "예상보다 오래 걸리고 있어요. 자료 영역이 너무 넓지 않은지 확인해주세요...";
-}
-
-/**
- * 사회탐구·과학탐구 자료(실험 장치도, 모식도, 그래프, 표, 단면도)를 문제에
- * 붙이는 패널.
+ * 그림(수학 도형 · 사과탐 자료)을 문제에 붙이는 패널.
  *
- * 수학 도형(Gemini)과 완전히 따로 돈다. 두 기능이 결과만 같은 모양(SVG 문자열)
- * 이라 문제 카드에 붙고 저장되는 경로는 공유하지만, 그 앞단은 전혀 다르다.
+ * ── 왜 기다리지 않는가 ────────────────────────────────────────────────────
+ * AI 그림 생성은 정확하지만 느리다(수십 초). 예전에는 한 장 만들 때마다 화면이
+ * 멈춰 서서 기다려야 했다. 지금은 **자리를 먼저 잡는다** — 오려낸 원본이 곧바로
+ * 카드에 붙고, AI는 뒤에서 순서대로 돌면서 완성되는 대로 그 자리를 갈아끼운다.
+ * 그동안 사용자는 본문을 고치거나 다음 그림을 오려내면 된다.
  *
- * ── 비용에 대한 설계 ──────────────────────────────────────────────────────
- * 이 기능은 호출할 때마다 실제로 요금이 나가는 API를 쓴다. 그래서 자료를
- * 오려낸 다음 곧바로 보내지 않고, **원본 그대로 붙이기(무료)** 와
- * **AI로 다시 그리기(유료)** 중에 사용자가 고르게 한다. 무료 쪽을 기본으로
- * 앞에 두었다 — 사진·현미경 사진·지도처럼 다시 그리면 오히려 정보가 사라지는
- * 자료가 사과탐에는 아주 많고, 그런 자료는 원본이 정답이기 때문이다.
- *
- * 어느 쪽인지 픽셀 통계로 자동 판별하려고도 해봤지만 신뢰할 수 없어서 뺐다
- * (이유는 figureImage.ts 주석 참고). 사람이 보면 1초면 아는 것을 굳이 틀리게
- * 자동화하느니 물어보는 편이 낫다.
+ * 이 방식의 부수 효과가 하나 더 있다: 처리가 끝나기 전에 저장해도 **원본이 든
+ * 멀쩡한 이미지**가 저장된다. 빈 자리가 인쇄될 일이 없다.
  */
 export default function FigurePanel({
+  subject,
   imageSrc,
-  credits,
-  unlimited,
+  status,
+  queuedCount,
   onAdd,
-  onCreditsUsed,
 }: Props) {
-  const [config, setConfig] = useState<FigureConfig | null>(null);
   const [showCrop, setShowCrop] = useState(false);
-  /** 오려낸 자료. 이게 있으면 "원본/재구성" 선택 단계다. */
+  /** 오려낸 자료. 이게 있으면 "원본/AI" 선택 단계다. */
   const [pending, setPending] = useState<string | null>(null);
-  const [isWorking, setIsWorking] = useState(false);
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/figure/config")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled && data) setConfig(data as FigureConfig);
-      })
-      .catch(() => {
-        // 설정을 못 읽어도 원본 붙이기는 되어야 하므로 패널 자체는 남긴다.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const cost = status?.figureCost ?? 50;
+  const canUseAi = status?.figureReady !== false;
+  const unlimited = status?.unlimited ?? false;
+  const tokens = status?.tokens ?? null;
+  const notEnough = !unlimited && tokens !== null && tokens < cost;
+  const noun = subject === "math" ? "도형" : "자료";
 
-  useEffect(() => {
-    if (!isWorking) {
-      setElapsedSec(0);
-      return;
-    }
-    const startedAt = Date.now();
-    const id = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [isWorking]);
-
-  const cost = config?.cost ?? 5;
-  const canReconstruct = config?.configured !== false;
-  const notEnough =
-    !unlimited && credits !== null && credits < cost;
-
-  /** 무료 경로: 오려낸 원본을 그대로 문제에 붙인다. LLM을 부르지 않는다. */
-  async function useOriginal() {
+  function choose(useAi: boolean) {
     if (!pending) return;
-    setError(null);
-    try {
-      onAdd(await rasterToSvg(pending));
-      setPending(null);
-      setNotice("원본 자료를 그대로 붙였어요. (크레딧 차감 없음)");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "자료를 붙이지 못했습니다.");
-    }
-  }
-
-  /** 유료 경로: 줄인 이미지를 서버로 보내 SVG로 다시 그린다. */
-  async function reconstruct() {
-    if (!pending) return;
-    setIsWorking(true);
-    setError(null);
-    setNotice(null);
-    try {
-      // 입력 토큰을 줄이려고 긴 변을 768px로 낮춰 보낸다.
-      const forModel = await prepareFigureForModel(pending);
-
-      // 같은 자료를 이미 그린 적이 있으면 그대로 쓴다. 사과탐은 자료 하나에
-      // 문항이 여러 개 딸린 세트가 흔해서 이 경우가 실제로 자주 나온다.
-      const key = await figureCacheKey(forModel);
-      const cached = readFigureCache(key);
-      if (cached) {
-        onAdd(cached);
-        setPending(null);
-        setNotice("같은 자료를 이미 그린 적이 있어 그 결과를 다시 썼어요. (차감 없음)");
-        return;
-      }
-
-      const res = await fetch("/api/figure", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: forModel }),
-      });
-
-      let json: { image?: string; error?: string };
-      try {
-        json = await res.json();
-      } catch {
-        // 실행시간 초과 등으로 Vercel이 JSON이 아닌 에러 페이지를 돌려준 경우.
-        throw new Error(
-          "서버에서 정상적인 응답을 받지 못했어요. 이미지 생성이 60초를 넘겨 요청이 끊겼을 수 있습니다. 영역을 더 좁게 잘라 다시 시도하거나, 원본을 그대로 붙여주세요.",
-        );
-      }
-      if (!res.ok) throw new Error(json.error ?? "자료 재구성에 실패했습니다.");
-
-      // 여기서 한 번 확인하지 않으면, 이미지가 없을 때 그 undefined가 그대로
-      // 문제 카드까지 흘러가 "undefined"라는 글자로 인쇄된다. 실제로 응답
-      // 필드 이름을 바꾼 직후 예전 화면이 캐시된 상태에서 그 일이 났다.
-      if (typeof json.image !== "string" || !json.image.startsWith("data:image/")) {
-        throw new Error(
-          "서버가 이미지를 돌려주지 않았어요. 페이지를 새로고침한 뒤 다시 시도해주세요. (방금 배포된 직후라면 예전 화면이 캐시돼 있을 수 있습니다.)",
-        );
-      }
-
-      // 이미지 생성 모델은 자기 비율(대개 정사각형)에 맞춰 그려서 그림 둘레에
-      // 흰 여백을 잔뜩 붙여 준다. 그대로 두면 그림보다 여백이 커져 문단 사이가
-      // 휑하게 벌어지므로 잘라낸다.
-      const trimmed = await trimBlankBorder(json.image);
-
-      // 완성된 그림도 원본과 똑같이 SVG로 감싸 둔다 — 크기·위치 조절과 PNG
-      // 캡처가 두 경로에서 완전히 같은 방식으로 동작한다.
-      const svg = await rasterToSvg(trimmed);
-      writeFigureCache(key, svg);
-      onAdd(svg);
-      setPending(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "자료 재구성에 실패했습니다.");
-    } finally {
-      setIsWorking(false);
-      onCreditsUsed();
-    }
+    onAdd(pending, useAi);
+    setPending(null);
   }
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-medium text-slate-500">
-          사회탐구 · 과학탐구 자료
-        </p>
+        <p className="text-xs font-medium text-slate-500">{noun} 넣기</p>
         <button
           type="button"
-          onClick={() => {
-            setShowCrop(true);
-            setError(null);
-            setNotice(null);
-          }}
-          disabled={isWorking}
+          onClick={() => setShowCrop(true)}
           className="g-btn g-btn-outline text-xs"
         >
-          자료 추가
+          + {noun} 추가
         </button>
       </div>
 
+      <TokenGauge
+        tokens={tokens}
+        unlimited={unlimited}
+        pending={queuedCount * cost}
+      />
+
       <p className="text-[11px] text-slate-400">
-        실험 장치, 모식도, 그래프, 표, 지층 단면 같은 자료를 오려서 문제에
-        붙입니다. 원본을 그대로 붙이면 무료이고, AI로 다시 그리면 사진인식권
-        {" "}
-        {cost}장을 씁니다. Mathpix가 자동으로 잡아낸 자료는 이미 원본 그대로
-        붙어 있으니, 그걸로 충분하면 여기서 따로 추가하지 않아도 됩니다.
+        {noun} 부분을 오려서 문제에 붙입니다. 원본을 그대로 붙이면 무료이고, AI로
+        다시 그리면 {cost}토큰을 씁니다. Mathpix가 자동으로 잡아낸 {noun}은 이미
+        원본 그대로 붙어 있으니, 그걸로 충분하면 따로 추가하지 않아도 됩니다.
       </p>
 
       {/* 오려내기가 끝나면 여기서 무료/유료를 고른다. 이 선택 단계가 곧
-          "꼭 필요할 때만 LLM을 쓴다"를 지키는 장치다. */}
-      {pending && !isWorking && (
-        <div className="flex flex-col gap-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+          "꼭 필요할 때만 AI를 쓴다"를 지키는 장치다. */}
+      {pending && (
+        <div className="flex animate-fade-in flex-col gap-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3">
           <div className="flex justify-center rounded bg-white p-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={pending}
-              alt="오려낸 자료"
+              alt={`오려낸 ${noun}`}
               className="max-h-48 w-auto object-contain"
             />
           </div>
 
-          <p className="text-[11px] text-slate-600">
-            이 자료를 어떻게 넣을까요?
-          </p>
+          <p className="text-[11px] text-slate-600">이 {noun}을 어떻게 넣을까요?</p>
 
           <div className="flex flex-col gap-2">
             <button
               type="button"
-              onClick={() => void useOriginal()}
+              onClick={() => choose(false)}
               className="g-btn g-btn-primary w-full text-xs"
             >
               원본 그대로 붙이기 (무료)
@@ -247,21 +111,21 @@ export default function FigurePanel({
 
             <button
               type="button"
-              onClick={() => void reconstruct()}
-              disabled={!canReconstruct || notEnough}
+              onClick={() => choose(true)}
+              disabled={!canUseAi || notEnough}
               className="g-btn g-btn-outline w-full text-xs"
             >
               AI로 깨끗하게 다시 그리기
-              {unlimited ? " (무제한)" : ` (사진인식권 ${cost}장)`}
+              {unlimited ? " (무제한)" : ` (${cost}토큰)`}
             </button>
             <p className="px-1 text-[11px] text-slate-500">
               선과 글자로 된 도식·그래프·회로도라면 이쪽이 훨씬 깨끗하게
-              인쇄됩니다. 다만 이미지 생성 모델이 한글 라벨을 잘못 쓰는 경우가
-              있으니, 완성된 그림의 글자는 꼭 확인해주세요.
-              {config?.configured === false &&
+              인쇄됩니다. 누르면 자리부터 잡아두고 뒤에서 그리니 기다리지 않아도
+              됩니다. 다만 AI가 한글 라벨을 잘못 쓰는 경우가 있으니 완성된 그림의
+              글자는 꼭 확인해주세요.
+              {status?.figureReady === false &&
                 " (지금은 OPENAI_API_KEY가 설정되지 않아 쓸 수 없습니다.)"}
-              {notEnough &&
-                ` (남은 사진인식권 ${credits}장으로는 부족합니다.)`}
+              {notEnough && ` (남은 ${tokens}토큰으로는 부족합니다.)`}
             </p>
           </div>
 
@@ -275,33 +139,10 @@ export default function FigurePanel({
         </div>
       )}
 
-      {isWorking && (
-        <div className="flex flex-col gap-1 rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-            <div
-              className="h-full rounded-full bg-blue-600 transition-all duration-1000"
-              style={{
-                width: `${Math.min(90, Math.round((elapsedSec / EXPECTED_SEC) * 90))}%`,
-              }}
-            />
-          </div>
-          <p className="text-[11px] text-slate-600">
-            {statusText(elapsedSec)} ({elapsedSec}초)
-          </p>
-        </div>
-      )}
-
-      {error && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">
-          {error}
-        </p>
-      )}
-      {notice && <p className="text-[11px] text-emerald-700">{notice}</p>}
-
       {showCrop && (
         <DiagramCropModal
           imageSrc={imageSrc}
-          purpose="figure"
+          purpose={subject === "math" ? "math" : "figure"}
           onConfirm={(cropped) => {
             setShowCrop(false);
             setPending(cropped);

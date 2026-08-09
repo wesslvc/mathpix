@@ -122,6 +122,70 @@ body {
   outline: none;
 }
 
+/* ── 화면 전환 ──────────────────────────────────────────────────────────
+   업로드 → 크롭 → 인식 → 결과로 넘어갈 때 화면이 뚝뚝 끊겨 보이던 것을
+   부드럽게 잇는다. 아주 짧게(0.22s) 살짝 올라오며 나타나는 정도로만 둔다 —
+   길거나 크게 움직이면 여러 장을 연달아 넣을 때 오히려 답답해진다.
+   움직임을 불편해하는 사용자를 위해 prefers-reduced-motion이면 끈다. */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.18s ease-out both;
+}
+
+.animate-stage-in {
+  animation: rise-in 0.22s ease-out both;
+}
+
+/* 버튼·카드가 상태에 따라 바뀔 때도 툭 튀지 않게. */
+.g-card,
+.problem-figure {
+  transition: opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* AI가 그리는 중인 그림은 옅게 숨 쉬듯 깜빡여 "작업 중"을 알린다.
+   카드 안이 아니라 조절 패널 쪽 표시에만 쓴다 — 카드는 그대로 캡처되므로
+   깜빡임이 이미지에 섞이면 안 된다. */
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.animate-soft-pulse {
+  animation: soft-pulse 1.4s ease-in-out infinite;
+}
+
+/* 진행률을 알 수 없는 작업용 막대. 좌우로 흘러가며 "멈춘 게 아니다"를 알린다. */
+@keyframes loading-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.animate-loading-sweep {
+  animation: loading-sweep 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-stage-in,
+  .animate-soft-pulse,
+  .animate-loading-sweep {
+    animation: none;
+  }
+  .g-card,
+  .problem-figure {
+    transition: none;
+  }
+}
+
 /* KaTeX 수식이 본문 텍스트와 잘 어우러지도록 여백을 살짝 조정 */
 .katex-display {
   margin: 0.75em 0;

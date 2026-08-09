@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "사진인식권이 모두 소진됐습니다. 이용권을 구매하면 1000개가 충전돼요.",
+            "토큰을 모두 사용했습니다. 이용권을 구매하면 1000토큰이 충전돼요.",
         },
         { status: 402 },
       );

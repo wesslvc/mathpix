@@ -48,7 +48,7 @@ async function resolveUserId(
   return (data?.user_id as string | undefined) ?? null;
 }
 
-/** 결제 완료 → 사진인식권 1000개 충전(정기결제 회차도 매번 동일하게 충전). */
+/** 결제 완료 → 토큰 1000개 충전(정기결제 회차도 매번 동일하게 충전). */
 async function grantCredits(
   admin: SupabaseClient,
   args: {

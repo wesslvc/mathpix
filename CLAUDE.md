@@ -66,96 +66,16 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
 - DB 스키마 SQL: `supabase/migrations/0001_init.sql`
   (categories / problems 테이블 + RLS + `problem-images` 비공개 버킷)
 - 키가 없으면 앱이 죽지 않고 안내 메시지만 표시하도록 처리 (Mathpix mock, Supabase 안내)
-- 도형(원/삼각형 등) 재구성: Mathpix가 자동 감지한 도형 영역은 원본 사진에서
-  그대로 오려낸 raster로 무료·자동 표시(기존 동작, `ResultStage.tsx`). 그와
-  별개로 "도형 추가인식" 버튼(`DiagramCropModal.tsx`)을 누르면 사용자가 원본
-  사진에서 도형 부분을 직접 드래그로 오려내고, 그 영역만 `/api/diagram` →
-  `src/lib/diagramVector.ts`가 **Google Gemini API**
-  (`generativelanguage.googleapis.com/v1beta/models/<모델>:generateContent`,
-  `x-goog-api-key` 헤더, 이미지는 `inline_data`에 접두어 없는 순수 base64,
-  `GEMINI_API_KEY` 환경변수)로 보내 깨끗한 SVG로 재구성해 문제 밑에 추가로
-  붙인다. `GEMINI_API_KEY`가 없으면 이 버튼을 눌러도 에러 메시지만 뜨고
-  차감되지 않음(자동 raster 표시는 키 없이도 그대로 동작).
+- 그림(수학 도형 · 사과탐 자료) 재구성: **하나로 통합됐다.** 예전에는 수학 도형만
+  Gemini로 SVG를 만드는 별도 경로가 있었는데 전부 걷어냈다(`diagramVector.ts`,
+  `/api/diagram/*`, 플래시쿠폰·모델 티어 전부 삭제). 지금은 과목과 무관하게
+  OpenAI 이미지 편집 하나만 쓰고, 과목에 따라 **프롬프트만** 갈린다.
 
-  **모델은 사용자가 고른다**(`DIAGRAM_MODELS`, `ResultStage.tsx`의 선택 UI):
-  - `lite` = `gemini-flash-lite-latest` (기본) — 사진인식권 5장
-  - `flash` = `gemini-flash-latest` (고화질) — 플래시쿠폰 1장
-
-  **크레딧/한도 정책** (마이그레이션 0010 → 0011 → 0012 → 0013 순서대로 적용.
-  뒤 파일이 앞 파일의 함수를 통째로 덮어쓰므로 **순서를 지켜야 한다**):
-  - OCR 1회 = 사진인식권 1장 (무료 사용자도 가능)
-  - lite: 무료 사용자는 사진인식권 5장 차감, **결제자는 무료**
-  - flash: **결제자 전용**, 사진인식권 대신 **플래시쿠폰**으로 하루 5장,
-    KST 자정 초기화, 누적 안 됨
-  - `entitlements.unlimited = true`인 계정은 OCR·lite·flash 차감을 전부 건너뛴다
-    (0012에서 운영자 계정에 켜둠)
-
-  **flash는 단일 모델이 아니라 세대별 티어 목록이다** (`0014`, 제일 헷갈리는 부분):
-  사용자별 한도(하루 5장)와 **별개로** 모델마다 하루 예산(기본 20건)이 있다.
-  Gemini 무료 등급 RPD는 사용자가 아니라 **계정 전체**에 걸리므로, 사용자별
-  한도만 두면 사용자 4명이 각자 5장씩 써서 그대로 터진다.
-  **RPD는 모델별로 따로 걸리기 때문에**, 위 세대가 20건을 다 쓰면 flash를
-  포기하는 게 아니라 아래 세대로 내려가 또 20건을 쓴다(`diagram_model_tiers`
-  테이블, tier 1이 최고 화질). 티어 5개면 하루 flash 용량이 100건이 된다.
-  전부 소진되면 그때 lite로 내려간다.
-  **무제한 계정도 이 예산은 못 넘는다** — 우리 지갑이 아니라 Google의 제한이다.
-
-  티어 목록을 **코드가 아니라 DB에 둔 이유**: 모델 이름을 추측했다가 404를
-  여러 번 맞았다. 이름이 틀려도 재배포 없이 표만 고치면 되고, 실제로 404/429가
-  나면 `/api/diagram`이 `exhaust_diagram_model_tier()`로 그 세대를 오늘 소진
-  처리하고 **다음 티어로 자동으로 내려가 재시도**한다(사용자에겐 오류가 안 보임).
-  이름이 아예 틀린 티어는 하루 한 번만 헛수고하고 건너뛰어진다.
-
-  차감 순서가 중요하다: 모델 카운트를 먼저 올리고 개인 자격을 확인하며, 개인
-  쪽에서 막히면 **올려둔 카운트를 반드시 되돌린다**(안 그러면 아무도 안 쓴 몫이
-  증발한다). 반대로 404/429로 세대를 갈아탈 때는 `refund_diagram_credit`에
-  `p_model_id`를 **넘기지 않는다** — 소진 표시를 유지해야 하기 때문이다.
-
-  사용 기록은 `diagram_usage_log`(누가 언제 뭘 썼는지)와
-  `diagram_daily_usage`(날짜·모델별 합계)에 남는다. 운영자(unlimited 계정)는
-  `/api/diagram/usage?days=7`로 사용자별 집계를 볼 수 있다.
-
-  한도 숫자는 전부 DB 함수(`flash_diagram_daily_limit()`, `lite_diagram_cost()`)에
-  있고 서버·화면이 그 값을 읽어 쓴다. **JS 쪽에 하드코딩하지 말 것** — 어긋난다.
-  차감은 `consume_diagram_credit(p_model)`, 환불은 `refund_diagram_credit(p_model)`,
-  화면 표시용 조회는 `diagram_quota()` → `/api/diagram/quota`.
-  실패 사유가 여러 가지(미결제/크레딧 부족/쿠폰 소진)라 이 함수들은 기존
-  `consume_recognition_credit`과 달리 integer가 아니라 **jsonb**를 돌려준다.
-  `/api/diagram`에는 `export const maxDuration = 60`이 필요하다 — 기본
-  서버리스 제한(10초대)에 걸리면 Vercel이 **JSON이 아닌** 에러 페이지를
-  돌려줘서 클라이언트 `res.json()`이 깨진다(`ResultStage.tsx`에 파싱 실패
-  처리 있음).
-
-  #### 모델 선택에서 배운 것 (제일 중요)
-
-  **모델 이름을 기억이나 웹 검색으로 고르지 말 것. 반드시 실제로 호출해보고
-  고를 것.** 카탈로그/ListModels에 이름이 보여도 그 키로는 404가 날 수 있다
-  (제공 여부가 키가 아니라 **계정**에 묶여 있음). 이걸 검증하려고
-  `/api/diagram/models` 진단 엔드포인트를 만들어 뒀다(로그인 필요, 현재는
-  Gemini ListModels 조회용). NVIDIA를 쓰던 시절엔 후보 모델마다 1×1 PNG를
-  실제로 찔러보는 프로브 버전이었고, 그게 한 방에 답을 줬다.
-
-  이름 추측으로 날린 실패들: `microsoft/phi-3.5-vision-instruct`(카탈로그에
-  아예 없음), `moonshotai/kimi-k2.6`(404 `Not found for account` — 사용자가
-  키를 새로 발급해도 계정 해시가 동일해서 그대로 404),
-  `nvidia/nemotron-3-super-120b-a12b`(텍스트 전용, 500 "multimodal processing
-  is not enabled"), `gemini-2.5-flash-lite`(ListModels 목록엔 있는데 호출하면
-  "no longer available to new users").
-
-  전체 이력: Gemini 2.0 Flash(계정에서 사라짐) → 2.5 Flash(429 연발) →
-  NVIDIA `nemotron-nano-12b-v2-vl`(품질 부족) → `llama-3.2-90b-vision`(느림,
-  이때 `ResultStage.tsx`에 경과시간+진행률 UI 추가) → `llama-3.2-11b-vision`
-  → phi-3.5(없는 모델) → 11b → kimi-k2.6(404) → `nvidia/llama-3.1-nemotron-nano-vl-8b-v1`
-  (프로브로 200 OK 확인됨 — NVIDIA로 되돌아갈 일이 있으면 이걸 쓸 것. 단
-  `route.ts`의 키 검사와 `diagramVector.ts`의 요청 형식을 NVIDIA용으로 함께
-  되돌려야 한다. 두 API는 요청 모양이 완전히 다름) → Gemini 2.5 Flash Lite(404)
-  → **현재 `gemini-3.6-flash`**. 품질이 부족하면 상위 모델로, 429가 잦으면
-  `gemini-3.5-flash-lite` / `gemini-flash-lite-latest`로 조정.
-
-  `diagramVector.ts`의 실패 처리 원칙: HTTP 에러는 상태 코드와 API가 준
-  메시지를 담아 **throw**하고(호출부가 크레딧 환불 + 그 메시지를 사용자에게
-  노출), 응답은 정상인데 SVG를 못 뽑은 경우만 `null`을 반환한다. 예전엔
-  전부 `return null`이라 k2.6이 왜 안 되는지 몇 번을 잘못 짚었다.
+  왜 걷어냈나: 두 경로를 유지할 이유가 없었고(품질도 이미지 생성이 낫다),
+  Gemini 쪽은 무료 등급 RPD 때문에 티어 캐스케이드·플래시쿠폰·전역 예산 같은
+  장치가 잔뜩 붙어 있어 유지 비용이 컸다. 0010~0014 마이그레이션이 만든 DB
+  함수들(`consume_diagram_credit`, `diagram_model_tiers` 등)은 이제 아무도
+  부르지 않는다 — 그냥 남겨둬도 무해하다.
 
 ### 도형·자료를 본문 문단 사이에 놓기
 
