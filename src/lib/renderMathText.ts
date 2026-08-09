@@ -108,6 +108,14 @@ const PROBLEM_NUMBER = /^(\d{1,3}\s*\.)(\s*)/;
 // 보이는 부분).
 const CONDITION_MARKER = /^\s*\([가나다라마바사아자차카타파하]\)\s*/;
 
+// 합답형 문항의 "<보기>" 머리글. 문제집마다 꺾쇠(<보기>), 홑화살괄호(〈보기〉),
+// 대괄호([보기])를 섞어 쓰고 Mathpix도 본 대로 옮겨오므로 다 받아준다.
+// 머리글만 있는 줄이어야 한다 — 본문 중에 "보기"라는 낱말이 나오는 것과 구분한다.
+const BOGI_HEADER = /^\s*[<〈[]\s*보\s*기\s*[>〉\]]\s*$/;
+
+// "ㄱ.", "ㄴ)", "ㄷ," 처럼 자음 하나로 시작하는 보기 항목 줄.
+const BOGI_ITEM = /^\s*[ㄱ-ㅎ]\s*[.,)]/;
+
 // 한글/CJK 문자(수식이 아니라 설명 텍스트로 간주).
 const CJK_PATTERN = /[　-〿㐀-鿿가-힯＀-￯]/;
 // 델리미터가 없어도 수식으로 볼 만한 토큰(위/아래 첨자, 중괄호, 백슬래시 명령).
@@ -831,6 +839,102 @@ export function renderMathTextWithInfo(
       if (CONDITION_MARKER.test(line)) acc.push(i);
       return acc;
     }, []);
+
+    // "<보기>" 박스. 머리글 줄부터 마지막 ㄱ/ㄴ/ㄷ 항목 문장의 마침표까지 묶는다.
+    // (가)/(나) 조건이 머리글보다 앞에 있으면 그건 그것대로 기존 규칙에
+    // 맡기고 여기서는 손대지 않는다 — 안 그러면 조건이 박스 밖으로 새어나간다.
+    const bogiIdx = lines.findIndex((line) => BOGI_HEADER.test(line));
+    // Mathpix가 "<보기>" 다음에 빈 줄을 넣어 항목을 다른 문단으로 보내기도
+    // 한다. 그러면 이 블록에는 머리글만 있으므로 다음 블록까지 이어서 본다.
+    const hasItemHere =
+      bogiIdx !== -1 &&
+      lines.slice(bogiIdx + 1).some((line) => BOGI_ITEM.test(line));
+    const nextBlock = blocks[bi + 1];
+    const useNext =
+      bogiIdx !== -1 &&
+      !hasItemHere &&
+      nextBlock !== undefined &&
+      nextBlock.lines.some((line) => BOGI_ITEM.test(line));
+    const firstMarkerIdx = markerIndices.length > 0 ? markerIndices[0] : -1;
+
+    if (
+      bogiIdx !== -1 &&
+      // 항목이 하나도 없으면 머리글만 덩그러니 박스에 갇힌다. 그건 박스가 아니다.
+      (hasItemHere || useNext) &&
+      (firstMarkerIdx === -1 || firstMarkerIdx > bogiIdx)
+    ) {
+      const introLines = lines.slice(0, bogiIdx);
+      if (introLines.length > 0) {
+        parts.push(
+          `<p class="mmd-paragraph">${renderLines(introLines, isFirst, mathBlocks)}</p>`,
+        );
+        isFirst = false;
+      }
+
+      const startAbs = offset + bogiIdx;
+      const rangeEnd = useNext
+        ? nextBlock.start + nextBlock.lines.length - 1
+        : offset + lines.length - 1;
+
+      // 마지막 항목 줄을 찾는다. 실제 질문이나 선택지 줄을 만나면 거기서 멈춘다.
+      let lastItem = -1;
+      let hardStop = -1;
+      for (let i = startAbs + 1; i <= rangeEnd; i++) {
+        const line = canonicalLines[i];
+        if (line.trim() === "") continue;
+        if (BOGI_ITEM.test(line)) {
+          lastItem = i;
+          continue;
+        }
+        if (QUESTION_OR_CHOICE_LINE.test(line)) {
+          hardStop = i;
+          break;
+        }
+      }
+
+      const limit = hardStop === -1 ? rangeEnd : hardStop - 1;
+      let endAbs = startAbs;
+      if (lastItem !== -1) {
+        endAbs = lastItem;
+        // 마지막 항목에 마침표가 없으면(수식 때문에 줄이 갈린 경우 등) 뒤에서
+        // 첫 마침표를 찾아 거기까지 늘린다. 못 찾으면 항목 줄에서 끝낸다 —
+        // 무작정 늘리면 뒤의 무관한 본문까지 삼킨다.
+        if (!lineHasSentenceEnd(canonicalLines[lastItem], mathBlocks)) {
+          for (let i = lastItem + 1; i <= limit; i++) {
+            if (canonicalLines[i].trim() === "") continue;
+            if (lineHasSentenceEnd(canonicalLines[i], mathBlocks)) {
+              endAbs = i;
+              break;
+            }
+          }
+        }
+      }
+
+      const { head, rest } = closeBoxAtLine(canonicalLines[endAbs], mathBlocks);
+      const boxLines = [
+        ...canonicalLines.slice(startAbs, endAbs).filter((l) => l.trim() !== ""),
+        head,
+      ];
+      parts.push(
+        `<div class="mmd-box">${renderLines(boxLines, false, mathBlocks)}</div>`,
+      );
+      recordBox(startAbs, endAbs);
+
+      const trailingLines = [
+        ...(rest !== null ? [rest] : []),
+        ...canonicalLines.slice(endAbs + 1, rangeEnd + 1),
+      ].filter((l) => l.trim() !== "");
+      if (trailingLines.length > 0) {
+        parts.push(
+          `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`,
+        );
+      }
+
+      // 다음 블록까지 끌어 썼으면 그 블록은 여기서 소비된 것이다.
+      if (useNext) bi++;
+      isFirst = false;
+      continue;
+    }
 
     if (markerIndices.length > 0) {
       const firstIdx = markerIndices[0];
