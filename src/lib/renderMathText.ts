@@ -425,8 +425,77 @@ function closeBoxAtLine(
 /** 조건 박스로 묶을 줄 범위(양끝 포함). 줄 번호는 getTextLines()의 인덱스다. */
 export type BoxRange = { start: number; end: number };
 
-/** 사용자가 지정한 박스. `{ none: true }`는 "박스를 치지 않음"을 뜻한다. */
-export type BoxOverride = BoxRange | { none: true } | null;
+/**
+ * 사용자가 지정한 박스.
+ *
+ * 지금 쓰는 형태는 `{ ranges: [...] }` 하나뿐이고 빈 배열이 "박스 없음"이다.
+ * 나머지 두 형태는 DB(problems.box_range)에 이미 저장돼 있는 옛 값들이라
+ * 읽기만 한다 — 박스를 하나만 만들 수 있던 시절의 `{ start, end }`와,
+ * "박스 없음"을 뜻하던 `{ none: true }`. 옛 행을 마이그레이션하지 않고도
+ * 그대로 열리게 하려고 남겨둔다.
+ */
+export type BoxOverride =
+  | { ranges: BoxRange[] }
+  | BoxRange
+  | { none: true }
+  | null;
+
+/**
+ * 범위 목록을 정리한다: 뒤집힌 범위를 바로잡고, 앞에서부터 정렬하고,
+ * 겹치는 범위는 하나로 합친다. 겹친 채로 그리면 같은 줄이 박스 두 개에
+ * 중복해서 나오므로 그리기 전에 반드시 거쳐야 한다.
+ *
+ * 딱 붙어 있는 범위(앞 박스의 끝 다음 줄이 뒤 박스의 시작)는 합치지 않는다 —
+ * 사이에 아무 줄도 없는 박스 두 개를 일부러 나란히 두는 경우가 있다.
+ */
+export function normalizeBoxRanges(ranges: BoxRange[]): BoxRange[] {
+  const sorted = ranges
+    .filter(
+      (r) =>
+        Number.isFinite(r?.start) && Number.isFinite(r?.end),
+    )
+    .map((r) => ({
+      start: Math.min(r.start, r.end),
+      end: Math.max(r.start, r.end),
+    }))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+
+  const out: BoxRange[] = [];
+  for (const r of sorted) {
+    const last = out[out.length - 1];
+    if (last !== undefined && r.start <= last.end) {
+      last.end = Math.max(last.end, r.end);
+      continue;
+    }
+    out.push({ ...r });
+  }
+  return out;
+}
+
+/**
+ * 저장된 값을 범위 배열로 통일한다. 옛 형태(단일 범위 / `{ none: true }`)도
+ * 여기서 흡수하므로, 이 함수를 거친 뒤로는 아무도 형태를 따질 필요가 없다.
+ *
+ * `null`을 돌려주면 "사용자가 정한 게 없으니 자동 감지에 맡긴다"는 뜻이고,
+ * 빈 배열은 "사용자가 박스 없음을 골랐다"는 뜻이다. 둘은 다르다.
+ */
+export function toBoxRanges(
+  override: BoxOverride | undefined,
+): BoxRange[] | null {
+  if (override === undefined || override === null) return null;
+  if ("ranges" in override) {
+    return normalizeBoxRanges(
+      Array.isArray(override.ranges) ? override.ranges : [],
+    );
+  }
+  if ("none" in override) return [];
+  return normalizeBoxRanges([override]);
+}
+
+/** 범위 배열을 저장·전달용 형태로 감싼다. */
+export function fromBoxRanges(ranges: BoxRange[]): BoxOverride {
+  return { ranges: normalizeBoxRanges(ranges) };
+}
 
 type Block = { lines: string[]; start: number };
 
@@ -510,43 +579,73 @@ function renderPlainRange(
   return html;
 }
 
-/**
- * 사용자가 정한 범위대로만 박스를 친다. 자동 감지 규칙(마침표/질문줄 등)은
- * 일절 적용하지 않는다 — 사용자가 이미 눈으로 보고 고른 결과이기 때문이다.
- */
-function renderWithForcedBox(
+/** 박스 한 개를 그린다. 안이 빈 줄뿐이면 아무것도 그리지 않는다(빈 테두리 방지). */
+function renderBox(
   allLines: string[],
-  range: BoxRange | null,
+  range: BoxRange,
   mathBlocks: string[],
-  tables: string[],
 ): string {
-  if (range === null) {
-    return renderPlainRange(allLines, 0, allLines.length - 1, true, mathBlocks, tables);
-  }
-
-  const start = Math.max(0, Math.min(range.start, allLines.length - 1));
-  const end = Math.max(start, Math.min(range.end, allLines.length - 1));
-
-  let html = renderPlainRange(allLines, 0, start - 1, true, mathBlocks, tables);
-
   // 박스 안에서는 빈 줄을 없애고(빈 줄이 있으면 박스가 어색하게 벌어진다)
   // ">" 인용 표시가 남아 있으면 떼어낸다.
   const boxLines = allLines
-    .slice(start, end + 1)
+    .slice(range.start, range.end + 1)
     .filter((line) => line.trim() !== "")
     .map((line) => line.replace(/^\s*>\s?/, ""));
-  if (boxLines.length > 0) {
-    html += `<div class="mmd-box">${renderLines(boxLines, false, mathBlocks)}</div>`;
+  if (boxLines.length === 0) return "";
+  return `<div class="mmd-box">${renderLines(boxLines, false, mathBlocks)}</div>`;
+}
+
+/**
+ * 사용자가 정한 범위대로만 박스를 친다. 자동 감지 규칙(마침표/질문줄 등)은
+ * 일절 적용하지 않는다 — 사용자가 이미 눈으로 보고 고른 결과이기 때문이다.
+ *
+ * 범위를 여러 개 받아 박스를 여러 개 그린다(조건 박스와 <보기> 박스가 한
+ * 문제에 같이 나오는 경우). 범위 사이의 줄은 평범한 문단으로 둔다.
+ */
+function renderWithForcedBoxes(
+  allLines: string[],
+  ranges: BoxRange[],
+  mathBlocks: string[],
+  tables: string[],
+): string {
+  const lastLine = allLines.length - 1;
+  const boxes = normalizeBoxRanges(
+    ranges.map((r) => ({
+      start: Math.max(0, Math.min(r.start, lastLine)),
+      end: Math.max(0, Math.min(r.end, lastLine)),
+    })),
+  );
+
+  if (boxes.length === 0) {
+    return renderPlainRange(allLines, 0, lastLine, true, mathBlocks, tables);
   }
 
-  html += renderPlainRange(
-    allLines,
-    end + 1,
-    allLines.length - 1,
-    start === 0 && boxLines.length === 0,
-    mathBlocks,
-    tables,
-  );
+  let html = "";
+  let cursor = 0;
+  // 문제번호를 굵게 처리하는 건 카드에서 맨 처음 나오는 문단 하나뿐이다.
+  // 앞에 아무것도 안 그려졌을 때만 "첫 문단"이 유지된다.
+  let isFirst = true;
+
+  for (const box of boxes) {
+    const before = renderPlainRange(
+      allLines,
+      cursor,
+      box.start - 1,
+      isFirst,
+      mathBlocks,
+      tables,
+    );
+    html += before;
+    if (before !== "") isFirst = false;
+
+    const boxHtml = renderBox(allLines, box, mathBlocks);
+    html += boxHtml;
+    if (boxHtml !== "") isFirst = false;
+
+    cursor = box.end + 1;
+  }
+
+  html += renderPlainRange(allLines, cursor, lastLine, isFirst, mathBlocks, tables);
   return html;
 }
 
@@ -583,12 +682,12 @@ export function renderMathText(input: string, boxOverride?: BoxOverride): string
  * (같은 규칙을 UI 쪽에 한 번 더 구현하면 반드시 어긋난다).
  *
  * boxOverride를 주면 자동 감지를 아예 건너뛰고 지정한 범위만 박스로 만든다.
- * `{ none: true }`는 "박스 없음"을 사용자가 명시한 경우다.
+ * 빈 범위 목록은 "박스 없음"을 사용자가 명시한 경우다.
  */
 export function renderMathTextWithInfo(
   input: string,
   boxOverride?: BoxOverride,
-): { html: string; box: BoxRange | null; lines: string[] } {
+): { html: string; boxes: BoxRange[]; lines: string[] } {
   const normalized = normalizeDelimiters(input);
   const { text: withoutTables, tables } = protectTabular(normalized);
   const { text, blocks: mathBlocks } = protectDisplayMath(withoutTables);
@@ -596,14 +695,14 @@ export function renderMathTextWithInfo(
   const blocks = toBlocks(canonicalLines);
 
   // 사용자가 범위를 직접 정했으면 자동 감지 로직은 건드리지 않고 그대로 따른다.
-  if (boxOverride !== undefined && boxOverride !== null) {
-    const forced = "none" in boxOverride ? null : boxOverride;
+  const forced = toBoxRanges(boxOverride);
+  if (forced !== null) {
     return {
       html: restoreTables(
-        renderWithForcedBox(canonicalLines, forced, mathBlocks, tables),
+        renderWithForcedBoxes(canonicalLines, forced, mathBlocks, tables),
         tables,
       ),
-      box: forced,
+      boxes: forced,
       lines: canonicalLines,
     };
   }
@@ -615,10 +714,13 @@ export function renderMathTextWithInfo(
   let openBoxLines: string[] | null = null;
   // 열린 박스가 시작된 canonical 줄 번호(박스 범위를 알려주기 위해 기록한다).
   let openBoxStart = 0;
-  let box: BoxRange | null = null;
-  /** 첫 번째로 확정된 박스만 기록한다(문제 하나에 조건 박스는 보통 하나다). */
+  /**
+   * 자동으로 그린 박스를 전부 기록한다. 박스 범위 편집 UI가 이 목록을 그대로
+   * 출발점으로 삼으므로, 실제로 그린 박스와 하나라도 어긋나면 안 된다.
+   */
+  const boxes: BoxRange[] = [];
   const recordBox = (start: number, end: number) => {
-    if (box === null && end >= start) box = { start, end };
+    if (end >= start) boxes.push({ start, end });
   };
 
   for (let bi = 0; bi < blocks.length; bi++) {
@@ -797,7 +899,7 @@ export function renderMathTextWithInfo(
 
   return {
     html: restoreTables(html, tables),
-    box,
+    boxes: normalizeBoxRanges(boxes),
     lines: canonicalLines,
   };
 }
