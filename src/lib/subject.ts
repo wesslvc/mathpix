@@ -3,11 +3,10 @@
  *
  * 텍스트와 수식을 Mathpix로 읽는 부분은 두 모드가 완전히 같다. 갈라지는 건
  * "그림을 어떻게 처리하느냐" 하나뿐이다:
- *   math    — 수학 도형을 Gemini가 벡터로 다시 그린다(도형 추가인식)
- *   science — 사과탐 자료를 OpenAI가 다시 그리거나, 원본을 그대로 붙인다
- *
- * 두 도구를 한 화면에 같이 두면 어느 걸 눌러야 하는지 헷갈리고, 잘못 눌러
- * 엉뚱한 모델에 크레딧을 쓰게 된다. 그래서 모드에 맞는 것만 보여준다.
+ * 그림을 다시 그리는 도구는 두 모드가 같다(같은 이미지 생성 모델). 과목에
+ * 따라 **프롬프트만** 갈린다 — 수학은 교점·접점의 정확도가, 사과탐은 위치
+ * 관계와 화살표 방향이 답을 좌우하기 때문이다. 화면 문구도 "도형/자료"로
+ * 각각 맞춰 보여준다.
  */
 export type Subject = "math" | "science";
 
@@ -17,8 +16,8 @@ export const SUBJECT_LABEL: Record<Subject, string> = {
 };
 
 export const SUBJECT_HINT: Record<Subject, string> = {
-  math: "도형은 Gemini가 벡터로 다시 그립니다.",
-  science: "자료는 원본을 그대로 붙이거나 GPT가 다시 그립니다.",
+  math: "도형은 원본을 붙이거나 AI가 다시 그립니다.",
+  science: "자료는 원본을 붙이거나 AI가 다시 그립니다.",
 };
 
 export function isSubject(value: unknown): value is Subject {

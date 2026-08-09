@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** 신규 사용자에게 주는 무료 사진인식권 수. */
+/** 신규 사용자에게 주는 무료 토큰 수. */
 export const FREE_RECOGNITION_CREDITS = 50;
 /** 이용권 결제 1건당 충전되는 사진인식권 수. */
 export const PAID_RECOGNITION_CREDITS = 1000;

@@ -54,6 +54,12 @@ type Props = {
   /** 놓을 수 있는 자리 이름들. 길이는 문단 수 + 1. */
   slotLabels?: string[];
   onPositionChange?: (next: number) => void;
+  /** 라벨 아래에 덧붙일 안내(주로 실패 사유). */
+  note?: string;
+  /** 실패한 AI 작업을 다시 시도한다. */
+  onRetry?: () => void;
+  /** AI가 처리 중이면 라벨을 옅게 깜빡여 알린다. */
+  busy?: boolean;
 };
 
 function Slider({
@@ -102,6 +108,9 @@ export default function DiagramAdjuster({
   position,
   slotLabels,
   onPositionChange,
+  note,
+  onRetry,
+  busy = false,
 }: Props) {
   // 위치 조절은 놓을 자리가 둘 이상일 때만 의미가 있다.
   const canMove =
@@ -113,8 +122,21 @@ export default function DiagramAdjuster({
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 px-3 py-2">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium text-slate-600">{label}</span>
+        <span
+          className={`text-[11px] font-medium text-slate-600 ${busy ? "animate-soft-pulse" : ""}`}
+        >
+          {label}
+        </span>
         <div className="flex gap-1">
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
+            >
+              다시 시도
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onChange(DEFAULT_DIAGRAM_LAYOUT)}
@@ -133,6 +155,10 @@ export default function DiagramAdjuster({
           )}
         </div>
       </div>
+      {note && (
+        <p className="text-[10px] leading-snug text-amber-700">{note}</p>
+      )}
+
       {/* 위치는 미리보기에서 그림을 손으로 끌어 옮기는 게 기본이다. 여기
           목록은 지금 어디에 놓였는지 보여주는 표시이자, 손이 아니라 정확히
           몇 번째 문단인지로 고르고 싶을 때 쓰는 보조 수단이다. */}

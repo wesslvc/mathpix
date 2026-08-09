@@ -3,8 +3,9 @@ import {
   FigureImageError,
   figureImageModelIds,
   generateFigureImage,
+  type FigureSubject,
 } from "@/lib/figureImageGen";
-import { FIGURE_CREDIT_COST } from "@/lib/figureCost";
+import { FIGURE_TOKEN_COST } from "@/lib/tokens";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -25,7 +26,7 @@ export const maxDuration = 60;
 const MAX_MODEL_ATTEMPTS = 2;
 
 export async function POST(req: NextRequest) {
-  let body: { image?: string };
+  let body: { image?: string; subject?: string };
   try {
     body = await req.json();
   } catch {
@@ -42,6 +43,8 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+
+  const subject: FigureSubject = body.subject === "math" ? "math" : "science";
 
   if (!process.env.OPENAI_API_KEY) {
     console.error("[api/figure] OPENAI_API_KEY not set");
@@ -64,21 +67,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 자료 재구성은 실제로 돈이 나가는 유료 API라 사진인식권으로 과금한다.
-  // 수학 도형과 같은 크레딧 통을 쓰되, 차감은 요청당 딱 한 번만 한다 —
+  // AI 그림 생성은 실제로 돈이 나가는 유료 API라 토큰으로 과금한다.
+  // 차감은 요청당 딱 한 번만 한다 —
   // 모델을 갈아타며 재시도하는 것은 우리 사정이지 사용자가 더 낼 이유가 아니다.
   let charged = false;
   if (supabase) {
     try {
       const { data, error } = await supabase.rpc("consume_recognition_credit", {
-        p_amount: FIGURE_CREDIT_COST,
+        p_amount: FIGURE_TOKEN_COST,
       });
       if (error) throw error;
       // 함수는 남은 크레딧을 돌려주고, 부족하면 null을 준다.
       if (data === null) {
         return NextResponse.json(
           {
-            error: `사진인식권이 부족해요. 자료 재구성에는 ${FIGURE_CREDIT_COST}장이 필요합니다.`,
+            error: `토큰이 부족해요. AI 그림 생성에는 ${FIGURE_TOKEN_COST}토큰이 필요합니다.`,
           },
           { status: 402 },
         );
@@ -96,7 +99,7 @@ export async function POST(req: NextRequest) {
     if (!supabase || !charged) return;
     try {
       await supabase.rpc("refund_recognition_credit", {
-        p_amount: FIGURE_CREDIT_COST,
+        p_amount: FIGURE_TOKEN_COST,
       });
     } catch {
       // 환불 실패는 무시 — 사용자에게는 원래 오류만 보여준다.
@@ -109,7 +112,7 @@ export async function POST(req: NextRequest) {
   for (let i = 0; i < Math.min(modelIds.length, MAX_MODEL_ATTEMPTS); i++) {
     const modelId = modelIds[i];
     try {
-      const result = await generateFigureImage(image, modelId);
+      const result = await generateFigureImage(image, modelId, subject);
       if (!result) {
         await refund();
         return NextResponse.json(
@@ -117,7 +120,7 @@ export async function POST(req: NextRequest) {
           { status: 502 },
         );
       }
-      console.info(`[api/figure] ok model=${modelId}`);
+      console.info(`[api/figure] ok model=${modelId} subject=${subject}`);
       return NextResponse.json({ image: result.dataUrl, modelId });
     } catch (err) {
       // 404(없는 이름)/403(권한 없음)/429(한도)면 이 모델로는 안 된다.

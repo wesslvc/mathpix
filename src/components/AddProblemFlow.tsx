@@ -24,7 +24,7 @@ export default function AddProblemFlow({
   canAdd = true,
 }: {
   categoryId: string;
-  /** false면 사진인식권이 없음 → 오답 추가 대신 이용권 안내를 보여준다. */
+  /** false면 토큰이 없음 → 오답 추가 대신 이용권 안내를 보여준다. */
   canAdd?: boolean;
 }) {
   const router = useRouter();
@@ -144,13 +144,16 @@ export default function AddProblemFlow({
     answer,
     answerType,
     boxOverride,
+    problemId,
   }: {
     pngDataUrl: string;
     text: string;
     answer: string;
     answerType: AnswerType;
     boxOverride: BoxOverride | undefined;
-  }) {
+    /** 이미 저장한 문제면 그 id. 새 행을 만들지 않고 그 행을 갱신한다. */
+    problemId?: string | null;
+  }): Promise<string> {
     const supabase = createClient();
     const {
       data: { user },
@@ -175,10 +178,7 @@ export default function AddProblemFlow({
       .maybeSingle();
     const nextOrder = (maxRow?.sort_order ?? 0) + 1;
 
-    const { error: insertError } = await supabase.from("problems").insert({
-      category_id: categoryId,
-      user_id: user.id,
-      image_path: path,
+    const fields = {
       // 사용자가 결과 화면에서 손본 최종 본문을 저장한다(원본 인식값이 아니라).
       latex: text || result?.latex || null,
       text_content: text || result?.text || null,
@@ -186,15 +186,42 @@ export default function AddProblemFlow({
       answer_type: answerType,
       // undefined면 "자동 감지에 맡김"이라 DB에도 null로 둔다.
       box_range: boxOverride ?? null,
-      sort_order: nextOrder,
-    });
-    if (insertError) {
+    };
+
+    // 이미 저장한 문제를 또 저장하는 건 "고쳐서 다시 저장"이다. 새 행을 만들면
+    // 같은 문제가 두 개 생기므로 같은 행을 갱신한다.
+    if (problemId) {
+      const { error: updateError } = await supabase
+        .from("problems")
+        .update({ ...fields, image_path: path })
+        .eq("id", problemId);
+      if (updateError) {
+        await supabase.storage.from("problem-images").remove([path]);
+        throw updateError;
+      }
+      router.refresh();
+      return problemId;
+    }
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("problems")
+      .insert({
+        category_id: categoryId,
+        user_id: user.id,
+        image_path: path,
+        ...fields,
+        sort_order: nextOrder,
+      })
+      .select("id")
+      .single();
+    if (insertError || !inserted) {
       // 실패 시 업로드한 이미지도 함께 정리한다.
       await supabase.storage.from("problem-images").remove([path]);
-      throw insertError;
+      throw insertError ?? new Error("저장에 실패했습니다.");
     }
 
     router.refresh();
+    return inserted.id as string;
   }
 
   return (
@@ -243,7 +270,7 @@ export default function AddProblemFlow({
 
       {stage === "idle" && !canAdd && (
         <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <p>사진인식권이 모두 소진돼 오답을 더 추가할 수 없어요. 이용권을 구매하면 1000개가 충전돼요.</p>
+          <p>토큰을 모두 사용해 오답을 더 추가할 수 없어요. 이용권을 구매하면 1000토큰이 충전돼요.</p>
           <a
             href="/api/checkout"
             className="w-fit rounded-lg bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-700"
@@ -254,7 +281,7 @@ export default function AddProblemFlow({
       )}
 
       {stage === "upload" && (
-        <div className="flex flex-col gap-2">
+        <div key="upload" className="animate-stage-in flex flex-col gap-2">
           <ImageUploader
             onImagesSelected={handleImagesSelected}
             onError={handleImageError}
@@ -278,22 +305,42 @@ export default function AddProblemFlow({
       )}
 
       {stage === "crop" && imageSrc && (
+        <div key={imageSrc} className="animate-stage-in">
         <CropStage
           imageSrc={imageSrc}
           onConfirm={handleCropConfirm}
           onCancel={handleReset}
           onError={handleImageError}
         />
+        </div>
       )}
 
       {stage === "loading" && (
-        <div className="flex flex-col items-center gap-3 py-16 text-slate-500">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
-          <p>Mathpix로 문제를 인식하는 중입니다...</p>
+        <div
+          key="loading"
+          className="animate-stage-in flex flex-col items-center gap-4 py-16"
+        >
+          <div className="relative h-12 w-12">
+            <div className="absolute inset-0 rounded-full border-4 border-slate-200" />
+            <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-blue-600" />
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-sm font-medium text-slate-700">
+              문제를 읽고 있어요
+            </p>
+            <p className="text-xs text-slate-400">
+              글자와 수식을 인식하는 중입니다. 보통 몇 초면 끝나요.
+            </p>
+          </div>
+          {/* 진행률을 알 수 없으니 좌우로 흐르는 막대로 "돌아가는 중"만 보여준다. */}
+          <div className="h-1 w-40 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full w-1/3 animate-loading-sweep rounded-full bg-blue-600" />
+          </div>
         </div>
       )}
 
       {stage === "result" && result && (
+        <div key="result" className="animate-stage-in">
         <ResultStage
           result={result}
           onBack={() => setStage("crop")}
@@ -305,6 +352,7 @@ export default function AddProblemFlow({
           sourceImage={recognizedSourceImage}
           subject={subject}
         />
+        </div>
       )}
     </div>
   );
