@@ -32,7 +32,10 @@ function statusText(sec: number): string {
   if (sec < 4) return "자료를 서버로 보내는 중...";
   if (sec < 15) return "자료를 읽고 있어요...";
   if (sec < 35) return "그림을 새로 그리는 중이에요...";
-  return "거의 다 됐어요. 자료가 복잡하면 조금 더 걸립니다...";
+  if (sec < 55) return "거의 다 됐어요...";
+  // 60초를 넘기면 Vercel이 요청을 끊는다. 기다리다 끊기는 것보다 왜 그런지
+  // 미리 알려주는 편이 낫다.
+  return "예상보다 오래 걸리고 있어요. 자료 영역이 너무 넓지 않은지 확인해주세요...";
 }
 
 /**
@@ -152,9 +155,18 @@ export default function FigurePanel({
       }
       if (!res.ok) throw new Error(json.error ?? "자료 재구성에 실패했습니다.");
 
+      // 여기서 한 번 확인하지 않으면, 이미지가 없을 때 그 undefined가 그대로
+      // 문제 카드까지 흘러가 "undefined"라는 글자로 인쇄된다. 실제로 응답
+      // 필드 이름을 바꾼 직후 예전 화면이 캐시된 상태에서 그 일이 났다.
+      if (typeof json.image !== "string" || !json.image.startsWith("data:image/")) {
+        throw new Error(
+          "서버가 이미지를 돌려주지 않았어요. 페이지를 새로고침한 뒤 다시 시도해주세요. (방금 배포된 직후라면 예전 화면이 캐시돼 있을 수 있습니다.)",
+        );
+      }
+
       // 완성된 그림도 원본과 똑같이 SVG로 감싸 둔다 — 크기·위치 조절과 PNG
       // 캡처가 두 경로에서 완전히 같은 방식으로 동작한다.
-      const svg = await rasterToSvg(json.image as string);
+      const svg = await rasterToSvg(json.image);
       writeFigureCache(key, svg);
       onAdd(svg);
       setPending(null);

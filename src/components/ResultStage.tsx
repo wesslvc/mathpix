@@ -226,7 +226,10 @@ export default function ResultStage({
           markup: `<img src="${rasterFallbacks[d.id]}" alt="" />`,
         })),
       ...manualDiagramSvgs.map((d) => ({ id: d.id, markup: d.svg })),
-    ],
+    ]
+      // 마크업이 비어 있으면 카드에 끼워 넣지 않는다. 문자열 조립이라 undefined가
+      // 하나만 섞여도 "undefined"라는 글자가 그대로 문제에 인쇄돼 버린다.
+      .filter((f) => typeof f.markup === "string" && f.markup.length > 0),
     [result.diagrams, rasterFallbacks, manualDiagramSvgs],
   );
 
