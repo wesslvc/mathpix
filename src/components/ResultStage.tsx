@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
-import { renderMathTextWithInfo, type BoxOverride } from "@/lib/renderMathText";
+import {
+  blockToHtml,
+  renderMathTextWithInfo,
+  type BoxOverride,
+} from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import DiagramCropModal from "./DiagramCropModal";
@@ -205,13 +209,37 @@ export default function ResultStage({
     [sourceText, boxOverride],
   );
 
-  // 도형·자료를 본문 어디에 놓을지. 값은 "이 문단 앞"이라 0 = 맨 위,
-  // blocks.length = 맨 아래다. 지정하지 않으면 맨 아래(예전 동작 그대로).
+  /**
+   * 그림을 놓을 수 있는 자리들. 위에서부터 순서대로다.
+   *
+   * 문단 사이뿐 아니라 **조건 박스·보기 박스 안의 줄 사이**도 자리가 된다.
+   * 문제집에서는 자료가 박스 안에 들어가는 경우가 흔한데, 예전에는 박스가
+   * 통짜라 그 안에 넣을 방법이 없었다.
+   *
+   * line이 null이면 그 블록 **앞**(박스라면 테두리 바깥), 숫자면 그 박스 안의
+   * 몇 번째 줄 앞이다(lines.length면 박스 안 맨 끝).
+   */
+  const anchors = useMemo(() => {
+    const out: { block: number; line: number | null }[] = [];
+    blocks.forEach((b, bi) => {
+      out.push({ block: bi, line: null });
+      if (b.kind === "box") {
+        for (let li = 0; li <= b.lines.length; li++) {
+          out.push({ block: bi, line: li });
+        }
+      }
+    });
+    out.push({ block: blocks.length, line: null });
+    return out;
+  }, [blocks]);
+
+  // 도형·자료를 어느 자리에 놓을지(anchors의 인덱스). 지정하지 않으면 맨 아래.
   const [figurePos, setFigurePos] = useState<Record<string, number>>({});
 
   function positionOf(id: string): number {
-    // 본문을 고치면 문단 수가 달라지므로 항상 현재 범위로 가둔다.
-    return Math.min(Math.max(figurePos[id] ?? blocks.length, 0), blocks.length);
+    // 본문을 고치면 자리 개수가 달라지므로 항상 현재 범위로 가둔다.
+    const last = anchors.length - 1;
+    return Math.min(Math.max(figurePos[id] ?? last, 0), last);
   }
 
   /**
@@ -234,24 +262,35 @@ export default function ResultStage({
     [result.diagrams, rasterFallbacks, manualDiagramSvgs],
   );
 
-  /** 자리 고르는 목록에 보여줄 이름. 앞 문단의 첫 글자들을 붙여 알아보기 쉽게. */
+  /** 자리 고르는 목록에 보여줄 이름. 근처 글자를 붙여 어디인지 알아보게 한다. */
   const slotLabels = useMemo(() => {
-    const preview = (blockHtml: string): string => {
+    const preview = (html: string): string => {
       if (typeof document === "undefined") return "";
       const el = document.createElement("div");
-      el.innerHTML = blockHtml;
+      el.innerHTML = html;
       // KaTeX는 같은 수식을 MathML로도 함께 내보내서, 그냥 textContent를 읽으면
       // 수식이 두 번 나온다. 화면에 안 보이는 쪽을 떼고 읽는다.
       el.querySelectorAll(".katex-mathml").forEach((n) => n.remove());
-      return (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 14);
+      return (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 12);
     };
-    return Array.from({ length: blocks.length + 1 }, (_, i) => {
+
+    return anchors.map((a, i) => {
       if (i === 0) return "맨 위";
-      if (i === blocks.length) return "맨 아래";
-      const text = preview(blocks[i - 1]);
-      return text ? `${i}번째 문단 뒤 · ${text}…` : `${i}번째 문단 뒤`;
+      if (i === anchors.length - 1) return "맨 아래";
+
+      const block = blocks[a.block];
+      if (a.line === null) {
+        // 이 블록 앞 = 바로 앞 블록의 뒤.
+        const prev = blocks[a.block - 1];
+        const text = prev ? preview(blockToHtml(prev)) : "";
+        return text ? `${a.block}번째 문단 뒤 · ${text}…` : `${a.block}번째 문단 뒤`;
+      }
+      if (block?.kind !== "box") return "박스 안";
+      if (a.line >= block.lines.length) return "박스 안 · 맨 끝";
+      const text = preview(block.lines[a.line]);
+      return text ? `박스 안 · ${text}… 앞` : `박스 안 · ${a.line + 1}번째 줄 앞`;
     });
-  }, [blocks]);
+  }, [anchors, blocks]);
 
   // ── 손으로 끌어 옮기기 ────────────────────────────────────────────────
   // 미리보기의 그림을 그대로 잡아 끌면 좌우로 움직이고, 놓는 높이에 따라
@@ -280,38 +319,64 @@ export default function ResultStage({
   /** 드래그 중 "여기로 들어갑니다" 선의 위치(px). null이면 드래그 중이 아니다. */
   const [dropLineTop, setDropLineTop] = useState<number | null>(null);
 
-  /** 본문 문단 요소들(그림은 뺀다). 문서 순서가 곧 blocks 순서다. */
-  function blockElements(): HTMLElement[] {
-    const c = contentRef.current;
-    if (!c) return [];
-    return Array.from(c.children).filter(
-      (el): el is HTMLElement =>
-        el instanceof HTMLElement && !el.classList.contains("problem-figure"),
+  /** 그림이 아닌 자식들. 문서 순서가 곧 구조 순서다. */
+  function realChildren(el: Element): HTMLElement[] {
+    return Array.from(el.children).filter(
+      (c): c is HTMLElement =>
+        c instanceof HTMLElement && !c.classList.contains("problem-figure"),
     );
   }
 
-  /** 화면 세로 좌표가 몇 번째 문단 사이인지. 문단의 중간선을 기준으로 가른다. */
-  function slotAtY(clientY: number): number {
-    const els = blockElements();
-    for (let i = 0; i < els.length; i++) {
-      const r = els[i].getBoundingClientRect();
-      if (clientY < r.top + r.height / 2) return i;
+  /**
+   * 각 자리가 화면 세로 어디쯤인지. cardHtml을 만들 때와 **똑같은 순서로**
+   * DOM을 훑어야 자리 번호가 어긋나지 않는다.
+   */
+  function anchorPoints(): { slot: number; y: number }[] {
+    const c = contentRef.current;
+    if (!c) return [];
+    const out: { slot: number; y: number }[] = [];
+    const blockEls = realChildren(c);
+    let slot = 0;
+    for (const el of blockEls) {
+      const r = el.getBoundingClientRect();
+      out.push({ slot: slot++, y: r.top });
+      if (el.classList.contains("mmd-box")) {
+        const lineEls = realChildren(el);
+        for (const lineEl of lineEls) {
+          out.push({ slot: slot++, y: lineEl.getBoundingClientRect().top });
+        }
+        const last = lineEls[lineEls.length - 1];
+        out.push({
+          slot: slot++,
+          y: (last ?? el).getBoundingClientRect().bottom,
+        });
+      }
     }
-    return els.length;
+    const lastBlock = blockEls[blockEls.length - 1];
+    out.push({ slot, y: lastBlock ? lastBlock.getBoundingClientRect().bottom : 0 });
+    return out;
+  }
+
+  /** 손을 놓은 높이에서 가장 가까운 자리. */
+  function slotAtY(clientY: number): number {
+    const points = anchorPoints();
+    if (points.length === 0) return 0;
+    let best = points[0];
+    for (const p of points) {
+      if (Math.abs(p.y - clientY) < Math.abs(best.y - clientY)) best = p;
+    }
+    return best.slot;
   }
 
   function dropLineFor(slot: number): number | null {
     const wrap = cardWrapRef.current;
-    const els = blockElements();
-    if (!wrap || els.length === 0) return null;
-    const wrapTop = wrap.getBoundingClientRect().top;
+    if (!wrap) return null;
+    const point = anchorPoints().find((p) => p.slot === slot);
+    if (!point) return null;
     // getBoundingClientRect는 화면 좌표(축소된 값)라, 안내선을 놓을 카드
     // 좌표계로 되돌리려면 배율로 나눠야 한다.
     const s = scaleRef.current || 1;
-    if (slot >= els.length) {
-      return (els[els.length - 1].getBoundingClientRect().bottom - wrapTop) / s;
-    }
-    return (els[slot].getBoundingClientRect().top - wrapTop) / s;
+    return (point.y - wrap.getBoundingClientRect().top) / s;
   }
 
   function handleFigurePointerDown(e: React.PointerEvent) {
@@ -364,7 +429,7 @@ export default function ResultStage({
     setFigurePos((prev) => ({ ...prev, [drag.id]: drag.slot }));
   }
 
-  /** 본문 문단 사이사이에 도형·자료를 끼워 넣은 최종 카드 HTML. */
+  /** 문단 사이와 박스 안 줄 사이에 도형·자료를 끼워 넣은 최종 카드 HTML. */
   const cardHtml = useMemo(() => {
     const atSlot = (slot: number) =>
       figures
@@ -377,13 +442,27 @@ export default function ResultStage({
         )
         .join("");
 
-    return (
-      blocks.map((block, i) => atSlot(i) + block).join("") +
-      atSlot(blocks.length)
-    );
+    // anchors와 정확히 같은 순서로 훑어야 자리 번호가 어긋나지 않는다.
+    let slot = 0;
+    let out = "";
+    for (const block of blocks) {
+      out += atSlot(slot++);
+      if (block.kind === "plain") {
+        out += block.html;
+        continue;
+      }
+      let inner = "";
+      for (const line of block.lines) {
+        inner += atSlot(slot++) + line;
+      }
+      inner += atSlot(slot++); // 박스 안 맨 끝
+      out += `<div class="mmd-box">${inner}</div>`;
+    }
+    out += atSlot(slot);
+    return out;
     // positionOf/layoutOf는 아래 두 state를 읽는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blocks, figures, figurePos, layouts]);
+  }, [blocks, anchors, figures, figurePos, layouts]);
 
   // 정답을 적고 잠시 가만히 있으면 저장 버튼을 누르지 않아도 저장한다.
   // 글자마다 저장하면 "12"를 치는 동안 "1"로 저장되므로 입력이 멎을 때까지 기다린다.
