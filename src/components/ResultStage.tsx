@@ -7,6 +7,7 @@ import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import DiagramCropModal from "./DiagramCropModal";
 import FigurePanel from "./FigurePanel";
+import type { Subject } from "@/lib/subject";
 import type { DiagramQuota } from "@/app/api/diagram/quota/route";
 import BoxRangeEditor from "./BoxRangeEditor";
 import LatexEditor from "./LatexEditor";
@@ -43,6 +44,12 @@ type Props = {
   onAddAnother?: () => void;
   /** Mathpix에 보낸 원본(크롭된) 이미지. 도형 영역을 오려내는 데 쓴다. */
   sourceImage?: string | null;
+  /**
+   * 과목 모드. 그림을 다루는 도구만 이 값에 따라 갈린다 —
+   * math면 수학 도형(Gemini), science면 사과탐 자료(OpenAI).
+   * 텍스트·수식은 두 모드 모두 Mathpix가 이미 읽어온 뒤라 차이가 없다.
+   */
+  subject?: Subject;
 };
 
 const FONT_SIZES = [
@@ -87,6 +94,7 @@ export default function ResultStage({
   onNext,
   onAddAnother,
   sourceImage,
+  subject = "math",
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [fontSizeIdx, setFontSizeIdx] = useState(0);
@@ -503,13 +511,19 @@ export default function ResultStage({
       {(Object.keys(rasterFallbacks).length > 0 ||
         manualDiagramSvgs.length > 0) && (
         <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
-          <p className="text-xs font-medium text-slate-500">도형 크기·위치</p>
+          <p className="text-xs font-medium text-slate-500">
+            {subject === "science" ? "자료 크기·위치" : "도형 크기·위치"}
+          </p>
           {(result.diagrams ?? [])
             .filter((d) => rasterFallbacks[d.id])
             .map((d, i) => (
               <DiagramAdjuster
                 key={d.id}
-                label={`자동 감지 도형 ${i + 1}`}
+                label={
+                  subject === "science"
+                    ? `자동 감지 자료 ${i + 1}`
+                    : `자동 감지 도형 ${i + 1}`
+                }
                 layout={layoutOf(d.id)}
                 onChange={(next) => setLayout(d.id, next)}
               />
@@ -532,7 +546,10 @@ export default function ResultStage({
         </div>
       )}
 
-      {!isVectorizing && (
+      {/* 수학 모드에서만 보이는 도형 도구(Gemini). 사과탐 모드에서는 아래
+          FigurePanel이 대신 나온다 — 두 도구를 같이 두면 어느 걸 눌러야
+          할지 헷갈리고 엉뚱한 모델에 크레딧을 쓰게 된다. */}
+      {subject === "math" && !isVectorizing && (
         <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium text-slate-500">도형 화질</span>
@@ -657,7 +674,7 @@ export default function ResultStage({
         </div>
       )}
 
-      {showDiagramCrop && (
+      {subject === "math" && showDiagramCrop && (
         <DiagramCropModal
           imageSrc={sourceImage ?? null}
           onConfirm={handleDiagramCropConfirm}
@@ -668,7 +685,7 @@ export default function ResultStage({
       {/* 사과탐 자료. 위의 수학 도형과 완전히 별개 경로(다른 API, 다른 모델)지만
           결과가 같은 SVG 문자열이라 manualDiagramSvgs에 그대로 합류한다 —
           크기·위치 조절, PNG 캡처, 저장이 전부 그대로 따라온다. */}
-      {!isVectorizing && (
+      {subject === "science" && (
         <FigurePanel
           imageSrc={sourceImage ?? null}
           credits={quota?.credits ?? null}
