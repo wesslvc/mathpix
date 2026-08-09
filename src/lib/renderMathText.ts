@@ -541,7 +541,12 @@ export function renderPreviewLine(line: string, input: string): string {
   return renderLineContent(line, blocks);
 }
 
-/** 빈 줄 아닌 줄들을 문단으로 묶어 렌더링한다(표 토큰은 형제 요소로 뺀다). */
+/**
+ * 빈 줄 아닌 줄들을 문단으로 묶어 렌더링한다(표 토큰은 형제 요소로 뺀다).
+ *
+ * 이어붙인 문자열이 아니라 최상위 요소 하나씩을 담은 배열을 돌려준다. 문제
+ * 카드에서 도형·자료를 문단 **사이**에 끼워 넣으려면 경계를 알아야 하기 때문이다.
+ */
 function renderPlainRange(
   allLines: string[],
   from: number,
@@ -549,9 +554,9 @@ function renderPlainRange(
   isFirst: boolean,
   mathBlocks: string[],
   tables: string[],
-): string {
-  if (to < from) return "";
-  let html = "";
+): string[] {
+  if (to < from) return [];
+  const parts: string[] = [];
   let first = isFirst;
   for (const block of toBlocks(allLines.slice(from, to + 1))) {
     const lines = block.lines;
@@ -563,20 +568,26 @@ function renderPlainRange(
       const before = lines.slice(0, tableLineIdx);
       const after = lines.slice(tableLineIdx + 1);
       if (before.length > 0) {
-        html += `<p class="mmd-paragraph">${renderLines(before, first, mathBlocks)}</p>`;
+        parts.push(
+          `<p class="mmd-paragraph">${renderLines(before, first, mathBlocks)}</p>`,
+        );
         first = false;
       }
-      html += tables[Number(match[1])];
+      parts.push(tables[Number(match[1])]);
       if (after.length > 0) {
-        html += `<p class="mmd-paragraph">${renderLines(after, false, mathBlocks)}</p>`;
+        parts.push(
+          `<p class="mmd-paragraph">${renderLines(after, false, mathBlocks)}</p>`,
+        );
       }
       first = false;
       continue;
     }
-    html += `<p class="mmd-paragraph">${renderLines(lines, first, mathBlocks)}</p>`;
+    parts.push(
+      `<p class="mmd-paragraph">${renderLines(lines, first, mathBlocks)}</p>`,
+    );
     first = false;
   }
-  return html;
+  return parts;
 }
 
 /** 박스 한 개를 그린다. 안이 빈 줄뿐이면 아무것도 그리지 않는다(빈 테두리 방지). */
@@ -607,7 +618,7 @@ function renderWithForcedBoxes(
   ranges: BoxRange[],
   mathBlocks: string[],
   tables: string[],
-): string {
+): string[] {
   const lastLine = allLines.length - 1;
   const boxes = normalizeBoxRanges(
     ranges.map((r) => ({
@@ -620,7 +631,7 @@ function renderWithForcedBoxes(
     return renderPlainRange(allLines, 0, lastLine, true, mathBlocks, tables);
   }
 
-  let html = "";
+  const parts: string[] = [];
   let cursor = 0;
   // 문제번호를 굵게 처리하는 건 카드에서 맨 처음 나오는 문단 하나뿐이다.
   // 앞에 아무것도 안 그려졌을 때만 "첫 문단"이 유지된다.
@@ -635,18 +646,22 @@ function renderWithForcedBoxes(
       mathBlocks,
       tables,
     );
-    html += before;
-    if (before !== "") isFirst = false;
+    parts.push(...before);
+    if (before.length > 0) isFirst = false;
 
     const boxHtml = renderBox(allLines, box, mathBlocks);
-    html += boxHtml;
-    if (boxHtml !== "") isFirst = false;
+    if (boxHtml !== "") {
+      parts.push(boxHtml);
+      isFirst = false;
+    }
 
     cursor = box.end + 1;
   }
 
-  html += renderPlainRange(allLines, cursor, lastLine, isFirst, mathBlocks, tables);
-  return html;
+  parts.push(
+    ...renderPlainRange(allLines, cursor, lastLine, isFirst, mathBlocks, tables),
+  );
+  return parts;
 }
 
 /**
@@ -687,27 +702,30 @@ export function renderMathText(input: string, boxOverride?: BoxOverride): string
 export function renderMathTextWithInfo(
   input: string,
   boxOverride?: BoxOverride,
-): { html: string; boxes: BoxRange[]; lines: string[] } {
+): { html: string; blocks: string[]; boxes: BoxRange[]; lines: string[] } {
   const normalized = normalizeDelimiters(input);
   const { text: withoutTables, tables } = protectTabular(normalized);
   const { text, blocks: mathBlocks } = protectDisplayMath(withoutTables);
   const canonicalLines = text.split("\n");
   const blocks = toBlocks(canonicalLines);
 
+  /** 최상위 요소(문단/박스/표) 하나씩. 도형·자료를 그 사이에 끼워 넣는다. */
+  const finish = (raw: string[]) => {
+    const restored = raw.map((part) => restoreTables(part, tables));
+    return { html: restored.join(""), blocks: restored };
+  };
+
   // 사용자가 범위를 직접 정했으면 자동 감지 로직은 건드리지 않고 그대로 따른다.
   const forced = toBoxRanges(boxOverride);
   if (forced !== null) {
     return {
-      html: restoreTables(
-        renderWithForcedBoxes(canonicalLines, forced, mathBlocks, tables),
-        tables,
-      ),
+      ...finish(renderWithForcedBoxes(canonicalLines, forced, mathBlocks, tables)),
       boxes: forced,
       lines: canonicalLines,
     };
   }
 
-  let html = "";
+  const parts: string[] = [];
   let isFirst = true;
   // 마침표를 못 찾아 아직 안 닫힌 박스의 줄들(여러 블록에 걸쳐 쌓인다). null이면
   // 현재 열린 박스가 없다는 뜻.
@@ -747,13 +765,13 @@ export function renderMathTextWithInfo(
         // 실제 질문/선택지를 만났다면(hardStopIdx) 그 앞까지만 담는다.
         const stopAt = hardStopIdx !== -1 ? hardStopIdx : lines.length;
         openBoxLines.push(...lines.slice(0, stopAt));
-        html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
+        parts.push(`<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`);
         recordBox(openBoxStart, offset + stopAt - 1);
         openBoxLines = null;
 
         if (hardStopIdx !== -1) {
           const trailingLines = lines.slice(hardStopIdx);
-          html += `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`;
+          parts.push(`<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`);
         }
         isFirst = false;
         continue;
@@ -761,7 +779,7 @@ export function renderMathTextWithInfo(
 
       const { head, rest } = closeBoxAtLine(lines[closeIdx], mathBlocks);
       openBoxLines.push(...lines.slice(0, closeIdx), head);
-      html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
+      parts.push(`<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`);
       recordBox(openBoxStart, offset + closeIdx);
       openBoxLines = null;
 
@@ -770,7 +788,7 @@ export function renderMathTextWithInfo(
         ...lines.slice(closeIdx + 1),
       ];
       if (trailingLines.length > 0) {
-        html += `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`;
+        parts.push(`<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`);
       }
       isFirst = false;
       continue;
@@ -790,11 +808,11 @@ export function renderMathTextWithInfo(
       const afterLines = lines.slice(tableLineIdx + 1);
 
       if (beforeLines.length > 0) {
-        html += `<p class="mmd-paragraph">${renderLines(beforeLines, isFirst, mathBlocks)}</p>`;
+        parts.push(`<p class="mmd-paragraph">${renderLines(beforeLines, isFirst, mathBlocks)}</p>`);
       }
-      html += tableHtml;
+      parts.push(tableHtml);
       if (afterLines.length > 0) {
-        html += `<p class="mmd-paragraph">${renderLines(afterLines, false, mathBlocks)}</p>`;
+        parts.push(`<p class="mmd-paragraph">${renderLines(afterLines, false, mathBlocks)}</p>`);
       }
       isFirst = false;
       continue;
@@ -803,7 +821,7 @@ export function renderMathTextWithInfo(
     const isBoxedAll = lines.every((line) => /^\s*>/.test(line));
     if (isBoxedAll) {
       const content = lines.map((line) => line.replace(/^\s*>\s?/, ""));
-      html += `<div class="mmd-box">${renderLines(content, false, mathBlocks)}</div>`;
+      parts.push(`<div class="mmd-box">${renderLines(content, false, mathBlocks)}</div>`);
       recordBox(offset, offset + lines.length - 1);
       isFirst = false;
       continue;
@@ -833,7 +851,7 @@ export function renderMathTextWithInfo(
 
       const introLines = lines.slice(0, firstIdx);
       if (introLines.length > 0) {
-        html += `<p class="mmd-paragraph">${renderLines(introLines, isFirst, mathBlocks)}</p>`;
+        parts.push(`<p class="mmd-paragraph">${renderLines(introLines, isFirst, mathBlocks)}</p>`);
       }
 
       if (closeIdx === -1) {
@@ -859,12 +877,12 @@ export function renderMathTextWithInfo(
 
         const stopAt = hardStopIdx !== -1 ? hardStopIdx : lines.length;
         const conditionLines = lines.slice(firstIdx, stopAt);
-        html += `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
+        parts.push(`<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`);
         recordBox(offset + firstIdx, offset + stopAt - 1);
 
         if (hardStopIdx !== -1) {
           const trailingLines = lines.slice(hardStopIdx);
-          html += `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`;
+          parts.push(`<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`);
         }
         isFirst = false;
         continue;
@@ -872,7 +890,7 @@ export function renderMathTextWithInfo(
 
       const { head, rest } = closeBoxAtLine(lines[closeIdx], mathBlocks);
       const conditionLines = [...lines.slice(firstIdx, closeIdx), head];
-      html += `<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`;
+      parts.push(`<div class="mmd-box">${renderLines(conditionLines, false, mathBlocks)}</div>`);
       recordBox(offset + firstIdx, offset + closeIdx);
 
       const trailingLines = [
@@ -880,25 +898,25 @@ export function renderMathTextWithInfo(
         ...lines.slice(closeIdx + 1),
       ];
       if (trailingLines.length > 0) {
-        html += `<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`;
+        parts.push(`<p class="mmd-paragraph">${renderLines(trailingLines, false, mathBlocks)}</p>`);
       }
       isFirst = false;
       continue;
     }
 
-    html += `<p class="mmd-paragraph">${renderLines(lines, isFirst, mathBlocks)}</p>`;
+    parts.push(`<p class="mmd-paragraph">${renderLines(lines, isFirst, mathBlocks)}</p>`);
     isFirst = false;
   }
 
   // 마지막까지 마침표를 못 찾은 채 끝나면(원본에 마침표가 없는 등) 남은 줄을
   // 그대로 박스로 닫아 최소한 내용이 사라지지 않게 한다.
   if (openBoxLines !== null) {
-    html += `<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`;
+    parts.push(`<div class="mmd-box">${renderLines(openBoxLines, false, mathBlocks)}</div>`);
     recordBox(openBoxStart, canonicalLines.length - 1);
   }
 
   return {
-    html: restoreTables(html, tables),
+    ...finish(parts),
     boxes: normalizeBoxRanges(boxes),
     lines: canonicalLines,
   };
