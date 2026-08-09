@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import DiagramCropModal from "./DiagramCropModal";
-import { prepareFigureForModel, rasterToSvg } from "@/lib/figureImage";
+import {
+  prepareFigureForModel,
+  rasterToSvg,
+  trimBlankBorder,
+} from "@/lib/figureImage";
 import {
   figureCacheKey,
   readFigureCache,
@@ -164,9 +168,14 @@ export default function FigurePanel({
         );
       }
 
+      // 이미지 생성 모델은 자기 비율(대개 정사각형)에 맞춰 그려서 그림 둘레에
+      // 흰 여백을 잔뜩 붙여 준다. 그대로 두면 그림보다 여백이 커져 문단 사이가
+      // 휑하게 벌어지므로 잘라낸다.
+      const trimmed = await trimBlankBorder(json.image);
+
       // 완성된 그림도 원본과 똑같이 SVG로 감싸 둔다 — 크기·위치 조절과 PNG
       // 캡처가 두 경로에서 완전히 같은 방식으로 동작한다.
-      const svg = await rasterToSvg(json.image);
+      const svg = await rasterToSvg(trimmed);
       writeFigureCache(key, svg);
       onAdd(svg);
       setPending(null);

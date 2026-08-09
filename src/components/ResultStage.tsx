@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { renderMathTextWithInfo, type BoxOverride } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import DiagramCropModal from "./DiagramCropModal";
 import FigurePanel from "./FigurePanel";
+import ScaledCard from "./ScaledCard";
 import type { Subject } from "@/lib/subject";
 import type { DiagramQuota } from "@/app/api/diagram/quota/route";
 import BoxRangeEditor from "./BoxRangeEditor";
@@ -263,6 +264,12 @@ export default function ResultStage({
   // 최종 위치는 손을 뗄 때 한 번만 state에 반영한다.
   const contentRef = useRef<HTMLDivElement>(null);
   const cardWrapRef = useRef<HTMLDivElement>(null);
+  // 카드가 화면 폭에 맞춰 축소돼 있으면 손가락이 움직인 화면 거리와 카드
+  // 안에서의 거리가 다르다. 드래그 계산에서 되돌리려고 배율을 들고 있는다.
+  const scaleRef = useRef(1);
+  const handleScaleChange = useCallback((s: number) => {
+    scaleRef.current = s;
+  }, []);
   const dragRef = useRef<{
     id: string;
     el: HTMLElement;
@@ -298,10 +305,13 @@ export default function ResultStage({
     const els = blockElements();
     if (!wrap || els.length === 0) return null;
     const wrapTop = wrap.getBoundingClientRect().top;
+    // getBoundingClientRect는 화면 좌표(축소된 값)라, 안내선을 놓을 카드
+    // 좌표계로 되돌리려면 배율로 나눠야 한다.
+    const s = scaleRef.current || 1;
     if (slot >= els.length) {
-      return els[els.length - 1].getBoundingClientRect().bottom - wrapTop;
+      return (els[els.length - 1].getBoundingClientRect().bottom - wrapTop) / s;
     }
-    return els[slot].getBoundingClientRect().top - wrapTop;
+    return (els[slot].getBoundingClientRect().top - wrapTop) / s;
   }
 
   function handleFigurePointerDown(e: React.PointerEvent) {
@@ -326,8 +336,8 @@ export default function ResultStage({
     if (!drag) return;
     e.preventDefault();
 
-    // 좌우: 끈 만큼 그대로. 슬라이더와 같은 범위 안에 가둔다.
-    const dx = e.clientX - drag.startX;
+    // 좌우: 끈 만큼. 화면에서 움직인 거리를 카드 안의 거리로 되돌린다.
+    const dx = (e.clientX - drag.startX) / (scaleRef.current || 1);
     const offsetX = Math.max(-300, Math.min(300, drag.startOffsetX + dx));
     const scale = layoutOf(drag.id).scale;
     drag.el.style.marginLeft = `calc(${(100 - scale) / 2}% + ${offsetX}px)`;
@@ -348,7 +358,7 @@ export default function ResultStage({
       // 이미 풀렸으면 그만이다.
     }
 
-    const dx = e.clientX - drag.startX;
+    const dx = (e.clientX - drag.startX) / (scaleRef.current || 1);
     const offsetX = Math.max(-300, Math.min(300, drag.startOffsetX + dx));
     setLayout(drag.id, { ...layoutOf(drag.id), offsetX });
     setFigurePos((prev) => ({ ...prev, [drag.id]: drag.slot }));
@@ -594,7 +604,9 @@ export default function ResultStage({
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      {/* 휴대폰에서도 가로로 밀지 않고 한눈에 보이도록 통째로 축소한다.
+          카드 너비는 어떤 기기에서도 같으므로 결과물은 달라지지 않는다. */}
+      <ScaledCard width={PROBLEM_CARD_WIDTH} onScaleChange={handleScaleChange}>
         {/* 드래그 안내선을 카드 위에 겹쳐 놓기 위한 껍데기. 안내선은 cardRef
             바깥에 두어야 PNG로 캡처될 때 같이 찍히지 않는다. */}
         <div
@@ -631,7 +643,7 @@ export default function ResultStage({
             />
           )}
         </div>
-      </div>
+      </ScaledCard>
 
       {/* 인식 결과를 바로 고친다. 저장 후 갤러리에서 다시 여는 왕복을 없앤다. */}
       <div className="rounded-lg border border-slate-200 px-3 py-2.5">
