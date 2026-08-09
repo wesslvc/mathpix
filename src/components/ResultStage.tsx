@@ -13,7 +13,8 @@ import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import FigurePanel from "./FigurePanel";
 import ScaledCard from "./ScaledCard";
 import { useFigureJobs } from "./FigureJobsProvider";
-import { buildAnchors, buildCardHtml } from "@/lib/cardHtml";
+import { buildAnchors, buildCardHtml, collectTables } from "@/lib/cardHtml";
+import { DEFAULT_TABLE_LAYOUT } from "@/lib/diagramLayout";
 import {
   prepareFigureForModel,
   rasterToSvg,
@@ -114,7 +115,12 @@ export default function ResultStage({
   const [layouts, setLayouts] = useState<Record<string, DiagramLayout>>({});
 
   function layoutOf(key: string): DiagramLayout {
-    return layouts[key] ?? DEFAULT_DIAGRAM_LAYOUT;
+    // 표는 기본값이 다르다(손대기 전에는 예전 그대로 보여야 한다).
+    // tableDefaults는 아래에서 만들지만, 이 함수가 실제로 불리는 건 그 뒤다.
+    return (
+      layouts[key] ??
+      (key in tableDefaults ? DEFAULT_TABLE_LAYOUT : DEFAULT_DIAGRAM_LAYOUT)
+    );
   }
   function setLayout(key: string, next: DiagramLayout) {
     setLayouts((prev) => ({ ...prev, [key]: next }));
@@ -202,13 +208,30 @@ export default function ResultStage({
    */
   const anchors = useMemo(() => buildAnchors(blocks), [blocks]);
 
-  // 도형·자료를 어느 자리에 놓을지(anchors의 인덱스). 지정하지 않으면 맨 아래.
+  /**
+   * 본문에 들어 있는 표들. 그림과 똑같이 끌어 옮길 수 있는 물건으로 다룬다 —
+   * 문제집에서는 표가 문장 사이 어디에 오느냐가 제각각이고, 표 옆에 지도나
+   * 그래프를 나란히 세우는 경우도 흔하다.
+   */
+  const tables = useMemo(() => collectTables(blocks), [blocks]);
+  /** 표 id -> 원문에서 원래 있던 자리. 손대지 않으면 그 자리에 그대로 그려진다. */
+  const tableDefaults = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const t of tables) m[t.id] = t.defaultPosition;
+    return m;
+  }, [tables]);
+
+  // 도형·자료·표를 어느 자리에 놓을지(anchors의 인덱스).
+  // 지정하지 않으면 그림은 맨 아래, 표는 원문에서 있던 자리.
   const [figurePos, setFigurePos] = useState<Record<string, number>>({});
+  /** 같은 자리에 놓인 것끼리 가로로 나란히 놓을지. */
+  const [figureRow, setFigureRow] = useState<Record<string, boolean>>({});
 
   function positionOf(id: string): number {
     // 본문을 고치면 자리 개수가 달라지므로 항상 현재 범위로 가둔다.
     const last = anchors.length - 1;
-    return Math.min(Math.max(figurePos[id] ?? last, 0), last);
+    const fallback = tableDefaults[id] ?? last;
+    return Math.min(Math.max(figurePos[id] ?? fallback, 0), last);
   }
 
   /**
@@ -251,6 +274,7 @@ export default function ResultStage({
       if (a.line === null) {
         // 이 블록 앞 = 바로 앞 블록의 뒤.
         const prev = blocks[a.block - 1];
+        if (prev?.kind === "table") return "표가 있던 자리";
         const text = prev ? preview(blockToHtml(prev)) : "";
         return text ? `${a.block}번째 문단 뒤 · ${text}…` : `${a.block}번째 문단 뒤`;
       }
@@ -262,14 +286,21 @@ export default function ResultStage({
   }, [anchors, blocks]);
 
   // ── 손으로 끌어 옮기기 ────────────────────────────────────────────────
-  // 미리보기의 그림을 그대로 잡아 끌면 좌우로 움직이고, 놓는 높이에 따라
+  // 미리보기의 그림·표를 그대로 잡아 끌면 좌우로 움직이고, 놓는 높이에 따라
   // 어느 문단 사이로 들어갈지 정해진다.
   //
-  // 끄는 동안에는 React state를 건드리지 않고 DOM 스타일만 직접 바꾼다.
-  // 본문은 dangerouslySetInnerHTML 한 덩어리라, state가 바뀌어 문자열이
-  // 달라지면 React가 innerHTML을 통째로 갈아치우고 — 그러면 지금 잡고 있는
-  // 그 요소가 사라져서 포인터 캡처가 끊기고 드래그가 중간에 죽는다.
-  // 최종 위치는 손을 뗄 때 한 번만 state에 반영한다.
+  // 끄는 동안에는 놓을 자리를 state에 반영하지 않고 DOM 스타일만 직접 바꾼다.
+  // 본문은 dangerouslySetInnerHTML 한 덩어리라, 다시 그려질 때마다 React가
+  // 자식들을 통째로 갈아끼우기 때문이다.
+  //
+  // **그래서 잡고 있는 요소를 붙들고 있으면 안 된다.** 안내선이 나타나는 것만으로
+  // 도 카드가 한 번 다시 그려져서, 처음에 잡은 그 DOM 노드는 곧 떨어져 나간다
+  // (실제 브라우저에서 확인 — pointerdown 직후 자식 전체가 교체된다). 그래서
+  //  · 움직일 때마다 id로 지금 화면에 있는 요소를 다시 찾고,
+  //  · setPointerCapture 대신 window에서 pointermove/up을 받는다.
+  // 예전에는 캡처에 기대다 보니 카드 바깥(여백)에서 손을 놓으면 pointerup이
+  // 어디에도 닿지 않아 옮긴 게 통째로 무시됐다. "맨 위/맨 아래로 보내기"가
+  // 바로 그 자리라 특히 자주 걸렸다.
   const contentRef = useRef<HTMLDivElement>(null);
   const cardWrapRef = useRef<HTMLDivElement>(null);
   // 카드가 화면 폭에 맞춰 축소돼 있으면 손가락이 움직인 화면 거리와 카드
@@ -280,7 +311,6 @@ export default function ResultStage({
   }, []);
   const dragRef = useRef<{
     id: string;
-    el: HTMLElement;
     startX: number;
     startOffsetX: number;
     slot: number;
@@ -288,11 +318,16 @@ export default function ResultStage({
   /** 드래그 중 "여기로 들어갑니다" 선의 위치(px). null이면 드래그 중이 아니다. */
   const [dropLineTop, setDropLineTop] = useState<number | null>(null);
 
-  /** 그림이 아닌 자식들. 문서 순서가 곧 구조 순서다. */
+  /**
+   * 그림·표가 아닌 자식들. 문서 순서가 곧 구조 순서다.
+   * 나란히 놓기용 껍데기(problem-figure-row)도 본문이 아니므로 함께 뺀다.
+   */
   function realChildren(el: Element): HTMLElement[] {
     return Array.from(el.children).filter(
       (c): c is HTMLElement =>
-        c instanceof HTMLElement && !c.classList.contains("problem-figure"),
+        c instanceof HTMLElement &&
+        !c.classList.contains("problem-figure") &&
+        !c.classList.contains("problem-figure-row"),
     );
   }
 
@@ -348,24 +383,34 @@ export default function ResultStage({
     return (point.y - wrap.getBoundingClientRect().top) / s;
   }
 
+  /** 지금 화면에 있는 그 요소. 카드가 다시 그려져도 id로 찾으면 늘 최신이다. */
+  function figureEl(id: string): HTMLElement | null {
+    return (
+      contentRef.current?.querySelector<HTMLElement>(
+        `[data-fig-id="${CSS.escape(id)}"]`,
+      ) ?? null
+    );
+  }
+
   function handleFigurePointerDown(e: React.PointerEvent) {
     const el = (e.target as HTMLElement).closest<HTMLElement>("[data-fig-id]");
     const id = el?.dataset.figId;
     if (!el || !id) return;
     e.preventDefault();
-    el.setPointerCapture(e.pointerId);
     const slot = positionOf(id);
     dragRef.current = {
       id,
-      el,
       startX: e.clientX,
       startOffsetX: layoutOf(id).offsetX,
       slot,
     };
     setDropLineTop(dropLineFor(slot));
+    window.addEventListener("pointermove", winMove);
+    window.addEventListener("pointerup", winUp);
+    window.addEventListener("pointercancel", winUp);
   }
 
-  function handleFigurePointerMove(e: React.PointerEvent) {
+  function handleDragMove(e: PointerEvent) {
     const drag = dragRef.current;
     if (!drag) return;
     e.preventDefault();
@@ -373,24 +418,31 @@ export default function ResultStage({
     // 좌우: 끈 만큼. 화면에서 움직인 거리를 카드 안의 거리로 되돌린다.
     const dx = (e.clientX - drag.startX) / (scaleRef.current || 1);
     const offsetX = Math.max(-300, Math.min(300, drag.startOffsetX + dx));
-    const scale = layoutOf(drag.id).scale;
-    drag.el.style.marginLeft = `calc(${(100 - scale) / 2}% + ${offsetX}px)`;
+    const el = figureEl(drag.id);
+    if (el) {
+      // 나란히 놓인 것은 폭을 flex가 잡고 있어서 가운데 맞춤용 %를 더하면 안 된다
+      // (더하면 손을 대는 순간 옆으로 훌쩍 뛴다). 끈 만큼만 밀어 보여준다.
+      const inRow =
+        el.parentElement?.classList.contains("problem-figure-row") ?? false;
+      const scale = layoutOf(drag.id).scale;
+      el.style.marginLeft = inRow
+        ? `${offsetX}px`
+        : `calc(${(100 - scale) / 2}% + ${offsetX}px)`;
+    }
 
     // 위아래: 놓을 자리를 정하고 안내선을 옮긴다.
     drag.slot = slotAtY(e.clientY);
     setDropLineTop(dropLineFor(drag.slot));
   }
 
-  function handleFigurePointerUp(e: React.PointerEvent) {
+  function handleDragEnd(e: PointerEvent) {
     const drag = dragRef.current;
+    window.removeEventListener("pointermove", winMove);
+    window.removeEventListener("pointerup", winUp);
+    window.removeEventListener("pointercancel", winUp);
     if (!drag) return;
     dragRef.current = null;
     setDropLineTop(null);
-    try {
-      drag.el.releasePointerCapture(e.pointerId);
-    } catch {
-      // 이미 풀렸으면 그만이다.
-    }
 
     const dx = (e.clientX - drag.startX) / (scaleRef.current || 1);
     const offsetX = Math.max(-300, Math.min(300, drag.startOffsetX + dx));
@@ -398,19 +450,58 @@ export default function ResultStage({
     setFigurePos((prev) => ({ ...prev, [drag.id]: drag.slot }));
   }
 
-  /** 카드에 붙을 그림들을 위치·크기와 함께 정리한다. 저장·재저장에 그대로 쓴다. */
+  // window에 붙이는 것은 **항상 같은 함수**여야 뗄 수 있다. 실제 동작은 매
+  // 렌더마다 새로 만들어지는(=최신 state를 읽는) 함수에 넘긴다.
+  const dragHandlers = useRef({ move: handleDragMove, end: handleDragEnd });
+  useEffect(() => {
+    dragHandlers.current = { move: handleDragMove, end: handleDragEnd };
+  });
+  const winMove = useCallback((e: PointerEvent) => dragHandlers.current.move(e), []);
+  const winUp = useCallback((e: PointerEvent) => dragHandlers.current.end(e), []);
+  // 화면을 떠날 때 붙여둔 게 남지 않게 한다.
+  useEffect(
+    () => () => {
+      window.removeEventListener("pointermove", winMove);
+      window.removeEventListener("pointerup", winUp);
+      window.removeEventListener("pointercancel", winUp);
+    },
+    [winMove, winUp],
+  );
+
+  /**
+   * 카드에 붙을 것들(그림과 표)을 위치·크기와 함께 정리한다. 저장·재저장에
+   * 그대로 쓴다. 표를 먼저 두어, 같은 자리에서 나란히 놓일 때 원문에 있던
+   * 표가 왼쪽에 오는 것을 기본으로 한다(옆으로 끌면 순서가 바뀐다).
+   */
   const cardFigures = useMemo(
-    () =>
-      figures.map((f) => ({
+    () => [
+      ...tables.map((t) => ({
+        id: t.id,
+        markup: t.markup,
+        layout: layoutOf(t.id),
+        position: positionOf(t.id),
+        kind: "table" as const,
+        row: figureRow[t.id] ?? false,
+      })),
+      ...figures.map((f) => ({
         id: f.id,
         markup: f.markup,
         layout: layoutOf(f.id),
         position: positionOf(f.id),
+        kind: "figure" as const,
+        row: figureRow[f.id] ?? false,
       })),
-    // layoutOf/positionOf는 아래 두 state를 읽는다.
+    ],
+    // layoutOf/positionOf는 아래 state들을 읽는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [figures, layouts, figurePos, anchors],
+    [figures, tables, layouts, figurePos, figureRow, anchors],
   );
+
+  /** 같은 자리에 놓인 것이 몇 개나 더 있는지. "나란히 놓기"를 안내할 때 쓴다. */
+  function slotMateCount(id: string): number {
+    const here = positionOf(id);
+    return cardFigures.filter((f) => f.id !== id && f.position === here).length;
+  }
 
   /** 문단 사이와 박스 안 줄 사이에 그림을 끼워 넣은 최종 카드 HTML. */
   const cardHtml = useMemo(
@@ -606,6 +697,7 @@ export default function ResultStage({
     manualDiagramSvgs,
     layouts,
     figurePos,
+    figureRow,
     fontPt,
   ]);
 
@@ -695,9 +787,6 @@ export default function ResultStage({
               className="font-serif leading-relaxed text-ink"
               style={{ fontSize: ptToPx(fontPt) }}
               onPointerDown={handleFigurePointerDown}
-              onPointerMove={handleFigurePointerMove}
-              onPointerUp={handleFigurePointerUp}
-              onPointerCancel={handleFigurePointerUp}
               dangerouslySetInnerHTML={{ __html: cardHtml }}
             />
           </div>
@@ -770,17 +859,38 @@ export default function ResultStage({
         )}
       </div>
 
-      {/* 도형 크기·위치 조절 — 카드에 실제로 붙은 도형이 있을 때만 보여준다. */}
+      {/* 그림·표 크기·위치 조절 — 카드에 실제로 붙은 것이 있을 때만 보여준다. */}
       {(Object.keys(rasterFallbacks).length > 0 ||
-        manualDiagramSvgs.length > 0) && (
+        manualDiagramSvgs.length > 0 ||
+        tables.length > 0) && (
         <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
           <p className="text-xs font-medium text-slate-500">
-            그림 크기·위치
+            그림·표 크기·위치
           </p>
           <p className="text-[11px] text-slate-400">
-            위 미리보기에서 그림을 손가락(또는 마우스)으로 잡아 끌면 원하는 문단
-            사이로 옮길 수 있어요. 파란 선이 들어갈 자리입니다.
+            위 미리보기에서 그림이나 표를 손가락(또는 마우스)으로 잡아 끌면
+            원하는 문단 사이로 옮길 수 있어요. 파란 선이 들어갈 자리입니다.
+            같은 자리에 둘을 놓고 “옆으로 나란히”를 켜면 가로로 나란히 놓입니다.
           </p>
+          {tables.map((t, i) => (
+            <DiagramAdjuster
+              key={t.id}
+              label={tables.length > 1 ? `표 ${i + 1}` : "표"}
+              layout={layoutOf(t.id)}
+              defaultLayout={DEFAULT_TABLE_LAYOUT}
+              onChange={(next) => setLayout(t.id, next)}
+              position={positionOf(t.id)}
+              slotLabels={slotLabels}
+              onPositionChange={(p) =>
+                setFigurePos((prev) => ({ ...prev, [t.id]: p }))
+              }
+              row={figureRow[t.id] ?? false}
+              rowMates={slotMateCount(t.id)}
+              onRowChange={(v) =>
+                setFigureRow((prev) => ({ ...prev, [t.id]: v }))
+              }
+            />
+          ))}
           {(result.diagrams ?? [])
             .filter((d) => rasterFallbacks[d.id])
             .map((d, i) => (
@@ -793,6 +903,11 @@ export default function ResultStage({
                 slotLabels={slotLabels}
                 onPositionChange={(p) =>
                   setFigurePos((prev) => ({ ...prev, [d.id]: p }))
+                }
+                row={figureRow[d.id] ?? false}
+                rowMates={slotMateCount(d.id)}
+                onRowChange={(v) =>
+                  setFigureRow((prev) => ({ ...prev, [d.id]: v }))
                 }
               />
             ))}
@@ -823,6 +938,11 @@ export default function ResultStage({
               slotLabels={slotLabels}
               onPositionChange={(p) =>
                 setFigurePos((prev) => ({ ...prev, [d.id]: p }))
+              }
+              row={figureRow[d.id] ?? false}
+              rowMates={slotMateCount(d.id)}
+              onRowChange={(v) =>
+                setFigureRow((prev) => ({ ...prev, [d.id]: v }))
               }
               onRemove={() =>
                 setManualDiagramSvgs((prev) => prev.filter((p) => p.id !== d.id))
