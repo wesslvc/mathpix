@@ -9,6 +9,24 @@ import { createClient } from "@/lib/supabase/client";
 import type { RecognizeResponse } from "@/lib/types";
 import type { AnswerType } from "@/lib/answer";
 import type { StoredBoxRange } from "@/lib/storedFigures";
+import type { TokenStatus } from "@/app/api/tokens/route";
+import {
+  PROBLEM_INPUT_DIM,
+  prepareFigureForModel,
+  rasterToSvg,
+  trimBlankBorder,
+} from "@/lib/figureImage";
+import type { DiagramLayout } from "@/lib/diagramLayout";
+
+/**
+ * "통째로 AI로 다시 그리기"로 만든 문제 이미지의 배치.
+ * 카드를 꽉 채우고 위 여백을 두지 않는다 — 이 그림 한 장이 곧 문제다.
+ */
+const WHOLE_PROBLEM_LAYOUT: DiagramLayout = {
+  scale: 100,
+  offsetX: 0,
+  offsetY: 0,
+};
 
 type Stage = "idle" | "upload" | "crop" | "loading" | "result";
 
@@ -29,6 +47,32 @@ export default function AddProblemFlow({
     string | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 통째로 다시 그려 만든 문제 이미지. ResultStage에 처음부터 붙여 준다.
+   * 이 경우 본문 텍스트는 비어 있고 이 그림 한 장이 곧 문제다.
+   */
+  const [initialFigures, setInitialFigures] = useState<
+    { id: string; svg: string; layout?: DiagramLayout }[] | undefined
+  >(undefined);
+  /** 지금 무엇을 기다리는 중인지. 걸리는 시간이 크게 달라서 문구를 나눈다. */
+  const [loadingKind, setLoadingKind] = useState<"ocr" | "problem">("ocr");
+  /** 크롭 화면에 "통째로 다시 그리기" 비용을 표시하려고 읽어둔다. */
+  const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/tokens")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setTokenStatus(data as TokenStatus);
+      })
+      .catch(() => {
+        // 못 읽어도 버튼은 눌러볼 수 있다(서버가 최종 판단한다).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // 여러 장을 한 번에 올리면 첫 장부터 크롭→인식→저장하고, 나머지는 여기 대기.
   const [queue, setQueue] = useState<string[]>([]);
   function readAsDataUrl(file: File): Promise<string> {
@@ -62,6 +106,7 @@ export default function AddProblemFlow({
   function advanceQueue() {
     setResult(null);
     setRecognizedSourceImage(null);
+    setInitialFigures(undefined);
     setError(null);
     if (queue.length > 0) {
       const [next, ...rest] = queue;
@@ -78,13 +123,23 @@ export default function AddProblemFlow({
     setImageSrc(null);
     setResult(null);
     setRecognizedSourceImage(null);
+    setInitialFigures(undefined);
     setError(null);
     setStage("upload");
   }
 
-  async function handleCropConfirm(croppedDataUrl: string) {
+  async function handleCropConfirm(
+    croppedDataUrl: string,
+    mode: "ocr" | "problem",
+  ) {
+    if (mode === "problem") {
+      await recognizeAsWholeImage(croppedDataUrl);
+      return;
+    }
+    setLoadingKind("ocr");
     setStage("loading");
     setError(null);
+    setInitialFigures(undefined);
     try {
       const res = await fetch("/api/mathpix", {
         method: "POST",
@@ -102,10 +157,66 @@ export default function AddProblemFlow({
     }
   }
 
+  /**
+   * 문제를 **통째로** 이미지 생성 모델에 보내 깨끗한 문제 이미지를 만든다.
+   *
+   * 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다 이쪽이
+   * 원본에 가깝다는 판단(사용자가 실제로 비교해보고 정함). Mathpix는 부르지
+   * 않으므로 인식 토큰도 쓰지 않는다.
+   *
+   * 결과는 "사용자가 붙인 그림"과 똑같은 취급을 받는다 — 저장·수정·PDF가 전부
+   * 기존 길을 그대로 탄다.
+   */
+  async function recognizeAsWholeImage(croppedDataUrl: string) {
+    setLoadingKind("problem");
+    setStage("loading");
+    setError(null);
+    setInitialFigures(undefined);
+    try {
+      // 문제 전체는 본문 글자까지 살아야 해서 그림 하나보다 크게 보낸다.
+      const prepared = await prepareFigureForModel(
+        croppedDataUrl,
+        PROBLEM_INPUT_DIM,
+      );
+      const res = await fetch("/api/figure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: prepared, mode: "problem" }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "문제를 다시 그리지 못했습니다.");
+      const image = json.image;
+      if (typeof image !== "string" || !image.startsWith("data:image/")) {
+        throw new Error("이미지를 받지 못했습니다.");
+      }
+
+      // 둘레의 빈 여백을 잘라내고, 다른 그림과 같은 방식으로 감싼다.
+      const trimmed = await trimBlankBorder(image);
+      const svg = await rasterToSvg(trimmed);
+      setInitialFigures([
+        { id: crypto.randomUUID(), svg, layout: WHOLE_PROBLEM_LAYOUT },
+      ]);
+      // 본문 텍스트는 없다 — 이 그림 한 장이 곧 문제다.
+      setResult({
+        mock: false,
+        latex: "",
+        text: "",
+        confidence: null,
+        diagrams: [],
+      });
+      setRecognizedSourceImage(croppedDataUrl);
+      setStage("result");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "알 수 없는 오류");
+      setStage("crop");
+    }
+  }
+
   function handleReset() {
     setImageSrc(null);
     setResult(null);
     setRecognizedSourceImage(null);
+    setInitialFigures(undefined);
     setError(null);
     setQueue([]);
     setStage("idle");
@@ -265,6 +376,7 @@ export default function AddProblemFlow({
           onConfirm={handleCropConfirm}
           onCancel={handleReset}
           onError={handleImageError}
+          problemTokenCost={tokenStatus?.figureCost ?? null}
         />
         </div>
       )}
@@ -280,10 +392,14 @@ export default function AddProblemFlow({
           </div>
           <div className="flex flex-col items-center gap-1">
             <p className="text-sm font-medium text-slate-700">
-              문제를 읽고 있어요
+              {loadingKind === "problem"
+                ? "문제를 다시 그리고 있어요"
+                : "문제를 읽고 있어요"}
             </p>
             <p className="text-xs text-slate-400">
-              글자와 수식을 인식하는 중입니다. 보통 몇 초면 끝나요.
+              {loadingKind === "problem"
+                ? "AI가 문제 전체를 깨끗하게 옮겨 그리는 중입니다. 1분 정도 걸려요."
+                : "글자와 수식을 인식하는 중입니다. 보통 몇 초면 끝나요."}
             </p>
           </div>
           {/* 진행률을 알 수 없으니 좌우로 흐르는 막대로 "돌아가는 중"만 보여준다. */}
@@ -304,6 +420,7 @@ export default function AddProblemFlow({
           onNext={advanceQueue}
           onAddAnother={startAnother}
           sourceImage={recognizedSourceImage}
+          initialFigures={initialFigures}
         />
         </div>
       )}

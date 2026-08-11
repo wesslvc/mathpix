@@ -17,6 +17,15 @@
 /** 모델에 보낼 이미지의 긴 변 상한. 작을수록 입력 토큰이 싸다. */
 export const MODEL_INPUT_DIM = 768;
 
+/**
+ * 문제 **전체**를 보낼 때의 상한.
+ *
+ * 그림 하나는 768px로 충분하지만, 문제 한 장에는 본문·선지까지 들어 있어서
+ * 같은 크기로 줄이면 글자가 뭉개진다. 모델이 못 읽은 글자는 지어내므로
+ * (그리고 결과가 이미지라 나중에 고칠 수도 없으므로) 여기서 아끼면 안 된다.
+ */
+export const PROBLEM_INPUT_DIM = 1536;
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -33,12 +42,15 @@ function loadImage(src: string): Promise<HTMLImageElement> {
  *
  * 이미 그보다 작으면 확대하지 않는다 — 없던 정보가 생기지도 않으면서 토큰만 는다.
  */
-export async function prepareFigureForModel(dataUrl: string): Promise<string> {
+export async function prepareFigureForModel(
+  dataUrl: string,
+  maxDim: number = MODEL_INPUT_DIM,
+): Promise<string> {
   const img = await loadImage(dataUrl);
-  if (Math.max(img.naturalWidth, img.naturalHeight) <= MODEL_INPUT_DIM) {
+  if (Math.max(img.naturalWidth, img.naturalHeight) <= maxDim) {
     return dataUrl;
   }
-  const scale = MODEL_INPUT_DIM / Math.max(img.naturalWidth, img.naturalHeight);
+  const scale = maxDim / Math.max(img.naturalWidth, img.naturalHeight);
   const w = Math.max(1, Math.round(img.naturalWidth * scale));
   const h = Math.max(1, Math.round(img.naturalHeight * scale));
 

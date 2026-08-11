@@ -69,6 +69,14 @@ type Props = {
   onAddAnother?: () => void;
   /** Mathpix에 보낸 원본(크롭된) 이미지. 도형 영역을 오려내는 데 쓴다. */
   sourceImage?: string | null;
+  /**
+   * 처음부터 카드에 붙어 있는 그림.
+   *
+   * "통째로 AI로 다시 그리기"로 만든 문제가 이 경로로 온다 — 본문 텍스트는
+   * 비어 있고 생성된 문제 이미지 한 장이 곧 카드다. 저장·수정·PDF는 그림이
+   * 붙은 보통 문제와 완전히 같은 길을 탄다.
+   */
+  initialFigures?: { id: string; svg: string; layout?: DiagramLayout }[];
 };
 
 /**
@@ -96,6 +104,7 @@ export default function ResultStage({
   onNext,
   onAddAnother,
   sourceImage,
+  initialFigures,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [fontPt, setFontPt] = useState(DEFAULT_FONT_PT);
@@ -117,7 +126,11 @@ export default function ResultStage({
   const [boxOverride, setBoxOverride] = useState<BoxOverride | undefined>(undefined);
   const [showBoxEditor, setShowBoxEditor] = useState(false);
   // 도형별 크기·위치. 키는 raster는 도형 id, 수동 SVG는 "svg:<index>".
-  const [layouts, setLayouts] = useState<Record<string, DiagramLayout>>({});
+  const [layouts, setLayouts] = useState<Record<string, DiagramLayout>>(() => {
+    const init: Record<string, DiagramLayout> = {};
+    for (const f of initialFigures ?? []) if (f.layout) init[f.id] = f.layout;
+    return init;
+  });
 
   function layoutOf(key: string): DiagramLayout {
     // 표는 기본값이 다르다(손대기 전에는 예전 그대로 보여야 한다).
@@ -140,7 +153,9 @@ export default function ResultStage({
   // 밀려 엉뚱한 도형에 적용된다).
   // kind는 조절 목록에 붙는 이름에만 쓴다(수학 도형인지 사과탐 자료인지).
   // 붙는 방식·저장 경로는 둘이 완전히 같다.
-  const [manualDiagramSvgs, setManualDiagramSvgs] = useState<ManualFigure[]>([]);
+  const [manualDiagramSvgs, setManualDiagramSvgs] = useState<ManualFigure[]>(
+    () => (initialFigures ?? []).map((f) => ({ id: f.id, svg: f.svg })),
+  );
 
   // AI 그림 작업은 이 화면 바깥(FigureJobsProvider)에서 돈다. 작업이 도는 동안
   // 다음 문제로 넘어가도 계속되어야 하기 때문이다.
@@ -185,6 +200,11 @@ export default function ResultStage({
   // 인식 결과를 그 자리에서 고칠 수 있게 한다. 저장 후 갤러리에서 다시 여는
   // 왕복 없이, 잘못 읽힌 수식을 보면서 바로 손보는 게 훨씬 빠르다.
   const [sourceText, setSourceText] = useState(result.text || result.latex);
+  /**
+   * 본문 글자가 없는 문제인가("통째로 AI로 다시 그리기"로 만든 것).
+   * 이때는 본문 수정·조건 박스·LaTeX 복사가 다룰 대상이 없어서 감춘다.
+   */
+  const isImageOnly = (result.text || result.latex).trim() === "";
   const [showTextEditor, setShowTextEditor] = useState(false);
 
   // 다음 이미지로 넘어가면 새 인식 결과로 갈아끼운다.
@@ -192,6 +212,16 @@ export default function ResultStage({
     setSourceText(result.text || result.latex);
     setShowTextEditor(false);
     setBoxOverride(undefined);
+    setManualDiagramSvgs(
+      (initialFigures ?? []).map((f) => ({ id: f.id, svg: f.svg })),
+    );
+    setLayouts(() => {
+      const init: Record<string, DiagramLayout> = {};
+      for (const f of initialFigures ?? []) if (f.layout) init[f.id] = f.layout;
+      return init;
+    });
+    // initialFigures는 result와 함께 바뀐다(같은 인식 한 건에 딸린 값).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
 
   // blocks는 최상위 요소(문단/조건 박스/표) 하나씩이다. 도형·자료를 그 사이에
@@ -586,8 +616,12 @@ export default function ResultStage({
       )}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-ink">인식 결과</h2>
-        <FontSizeControl value={fontPt} onChange={setFontPt} />
+        <h2 className="text-lg font-semibold text-ink">
+          {isImageOnly ? "다시 그린 문제" : "인식 결과"}
+        </h2>
+        {!isImageOnly && (
+          <FontSizeControl value={fontPt} onChange={setFontPt} />
+        )}
       </div>
 
       <DraggableCard
@@ -604,7 +638,16 @@ export default function ResultStage({
         }
       />
 
+      {isImageOnly && (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
+          이 문제는 AI가 통째로 다시 그린 <strong>이미지</strong>입니다. 글자를
+          따로 들고 있지 않아 본문 수정·조건 박스·글자 크기는 쓰지 않습니다.
+          잘못 그려졌으면 뒤로 가서 다시 그리거나, 인식하기로 만들어 주세요.
+        </p>
+      )}
+
       {/* 인식 결과를 바로 고친다. 저장 후 갤러리에서 다시 여는 왕복을 없앤다. */}
+      {!isImageOnly && (
       <div className="rounded-lg border border-slate-200 px-3 py-2.5">
         <button
           type="button"
@@ -635,8 +678,10 @@ export default function ResultStage({
           </div>
         )}
       </div>
+      )}
 
       {/* 조건 박스 범위 조절 — 자동 감지가 어긋났을 때 손으로 고친다. */}
+      {!isImageOnly && (
       <div className="rounded-lg border border-slate-200 px-3 py-2.5">
         <button
           type="button"
@@ -661,6 +706,7 @@ export default function ResultStage({
           </div>
         )}
       </div>
+      )}
 
       {/* 그림·표 크기·위치 조절 — 카드에 실제로 붙은 것이 있을 때만 보여준다. */}
       {(Object.keys(rasterFallbacks).length > 0 ||
