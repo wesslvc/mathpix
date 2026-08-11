@@ -77,6 +77,15 @@ type Props = {
    * 붙은 보통 문제와 완전히 같은 길을 탄다.
    */
   initialFigures?: { id: string; svg: string; layout?: DiagramLayout }[];
+  /**
+   * 화면이 뜨자마자 큐에 넣을 "문제 전체 다시 그리기" 작업.
+   *
+   * 큐에 넣으려면 이 문제의 키(problemKey)가 필요한데 그건 여기서 만들어지므로,
+   * 부모가 일감만 넘겨주고 넣는 건 여기서 한다. 넣고 나면 onWholeJobQueued로
+   * 알려 부모가 같은 일을 두 번 넣지 않게 한다.
+   */
+  pendingWholeJob?: { id: string; crop: string } | null;
+  onWholeJobQueued?: () => void;
 };
 
 /**
@@ -105,6 +114,8 @@ export default function ResultStage({
   onAddAnother,
   sourceImage,
   initialFigures,
+  pendingWholeJob,
+  onWholeJobQueued,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [fontPt, setFontPt] = useState(DEFAULT_FONT_PT);
@@ -168,6 +179,13 @@ export default function ResultStage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
   const jobOf = (figureId: string) => jobs.find((j) => j.id === figureId);
+  /** 이 문제를 통째로 그리는 작업이 아직 도는 중인가(안내 문구에 쓴다). */
+  const wholeJobRunning = jobs.some(
+    (j) =>
+      j.problemKey === problemKey &&
+      j.mode === "problem" &&
+      (j.status === "pending" || j.status === "running"),
+  );
   /** 남은 토큰과 기능별 소모량. null이면 아직 못 불러온 상태. */
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
 
@@ -400,6 +418,22 @@ export default function ResultStage({
     // (넣으면 타이머가 렌더마다 초기화돼 영영 저장되지 않는다).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answer, answerType, autoSaveOff, savedId, dirty, isSaving, onSaveToCategory]);
+
+  // "통째로 다시 그리기"를 고른 문제는 화면이 뜨자마자 큐에 얹는다. 기다리지
+  // 않으므로 사용자는 그 사이 정답을 적거나 다음 사진으로 넘어갈 수 있다.
+  useEffect(() => {
+    if (!pendingWholeJob) return;
+    enqueue({
+      id: pendingWholeJob.id,
+      problemKey,
+      label: problemLabel,
+      crop: pendingWholeJob.crop,
+      mode: "problem",
+    });
+    onWholeJobQueued?.();
+    // problemKey/label은 result와 함께 정해진다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingWholeJob]);
 
   // Mathpix가 텍스트로 옮길 수 없는 도형(원, 삼각형 등)을 감지하면 그 영역의
   // 좌표를 함께 알려준다. OCR로는 도형을 재구성할 수 없으니, 보낸 원본
@@ -638,13 +672,22 @@ export default function ResultStage({
         }
       />
 
-      {isImageOnly && (
-        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
-          이 문제는 AI가 통째로 다시 그린 <strong>이미지</strong>입니다. 글자를
-          따로 들고 있지 않아 본문 수정·조건 박스·글자 크기는 쓰지 않습니다.
-          잘못 그려졌으면 뒤로 가서 다시 그리거나, 인식하기로 만들어 주세요.
-        </p>
-      )}
+      {isImageOnly &&
+        (wholeJobRunning ? (
+          <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-800">
+            AI가 문제를 다시 그리는 중입니다(1분쯤 걸려요). 지금 보이는 건
+            <strong> 오려낸 원본</strong>이고, 완성되면 저절로 바뀝니다.{" "}
+            <strong>기다리지 않아도 됩니다</strong> — 정답을 미리 적어 두거나
+            다음 사진으로 넘어가세요. 저장해 둔 문제는 완성되는 대로 알아서
+            갱신됩니다.
+          </p>
+        ) : (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
+            이 문제는 AI가 통째로 다시 그린 <strong>이미지</strong>입니다. 글자를
+            따로 들고 있지 않아 본문 수정·조건 박스·글자 크기는 쓰지 않습니다.
+            잘못 그려졌으면 뒤로 가서 다시 그리거나, 인식하기로 만들어 주세요.
+          </p>
+        ))}
 
       {/* 인식 결과를 바로 고친다. 저장 후 갤러리에서 다시 여는 왕복을 없앤다. */}
       {!isImageOnly && (
@@ -764,7 +807,7 @@ export default function ResultStage({
             <DiagramAdjuster
               key={d.id}
               label={
-                `그림 ${idx + 1}` +
+                (isImageOnly ? "문제 이미지" : `그림 ${idx + 1}`) +
                 (jobOf(d.id)?.status === "running"
                   ? " · AI가 그리는 중…"
                   : jobOf(d.id)?.status === "pending"
@@ -881,7 +924,9 @@ export default function ResultStage({
         >
           크롭 다시하기
         </button>
-        <button
+        {!isImageOnly && (
+          <>
+<button
           type="button"
           onClick={handleCopyLatex}
           className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
@@ -895,6 +940,8 @@ export default function ResultStage({
         >
           {textCopied ? "복사됨!" : "텍스트 복사"}
         </button>
+          </>
+        )}
       </div>
 
       {/* 저장이 끝나면 "다음 문제"를 가장 크게 띄운다 — 여러 개를 연달아 넣는

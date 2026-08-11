@@ -10,10 +10,13 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
+  MODEL_INPUT_DIM,
+  PROBLEM_INPUT_DIM,
   prepareFigureForModel,
   rasterToSvg,
   trimBlankBorder,
 } from "@/lib/figureImage";
+import type { FigureMode } from "@/lib/figureImageGen";
 import {
   figureCacheKey,
   readFigureCache,
@@ -30,6 +33,12 @@ export type FigureJob = {
   label: string;
   /** 모델에 보낼 원본 크롭. 재시도에도 쓴다. */
   crop: string;
+  /**
+   * 무엇을 그리는가. 기본은 그림 하나("figure").
+   * "problem"이면 문제 한 개 전체를 다시 그린다 — 프롬프트도 입력 해상도도
+   * 다르다(본문 글자까지 살아야 해서 더 크게 보낸다).
+   */
+  mode?: FigureMode;
   status: "pending" | "running" | "done" | "error";
   error?: string;
   /** 완성된 그림 마크업. 화면이 열려 있으면 미리보기에 바로 반영된다. */
@@ -95,8 +104,21 @@ export default function FigureJobsProvider({
     [],
   );
 
+  /**
+   * 같은 id는 한 번만 받는다.
+   *
+   * **중복 과금을 막는 자리다.** 작업 하나가 곧 유료 API 호출 한 번이라,
+   * 실수로 두 번 들어가면 사용자 토큰이 두 배로 빠진다. 실제로 개발 모드의
+   * StrictMode가 이펙트를 두 번 실행해 같은 작업이 두 개 쌓인 적이 있다.
+   * 버튼을 두 번 누르거나 화면이 다시 그려지는 경우에도 같은 일이 생길 수
+   * 있으므로, 넣는 쪽을 믿지 않고 여기서 막는다.
+   */
   const enqueue = useCallback((job: Omit<FigureJob, "status">) => {
-    setJobs((prev) => [...prev, { ...job, status: "pending" }]);
+    setJobs((prev) =>
+      prev.some((j) => j.id === job.id)
+        ? prev
+        : [...prev, { ...job, status: "pending" }],
+    );
   }, []);
 
   const retry = useCallback((id: string) => {
@@ -183,18 +205,25 @@ export default function FigureJobsProvider({
 
     (async () => {
       try {
-        // 입력 토큰을 줄이려고 긴 변을 768px로 낮춰 보낸다.
-        const forModel = await prepareFigureForModel(next.crop);
+        // 입력 토큰을 줄이려고 긴 변을 낮춰 보낸다. 문제 전체는 본문 글자까지
+        // 살아야 해서 그림 하나(768px)보다 크게 보낸다.
+        const mode: FigureMode = next.mode ?? "figure";
+        const forModel = await prepareFigureForModel(
+          next.crop,
+          mode === "problem" ? PROBLEM_INPUT_DIM : MODEL_INPUT_DIM,
+        );
 
         // 같은 그림을 이미 그린 적이 있으면 그대로 쓴다(세트 문항 대비).
-        const key = await figureCacheKey(forModel);
+        // 모드를 키에 섞는다 — 같은 이미지라도 그림용과 문제 전체용은 결과가
+        // 다르므로 서로의 결과를 물려받으면 안 된다.
+        const key = await figureCacheKey(`${mode}:${forModel}`);
         let svg = readFigureCache(key);
 
         if (!svg) {
           const res = await fetch("/api/figure", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: forModel }),
+            body: JSON.stringify({ image: forModel, mode }),
           });
           let json: { image?: string; error?: string };
           try {

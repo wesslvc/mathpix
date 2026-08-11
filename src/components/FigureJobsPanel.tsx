@@ -42,10 +42,10 @@ export default function FigureJobsPanel() {
           )}
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
             {activeCount > 0
-              ? `AI가 그림 ${activeCount}개를 그리는 중`
+              ? `AI가 ${activeCount}개를 그리는 중`
               : failed > 0
-                ? `그림 ${failed}개 실패`
-                : "그림 작업 완료"}
+                ? `${failed}개 실패`
+                : "AI 작업 완료"}
           </span>
           <span className="shrink-0 text-[11px] text-slate-400">
             {open ? "닫기 ▾" : "보기 ▴"}
