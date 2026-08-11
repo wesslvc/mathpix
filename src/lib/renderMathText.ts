@@ -236,23 +236,148 @@ function isPureMathPlaceholderBlock(block: string): boolean {
 // 안에 갇혔다 — 마크다운 표는 제 줄에 남아 별도 블록이 되는데 tabular만
 // 그러지 못해, 같은 표인데 어느 형식으로 왔느냐에 따라 다르게 그려졌다.
 // 표를 손으로 끌어 옮기려면 표가 제 블록이어야 한다.
-const TABULAR_PATTERN =
-  /(?:\$\$\s*)?\\begin\{tabular\}\s*(?:\[[^\]]*\])?\s*\{(?:[^{}]|\{[^{}]*\})*\}([\s\S]*?)\\end\{tabular\}(?:\s*\$\$)?/g;
+// 한 줄로 늘어놓으면 읽을 수가 없어서 조각으로 나눠 조립한다.
+/** 중괄호 한 겹까지 품는 인자. 열 지정에 "@{}ll@{}"나 "p{2cm}"이 들어온다. */
+const TB_ARG = String.raw`\{(?:[^{}]|\{[^{}]*\})*\}`;
+/**
+ * 표를 감싼 수식 델리미터.
+ *
+ * `$$`뿐 아니라 **홑 `$`**도 받아야 한다. 홑 `$`를 놓치면 `$\x00TABLE0\x00$`가
+ * 남아 KaTeX가 NUL을 파싱하다 실패하고 "\displaystyle …"이 빨간 글씨로 찍힌다.
+ * `$$\displaystyle\begin{tabular}`처럼 스타일 명령이 끼어드는 것도 받는다.
+ *
+ * `\s*`가 `$` **뒤에** 있는 게 중요하다 — 앞에 두면 표 앞의 빈 줄까지 삼켜
+ * 표가 앞 문단에 붙어버린다.
+ */
+const TB_STYLE = String.raw`(?:\\(?:display|text|script|scriptscript)style\s*)?`;
+// tabularx/tabular*는 열 지정 앞에 폭 인자가 하나 더 붙는다
+// (\begin{tabularx}{\textwidth}{|X|X|}). 개수가 달라서 환경별로 나눠 적는다.
+const TB_ENV =
+  "(?:" +
+  String.raw`\\begin\{tabular\}\s*(?:\[[^\]]*\])?\s*${TB_ARG}` +
+  "|" +
+  String.raw`\\begin\{tabularx\}\s*(?:\[[^\]]*\])?\s*${TB_ARG}\s*${TB_ARG}` +
+  "|" +
+  String.raw`\\begin\{tabular\*\}\s*(?:\[[^\]]*\])?\s*${TB_ARG}\s*${TB_ARG}` +
+  ")";
+const TB_BODY = String.raw`([\s\S]*?)\\end\{tabular[x*]?\}`;
+
+/**
+ * 델리미터는 **여는 것과 닫는 것을 짝으로** 적는다. "닫는 쪽만 선택적"으로
+ * 두면 안 된다 — `\s*(?:\$\$|\$)?`가 표 뒤의 빈 줄을 삼킨 뒤 **다음 문장의
+ * 여는 `$`**를 닫는 델리미터로 집어먹는다(실제로 "$P(0<Z<1)$의 값은?"이
+ * 통째로 표 안으로 빨려 들어갔다). 그래서 세 가지를 따로 늘어놓는다.
+ * `$$` 쪽을 먼저 둬야 `$$`가 `$` 하나로 반쪽만 잡히지 않는다.
+ *
+ * 본문 캡처가 형태마다 다른 번호로 잡히므로, 쓰는 쪽에서 먼저 잡힌 것을 고른다.
+ */
+const TABULAR_PATTERN = new RegExp(
+  [
+    String.raw`\$\$\s*${TB_STYLE}${TB_ENV}${TB_BODY}\s*\$\$`,
+    String.raw`\$\s*${TB_STYLE}${TB_ENV}${TB_BODY}\s*\$`,
+    `${TB_ENV}${TB_BODY}`,
+  ].join("|"),
+  "g",
+);
+
+/** `s[i]`가 "{"일 때 짝이 맞는 "}"까지 읽는다. 없으면 null. */
+function readBraceGroup(s: string, i: number): { text: string; end: number } | null {
+  if (s[i] !== "{") return null;
+  let depth = 0;
+  for (let j = i; j < s.length; j++) {
+    if (s[j] === "{") depth++;
+    else if (s[j] === "}") {
+      depth--;
+      if (depth === 0) return { text: s.slice(i + 1, j), end: j + 1 };
+    }
+  }
+  return null;
+}
+
+/**
+ * 병합 셀을 알아본다.
+ *
+ * `\multicolumn{2}{|c|}{구분}` / `\multirow{2}{*}{지역}`. 이걸 모르면 명령이
+ * 글자 그대로 표 안에 찍힌다 — 사회탐구 표에는 병합이 아주 흔하다.
+ * 내용에 중괄호가 또 들어갈 수 있어서(`{\bf 갑}`) 정규식이 아니라 짝맞추기로 읽는다.
+ */
+function parseSpanCell(cell: string): {
+  content: string;
+  colspan: number;
+  rowspan: number;
+} {
+  const plain = { content: cell, colspan: 1, rowspan: 1 };
+  const m = cell.match(/^\\(multicolumn|multirow)\s*/);
+  if (!m) return plain;
+
+  // 둘 다 인자가 셋이고 **내용은 마지막 인자**다.
+  //   \multicolumn{2}{|c|}{인구 구성}   \multirow{2}{*}{A 지역}
+  // 가운데(정렬·폭)를 내용으로 잘못 읽으면 칸에 "|c|"가 찍힌다.
+  const count = readBraceGroup(cell, m[0].length);
+  if (!count) return plain;
+  const middle = readBraceGroup(cell, count.end);
+  if (!middle) return plain;
+  const body = readBraceGroup(cell, middle.end);
+  if (!body) return plain;
+
+  // 명령 뒤에 글자가 더 있으면 버리지 않고 붙인다.
+  const rest = cell.slice(body.end).trim();
+  const n = Number(count.text.trim());
+  const span = Number.isInteger(n) && n > 1 ? n : 1;
+  return {
+    content: (body.text + (rest ? ` ${rest}` : "")).trim(),
+    colspan: m[1] === "multicolumn" ? span : 1,
+    rowspan: m[1] === "multirow" ? span : 1,
+  };
+}
 
 function tabularToTableHtml(body: string): string {
   const rows = body
+    // 행 끝의 "\\"는 뒤에 간격 지정이 붙기도 한다("\\[2mm]").
     .split(/\\\\/)
-    .map((row) => row.replace(/\\hline/g, "").trim())
+    .map((row) =>
+      row
+        // \hline과 \cline{1-2}는 가로줄 지시라 표시할 내용이 아니다.
+        // 남겨두면 "\cline{1-2}"가 글자 그대로 칸 안에 찍힌다.
+        .replace(/\\hline|\\cline\s*\{[^}]*\}|\\toprule|\\midrule|\\bottomrule/g, "")
+        .replace(/^\s*\[[^\]]*\]/, "")
+        .trim(),
+    )
     .filter((row) => row.length > 0);
 
+  // 세로 병합(\multirow)이 걸린 열은 다음 행에서 **빈 자리표시 칸**으로 나온다
+  //   \multirow{2}{*}{A 지역} & 인구 \\
+  //    & 면적 \\        ← 앞의 빈 칸은 위 칸이 차지한 자리다
+  // LaTeX는 그 빈 칸이 있어야 하지만 HTML의 rowspan은 아예 없어야 한다.
+  // 그대로 두면 칸이 하나씩 밀려 표가 어긋난다. 열마다 남은 행 수를 세어 버린다.
+  const covered: number[] = [];
   const rowsHtml = rows
     .map((row, i) => {
-      const cells = row.split("&").map((cell) => cell.trim());
       const tag = i === 0 ? "th" : "td";
-      const cellsHtml = cells
-        .map((cell) => `<${tag}>${renderInline(cell)}</${tag}>`)
-        .join("");
-      return `<tr>${cellsHtml}</tr>`;
+      const cells = row.split("&");
+      let out = "";
+      let col = 0;
+      for (let ci = 0; ci < cells.length; ) {
+        if ((covered[col] ?? 0) > 0) {
+          covered[col] -= 1;
+          // 자리표시 칸(빈 칸)만 버린다. 내용이 있으면 표가 우리 예상과
+          // 다른 것이므로 함부로 버리지 않는다.
+          if (cells[ci].trim() === "") ci += 1;
+          col += 1;
+          continue;
+        }
+        const c = parseSpanCell(cells[ci].trim());
+        const attr =
+          (c.colspan > 1 ? ` colspan="${c.colspan}"` : "") +
+          (c.rowspan > 1 ? ` rowspan="${c.rowspan}"` : "");
+        out += `<${tag}${attr}>${renderInline(c.content)}</${tag}>`;
+        if (c.rowspan > 1) {
+          for (let k = 0; k < c.colspan; k++) covered[col + k] = c.rowspan - 1;
+        }
+        col += c.colspan;
+        ci += 1;
+      }
+      return `<tr>${out}</tr>`;
     })
     .join("");
 
@@ -267,6 +392,18 @@ function tabularToTableHtml(body: string): string {
 const MD_TABLE_ROW = /^\s*\|(.+)\|\s*$/;
 /** 머리글과 본문을 가르는 줄. 셀이 ---, :---:, ---: 중 하나여야 한다. */
 const MD_TABLE_SEPARATOR = /^\s*\|[\s:|-]+\|\s*$/;
+
+/**
+ * 바깥 파이프가 없는 표도 있다.
+ *   구분 | 값
+ *   :---: | :---:
+ *   갑 | 1
+ * 구분선만은 확실히 알아볼 수 있으므로(대시 묶음이 파이프로 이어진 줄),
+ * 그 줄을 기준으로 표를 찾는다. 그냥 "|가 있는 줄"로 잡으면 절댓값 기호가
+ * 든 문장이 표로 둔갑한다.
+ */
+const MD_BARE_SEPARATOR = /^\s*:?-{2,}:?(\s*\|\s*:?-{2,}:?)+\s*$/;
+const MD_BARE_ROW = /^[^|\n]*\|[^\n]*$/;
 
 /**
  * 마크다운 표의 한 줄을 셀로 쪼갠다.
@@ -307,38 +444,68 @@ function markdownTableHtml(header: string[], rows: string[][]): string {
 function protectTables(input: string): { text: string; tables: string[] } {
   const tables: string[] = [];
 
-  const withoutTabular = input.replace(TABULAR_PATTERN, (_match, body: string) => {
-    const token = `\x00TABLE${tables.length}\x00`;
-    tables.push(tabularToTableHtml(body));
-    return token;
-  });
+  const withoutTabular = input.replace(
+    TABULAR_PATTERN,
+    (_match, dd?: string, d?: string, bare?: string) => {
+      const token = `\x00TABLE${tables.length}\x00`;
+      // 세 형태 중 실제로 잡힌 본문 하나를 고른다(위 TABULAR_PATTERN 주석 참고).
+      tables.push(tabularToTableHtml(dd ?? d ?? bare ?? ""));
+      return token;
+    },
+  );
 
   const lines = withoutTabular.split("\n");
   const out: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const isTableStart =
-      MD_TABLE_ROW.test(lines[i]) &&
+    // ① 구분선이 있는 표(파이프가 바깥에 있든 없든).
+    const sepNext =
       i + 1 < lines.length &&
-      MD_TABLE_SEPARATOR.test(lines[i + 1]);
-    if (!isTableStart) {
-      out.push(lines[i]);
+      (MD_TABLE_SEPARATOR.test(lines[i + 1]) || MD_BARE_SEPARATOR.test(lines[i + 1]));
+    const rowish = MD_TABLE_ROW.test(lines[i]) || MD_BARE_ROW.test(lines[i]);
+    if (rowish && sepNext) {
+      const header = splitMarkdownRow(lines[i]);
+      const rows: string[][] = [];
+      let j = i + 2;
+      while (
+        j < lines.length &&
+        (MD_TABLE_ROW.test(lines[j]) || MD_BARE_ROW.test(lines[j])) &&
+        !MD_TABLE_SEPARATOR.test(lines[j]) &&
+        !MD_BARE_SEPARATOR.test(lines[j])
+      ) {
+        rows.push(splitMarkdownRow(lines[j]));
+        j++;
+      }
+      out.push(`\x00TABLE${tables.length}\x00`);
+      tables.push(markdownTableHtml(header, rows));
+      i = j - 1;
       continue;
     }
 
-    const header = splitMarkdownRow(lines[i]);
-    const rows: string[][] = [];
-    let j = i + 2;
-    while (
-      j < lines.length &&
-      MD_TABLE_ROW.test(lines[j]) &&
-      !MD_TABLE_SEPARATOR.test(lines[j])
-    ) {
-      rows.push(splitMarkdownRow(lines[j]));
-      j++;
+    // ② 구분선이 아예 없는 표. Mathpix가 머리글 구분선을 빼고 줄만 주는
+    // 경우가 있다. 아무 "|" 줄이나 표로 보면 절댓값이 든 문장("$|x|=3$")이
+    // 표로 둔갑하므로, **바깥 파이프가 있고 칸 수가 똑같은 줄이 둘 이상**
+    // 이어질 때만 표로 본다.
+    if (MD_TABLE_ROW.test(lines[i])) {
+      const width = splitMarkdownRow(lines[i]).length;
+      let j = i;
+      while (
+        j < lines.length &&
+        MD_TABLE_ROW.test(lines[j]) &&
+        !MD_TABLE_SEPARATOR.test(lines[j]) &&
+        splitMarkdownRow(lines[j]).length === width
+      ) {
+        j++;
+      }
+      if (width >= 2 && j - i >= 2) {
+        const block = lines.slice(i, j).map(splitMarkdownRow);
+        out.push(`\x00TABLE${tables.length}\x00`);
+        tables.push(markdownTableHtml(block[0], block.slice(1)));
+        i = j - 1;
+        continue;
+      }
     }
-    out.push(`\x00TABLE${tables.length}\x00`);
-    tables.push(markdownTableHtml(header, rows));
-    i = j - 1;
+
+    out.push(lines[i]);
   }
 
   return { text: out.join("\n"), tables };
