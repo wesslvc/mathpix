@@ -10,12 +10,7 @@ import type { RecognizeResponse } from "@/lib/types";
 import type { AnswerType } from "@/lib/answer";
 import type { StoredBoxRange } from "@/lib/storedFigures";
 import type { TokenStatus } from "@/app/api/tokens/route";
-import {
-  PROBLEM_INPUT_DIM,
-  prepareFigureForModel,
-  rasterToSvg,
-  trimBlankBorder,
-} from "@/lib/figureImage";
+import { rasterToSvg } from "@/lib/figureImage";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 
 /**
@@ -54,8 +49,14 @@ export default function AddProblemFlow({
   const [initialFigures, setInitialFigures] = useState<
     { id: string; svg: string; layout?: DiagramLayout }[] | undefined
   >(undefined);
-  /** 지금 무엇을 기다리는 중인지. 걸리는 시간이 크게 달라서 문구를 나눈다. */
-  const [loadingKind, setLoadingKind] = useState<"ocr" | "problem">("ocr");
+  /**
+   * 결과 화면이 뜨면 큐에 넣을 "문제 전체 다시 그리기" 작업.
+   * ResultStage가 그 문제의 키를 만들어 주므로 화면이 뜬 다음에 넣는다.
+   */
+  const [pendingWholeJob, setPendingWholeJob] = useState<{
+    id: string;
+    crop: string;
+  } | null>(null);
   /** 크롭 화면에 "통째로 다시 그리기" 비용을 표시하려고 읽어둔다. */
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
 
@@ -107,6 +108,7 @@ export default function AddProblemFlow({
     setResult(null);
     setRecognizedSourceImage(null);
     setInitialFigures(undefined);
+    setPendingWholeJob(null);
     setError(null);
     if (queue.length > 0) {
       const [next, ...rest] = queue;
@@ -124,6 +126,7 @@ export default function AddProblemFlow({
     setResult(null);
     setRecognizedSourceImage(null);
     setInitialFigures(undefined);
+    setPendingWholeJob(null);
     setError(null);
     setStage("upload");
   }
@@ -136,10 +139,10 @@ export default function AddProblemFlow({
       await recognizeAsWholeImage(croppedDataUrl);
       return;
     }
-    setLoadingKind("ocr");
     setStage("loading");
     setError(null);
     setInitialFigures(undefined);
+    setPendingWholeJob(null);
     try {
       const res = await fetch("/api/mathpix", {
         method: "POST",
@@ -158,43 +161,27 @@ export default function AddProblemFlow({
   }
 
   /**
-   * 문제를 **통째로** 이미지 생성 모델에 보내 깨끗한 문제 이미지를 만든다.
+   * 문제를 **통째로** 다시 그리는 길로 들어간다.
    *
    * 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다 이쪽이
    * 원본에 가깝다는 판단(사용자가 실제로 비교해보고 정함). Mathpix는 부르지
    * 않으므로 인식 토큰도 쓰지 않는다.
    *
-   * 결과는 "사용자가 붙인 그림"과 똑같은 취급을 받는다 — 저장·수정·PDF가 전부
-   * 기존 길을 그대로 탄다.
+   * **기다리지 않는다.** 생성은 1분쯤 걸리는데 그동안 화면을 붙잡아 두면 아무
+   * 것도 못 한다. 그래서 오려낸 원본을 곧바로 카드에 붙여 결과 화면으로 넘기고,
+   * 실제 생성은 화면 바깥 큐(FigureJobsProvider)에 맡긴다 — 사용자는 그 사이에
+   * 정답을 적어 두거나 다음 사진으로 넘어갈 수 있다. 완성되면 화면이 열려 있으면
+   * 미리보기가 갈아끼워지고, 이미 닫혔으면 저장본이 알아서 갱신된다.
    */
   async function recognizeAsWholeImage(croppedDataUrl: string) {
-    setLoadingKind("problem");
-    setStage("loading");
     setError(null);
-    setInitialFigures(undefined);
     try {
-      // 문제 전체는 본문 글자까지 살아야 해서 그림 하나보다 크게 보낸다.
-      const prepared = await prepareFigureForModel(
-        croppedDataUrl,
-        PROBLEM_INPUT_DIM,
-      );
-      const res = await fetch("/api/figure", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: prepared, mode: "problem" }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "문제를 다시 그리지 못했습니다.");
-      const image = json.image;
-      if (typeof image !== "string" || !image.startsWith("data:image/")) {
-        throw new Error("이미지를 받지 못했습니다.");
-      }
-
-      // 둘레의 빈 여백을 잘라내고, 다른 그림과 같은 방식으로 감싼다.
-      const trimmed = await trimBlankBorder(image);
-      const svg = await rasterToSvg(trimmed);
+      // 원본을 그대로 붙여 둔다. 빈 자리를 만들지 않으려는 것이고, 완성 전에
+      // 저장하더라도 최소한 원본이 든 멀쩡한 이미지가 저장된다.
+      const id = crypto.randomUUID();
+      const placeholder = await rasterToSvg(croppedDataUrl);
       setInitialFigures([
-        { id: crypto.randomUUID(), svg, layout: WHOLE_PROBLEM_LAYOUT },
+        { id, svg: placeholder, layout: WHOLE_PROBLEM_LAYOUT },
       ]);
       // 본문 텍스트는 없다 — 이 그림 한 장이 곧 문제다.
       setResult({
@@ -206,6 +193,9 @@ export default function AddProblemFlow({
       });
       setRecognizedSourceImage(croppedDataUrl);
       setStage("result");
+      // 화면을 넘긴 **뒤에** 큐에 넣는다. ResultStage가 이 id로 자리를 잡고
+      // 있어야 완성된 그림이 그 자리에 들어간다.
+      setPendingWholeJob({ id, crop: croppedDataUrl });
     } catch (err) {
       setError(err instanceof Error ? err.message : "알 수 없는 오류");
       setStage("crop");
@@ -217,6 +207,7 @@ export default function AddProblemFlow({
     setResult(null);
     setRecognizedSourceImage(null);
     setInitialFigures(undefined);
+    setPendingWholeJob(null);
     setError(null);
     setQueue([]);
     setStage("idle");
@@ -392,14 +383,10 @@ export default function AddProblemFlow({
           </div>
           <div className="flex flex-col items-center gap-1">
             <p className="text-sm font-medium text-slate-700">
-              {loadingKind === "problem"
-                ? "문제를 다시 그리고 있어요"
-                : "문제를 읽고 있어요"}
+              문제를 읽고 있어요
             </p>
             <p className="text-xs text-slate-400">
-              {loadingKind === "problem"
-                ? "AI가 문제 전체를 깨끗하게 옮겨 그리는 중입니다. 1분 정도 걸려요."
-                : "글자와 수식을 인식하는 중입니다. 보통 몇 초면 끝나요."}
+              글자와 수식을 인식하는 중입니다. 보통 몇 초면 끝나요.
             </p>
           </div>
           {/* 진행률을 알 수 없으니 좌우로 흐르는 막대로 "돌아가는 중"만 보여준다. */}
@@ -421,6 +408,8 @@ export default function AddProblemFlow({
           onAddAnother={startAnother}
           sourceImage={recognizedSourceImage}
           initialFigures={initialFigures}
+          pendingWholeJob={pendingWholeJob}
+          onWholeJobQueued={() => setPendingWholeJob(null)}
         />
         </div>
       )}
