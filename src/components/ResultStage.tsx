@@ -11,9 +11,9 @@ import {
 import type { RecognizeResponse } from "@/lib/types";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import FigurePanel from "./FigurePanel";
-import ScaledCard from "./ScaledCard";
+import DraggableCard from "./DraggableCard";
 import { useFigureJobs } from "./FigureJobsProvider";
-import { buildAnchors, buildCardHtml, collectTables } from "@/lib/cardHtml";
+import { buildAnchors, collectTables } from "@/lib/cardHtml";
 import { DEFAULT_TABLE_LAYOUT } from "@/lib/diagramLayout";
 import {
   prepareFigureForModel,
@@ -37,6 +37,10 @@ import type { AnswerType } from "@/lib/answer";
 import AnswerInput from "./AnswerInput";
 import FontSizeControl from "./FontSizeControl";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
+import {
+  toStoredFigures,
+  type StoredBoxRange,
+} from "@/lib/storedFigures";
 
 type Props = {
   result: RecognizeResponse;
@@ -49,7 +53,8 @@ type Props = {
     text: string;
     answer: string;
     answerType: AnswerType;
-    boxOverride: BoxOverride | undefined;
+    /** problems.box_range에 그대로 들어갈 값(박스 범위 + 글자 크기 + 그림). */
+    boxRange: StoredBoxRange;
     /** 이미 저장한 문제면 그 id. 새로 만들지 않고 갱신한다. */
     problemId?: string | null;
   }) => Promise<string>;
@@ -285,188 +290,11 @@ export default function ResultStage({
     });
   }, [anchors, blocks]);
 
-  // ── 손으로 끌어 옮기기 ────────────────────────────────────────────────
-  // 미리보기의 그림·표를 그대로 잡아 끌면 좌우로 움직이고, 놓는 높이에 따라
-  // 어느 문단 사이로 들어갈지 정해진다.
-  //
-  // 끄는 동안에는 놓을 자리를 state에 반영하지 않고 DOM 스타일만 직접 바꾼다.
-  // 본문은 dangerouslySetInnerHTML 한 덩어리라, 다시 그려질 때마다 React가
-  // 자식들을 통째로 갈아끼우기 때문이다.
-  //
-  // **그래서 잡고 있는 요소를 붙들고 있으면 안 된다.** 안내선이 나타나는 것만으로
-  // 도 카드가 한 번 다시 그려져서, 처음에 잡은 그 DOM 노드는 곧 떨어져 나간다
-  // (실제 브라우저에서 확인 — pointerdown 직후 자식 전체가 교체된다). 그래서
-  //  · 움직일 때마다 id로 지금 화면에 있는 요소를 다시 찾고,
-  //  · setPointerCapture 대신 window에서 pointermove/up을 받는다.
-  // 예전에는 캡처에 기대다 보니 카드 바깥(여백)에서 손을 놓으면 pointerup이
-  // 어디에도 닿지 않아 옮긴 게 통째로 무시됐다. "맨 위/맨 아래로 보내기"가
-  // 바로 그 자리라 특히 자주 걸렸다.
-  const contentRef = useRef<HTMLDivElement>(null);
+  // 카드와 "손으로 끌어 옮기기"는 DraggableCard가 맡는다. 인식 결과 화면과
+  // 수정 화면이 **같은 것을 써야** 자리 계산이 어긋나지 않는다.
   const cardWrapRef = useRef<HTMLDivElement>(null);
-  // 카드가 화면 폭에 맞춰 축소돼 있으면 손가락이 움직인 화면 거리와 카드
-  // 안에서의 거리가 다르다. 드래그 계산에서 되돌리려고 배율을 들고 있는다.
-  const scaleRef = useRef(1);
-  const handleScaleChange = useCallback((s: number) => {
-    scaleRef.current = s;
-  }, []);
-  const dragRef = useRef<{
-    id: string;
-    startX: number;
-    startOffsetX: number;
-    slot: number;
-  } | null>(null);
-  /** 드래그 중 "여기로 들어갑니다" 선의 위치(px). null이면 드래그 중이 아니다. */
-  const [dropLineTop, setDropLineTop] = useState<number | null>(null);
-
-  /**
-   * 그림·표가 아닌 자식들. 문서 순서가 곧 구조 순서다.
-   * 나란히 놓기용 껍데기(problem-figure-row)도 본문이 아니므로 함께 뺀다.
-   */
-  function realChildren(el: Element): HTMLElement[] {
-    return Array.from(el.children).filter(
-      (c): c is HTMLElement =>
-        c instanceof HTMLElement &&
-        !c.classList.contains("problem-figure") &&
-        !c.classList.contains("problem-figure-row"),
-    );
-  }
-
-  /**
-   * 각 자리가 화면 세로 어디쯤인지. cardHtml을 만들 때와 **똑같은 순서로**
-   * DOM을 훑어야 자리 번호가 어긋나지 않는다.
-   */
-  function anchorPoints(): { slot: number; y: number }[] {
-    const c = contentRef.current;
-    if (!c) return [];
-    const out: { slot: number; y: number }[] = [];
-    const blockEls = realChildren(c);
-    let slot = 0;
-    for (const el of blockEls) {
-      const r = el.getBoundingClientRect();
-      out.push({ slot: slot++, y: r.top });
-      if (el.classList.contains("mmd-box")) {
-        const lineEls = realChildren(el);
-        for (const lineEl of lineEls) {
-          out.push({ slot: slot++, y: lineEl.getBoundingClientRect().top });
-        }
-        const last = lineEls[lineEls.length - 1];
-        out.push({
-          slot: slot++,
-          y: (last ?? el).getBoundingClientRect().bottom,
-        });
-      }
-    }
-    const lastBlock = blockEls[blockEls.length - 1];
-    out.push({ slot, y: lastBlock ? lastBlock.getBoundingClientRect().bottom : 0 });
-    return out;
-  }
-
-  /** 손을 놓은 높이에서 가장 가까운 자리. */
-  function slotAtY(clientY: number): number {
-    const points = anchorPoints();
-    if (points.length === 0) return 0;
-    let best = points[0];
-    for (const p of points) {
-      if (Math.abs(p.y - clientY) < Math.abs(best.y - clientY)) best = p;
-    }
-    return best.slot;
-  }
-
-  function dropLineFor(slot: number): number | null {
-    const wrap = cardWrapRef.current;
-    if (!wrap) return null;
-    const point = anchorPoints().find((p) => p.slot === slot);
-    if (!point) return null;
-    // getBoundingClientRect는 화면 좌표(축소된 값)라, 안내선을 놓을 카드
-    // 좌표계로 되돌리려면 배율로 나눠야 한다.
-    const s = scaleRef.current || 1;
-    return (point.y - wrap.getBoundingClientRect().top) / s;
-  }
-
-  /** 지금 화면에 있는 그 요소. 카드가 다시 그려져도 id로 찾으면 늘 최신이다. */
-  function figureEl(id: string): HTMLElement | null {
-    return (
-      contentRef.current?.querySelector<HTMLElement>(
-        `[data-fig-id="${CSS.escape(id)}"]`,
-      ) ?? null
-    );
-  }
-
-  function handleFigurePointerDown(e: React.PointerEvent) {
-    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-fig-id]");
-    const id = el?.dataset.figId;
-    if (!el || !id) return;
-    e.preventDefault();
-    const slot = positionOf(id);
-    dragRef.current = {
-      id,
-      startX: e.clientX,
-      startOffsetX: layoutOf(id).offsetX,
-      slot,
-    };
-    setDropLineTop(dropLineFor(slot));
-    window.addEventListener("pointermove", winMove);
-    window.addEventListener("pointerup", winUp);
-    window.addEventListener("pointercancel", winUp);
-  }
-
-  function handleDragMove(e: PointerEvent) {
-    const drag = dragRef.current;
-    if (!drag) return;
-    e.preventDefault();
-
-    // 좌우: 끈 만큼. 화면에서 움직인 거리를 카드 안의 거리로 되돌린다.
-    const dx = (e.clientX - drag.startX) / (scaleRef.current || 1);
-    const offsetX = Math.max(-300, Math.min(300, drag.startOffsetX + dx));
-    const el = figureEl(drag.id);
-    if (el) {
-      // 나란히 놓인 것은 폭을 flex가 잡고 있어서 가운데 맞춤용 %를 더하면 안 된다
-      // (더하면 손을 대는 순간 옆으로 훌쩍 뛴다). 끈 만큼만 밀어 보여준다.
-      const inRow =
-        el.parentElement?.classList.contains("problem-figure-row") ?? false;
-      const scale = layoutOf(drag.id).scale;
-      el.style.marginLeft = inRow
-        ? `${offsetX}px`
-        : `calc(${(100 - scale) / 2}% + ${offsetX}px)`;
-    }
-
-    // 위아래: 놓을 자리를 정하고 안내선을 옮긴다.
-    drag.slot = slotAtY(e.clientY);
-    setDropLineTop(dropLineFor(drag.slot));
-  }
-
-  function handleDragEnd(e: PointerEvent) {
-    const drag = dragRef.current;
-    window.removeEventListener("pointermove", winMove);
-    window.removeEventListener("pointerup", winUp);
-    window.removeEventListener("pointercancel", winUp);
-    if (!drag) return;
-    dragRef.current = null;
-    setDropLineTop(null);
-
-    const dx = (e.clientX - drag.startX) / (scaleRef.current || 1);
-    const offsetX = Math.max(-300, Math.min(300, drag.startOffsetX + dx));
-    setLayout(drag.id, { ...layoutOf(drag.id), offsetX });
-    setFigurePos((prev) => ({ ...prev, [drag.id]: drag.slot }));
-  }
-
-  // window에 붙이는 것은 **항상 같은 함수**여야 뗄 수 있다. 실제 동작은 매
-  // 렌더마다 새로 만들어지는(=최신 state를 읽는) 함수에 넘긴다.
-  const dragHandlers = useRef({ move: handleDragMove, end: handleDragEnd });
-  useEffect(() => {
-    dragHandlers.current = { move: handleDragMove, end: handleDragEnd };
-  });
-  const winMove = useCallback((e: PointerEvent) => dragHandlers.current.move(e), []);
-  const winUp = useCallback((e: PointerEvent) => dragHandlers.current.end(e), []);
-  // 화면을 떠날 때 붙여둔 게 남지 않게 한다.
-  useEffect(
-    () => () => {
-      window.removeEventListener("pointermove", winMove);
-      window.removeEventListener("pointerup", winUp);
-      window.removeEventListener("pointercancel", winUp);
-    },
-    [winMove, winUp],
-  );
+  /** 끌고 있는 중이면 자동 저장을 미룬다(어중간한 위치가 이미지로 굳는다). */
+  const draggingRef = useRef(false);
 
   /**
    * 카드에 붙을 것들(그림과 표)을 위치·크기와 함께 정리한다. 저장·재저장에
@@ -503,12 +331,6 @@ export default function ResultStage({
     return cardFigures.filter((f) => f.id !== id && f.position === here).length;
   }
 
-  /** 문단 사이와 박스 안 줄 사이에 그림을 끼워 넣은 최종 카드 HTML. */
-  const cardHtml = useMemo(
-    () => buildCardHtml(blocks, cardFigures),
-    [blocks, cardFigures],
-  );
-
   // 정답을 적고 잠시 가만히 있으면 저장 버튼을 누르지 않아도 저장한다.
   // 글자마다 저장하면 "12"를 치는 동안 "1"로 저장되므로 입력이 멎을 때까지 기다린다.
   // 도형·박스를 더 만지려던 참이면 아래 안내에 남은 시간이 보이고, 취소할 수 있다.
@@ -533,7 +355,7 @@ export default function ResultStage({
     // 위치가 이미지로 굳는다), 한 번만 재는 타이머로 건너뛰면 영영 저장되지
     // 않는다. 손을 뗄 때까지 같은 간격으로 다시 확인한다.
     const timer = setInterval(() => {
-      if (dragRef.current) return;
+      if (draggingRef.current) return;
       clearInterval(timer);
       setAutoSaveLeftSec(null);
       void handleSaveToCategory();
@@ -719,9 +541,14 @@ export default function ResultStage({
         text: sourceText,
         answer: answer.trim(),
         answerType,
-        // 박스 범위와 글자 크기를 한 값에 담아 저장한다(자세한 이유는
+        // 박스 범위·글자 크기·그림을 한 값에 담아 저장한다(자세한 이유는
         // src/lib/fontSize.ts 주석). ranges가 null이면 박스는 자동 감지.
-        boxOverride: { ranges: toBoxRanges(boxOverride), fontPt },
+        // 그림을 같이 저장하지 않으면 나중에 수정할 때 그림이 통째로 사라진다.
+        boxRange: {
+          ranges: toBoxRanges(boxOverride),
+          fontPt,
+          figures: toStoredFigures(cardFigures),
+        },
         problemId: savedId,
       });
       setSavedId(id);
@@ -763,43 +590,19 @@ export default function ResultStage({
         <FontSizeControl value={fontPt} onChange={setFontPt} />
       </div>
 
-      {/* 휴대폰에서도 가로로 밀지 않고 한눈에 보이도록 통째로 축소한다.
-          카드 너비는 어떤 기기에서도 같으므로 결과물은 달라지지 않는다. */}
-      <ScaledCard width={PROBLEM_CARD_WIDTH} onScaleChange={handleScaleChange}>
-        {/* 드래그 안내선을 카드 위에 겹쳐 놓기 위한 껍데기. 안내선은 cardRef
-            바깥에 두어야 PNG로 캡처될 때 같이 찍히지 않는다. */}
-        <div
-          ref={cardWrapRef}
-          className="relative"
-          style={{ width: PROBLEM_CARD_WIDTH }}
-        >
-          <div
-            ref={cardRef}
-            className="problem-surface rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
-            style={{ width: PROBLEM_CARD_WIDTH }}
-          >
-            {/* 본문과 도형·자료를 한 덩어리로 만들어 넣는다. React 요소로 따로
-                두면 도형을 문단 사이에 놓을 수 없고, 문단마다 감싸는 <div>가
-                생겨 ".mmd-paragraph:last-child" 같은 규칙이 어긋나 문단 간격이
-                무너진다. */}
-            <div
-              ref={contentRef}
-              className="font-serif leading-relaxed text-ink"
-              style={{ fontSize: ptToPx(fontPt) }}
-              onPointerDown={handleFigurePointerDown}
-              dangerouslySetInnerHTML={{ __html: cardHtml }}
-            />
-          </div>
-
-          {/* 놓으면 여기로 들어간다는 안내선. */}
-          {dropLineTop !== null && (
-            <div
-              className="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded bg-blue-500"
-              style={{ top: dropLineTop }}
-            />
-          )}
-        </div>
-      </ScaledCard>
+      <DraggableCard
+        blocks={blocks}
+        figures={cardFigures}
+        fontSizePx={ptToPx(fontPt)}
+        width={PROBLEM_CARD_WIDTH}
+        cardRef={cardRef}
+        cardClassName="problem-surface rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
+        draggingRef={draggingRef}
+        onLayoutChange={setLayout}
+        onPositionChange={(id, slot) =>
+          setFigurePos((prev) => ({ ...prev, [id]: slot }))
+        }
+      />
 
       {/* 인식 결과를 바로 고친다. 저장 후 갤러리에서 다시 여는 왕복을 없앤다. */}
       <div className="rounded-lg border border-slate-200 px-3 py-2.5">

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { categoryLabel, type Category, type Problem } from "@/lib/supabase/types";
+import { categoryLabel, type Category } from "@/lib/supabase/types";
+
 import AddProblemFlow from "@/components/AddProblemFlow";
 import ProblemGallery, {
   type GalleryProblem,
@@ -14,6 +15,60 @@ import FigureJobsPanel from "@/components/FigureJobsPanel";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
+import type { BoxOverride } from "@/lib/renderMathText";
+
+/**
+ * 목록 조회에서 실제로 받아오는 모양.
+ *
+ * **box_range를 통째로 가져오지 않는다.** 그 안에 그림(figures)이 들어 있고
+ * 문제 하나당 수백 KB가 넘을 수 있어서, "*"로 가져오면 실모 하나 여는 데 수
+ * MB를 읽게 된다. 목록에 필요한 키만 뽑고, 그림은 "수정"을 열 때 그 문제
+ * 하나만 따로 가져온다(ProblemGallery.loadFigures).
+ *
+ * 박스 범위는 형태가 세 가지다 — 지금 형태(ranges)와 박스를 하나만 만들 수
+ * 있던 시절의 옛 값 둘({start,end} / {none:true}). 옛 값을 안 챙기면 그때
+ * 손으로 잡아둔 박스가 "자동 감지"로 되돌아가 버린다.
+ */
+type ProblemListRow = {
+  id: string;
+  image_path: string;
+  latex: string | null;
+  text_content: string | null;
+  answer: string | null;
+  answer_type: string | null;
+  sort_order: number | null;
+  ranges: { start: number; end: number }[] | null;
+  fontPt: number | null;
+  boxStart: number | null;
+  boxEnd: number | null;
+  boxNone: boolean | null;
+};
+
+const PROBLEM_LIST_COLUMNS = [
+  "id",
+  "image_path",
+  "latex",
+  "text_content",
+  "answer",
+  "answer_type",
+  "sort_order",
+  "created_at",
+  "ranges:box_range->ranges",
+  "fontPt:box_range->fontPt",
+  "boxStart:box_range->start",
+  "boxEnd:box_range->end",
+  "boxNone:box_range->none",
+].join(", ");
+
+/** 목록 행에서 조건 박스 값을 되살린다(옛 형태 셋을 모두 받는다). */
+function boxRangeOf(p: ProblemListRow): BoxOverride | null {
+  if (p.ranges) return { ranges: p.ranges };
+  if (p.boxNone) return { none: true };
+  if (typeof p.boxStart === "number" && typeof p.boxEnd === "number") {
+    return { start: p.boxStart, end: p.boxEnd };
+  }
+  return null;
+}
 
 export default async function CategoryPage({
   params,
@@ -44,13 +99,36 @@ export default async function CategoryPage({
     notFound();
   }
 
-  const { data: problems } = await supabase
+  const slim = await supabase
     .from("problems")
-    .select("*")
+    .select(PROBLEM_LIST_COLUMNS)
     .eq("category_id", id)
     .order("sort_order", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: true })
-    .returns<Problem[]>();
+    .returns<ProblemListRow[]>();
+
+  let problems = slim.data;
+  if (slim.error) {
+    // JSON 경로 선택이 막힌 환경이면 목록이 통째로 안 나오는 것보다 낫다 —
+    // 통째로 가져와서 여기서 추린다(그림까지 읽게 되지만 화면은 뜬다).
+    const full = await supabase
+      .from("problems")
+      .select("*")
+      .eq("category_id", id)
+      .order("sort_order", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
+    problems = (full.data ?? []).map((p) => {
+      const box = (p.box_range ?? {}) as Record<string, unknown>;
+      return {
+        ...(p as unknown as ProblemListRow),
+        ranges: (box.ranges as ProblemListRow["ranges"]) ?? null,
+        fontPt: (box.fontPt as number | null) ?? null,
+        boxStart: (box.start as number | null) ?? null,
+        boxEnd: (box.end as number | null) ?? null,
+        boxNone: (box.none as boolean | null) ?? null,
+      };
+    });
+  }
 
   const paths = (problems ?? []).map((p) => p.image_path);
   let signedUrlByPath = new Map<string, string>();
@@ -68,7 +146,7 @@ export default async function CategoryPage({
   }
 
   const galleryProblems: GalleryProblem[] = (problems ?? [])
-    .map((p) => {
+    .map((p): GalleryProblem | null => {
       const imageUrl = signedUrlByPath.get(p.image_path);
       if (!imageUrl) return null;
       return {
@@ -79,8 +157,8 @@ export default async function CategoryPage({
         sortOrder: p.sort_order,
         answer: p.answer ?? "",
         answerType: toAnswerType(p.answer_type),
-        boxRange: (p.box_range as GalleryProblem["boxRange"]) ?? null,
-        fontPt: readFontPt(p.box_range),
+        boxRange: boxRangeOf(p),
+        fontPt: readFontPt({ fontPt: p.fontPt }),
       };
     })
     .filter((p): p is GalleryProblem => p !== null);

@@ -8,7 +8,7 @@ import ResultStage from "@/components/ResultStage";
 import { createClient } from "@/lib/supabase/client";
 import type { RecognizeResponse } from "@/lib/types";
 import type { AnswerType } from "@/lib/answer";
-import type { BoxOverride } from "@/lib/renderMathText";
+import type { StoredBoxRange } from "@/lib/storedFigures";
 
 type Stage = "idle" | "upload" | "crop" | "loading" | "result";
 
@@ -123,14 +123,14 @@ export default function AddProblemFlow({
     text,
     answer,
     answerType,
-    boxOverride,
+    boxRange,
     problemId,
   }: {
     pngDataUrl: string;
     text: string;
     answer: string;
     answerType: AnswerType;
-    boxOverride: BoxOverride | undefined;
+    boxRange: StoredBoxRange;
     /** 이미 저장한 문제면 그 id. 새 행을 만들지 않고 그 행을 갱신한다. */
     problemId?: string | null;
   }): Promise<string> {
@@ -164,8 +164,8 @@ export default function AddProblemFlow({
       text_content: text || result?.text || null,
       answer: answer || null,
       answer_type: answerType,
-      // undefined면 "자동 감지에 맡김"이라 DB에도 null로 둔다.
-      box_range: boxOverride ?? null,
+      // 박스 범위·글자 크기·그림이 한 값에 들어 있다(storedFigures.ts 참고).
+      box_range: boxRange,
     };
 
     // 이미 저장한 문제를 또 저장하는 건 "고쳐서 다시 저장"이다. 새 행을 만들면
