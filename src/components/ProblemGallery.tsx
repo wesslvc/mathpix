@@ -1,20 +1,30 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toPng } from "html-to-image";
 import { createClient } from "@/lib/supabase/client";
 import {
-  renderMathText,
+  renderMathTextWithInfo,
   toBoxRanges,
   type BoxOverride,
 } from "@/lib/renderMathText";
+import {
+  readStoredFigures,
+  restoreCardFigures,
+  toStoredFigures,
+  type StoredFigure,
+} from "@/lib/storedFigures";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import FontSizeControl from "./FontSizeControl";
 import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import BoxRangeEditor from "./BoxRangeEditor";
 import TextEditTabs from "./TextEditTabs";
-import ScaledCard from "./ScaledCard";
+import DiagramAdjuster, {
+  DEFAULT_DIAGRAM_LAYOUT,
+} from "./DiagramAdjuster";
+import { DEFAULT_TABLE_LAYOUT } from "@/lib/diagramLayout";
+import DraggableCard from "./DraggableCard";
 import {
   ANSWER_TYPE_LABEL,
   formatAnswer,
@@ -76,9 +86,67 @@ export default function ProblemGallery({ problems }: Props) {
   // undefined = 자동 감지에 맡김. 그 외는 사용자가 직접 정한 범위.
   const [editBox, setEditBox] = useState<BoxOverride | undefined>(undefined);
   const [editFontPt, setEditFontPt] = useState(DEFAULT_FONT_PT);
+  // 저장돼 있던 그림들. 목록 조회에는 들어 있지 않아서(용량 때문에) 수정할
+  // 문제 하나만 따로 가져온다.
+  const [editFigures, setEditFigures] = useState<StoredFigure[]>([]);
+  const [figuresLoading, setFiguresLoading] = useState(false);
+  /**
+   * 그림 정보가 없는 옛 문제인가.
+   *
+   * 예전에는 그림을 저장하지 않아서, 그런 문제를 여기서 고쳐 저장하면 원래
+   * 붙어 있던 그림이 통째로 사라진다. 되살릴 방법이 없으므로 알려만 준다.
+   */
+  const [maybeLostFigures, setMaybeLostFigures] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  // 미리보기에 그릴 것들. 표는 본문에서 다시 뽑고(본문을 고치면 따라 바뀐다)
+  // 저장돼 있던 자리·크기만 입힌다.
+  const blocks = useMemo(
+    () => renderMathTextWithInfo(editText, editBox).blocks,
+    [editText, editBox],
+  );
+  const cardFigures = useMemo(
+    () => restoreCardFigures(editFigures, blocks),
+    [editFigures, blocks],
+  );
+
+  /**
+   * 끌어 옮긴 결과를 저장할 목록에 반영한다.
+   *
+   * 표는 아직 저장된 적이 없을 수 있다(원래 자리 그대로 뒀던 표). 그때는
+   * 지금 화면 상태를 바탕으로 새로 넣어준다.
+   */
+  function updateFigure(id: string, patch: Partial<StoredFigure>) {
+    setEditFigures((prev) => {
+      const i = prev.findIndex((f) => f.id === id);
+      if (i !== -1) {
+        const next = [...prev];
+        next[i] = { ...next[i], ...patch };
+        return next;
+      }
+      const cur = cardFigures.find((f) => f.id === id);
+      if (!cur) return prev;
+      return [
+        ...prev,
+        {
+          id,
+          layout: cur.layout,
+          position: cur.position,
+          kind: cur.kind,
+          row: cur.row,
+          ...patch,
+        },
+      ];
+    });
+  }
+
+  /** 같은 자리에 놓인 다른 것의 개수("나란히 놓기"가 뜻이 있는지). */
+  function slotMateCount(id: string): number {
+    const here = cardFigures.find((f) => f.id === id)?.position;
+    return cardFigures.filter((f) => f.id !== id && f.position === here).length;
+  }
 
   async function move(index: number, dir: -1 | 1) {
     const j = index + dir;
@@ -132,6 +200,35 @@ export default function ProblemGallery({ problems }: Props) {
     // 글씨가 저 혼자 커졌다.
     setEditFontPt(problem.fontPt);
     setEditError(null);
+    setEditFigures([]);
+    setMaybeLostFigures(false);
+    void loadFigures(problem.id);
+  }
+
+  /** 이 문제에 저장된 그림을 가져온다(목록 조회에서는 일부러 뺐다). */
+  async function loadFigures(problemId: string) {
+    setFiguresLoading(true);
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("problems")
+        .select("box_range")
+        .eq("id", problemId)
+        .maybeSingle();
+      const stored = readStoredFigures(data?.box_range);
+      setEditFigures(stored);
+      // figures 키 자체가 없으면 그림을 저장하기 전에 만들어진 문제다.
+      const hasKey =
+        data?.box_range &&
+        typeof data.box_range === "object" &&
+        "figures" in (data.box_range as object);
+      setMaybeLostFigures(!hasKey);
+    } catch {
+      // 못 불러와도 본문 수정은 되게 둔다. 다만 그림이 빠질 수 있다고 알린다.
+      setMaybeLostFigures(true);
+    } finally {
+      setFiguresLoading(false);
+    }
   }
 
   async function saveEdit() {
@@ -161,7 +258,11 @@ export default function ProblemGallery({ problems }: Props) {
           latex: editText,
           answer: editAnswer.trim() || null,
           answer_type: editAnswerType,
-          box_range: { ranges: toBoxRanges(editBox), fontPt: editFontPt },
+          box_range: {
+            ranges: toBoxRanges(editBox),
+            fontPt: editFontPt,
+            figures: toStoredFigures(cardFigures),
+          },
         })
         .eq("id", editing.id);
       if (dbErr) {
@@ -284,6 +385,17 @@ export default function ProblemGallery({ problems }: Props) {
               내용·정답·조건 박스를 고치면 아래 미리보기처럼 이미지가 다시
               만들어져 저장됩니다.
             </p>
+            {figuresLoading && (
+              <p className="text-xs text-slate-400">그림을 불러오는 중…</p>
+            )}
+            {!figuresLoading && maybeLostFigures && (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                이 문제는 그림이 함께 저장되기 전에 만들어졌습니다. 원래 그림이
+                붙어 있었다면 <strong>여기서 저장하는 순간 사라집니다.</strong>{" "}
+                그림을 살리려면 저장하지 말고 닫은 뒤, 오답추가로 다시 만들어
+                주세요.
+              </p>
+            )}
 
             {/* 넓은 화면에서는 편집기와 미리보기를 나란히 둬서 고치는 즉시
                 결과를 확인할 수 있게 한다(수식 편집이 특히 불편했던 부분). */}
@@ -355,20 +467,51 @@ export default function ProblemGallery({ problems }: Props) {
                 {/* 휴대폰에서 가로로 밀지 않고 한눈에 보이도록 축소한다.
                     카드 너비는 고정이라 저장되는 결과는 달라지지 않는다. */}
                 <div className="rounded-lg border border-slate-200">
-                  <ScaledCard width={PROBLEM_CARD_WIDTH}>
-                    <div
-                      ref={previewRef}
-                      className="problem-surface bg-white p-8 font-serif leading-relaxed text-ink"
-                      style={{
-                        fontSize: ptToPx(editFontPt),
-                        width: PROBLEM_CARD_WIDTH,
-                      }}
-                      dangerouslySetInnerHTML={{
-                        __html: renderMathText(editText, editBox),
-                      }}
-                    />
-                  </ScaledCard>
+                  <DraggableCard
+                    blocks={blocks}
+                    figures={cardFigures}
+                    fontSizePx={ptToPx(editFontPt)}
+                    width={PROBLEM_CARD_WIDTH}
+                    cardRef={previewRef}
+                    cardClassName="problem-surface bg-white p-8"
+                    onLayoutChange={(id, layout) => updateFigure(id, { layout })}
+                    onPositionChange={(id, position) =>
+                      updateFigure(id, { position })
+                    }
+                  />
                 </div>
+
+                {/* 그림·표 조절. 위치는 미리보기에서 끌어 옮기는 게 기본이고,
+                    여기서는 크기·여백과 나란히 놓기를 다룬다. */}
+                {cardFigures.length > 0 && (
+                  <div className="mt-2 flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
+                    <p className="text-[11px] text-slate-400">
+                      미리보기에서 그림이나 표를 잡아 끌면 원하는 문단 사이로
+                      옮길 수 있어요. 같은 자리에 둘을 놓고 “옆으로 나란히”를
+                      켜면 가로로 놓입니다.
+                    </p>
+                    {cardFigures.map((f, i) => (
+                      <DiagramAdjuster
+                        key={f.id}
+                        label={
+                          f.kind === "table"
+                            ? `표 ${cardFigures.filter((x) => x.kind === "table").indexOf(f) + 1}`
+                            : `그림 ${cardFigures.filter((x) => x.kind !== "table").indexOf(f) + 1}`
+                        }
+                        layout={f.layout}
+                        defaultLayout={
+                          f.kind === "table"
+                            ? DEFAULT_TABLE_LAYOUT
+                            : DEFAULT_DIAGRAM_LAYOUT
+                        }
+                        onChange={(layout) => updateFigure(f.id, { layout })}
+                        row={f.row ?? false}
+                        rowMates={slotMateCount(f.id)}
+                        onRowChange={(row) => updateFigure(f.id, { row })}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
