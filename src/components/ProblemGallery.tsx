@@ -107,6 +107,11 @@ export default function ProblemGallery({ problems }: Props) {
     () => renderMathTextWithInfo(editText, editBox).blocks,
     [editText, editBox],
   );
+  /**
+   * 본문 글자가 없는 문제인가("통째로 AI로 다시 그리기"로 만든 것).
+   * 그림 한 장이 곧 문제라, 본문 수정·조건 박스는 다룰 대상이 없다.
+   */
+  const isImageOnly = (editing?.text ?? "").trim() === "";
   const cardFigures = useMemo(
     () => restoreCardFigures(editFigures, blocks),
     [editFigures, blocks],
@@ -401,7 +406,15 @@ export default function ProblemGallery({ problems }: Props) {
                 결과를 확인할 수 있게 한다(수식 편집이 특히 불편했던 부분). */}
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="flex flex-col gap-4">
-                <TextEditTabs value={editText} onChange={setEditText} />
+                {isImageOnly ? (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
+                    이 문제는 AI가 통째로 다시 그린 <strong>이미지</strong>입니다.
+                    글자를 따로 들고 있지 않아 본문 수정·조건 박스는 쓰지 않습니다.
+                    그림의 크기·위치는 오른쪽 미리보기에서 조절할 수 있어요.
+                  </p>
+                ) : (
+                  <TextEditTabs value={editText} onChange={setEditText} />
+                )}
 
                 <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
                   <div className="flex items-center gap-2">
@@ -448,13 +461,15 @@ export default function ProblemGallery({ problems }: Props) {
                   )}
                 </div>
 
-                <div className="rounded-lg border border-slate-200 px-3 py-2.5">
-                  <BoxRangeEditor
-                    text={editText}
-                    value={editBox}
-                    onChange={setEditBox}
-                  />
-                </div>
+                {!isImageOnly && (
+                  <div className="rounded-lg border border-slate-200 px-3 py-2.5">
+                    <BoxRangeEditor
+                      text={editText}
+                      value={editBox}
+                      onChange={setEditBox}
+                    />
+                  </div>
+                )}
               </div>
 
               <div>

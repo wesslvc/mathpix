@@ -3,6 +3,7 @@ import {
   FigureImageError,
   figureImageModelIds,
   generateFigureImage,
+  type FigureMode,
 } from "@/lib/figureImageGen";
 import { FIGURE_TOKEN_COST } from "@/lib/tokens";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -25,7 +26,7 @@ export const maxDuration = 60;
 const MAX_MODEL_ATTEMPTS = 2;
 
 export async function POST(req: NextRequest) {
-  let body: { image?: string };
+  let body: { image?: string; mode?: string };
   try {
     body = await req.json();
   } catch {
@@ -36,6 +37,8 @@ export async function POST(req: NextRequest) {
   }
 
   const image = body.image;
+  // "problem"이면 문제 한 개 전체를 다시 그린다(탐구). 프롬프트가 달라진다.
+  const mode: FigureMode = body.mode === "problem" ? "problem" : "figure";
   if (!image || typeof image !== "string") {
     return NextResponse.json(
       { error: "image(base64 data URL) 필드가 필요합니다." },
@@ -109,7 +112,7 @@ export async function POST(req: NextRequest) {
   for (let i = 0; i < Math.min(modelIds.length, MAX_MODEL_ATTEMPTS); i++) {
     const modelId = modelIds[i];
     try {
-      const result = await generateFigureImage(image, modelId);
+      const result = await generateFigureImage(image, modelId, mode);
       if (!result) {
         await refund();
         return NextResponse.json(

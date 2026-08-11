@@ -141,6 +141,38 @@ const PROMPT = `이 이미지는 한국 고등학교 문제집(수학·과학탐
 결과는 배경이 흰색이고 선이 또렷한, 문제집 삽화 같은 그림이어야 합니다.
 사진처럼 명암을 넣거나 입체적으로 꾸미지 마세요.`;
 
+/**
+ * **문제 전체**를 다시 그릴 때 쓰는 프롬프트.
+ *
+ * 그림 하나를 다시 그리는 것과 요구가 다르다. 그림은 "모양"이 맞아야 하지만
+ * 문제 전체는 **글자가 한 자도 틀리면 안 된다** — "옳은/옳지 않은" 하나만
+ * 바뀌어도 답이 뒤집히고, 사용자가 나중에 고칠 방법도 없다(결과가 이미지라
+ * 본문 수정이 안 된다). 그래서 "그대로 옮겨 적기"를 반복해 못박는다.
+ */
+const WHOLE_PROBLEM_PROMPT = `이 이미지는 한국 고등학교 문제집(사회탐구·과학탐구)에 실린 **문제 한 개 전체**입니다.
+사진을 깨끗한 인쇄물처럼 정서해 주세요. 내용은 무엇 하나 바꾸지 않습니다.
+
+가장 중요한 것 — 글자:
+- 모든 글자를 원본에 적힌 **그대로** 옮기세요. 한 글자도 바꾸거나 다듬거나
+  요약하거나 번역하지 마세요.
+- "옳은 것"과 "옳지 않은 것", "있는 대로"와 "하나만" 같은 표현은 답을 뒤집습니다.
+  원본 그대로 두세요.
+- 숫자, 단위, 기호, 연도, 지명, 인명은 원본과 정확히 같아야 합니다.
+- 읽기 어려운 글자가 있으면 지어내지 말고 원본의 획을 최대한 그대로 따라 그리세요.
+
+구조도 그대로:
+- 문제 번호, 발문, 조건 박스, 표, 자료, <보기>, 선지(①②③④⑤)를 원본과 같은
+  순서·같은 배치로 두세요. 빼거나 새로 만들지 마세요.
+- 표는 행·열 수와 칸 내용을 그대로 두고, 테두리를 또렷하게 그리세요.
+- 그림·지도·그래프·모식도는 위치 관계, 화살표 방향, 개수를 그대로 두세요.
+- 박스로 둘러싸인 부분은 박스를 유지하세요.
+
+모양:
+- 배경은 흰색, 글자는 검은색으로 또렷하게. 인쇄된 문제집 지면처럼 보이게 하세요.
+- 사진의 그림자·기울어짐·손가락·주변 여백은 지우고 똑바로 펴 주세요.
+- 글자 크기는 읽기 편하게 고르고, 줄이 겹치거나 잘리지 않게 하세요.
+- 색이 의미를 구분하고 있으면(지도의 지역, 그래프의 계열) 그 구분은 유지하세요.`;
+
 function dataUrlToBlob(
   dataUrl: string,
 ): { blob: Blob; filename: string } | null {
@@ -200,9 +232,17 @@ export type FigureImageResult = {
  * 크레딧을 환불하고 그 메시지를 사용자에게 보여준다), 응답은 정상인데 이미지를
  * 못 받은 경우만 null을 반환한다.
  */
+/**
+ * 무엇을 다시 그리는가.
+ *  - "figure"  : 오려낸 그림·자료 하나
+ *  - "problem" : 문제 한 개 전체(탐구). 글자가 훨씬 중요해서 프롬프트가 다르다.
+ */
+export type FigureMode = "figure" | "problem";
+
 export async function generateFigureImage(
   imageDataUrl: string,
   modelId: string,
+  mode: FigureMode = "figure",
 ): Promise<FigureImageResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -236,7 +276,7 @@ export async function generateFigureImage(
     const form = new FormData();
     form.append("model", modelId);
     form.append("image", source.blob, source.filename);
-    form.append("prompt", PROMPT);
+    form.append("prompt", mode === "problem" ? WHOLE_PROBLEM_PROMPT : PROMPT);
     form.append("n", "1");
     for (const [k, v] of Object.entries(params)) form.append(k, v);
 

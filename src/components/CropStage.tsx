@@ -9,7 +9,13 @@ import type { CropRect } from "@/lib/types";
 
 type Props = {
   imageSrc: string;
-  onConfirm: (croppedDataUrl: string) => void;
+  /**
+   * mode가 "problem"이면 인식(Mathpix) 대신 문제 전체를 이미지로 다시 그린다.
+   * 탐구처럼 표·지도·그림이 뒤섞인 문제는 그 편이 원본에 가깝다.
+   */
+  onConfirm: (croppedDataUrl: string, mode: "ocr" | "problem") => void;
+  /** 문제 전체 다시 그리기에 드는 토큰. 못 불러왔으면 표시하지 않는다. */
+  problemTokenCost?: number | null;
   onCancel: () => void;
   onError: (message: string) => void;
 };
@@ -24,7 +30,13 @@ function rectToPercentCrop(rect: CropRect, naturalWidth: number, naturalHeight: 
   };
 }
 
-export default function CropStage({ imageSrc, onConfirm, onCancel, onError }: Props) {
+export default function CropStage({
+  imageSrc,
+  onConfirm,
+  onCancel,
+  onError,
+  problemTokenCost,
+}: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [crop, setCrop] = useState<Crop>();
   const [autoDetected, setAutoDetected] = useState(false);
@@ -44,7 +56,7 @@ export default function CropStage({ imageSrc, onConfirm, onCancel, onError }: Pr
     setAutoDetected(true);
   }
 
-  function handleConfirm() {
+  function handleConfirm(mode: "ocr" | "problem") {
     const img = imgRef.current;
     if (!img || !crop || !crop.width || !crop.height) return;
 
@@ -56,7 +68,7 @@ export default function CropStage({ imageSrc, onConfirm, onCancel, onError }: Pr
     };
 
     const dataUrl = cropImageToDataUrl(img, rect);
-    onConfirm(dataUrl);
+    onConfirm(dataUrl, mode);
   }
 
   function handleResetToFull() {
@@ -104,7 +116,7 @@ export default function CropStage({ imageSrc, onConfirm, onCancel, onError }: Pr
         </ReactCrop>
       </div>
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
@@ -112,9 +124,21 @@ export default function CropStage({ imageSrc, onConfirm, onCancel, onError }: Pr
         >
           다른 이미지 선택
         </button>
+        {/* 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다
+            통째로 다시 그리는 편이 원본에 가깝다. 대신 결과가 이미지라 나중에
+            본문을 고칠 수 없으므로, 기본은 여전히 인식이다. */}
         <button
           type="button"
-          onClick={handleConfirm}
+          onClick={() => handleConfirm("problem")}
+          disabled={!crop?.width || !crop?.height}
+          className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          통째로 AI로 다시 그리기
+          {typeof problemTokenCost === "number" && ` (${problemTokenCost}토큰)`}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleConfirm("ocr")}
           disabled={!crop?.width || !crop?.height}
           className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
