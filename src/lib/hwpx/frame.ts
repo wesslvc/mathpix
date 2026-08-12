@@ -96,7 +96,11 @@ async function loadTemplate(bytes: ArrayBuffer, kind: "tamgu" | "math"): Promise
   };
 }
 
-/** 그림 하나를 단 폭에 맞춰 놓는 `<hp:pic>` 마크업. */
+/**
+ * 그림 하나를 단 폭에 맞춰 놓는 `<hp:pic>` 마크업과, 그 그림이 차지하는
+ * 높이(HWPUNIT). 높이는 문단의 줄 높이를 정하는 데 쓴다 — 아래
+ * `paragraphMaker` 설명 참고.
+ */
 function buildPicture(
   template: string,
   binaryId: string,
@@ -104,7 +108,7 @@ function buildPicture(
   heightPx: number,
   layout: FrameTemplate["layout"],
   serial: number,
-): string {
+): { markup: string; height: number } {
   if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
     // 크기를 모르면 그림을 못 앉힌다. 조용히 NaN 을 흘려보내면 한글이 파일을
     // 열지 못하는데, 그때는 원인을 찾기가 아주 어렵다.
@@ -165,7 +169,7 @@ function buildPicture(
       '<hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/>' +
       "</hp:renderingInfo>",
   );
-  return pic;
+  return { markup: pic, height: curH };
 }
 
 /**
@@ -179,22 +183,30 @@ function buildPicture(
  */
 function paragraphMaker(t: FrameTemplate) {
   const charPrIDRef = t.textParagraph.match(/<hp:run\s[^>]*charPrIDRef="(\d+)"/)?.[1] ?? "0";
-  // `<hp:linesegarray>` 는 원본을 열었을 때 계산해 둔 **줄 배치 캐시**다. 그대로
-  // 두면 "이 줄은 11.5pt 높이"라고 못박혀서, 우리가 넣은 큰 그림이 줄 높이를
-  // 밀어내지 못하고 위쪽 글자를 덮어썼다(실제로 라벨 위에 그림이 겹쳐 찍혔다).
-  // 지우면 무엇으로 열든 새로 계산한다.
-  const blank = t.blankParagraph
-    .replace(/\spageBreak="1"/, ' pageBreak="0"')
-    .replace(/<hp:linesegarray>[\s\S]*?<\/hp:linesegarray>/g, "");
+  const blank = t.blankParagraph.replace(/\spageBreak="1"/, ' pageBreak="0"');
+
+  /**
+   * `<hp:linesegarray>` 는 원본을 열었을 때 계산해 둔 **줄 배치 캐시**다. 빈
+   * 문단에서 떠 왔으니 "이 줄은 11.5pt 높이"라고 적혀 있고, 그대로 두면 우리가
+   * 넣은 큰 그림이 줄 높이를 밀어내지 못해 위쪽 라벨을 덮는다. 그래서 지운다 —
+   * 한글은 문서를 열 때 배치를 새로 계산한다.
+   *
+   * **직접 계산해 넣으려고 하지 말 것.** 한 번 시도했다가 더 나빠졌다.
+   * `vertpos` 는 문단이 놓일 세로 위치까지 담고 있어서, 값을 채우려면 앞 문단들의
+   * 높이와 단 넘김을 전부 알아야 한다 — 조판기를 다시 만드는 일이다.
+   */
   const withRun = (markup: string) =>
-    blank.replace(
-      /<hp:run\b[^>]*\/>|<hp:run\b[^>]*>[\s\S]*?<\/hp:run>/,
-      `<hp:run charPrIDRef="${charPrIDRef}">${markup}</hp:run>`,
-    );
+    blank
+      .replace(
+        /<hp:run\b[^>]*\/>|<hp:run\b[^>]*>[\s\S]*?<\/hp:run>/,
+        `<hp:run charPrIDRef="${charPrIDRef}">${markup}</hp:run>`,
+      )
+      .replace(/<hp:linesegarray>[\s\S]*?<\/hp:linesegarray>/g, "");
+
   return {
     blank: () => blank,
     text: (value: string) => setParagraphText(withRun("<hp:t></hp:t>"), value),
-    content: (markup: string) => setParagraphContent(withRun("<hp:t></hp:t>"), markup),
+    picture: (markup: string) => setParagraphContent(withRun("<hp:t></hp:t>"), markup),
   };
 }
 
@@ -237,10 +249,9 @@ export async function buildKiceHwpx(
     zip.file(href, problem.png);
     binaries.push({ id, href });
 
+    const pic = buildPicture(t.picture, id, problem.widthPx, problem.heightPx, t.layout, i + 1);
     if (problem.label.trim()) body += paragraph.text(problem.label.trim());
-    body += paragraph.content(
-      buildPicture(t.picture, id, problem.widthPx, problem.heightPx, t.layout, i + 1),
-    );
+    body += paragraph.picture(pic.markup);
     // 문제 사이 한 줄 띄우기. 쪽 나눔은 걸지 않는다(단을 따라 흐르게 둔다).
     body += paragraph.blank();
   });
