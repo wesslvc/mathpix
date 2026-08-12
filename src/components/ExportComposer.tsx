@@ -4,8 +4,8 @@ import { useState } from "react";
 import { PDFDocument, rgb } from "pdf-lib";
 import dynamic from "next/dynamic";
 
-// 평가원 양식은 hwpx(zip) 를 다루느라 무거운 라이브러리를 끌고 온다. 일반
-// PDF 로 뽑는 사람에게까지 그 짐을 지울 이유가 없어서 고를 때 받아온다.
+// 평가원 양식은 틀 좌표(수십 KB)와 글꼴 다섯 벌을 받아온다. 일반 A4 로 뽑는
+// 사람에게까지 그 짐을 지울 이유가 없어서 고를 때 받아온다.
 const KiceExportPanel = dynamic(() => import("./KiceExportPanel"), {
   ssr: false,
   loading: () => <p className="text-sm text-slate-500">평가원 양식 준비 중...</p>,
