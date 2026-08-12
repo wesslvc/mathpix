@@ -2,6 +2,14 @@
 
 import { useState } from "react";
 import { PDFDocument, rgb } from "pdf-lib";
+import dynamic from "next/dynamic";
+
+// 평가원 양식은 hwpx(zip) 를 다루느라 무거운 라이브러리를 끌고 온다. 일반
+// PDF 로 뽑는 사람에게까지 그 짐을 지울 이유가 없어서 고를 때 받아온다.
+const KiceExportPanel = dynamic(() => import("./KiceExportPanel"), {
+  ssr: false,
+  loading: () => <p className="text-sm text-slate-500">평가원 양식 준비 중...</p>,
+});
 
 export type ComposerProblem = {
   id: string;
@@ -231,6 +239,8 @@ export default function ExportComposer({
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [perPage, setPerPage] = useState<PerPage>(1);
+  /** 어떤 종이에 뽑을지. 평가원 양식은 한글 파일로 나간다(글꼴 때문에). */
+  const [layout, setLayout] = useState<"a4" | "kice">("a4");
 
   function move(index: number, dir: -1 | 1) {
     const j = index + dir;
@@ -533,6 +543,45 @@ export default function ExportComposer({
         </ol>
       </div>
 
+      {/* 어떤 양식으로 뽑을지. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-slate-700">양식</span>
+        <div className="flex gap-1">
+          {(
+            [
+              ["a4", "일반 (A4 PDF)"],
+              ["kice", "평가원 문제지"],
+            ] as const
+          ).map(([key, text]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setLayout(key)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                layout === key
+                  ? "border-blue-600 bg-blue-50 text-blue-700"
+                  : "border-slate-300 text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {layout === "kice" ? (
+        <KiceExportPanel
+          title={title}
+          items={order.map((problem, index) => ({
+            id: problem.id,
+            imageUrl: problem.imageUrl,
+            label: labelFor(problem, index),
+            answerLabel: `${numberFor(problem, index)}번`,
+            answer: problem.answer ?? "",
+          }))}
+        />
+      ) : (
+        <>
       {/* 한 페이지에 몇 문제를 넣을지. 탐구처럼 문제가 짧으면 1개는 종이가
           너무 남는다. */}
       <div className="flex flex-wrap items-center gap-2">
@@ -569,6 +618,8 @@ export default function ExportComposer({
           {isGenerating ? "PDF 만드는 중..." : "PDF 만들기"}
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }
