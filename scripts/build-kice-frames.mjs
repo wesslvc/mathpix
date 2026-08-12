@@ -29,8 +29,26 @@ if (!tamguSrc || !mathSrc) {
 
 const OUT_DIR = path.join(process.cwd(), "public", "kice");
 
+/**
+ * 구역 어디에 있든 머리말·꼬리말 정의를 그러모은다.
+ *
+ * 이게 필요한 이유: 머리말이 **첫 문단에 있으리라는 보장이 없다.** 수학
+ * 문제지는 머리말이 뒤쪽 문단에 붙어 있어서, 첫 문단만 남기고 나머지를
+ * 버렸더니 2쪽부터 `수학 영역` 머리말이 통째로 사라졌다(탐구는 첫 문단에
+ * 있어서 멀쩡했다 — 한 파일만 보고 넘어가면 놓친다).
+ */
+function collectHeaderCtrls(section, firstParagraphEnd) {
+  const out = [];
+  for (const [a, b] of topLevelElements(section, "hp:ctrl")) {
+    if (a < firstParagraphEnd) continue; // 첫 문단 것은 이미 남아 있다
+    const ctrl = section.slice(a, b);
+    if (/<hp:(header|footer)\b/.test(ctrl)) out.push(ctrl);
+  }
+  return out;
+}
+
 /** 첫 문단에서 문제 본문(직계 hp:t / hp:equation)만 떼어낸다. */
-function stripBodyFromFirstParagraph(para) {
+function stripBodyFromFirstParagraph(para, extraCtrls = []) {
   const open = para.slice(0, para.indexOf(">") + 1);
   const inner = para.slice(para.indexOf(">") + 1, para.lastIndexOf("</hp:p>"));
   let out = "";
@@ -50,6 +68,8 @@ function stripBodyFromFirstParagraph(para) {
       .join("");
     if (kept) out += runOpen + kept + "</hp:run>";
   }
+  // 뒤쪽 문단에 있던 머리말·꼬리말을 첫 문단으로 옮겨 붙인다.
+  if (extraCtrls.length) out += `<hp:run charPrIDRef="0">${extraCtrls.join("")}</hp:run>`;
   return open + out + "</hp:p>";
 }
 
@@ -132,7 +152,13 @@ function gutSection(section) {
   if (paras.length === 0) throw new Error("문단이 없습니다");
   const head = section.slice(0, paras[0][0]);
   const tail = section.slice(paras[paras.length - 1][1]);
-  const first = stripBodyFromFirstParagraph(section.slice(paras[0][0], paras[0][1]));
+  const moved = collectHeaderCtrls(section, paras[0][1]);
+  let first = stripBodyFromFirstParagraph(section.slice(paras[0][0], paras[0][1]), moved);
+  if (moved.length) {
+    // 머리말을 첫 문단으로 끌어올리면 **첫 쪽에도 찍히기 시작한다.** 원본에서는
+    // 뒤쪽 문단에 있었던 덕분에 첫 쪽에 안 나왔던 것이니, 첫 쪽 머리말을 끈다.
+    first = first.replace(/hideFirstHeader="0"/, 'hideFirstHeader="1"');
+  }
   return {
     // 빈 쪽은 런타임에 필요한 만큼 붙인다. 여기서는 틀 한 쪽만 남긴다.
     xml: head + first + tail,
