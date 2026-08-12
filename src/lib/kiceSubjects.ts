@@ -1,4 +1,4 @@
-import type { KiceArea } from "./hwpx/frame";
+import type { KiceArea } from "./kice/frames";
 
 /**
  * 평가원 문제지 틀에 찍을 영역·과목.

@@ -1,0 +1,439 @@
+/**
+ * 평가원 문제지 판형을 pdf-lib 로 직접 그린다.
+ *
+ * 틀(제목·머리말·성명칸·쪽번호 상자·단 구분선)은 원본 문제지를 렌더링해 뽑아 둔
+ * 좌표를 그대로 재생하고(`frames.json`), 그 위에 오답 이미지를 단을 따라 흘려
+ * 넣는다.
+ *
+ * **왜 hwpx 가 아니라 PDF 인가:** 처음에는 글꼴 때문에 한글 파일로 내보냈다.
+ * 수능 문제지는 한컴 전용 글꼴(HFT)로 짜여 있어 웹에 심을 수 없기 때문이다.
+ * 지금은 같은 이름의 TTF 를 손에 넣어(신그래픽체·견명조·태고딕·디나루·신중명조)
+ * 우리가 직접 그린다 — 한글이 없어도 되고, PDF 로 뽑는 마지막 한 걸음을
+ * 사용자가 하지 않아도 된다.
+ */
+import {
+  PDFDocument,
+  rgb,
+  pushGraphicsState,
+  popGraphicsState,
+  concatTransformationMatrix,
+  type PDFFont,
+  type PDFImage,
+  type PDFPage,
+} from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import type { Frame, FrameBox, FrameItem, FrameSet } from "./frames";
+
+/** 용지·여백·단 (hwpx 의 secPr 에서 그대로 가져온 값, 단위 pt). */
+export const LAYOUT = {
+  pageWidth: 771.02,
+  pageHeight: 1116.85,
+  marginLeft: 53,
+  columnWidth: 326.84,
+  columnGap: 11.34,
+  /** 본문 아래 끝(위에서 잰 거리). 단 구분선이 끝나는 자리와 같다. */
+  contentBottom: 1023.21,
+  /** 문제 사이 세로 간격. */
+  gap: 14,
+};
+
+const columnX = (i: number) => LAYOUT.marginLeft + i * (LAYOUT.columnWidth + LAYOUT.columnGap);
+
+const hex = (h: string | null) => {
+  const n = parseInt((h || "#000000").slice(1), 16);
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+};
+
+const inside = (box: FrameBox, x: number, y: number) =>
+  x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1;
+
+/** 지워야 할 영역 안에 들어가는 항목인지. */
+function dropped(it: FrameItem, drops?: FrameBox[]) {
+  if (!drops?.length) return false;
+  const pts: [number, number][] =
+    it.k === "line"
+      ? [
+          [it.x1, it.y1],
+          [it.x2, it.y2],
+        ]
+      : it.k === "circle"
+        ? [[it.cx, it.cy]]
+        : it.k === "rect" || it.k === "image"
+          ? [
+              [it.x, it.y],
+              [it.x + it.w, it.y + it.h],
+            ]
+          : [[it.x, it.y]];
+  return drops.some((b) => pts.every(([x, y]) => inside(b, x, y)));
+}
+
+type TextItem = Extract<FrameItem, { k: "text" }>;
+
+/**
+ * 같은 줄·같은 서식의 글자를 한 덩어리로 묶는다.
+ *
+ * 묶는 목적은 오직 **갈아끼울 글자를 찾기 위해서**다. 그리는 것은 글자
+ * 하나하나를 원래 x 에 그대로 놓는다 — 합쳐서 한 번에 그리면 원본이 벌려 둔
+ * 사이(예: `성명` 칸과 `수험 번호` 칸)가 뭉개져 글자가 겹친다.
+ */
+function groupLines(items: FrameItem[]) {
+  type Line = {
+    y: number;
+    size: number;
+    font: string;
+    x: number;
+    end: number;
+    items: TextItem[];
+    standalone?: boolean;
+    text: string;
+  };
+  const lines: Line[] = [];
+  for (const it of items) {
+    if (it.k !== "text") continue;
+    const line = it.standalone
+      ? null
+      : lines.find(
+          (l) =>
+            !l.standalone &&
+            Math.abs(l.y - it.y) < 1.2 &&
+            Math.abs(l.size - it.size) < 0.01 &&
+            l.font === it.font,
+        );
+    const right = it.x + (it.len ?? it.size * it.sx);
+    if (line) {
+      line.items.push(it);
+      line.end = Math.max(line.end, right);
+      line.x = Math.min(line.x, it.x);
+    } else {
+      lines.push({
+        y: it.y,
+        size: it.size,
+        font: it.font,
+        x: it.x,
+        end: right,
+        items: [it],
+        standalone: it.standalone,
+        text: "",
+      });
+    }
+  }
+  for (const l of lines) l.text = l.items.map((i) => i.t).join("").replace(/\s+/g, "");
+  return lines;
+}
+
+/** 둥근 네모. pdf-lib 에는 없어서 경로로 직접 그린다. */
+function roundedRectPath(x: number, y: number, w: number, h: number, r: number) {
+  const k = Math.min(r, w / 2, h / 2);
+  return (
+    `M ${x + k} ${y} H ${x + w - k} A ${k} ${k} 0 0 1 ${x + w} ${y + k} ` +
+    `V ${y + h - k} A ${k} ${k} 0 0 1 ${x + w - k} ${y + h} H ${x + k} ` +
+    `A ${k} ${k} 0 0 1 ${x} ${y + h - k} V ${y + k} A ${k} ${k} 0 0 1 ${x + k} ${y} Z`
+  );
+}
+
+/**
+ * 틀만 보고 **본문이 놓일 위아래 끝**을 알아낸다.
+ *
+ * 그리기 전에 알아야 한다 — 전체 쪽수를 쪽번호 상자에 찍으려면 몇 쪽이
+ * 나오는지 먼저 세어야 하고, 세려면 한 쪽에 얼마가 들어가는지 알아야 한다.
+ * 판단 기준은 그리는 쪽과 **같은 규칙**이어야 한다(어긋나면 쪽수가 틀린다).
+ */
+function frameBounds(frame: Frame) {
+  let headerBottom = 0;
+  let contentBottom = LAYOUT.contentBottom;
+  for (const it of frame.items) {
+    if (it.k !== "line" || dropped(it, frame.drop)) continue;
+    // 폭을 거의 다 가로지르는 가로줄이 곧 머리말과 본문의 경계다.
+    if (Math.abs(it.y1 - it.y2) < 0.5 && Math.abs(it.x2 - it.x1) > 400) {
+      headerBottom = Math.max(headerBottom, it.y1);
+    }
+    // 단 구분선이 끝나는 자리가 본문의 아래 끝이다(과목마다 다르다).
+    if (Math.abs(it.x1 - it.x2) < 0.5 && Math.abs(it.y2 - it.y1) > 300) {
+      contentBottom = Math.max(it.y1, it.y2);
+    }
+  }
+  return { headerBottom, contentBottom };
+}
+
+const frameFor = (frames: FrameSet, pageNo: number) =>
+  pageNo === 1 ? frames.first : pageNo % 2 === 0 ? frames.even : frames.odd;
+
+/** 문제마다 위에 붙는 출처 표기. 작게 — 문제지 흉내를 방해하면 안 된다. */
+const LABEL_SIZE = 8.5;
+const LABEL_GAP = 3;
+const LABEL_FONT = "(한)신중명조";
+
+type Placed = {
+  img: PDFImage;
+  label: string;
+  x: number;
+  /** 그림 위 끝(위에서 잰 거리). 표기는 이 위에 놓인다. */
+  y: number;
+  w: number;
+  h: number;
+};
+
+/**
+ * 그림을 단에 흘려 넣어 **쪽을 미리 짜 둔다.**
+ *
+ * 실제로 그리기 전에 한 번 짜 보는 이유는 전체 쪽수 때문이다. 쪽번호 상자의
+ * 사선 아래에 전체 쪽수가 찍히는데, 그 값은 마지막 쪽까지 짜 봐야 안다.
+ */
+function layoutPages(images: { img: PDFImage; label: string }[], frames: FrameSet) {
+  type Page = { colTop: number; bottom: number; col: number; cursor: number; items: Placed[] };
+  const pages: Page[] = [];
+  let page!: Page;
+  const startPage = () => {
+    const b = frameBounds(frameFor(frames, pages.length + 1));
+    page = {
+      colTop: b.headerBottom + LAYOUT.gap,
+      bottom: b.contentBottom,
+      col: 0,
+      cursor: b.headerBottom + LAYOUT.gap,
+      items: [],
+    };
+    pages.push(page);
+  };
+  startPage();
+  for (const { img, label } of images) {
+    const scale = Math.min(LAYOUT.columnWidth / img.width, 1);
+    const w = img.width * scale;
+    const h = img.height * scale;
+    const head = label ? LABEL_SIZE + LABEL_GAP : 0;
+    // 지금 단에 안 들어가면 오른쪽 단으로, 거기도 안 되면 다음 쪽으로.
+    if (page.cursor > page.colTop && page.cursor + head + h > page.bottom) {
+      if (page.col === 0) {
+        page.col = 1;
+        page.cursor = page.colTop;
+      } else {
+        startPage();
+      }
+    }
+    page.items.push({ img, label, x: columnX(page.col), y: page.cursor + head, w, h });
+    page.cursor += head + h + LAYOUT.gap;
+  }
+  return pages;
+}
+
+export type KiceSpec = {
+  frames: FrameSet;
+  /** 틀에 적힌 글자 → 바꿔 넣을 글자(빈 문자열이면 지운다). 공백은 무시하고 찾는다. */
+  replace: Record<string, string>;
+  /** 글꼴 이름 → TTF 바이트. 저작권 때문에 저장소가 아니라 따로 받아 온다. */
+  fonts: Record<string, Uint8Array>;
+  /** 틀이 쓰는 그림(교시 딱지) 이름 → PNG 바이트. */
+  images: Record<string, Uint8Array>;
+  /** `label` 은 문제 위에 작게 찍히는 출처 표기(빈 문자열이면 찍지 않는다). */
+  problems: { png: Uint8Array; label?: string }[];
+};
+
+export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  pdf.registerFontkit(fontkit);
+
+  /**
+   * 글꼴은 **미리 잘라 둔 것**(pyftsubset)을 `subset: false` 로 통째로 넣는다.
+   * pdf-lib(fontkit)의 서브셋터에 맡기면 **글자가 대부분 빈칸으로 찍히는데
+   * 오류는 나지 않는다** — 그 증상 때문에 한참 헤맸다.
+   */
+  const fallback = Object.keys(spec.fonts)[0];
+  const fontCache = new Map<string, PDFFont>();
+  const fontFor = async (name: string) => {
+    const key = spec.fonts[name] ? name : fallback;
+    let font = fontCache.get(key);
+    if (!font) {
+      font = await pdf.embedFont(spec.fonts[key], { subset: false });
+      fontCache.set(key, font);
+    }
+    return font;
+  };
+
+  const imageCache = new Map<string, PDFImage>();
+  const imageFor = async (file: string) => {
+    let img = imageCache.get(file);
+    if (!img) {
+      img = await pdf.embedPng(spec.images[file]);
+      imageCache.set(file, img);
+    }
+    return img;
+  };
+
+  const flip = (y: number) => LAYOUT.pageHeight - y;
+
+  type Draw = { text: string; x: number; alignRight?: number };
+
+  const drawFrame = async (
+    page: PDFPage,
+    frame: Frame,
+    nums: { pageNo: number; total: number },
+  ) => {
+    const items = frame.items.filter((i) => !dropped(i, frame.drop));
+
+    const drawText = async (text: string, o: TextItem, at: Draw) => {
+      // 공백은 그리지 않는다. 글자마다 자리를 따로 잡으므로 공백은 아무 일도
+      // 하지 않는데, 원본이 전각 공백(U+3000)을 쓰는 자리가 있어서 그대로
+      // 그리면 글꼴에 없는 글자라 **네모(⊠)가 찍힌다**(머리말에서 실제로 났다).
+      if (!text || !text.trim()) return;
+      const font = await fontFor(o.font);
+      const sx = o.sx ?? 1;
+      const x =
+        at.alignRight === undefined
+          ? at.x
+          : at.alignRight - font.widthOfTextAtSize(text, o.size) * sx;
+      // **원본이 적어 둔 글자 폭(textLength)은 쓰지 않는다.** 그 값은 원본
+      // 문서의 한컴 전용 글꼴 메트릭으로 계산된 것이라, 우리가 바꿔 넣은
+      // TTF 에 강제로 맞추면 글자마다 눌린 정도가 달라진다 — `제 4 교시` 에서
+      // 숫자만 15% 넓게 늘어나 혼자 커 보였다. 장평(sx)만 쓰면 모든 글자가
+      // 같은 비율이 되고, 글자 자리는 어차피 원본 x 를 그대로 쓴다.
+      page.pushOperators(pushGraphicsState(), concatTransformationMatrix(sx, 0, 0, 1, x, 0));
+      page.drawText(text, { x: 0, y: flip(o.y), size: o.size, font, color: hex(o.fill) });
+      page.pushOperators(popGraphicsState());
+    };
+
+    // 글자 항목마다 무엇을 어디에 그릴지 미리 정해 둔다. 갈아끼우는 판단은
+    // 줄 단위라서 먼저 해야 하지만, 실제로 그리는 건 **문서 순서**여야 한다.
+    const plan = new Map<TextItem, Draw | null>();
+
+    // 쪽번호와 전체 쪽수는 **글자로 짝지어 찾지 않는다.** 값이 쪽마다 달라져서
+    // 문자열로 맞추려 들면 반드시 어긋난다(2쪽의 `2` 와 전체 쪽수 `20` 을
+    // 글자로 구분할 방법이 없다). 틀에 붙여 둔 `role` 로 찾는다.
+    for (const it of items) {
+      if (it.k !== "text" || !it.role) continue;
+      const group = items.filter(
+        (o): o is TextItem =>
+          o.k === "text" &&
+          o.role === it.role &&
+          Math.abs(o.y - it.y) < 1.2 &&
+          Math.abs(o.size - it.size) < 0.01,
+      );
+      if (group[0] !== it) continue; // 무리마다 한 번만
+      for (const o of group) plan.set(o, null);
+      // 여러 자리 숫자는 조각으로 흩어져 있다. 왼쪽 끝에서 한 덩어리로 그린다.
+      const head = group.reduce((a, b) => (a.x <= b.x ? a : b));
+      plan.set(head, {
+        text: String(it.role === "pageTotal" ? nums.total : nums.pageNo),
+        x: head.x,
+        alignRight: it.alignRight,
+      });
+    }
+
+    for (const line of groupLines(items.filter((i) => !(i.k === "text" && i.role)))) {
+      const swap = spec.replace[line.text];
+      if (swap === undefined) {
+        for (const it of line.items) plan.set(it, { text: it.t, x: it.x });
+        continue;
+      }
+      if (!swap) {
+        for (const it of line.items) plan.set(it, null);
+        continue;
+      }
+      const bare = swap.replace(/\s+/g, "");
+      // 괄호 안 과목명은 글자 수가 같아도 **한 덩어리로** 그린다. 자리마다
+      // 한 자씩 끼우면 `(사회·문화)` 의 가운뎃점 자리에 로마숫자 Ⅰ 같은
+      // 가는 글자가 들어가면서 앞뒤가 휑하게 벌어진다.
+      if (bare.length === line.text.length && !swap.startsWith("(")) {
+        // **글자 수가 같으면 자리마다 한 자씩 갈아끼운다.**
+        // `사회탐구 영역` → `과학탐구 영역` 처럼 길이가 같은 경우가 흔한데,
+        // 이때 한 덩어리로 다시 그려 가운데 맞추면 원본이 잡아 둔 글자 자리를
+        // 통째로 벗어난다 — 실제로 영역명이 눈에 띄게 어긋났다.
+        let i = 0;
+        for (const it of line.items) {
+          const n = it.t.replace(/\s+/g, "").length;
+          plan.set(it, n ? { text: bare.slice(i, i + n), x: it.x } : null);
+          i += n;
+        }
+        continue;
+      }
+      // 길이가 다르면 어쩔 수 없이 한 덩어리로 그린다. 제목은 원래 자리의
+      // 가운데를 지키고, 괄호 안 과목명은 원래 시작점에 왼쪽을 맞춘다
+      // (영역명 바로 뒤에 붙어야 하므로 가운데로 옮기면 사이가 벌어진다).
+      const font = await fontFor(line.font);
+      const width = font.widthOfTextAtSize(swap, line.size) * line.items[0].sx;
+      const centered = !swap.startsWith("(");
+      line.items.forEach((it, i) => {
+        plan.set(
+          it,
+          i === 0
+            ? { text: swap, x: centered ? (line.x + line.end) / 2 - width / 2 : line.x }
+            : null,
+        );
+      });
+    }
+
+    for (const it of items) {
+      if (it.k === "rect") {
+        if (it.rx > 0) {
+          // 둥근 모서리. `drawSvgPath` 는 좌표를 **SVG 처럼 위에서 아래로**
+          // 읽으므로 미리 뒤집어 넘기면 두 번 뒤집혀 종이 밖으로 나간다.
+          page.drawSvgPath(roundedRectPath(it.x, it.y, it.w, it.h, it.rx), {
+            x: 0,
+            y: LAYOUT.pageHeight,
+            borderColor: it.stroke ? hex(it.stroke) : undefined,
+            borderWidth: it.stroke ? it.sw || 0.75 : undefined,
+            color: it.fill ? hex(it.fill) : undefined,
+          });
+        } else {
+          page.drawRectangle({
+            x: it.x,
+            y: flip(it.y + it.h),
+            width: it.w,
+            height: it.h,
+            color: it.fill ? hex(it.fill) : undefined,
+            borderColor: it.stroke ? hex(it.stroke) : undefined,
+            borderWidth: it.stroke ? it.sw || 0.5 : undefined,
+          });
+        }
+      } else if (it.k === "line") {
+        page.drawLine({
+          start: { x: it.x1, y: flip(it.y1) },
+          end: { x: it.x2, y: flip(it.y2) },
+          thickness: it.sw || 0.5,
+          color: hex(it.stroke),
+          dashArray: it.dash
+            ? it.dash.split(/[\s,]+/).map(Number).filter((n) => n > 0)
+            : undefined,
+        });
+      } else if (it.k === "circle") {
+        page.drawCircle({ x: it.cx, y: flip(it.cy), size: it.r, color: hex(it.fill) });
+      } else if (it.k === "image") {
+        page.drawImage(await imageFor(it.file), {
+          x: it.x,
+          y: flip(it.y + it.h),
+          width: it.w,
+          height: it.h,
+        });
+      } else {
+        const how = plan.get(it);
+        if (how) await drawText(how.text, it, how);
+      }
+    }
+  };
+
+  // ── 쪽을 짜 두고, 그 결과를 보고 그린다 ─────────────────────────────
+  const images: { img: PDFImage; label: string }[] = [];
+  for (const p of spec.problems) {
+    images.push({ img: await pdf.embedPng(p.png), label: p.label ?? "" });
+  }
+
+  const pages = layoutPages(images, spec.frames);
+  const labelFont = await fontFor(LABEL_FONT);
+
+  for (let n = 0; n < pages.length; n++) {
+    const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
+    await drawFrame(page, frameFor(spec.frames, n + 1), { pageNo: n + 1, total: pages.length });
+    for (const it of pages[n].items) {
+      if (it.label) {
+        page.drawText(it.label, {
+          x: it.x,
+          y: flip(it.y - LABEL_GAP),
+          size: LABEL_SIZE,
+          font: labelFont,
+          color: rgb(0.35, 0.35, 0.35),
+        });
+      }
+      page.drawImage(it.img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
+    }
+  }
+
+  return pdf.save();
+}
