@@ -421,6 +421,11 @@ export default function ResultStage({
 
   // "통째로 다시 그리기"를 고른 문제는 화면이 뜨자마자 큐에 얹는다. 기다리지
   // 않으므로 사용자는 그 사이 정답을 적거나 다음 사진으로 넘어갈 수 있다.
+  //
+  // **넣는 건 기다리지 않고 곧바로 한다.** 저장을 먼저 하고 넣게 했더니, 저장
+  // 왕복이 끝나기 전에 사용자가 다음 사진으로 넘어가면 이 화면이 사라지면서
+  // 작업이 아예 안 들어갔다. 저장은 따로 걸어두고(서버가 결과를 남길 행이
+  // 필요하다), 실제 행 id는 일꾼이 호출 직전에 스냅샷에서 읽어 간다.
   useEffect(() => {
     if (!pendingWholeJob) return;
     enqueue({
@@ -431,6 +436,8 @@ export default function ResultStage({
       mode: "problem",
     });
     onWholeJobQueued?.();
+    // 탭을 닫아도 서버가 결과를 남길 수 있게 문제 행을 미리 만들어 둔다.
+    if (!savedId && onSaveToCategory) void handleSaveToCategory();
     // problemKey/label은 result와 함께 정해진다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingWholeJob]);
@@ -587,12 +594,12 @@ export default function ResultStage({
     fontPt,
   ]);
 
-  async function handleSaveToCategory() {
-    if (!cardRef.current || !onSaveToCategory) return;
+  async function handleSaveToCategory(): Promise<string | null> {
+    if (!cardRef.current || !onSaveToCategory) return null;
     // 자동 저장과 버튼이 겹쳐 동시에 두 번 저장되는 것만 막는다. 이미 저장한
     // 문제를 다시 저장하는 건 막지 않는다 — 그건 "고쳐서 다시 저장"이고,
     // 같은 행을 갱신하므로 문제가 두 개 생기지 않는다.
-    if (isSaving) return;
+    if (isSaving) return null;
     setIsSaving(true);
     setSaveError(null);
     try {
@@ -617,8 +624,10 @@ export default function ResultStage({
       });
       setSavedId(id);
       setDirty(false);
+      return id;
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "저장에 실패했습니다.");
+      return null;
     } finally {
       setIsSaving(false);
     }

@@ -10,8 +10,6 @@ import ProblemGallery, {
 } from "@/components/ProblemGallery";
 import BillingStatus from "@/components/BillingStatus";
 import Logo from "@/components/Logo";
-import FigureJobsProvider from "@/components/FigureJobsProvider";
-import FigureJobsPanel from "@/components/FigureJobsPanel";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
@@ -193,16 +191,11 @@ export default async function CategoryPage({
         checkoutReady={isCheckoutReady()}
       />
 
-      {/* AI 그림 작업 큐는 오답 추가 화면 바깥에 둔다 — 작업이 도는 동안
-          다음 문제로 넘어가도 계속 돌아야 하기 때문이다. 진행 상황은 화면
-          구석에 뜨는 FigureJobsPanel에서 따로 본다. */}
-      <FigureJobsProvider>
-        <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
+      {/* 작업 큐(FigureJobsProvider)와 진행 패널은 루트 레이아웃에 있다 —
+          목록으로 돌아가도 작업이 계속 돌아야 하기 때문이다. */}
+      <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
 
-        <ProblemGallery problems={galleryProblems} />
-
-        <FigureJobsPanel />
-      </FigureJobsProvider>
+      <ProblemGallery problems={galleryProblems} />
     </main>
   );
 }

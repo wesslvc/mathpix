@@ -39,6 +39,11 @@ export type FigureJob = {
    * 다르다(본문 글자까지 살아야 해서 더 크게 보낸다).
    */
   mode?: FigureMode;
+  /**
+   * 저장된 문제 행 id. 문제 전체를 그리는 경우 서버가 이 행에 결과를 직접
+   * 저장한다 — 브라우저를 닫아도 결과가 남게 하려는 것이다.
+   */
+  problemId?: string | null;
   status: "pending" | "running" | "done" | "error";
   error?: string;
   /** 완성된 그림 마크업. 화면이 열려 있으면 미리보기에 바로 반영된다. */
@@ -223,7 +228,18 @@ export default function FigureJobsProvider({
           const res = await fetch("/api/figure", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: forModel, mode }),
+            body: JSON.stringify({
+              image: forModel,
+              mode,
+              // 서버가 결과를 직접 저장할 수 있게 알려준다(탭을 닫아도 남는다).
+              // 작업을 넣을 때는 아직 저장 전일 수 있어서, 화면이 계속 갱신해
+              // 주는 스냅샷에서 **호출 직전에** 최신 행 id를 읽는다.
+              problemId:
+                next.problemId ??
+                snapshotsRef.current.get(next.problemKey)?.problemId ??
+                null,
+              figureId: next.id,
+            }),
           });
           let json: { image?: string; error?: string };
           try {

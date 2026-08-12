@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import FigureJobsProvider from "@/components/FigureJobsProvider";
+import FigureJobsPanel from "@/components/FigureJobsPanel";
 
 /** 로고와 같은 모양의 파비콘. 외부 파일 없이 data URI로 넣어 404를 피한다. */
 const FAVICON_SVG =
@@ -33,7 +35,15 @@ export default function RootLayout({
     <html lang="ko">
       {/* UI는 시스템 산세리프(globals.css에서 지정), 문제 카드만 font-serif로
           명조를 쓴다 — 인쇄물은 명조가 읽기 좋고 화면 UI는 산세리프가 또렷하다. */}
-      <body className="antialiased">{children}</body>
+      {/* AI 작업 큐를 **앱 전체**에 둔다. 실모 페이지 안에 두면 목록으로
+          돌아가는 순간 통째로 사라져서, 그리던 것이 요금만 나가고 없어진다.
+          진행 상황은 화면 구석의 FigureJobsPanel에서 어디서든 볼 수 있다. */}
+      <body className="antialiased">
+        <FigureJobsProvider>
+          {children}
+          <FigureJobsPanel />
+        </FigureJobsProvider>
+      </body>
     </html>
   );
 }
