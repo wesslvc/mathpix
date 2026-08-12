@@ -25,8 +25,88 @@ export const maxDuration = 60;
  */
 const MAX_MODEL_ATTEMPTS = 2;
 
+/**
+ * 다 그린 문제 이미지를 서버가 직접 저장한다.
+ *
+ * **브라우저를 닫아도 결과가 남게 하려는 것이다.** 생성은 1분쯤 걸리는데,
+ * 그 사이에 탭을 닫거나 앱을 바꾸면 브라우저 쪽 fetch는 끊긴다. 그래도 이
+ * 함수는 서버에서 끝까지 돌아 결과를 저장하므로, 토큰만 나가고 아무것도 안
+ * 남는 일이 없다. 화면이 살아 있으면 화면이 더 예쁜 카드로 다시 저장하므로
+ * 이건 "최소한 남기는" 보험이다.
+ *
+ * 실패해도 요청 자체는 성공으로 돌려준다 — 화면이 살아 있으면 그쪽이 저장하고,
+ * 여기서 못 남긴 것 때문에 이미 만든 그림을 버릴 이유는 없다.
+ */
+async function persistWholeProblem(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  problemId: string,
+  figureId: string | null,
+  dataUrl: string,
+): Promise<boolean> {
+  try {
+    const { data: row } = await supabase
+      .from("problems")
+      .select("image_path, box_range")
+      .eq("id", problemId)
+      .maybeSingle();
+    if (!row?.image_path) return false;
+
+    const base64 = dataUrl.split(",")[1];
+    if (!base64) return false;
+    const bytes = Buffer.from(base64, "base64");
+
+    const dir = String(row.image_path).split("/").slice(0, -1).join("/");
+    const newPath = `${dir}/${crypto.randomUUID()}.png`;
+    const { error: upErr } = await supabase.storage
+      .from("problem-images")
+      .upload(newPath, bytes, { contentType: "image/png" });
+    if (upErr) return false;
+
+    // 그림 목록에서 이 그림의 마크업만 갈아끼운다. 화면이 저장해 둔 자리·크기는
+    // 건드리지 않는다(사용자가 옮겨 놨을 수 있다).
+    const box = (row.box_range ?? {}) as Record<string, unknown>;
+    const figures = Array.isArray(box.figures)
+      ? (box.figures as Record<string, unknown>[])
+      : [];
+    const markup = `<img src="${dataUrl}" alt="" />`;
+    const nextFigures =
+      figures.length > 0
+        ? figures.map((f) =>
+            !figureId || f.id === figureId ? { ...f, markup } : f,
+          )
+        : [
+            {
+              id: figureId ?? crypto.randomUUID(),
+              markup,
+              layout: { scale: 100, offsetX: 0, offsetY: 0 },
+              position: 0,
+              kind: "figure",
+            },
+          ];
+
+    const { error: dbErr } = await supabase
+      .from("problems")
+      .update({
+        image_path: newPath,
+        box_range: { ...box, figures: nextFigures },
+      })
+      .eq("id", problemId);
+    if (dbErr) {
+      await supabase.storage.from("problem-images").remove([newPath]);
+      return false;
+    }
+    await supabase.storage
+      .from("problem-images")
+      .remove([String(row.image_path)]);
+    return true;
+  } catch (err) {
+    console.error("[api/figure] 결과 저장 실패:", err);
+    return false;
+  }
+}
+
 export async function POST(req: NextRequest) {
-  let body: { image?: string; mode?: string };
+  let body: { image?: string; mode?: string; problemId?: string; figureId?: string };
   try {
     body = await req.json();
   } catch {
@@ -39,6 +119,10 @@ export async function POST(req: NextRequest) {
   const image = body.image;
   // "problem"이면 문제 한 개 전체를 다시 그린다(탐구). 프롬프트가 달라진다.
   const mode: FigureMode = body.mode === "problem" ? "problem" : "figure";
+  // 문제 전체를 그리는 경우에는 결과를 **서버가 직접 저장**한다. 브라우저를
+  // 닫아도 결과가 남게 하려는 것이다(자세한 이유는 persistWholeProblem 주석).
+  const problemId = typeof body.problemId === "string" ? body.problemId : null;
+  const figureId = typeof body.figureId === "string" ? body.figureId : null;
   if (!image || typeof image !== "string") {
     return NextResponse.json(
       { error: "image(base64 data URL) 필드가 필요합니다." },
@@ -121,7 +205,16 @@ export async function POST(req: NextRequest) {
         );
       }
       console.info(`[api/figure] ok model=${modelId}`);
-      return NextResponse.json({ image: result.dataUrl, modelId });
+      let persisted = false;
+      if (supabase && mode === "problem" && problemId) {
+        persisted = await persistWholeProblem(
+          supabase,
+          problemId,
+          figureId,
+          result.dataUrl,
+        );
+      }
+      return NextResponse.json({ image: result.dataUrl, modelId, persisted });
     } catch (err) {
       // 404(없는 이름)/403(권한 없음)/429(한도)면 이 모델로는 안 된다.
       if (err instanceof FigureImageError && err.shouldTryNextModel) {
