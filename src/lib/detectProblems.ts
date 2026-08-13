@@ -50,6 +50,10 @@ const PROMPT = `이 이미지는 한국 고등학교 문제집·모의고사 지
 - 글자가 잘리지만 않을 정도로 아주 조금만 남기세요. 넉넉하게 잡지 마세요.
 - 문제와 문제 사이의 빈 줄, 단 사이의 빈 공간, 종이 가장자리 여백은 넣지 마세요.
 - 문제마다 하나씩, 서로 겹치지 않게 잡으세요.
+- **한 문제를 여러 조각으로 나누지 마세요.** 발문·조건 박스·자료·선지는 한
+  문제의 일부이지 따로 잡을 것이 아닙니다. 같은 단 안에 있으면 처음부터 끝까지
+  **통째로 하나**로 잡으세요. 조각을 나누는 경우는 아래의 "단을 넘어간 문제"
+  하나뿐입니다.
 - 지면에 단이 둘이면 왼쪽 단을 위에서 아래로 먼저, 그다음 오른쪽 단 순서로 두세요.
 - 머리말, 쪽번호, 광고, 해설은 넣지 마세요.
 
@@ -155,7 +159,37 @@ function group(boxes: (ProblemBox & { no: string })[]): DetectedProblem[] {
     }
     out.push({ boxes: [box] });
   }
-  return out;
+  return out.map(mergeWithinColumn);
+}
+
+/**
+ * 한 문제 안에서 **같은 단에 있는 조각들은 하나로 합친다.**
+ *
+ * 이어 붙이기(`stitchVertically`)는 **단을 넘어간 경우에만** 쓸 물건이다.
+ * 같은 단에서 위아래로 놓인 조각을 이어 붙이면, 조각마다 폭을 다시 맞추고
+ * 사이에 띠를 넣는 바람에 원래 한 덩어리였던 것이 **잘렸다 붙인 티가 난다.**
+ * 같은 단이면 그냥 **둘을 아우르는 네모 하나로 잘라내면** 원본 그대로다.
+ *
+ * (모델이 한 문제를 발문/자료/선지처럼 여러 조각으로 나눠 주는 일이 잦다.)
+ */
+function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
+  if (problem.boxes.length < 2) return problem;
+  const columns = new Map<number, ProblemBox>();
+  for (const b of problem.boxes) {
+    const col = b.x + b.w / 2 < 0.5 ? 0 : 1;
+    const cur = columns.get(col);
+    if (!cur) {
+      columns.set(col, b);
+      continue;
+    }
+    const x = Math.min(cur.x, b.x);
+    const y = Math.min(cur.y, b.y);
+    const right = Math.max(cur.x + cur.w, b.x + b.w);
+    const bottom = Math.max(cur.y + cur.h, b.y + b.h);
+    columns.set(col, { x, y, w: right - x, h: bottom - y });
+  }
+  // 왼쪽 단이 먼저다(읽는 차례).
+  return { boxes: [...columns.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b) };
 }
 
 export async function detectProblems(dataUrl: string): Promise<DetectedProblem[]> {
