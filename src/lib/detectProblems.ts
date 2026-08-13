@@ -24,54 +24,17 @@ export type DetectedProblem = { boxes: ProblemBox[] };
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
-/** 목록을 못 받았을 때 쓸 이름. */
-const FALLBACK_MODEL = "gemini-flash-latest";
-
 /**
- * 쓸 모델을 **계정의 실제 목록에서 고른다.**
+ * 쓸 모델. **사용자가 고른 것을 그대로 쓴다.**
  *
- * 이름을 지어내면 404 로 기능이 통째로 죽는다(모델 이름은 자주 바뀐다).
- * `GET /v1beta/models` 는 **무료**라 한 번 물어보고 고르는 편이 안전하다.
- * 이 저장소가 OpenAI 쪽에서 세운 원칙과 같다 — 추측하지 말고 물어본다.
+ * 한때 계정의 모델 목록에서 자동으로 골랐는데, 고른 모델이 이 일에 안 맞으면
+ * 왜 실패하는지 알 수 없게 된다. 이름 하나로 못박아 두고 바꿔야 할 때는
+ * `GEMINI_DETECT_MODEL` 로 바꾼다. 404 가 나면 그 이름을 그대로 알린다 —
+ * 조용히 다른 모델로 갈아타지 않는다(고른 적 없는 모델에 요금이 나간 적이 있다).
  *
- * 다만 **고르는 건 한 번뿐이고 요청은 그 한 모델에만 나간다.** 실패했을 때
- * 조용히 다른 모델로 갈아타며 요금을 흘리는 짓은 하지 않는다(그래서 404 면
- * 캐시만 비우고 그대로 알린다).
- *
- * `GEMINI_DETECT_MODEL` 이 있으면 묻지 않고 그대로 쓴다.
+ * 자리를 재는 일이라 가장 값싼 등급이면 충분하다.
  */
-let picked: string | null = null;
-
-function rank(name: string): number {
-  // 버전이 높을수록 앞. `gemini-2.5-flash` → 2.5, `gemini-flash-latest` → 큰 값.
-  if (/^gemini-flash-latest$/.test(name)) return 1000;
-  const m = name.match(/gemini-(\d+(?:\.\d+)?)-flash/);
-  return m ? Number(m[1]) : 0;
-}
-
-async function detectModel(key: string): Promise<string> {
-  const fixed = process.env.GEMINI_DETECT_MODEL;
-  if (fixed) return fixed;
-  if (picked) return picked;
-  try {
-    const res = await fetch(`${ENDPOINT}?key=${key}`);
-    if (!res.ok) return FALLBACK_MODEL;
-    const json = (await res.json()) as {
-      models?: { name?: string; supportedGenerationMethods?: string[] }[];
-    };
-    const names = (json.models ?? [])
-      .filter((m) => (m.supportedGenerationMethods ?? []).includes("generateContent"))
-      .map((m) => String(m.name ?? "").replace(/^models\//, ""))
-      // 자리를 재는 일이라 flash 면 충분하다. 특수 목적 모델은 뺀다.
-      .filter((n) => n.includes("flash"))
-      .filter((n) => !/(lite|image|audio|tts|native|thinking|exp|preview)/.test(n));
-    names.sort((a, b) => rank(b) - rank(a));
-    picked = names[0] ?? FALLBACK_MODEL;
-    return picked;
-  } catch {
-    return FALLBACK_MODEL;
-  }
-}
+export const DETECT_MODEL = process.env.GEMINI_DETECT_MODEL ?? "gemini-flash-lite-latest";
 
 const PROMPT = `이 이미지는 한국 고등학교 문제집·모의고사 지면입니다.
 **문제 한 개씩** 차지하는 영역을 모두 찾아 주세요.
@@ -203,8 +166,7 @@ export async function detectProblems(dataUrl: string): Promise<DetectedProblem[]
   const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!m) throw new DetectError("이미지를 읽을 수 없습니다.", 400);
 
-  const model = await detectModel(key);
-  const res = await fetch(`${ENDPOINT}/${model}:generateContent?key=${key}`, {
+  const res = await fetch(`${ENDPOINT}/${DETECT_MODEL}:generateContent?key=${key}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -223,12 +185,10 @@ export async function detectProblems(dataUrl: string): Promise<DetectedProblem[]
 
   const body = await res.text();
   if (!res.ok) {
-    // 404 면 골라 둔 이름이 낡은 것이다. 캐시만 비워 다음에 다시 고르게 하고,
-    // 조용히 다른 모델로 갈아타지는 않는다(고른 적 없는 모델에 요금이 나간다).
-    if (res.status === 404) picked = null;
+    // 조용히 다른 모델로 갈아타지 않는다 — 고른 적 없는 모델에 요금이 나간다.
     throw new DetectError(
       res.status === 404
-        ? `모델 "${model}"을 찾을 수 없습니다. 다시 시도하거나 GEMINI_DETECT_MODEL 환경변수로 지정해 주세요.`
+        ? `모델 "${DETECT_MODEL}"을 찾을 수 없습니다. GEMINI_DETECT_MODEL 환경변수로 바꿔 주세요.`
         : `문제 영역 인식에 실패했습니다 (HTTP ${res.status}).`,
       res.status,
     );
