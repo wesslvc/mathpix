@@ -51,8 +51,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const problems = await detectProblems(body.image);
-    return NextResponse.json({ problems });
+    const { problems, model } = await detectProblems(body.image);
+    return NextResponse.json({ problems, model });
   } catch (err) {
     const status = err instanceof DetectError ? err.status : 500;
     return NextResponse.json(

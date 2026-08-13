@@ -1,13 +1,17 @@
 /**
  * 한 장에 여러 문제가 있는 지면에서 **문제마다의 영역**을 찾아낸다.
  *
- * Gemini 는 이미지에서 물체의 자리를 `box_2d`(0~1000 으로 정규화된
- * `[ymin, xmin, ymax, xmax]`)로 돌려주도록 되어 있다. 문제 하나를 "물체"로
- * 보고 그 규격을 그대로 쓴다.
+ * 좌표 규격은 Gemini 가 정해 둔 `box_2d`(0~1000 으로 정규화된
+ * `[ymin, xmin, ymax, xmax]`)를 쓴다. 문제 하나를 "물체"로 보는 셈이다.
  *
- * **왜 Gemini 인가:** 이건 그림을 만드는 일이 아니라 **자리를 재는** 일이라
- * 값이 싸고 빠른 쪽이 맞다(이미지 생성 모델에 시킬 일이 아니다). 결과가
- * 좌표뿐이라 틀려도 사용자가 눈으로 보고 지우면 그만이다.
+ * **모델은 두 갈래를 고를 수 있다**(`DETECT_PROVIDER`):
+ *   gemini — 기본. 자리를 재는 일에 맞춰 훈련돼 있고 값이 싸다.
+ *   openai — 같은 프롬프트를 GPT 비전 모델에 보낸다. 견줘 보려고 열어 뒀다.
+ * 어느 쪽이든 **응답 형식과 뒤처리(묶기·합치기)는 완전히 같다** — 갈리는 것은
+ * 호출 방법뿐이라, 바꿔 가며 결과만 비교하면 된다.
+ *
+ * 이건 그림을 만드는 일이 아니라 자리를 재는 일이라 값이 싼 등급이면 충분하고,
+ * 결과가 좌표뿐이라 틀려도 사용자가 눈으로 보고 지우면 그만이다.
  */
 
 /** 0~1 로 정규화된 영역. 왼쪽 위가 (0,0). */
@@ -192,11 +196,35 @@ function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
   return { boxes: [...columns.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b) };
 }
 
-export async function detectProblems(dataUrl: string): Promise<DetectedProblem[]> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) {
-    throw new DetectError("GEMINI_API_KEY가 설정되지 않았습니다.", 500);
+/** 모델이 돌려준 글에서 배열을 꺼내 묶는다. 두 갈래가 똑같이 쓴다. */
+function parse(text: string): DetectedProblem[] {
+  const take = (raw: unknown) => {
+    // `json_object` 를 강제하면 배열을 객체로 감싸 준다. 둘 다 받는다.
+    if (Array.isArray(raw)) return raw;
+    const o = raw as Record<string, unknown> | null;
+    for (const k of ["problems", "boxes", "items", "regions"]) {
+      if (o && Array.isArray(o[k])) return o[k];
+    }
+    return [];
+  };
+  try {
+    return group(toBoxes(take(JSON.parse(text))));
+  } catch {
+    // 가끔 앞뒤에 설명을 붙여 준다. 배열만 도려내 다시 해 본다.
+    const a = text.indexOf("[");
+    const b = text.lastIndexOf("]");
+    if (a === -1 || b <= a) throw new DetectError("영역을 읽지 못했습니다.", 502);
+    try {
+      return group(toBoxes(JSON.parse(text.slice(a, b + 1))));
+    } catch {
+      throw new DetectError("영역을 읽지 못했습니다.", 502);
+    }
   }
+}
+
+async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[]; model: string }> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new DetectError("GEMINI_API_KEY가 설정되지 않았습니다.", 500);
   const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!m) throw new DetectError("이미지를 읽을 수 없습니다.", 400);
 
@@ -205,12 +233,7 @@ export async function detectProblems(dataUrl: string): Promise<DetectedProblem[]
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [
-        {
-          parts: [
-            { inline_data: { mime_type: m[1], data: m[2] } },
-            { text: PROMPT },
-          ],
-        },
+        { parts: [{ inline_data: { mime_type: m[1], data: m[2] } }, { text: PROMPT }] },
       ],
       // 자리를 재는 일이라 매번 같은 답이 나와야 한다.
       generationConfig: { responseMimeType: "application/json", temperature: 0 },
@@ -223,29 +246,105 @@ export async function detectProblems(dataUrl: string): Promise<DetectedProblem[]
     throw new DetectError(
       res.status === 404
         ? `모델 "${DETECT_MODEL}"을 찾을 수 없습니다. GEMINI_DETECT_MODEL 환경변수로 바꿔 주세요.`
-        : `문제 영역 인식에 실패했습니다 (HTTP ${res.status}).`,
+        : `문제 영역 인식에 실패했습니다 (${DETECT_MODEL}, HTTP ${res.status}).`,
       res.status,
     );
   }
-
   let text: string;
   try {
-    const json = JSON.parse(body);
-    text = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    text = JSON.parse(body)?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
   } catch {
     throw new DetectError("모델이 정상적인 응답을 주지 않았습니다.", 502);
   }
-  try {
-    return group(toBoxes(JSON.parse(text)));
-  } catch {
-    // 가끔 앞뒤에 설명을 붙여 준다. 배열만 도려내 다시 해 본다.
-    const s = text.indexOf("[");
-    const e = text.lastIndexOf("]");
-    if (s === -1 || e <= s) throw new DetectError("영역을 읽지 못했습니다.", 502);
-    try {
-      return group(toBoxes(JSON.parse(text.slice(s, e + 1))));
-    } catch {
-      throw new DetectError("영역을 읽지 못했습니다.", 502);
-    }
+  return { problems: parse(text), model: DETECT_MODEL };
+}
+
+const OPENAI_MODELS = "https://api.openai.com/v1/models";
+const OPENAI_CHAT = "https://api.openai.com/v1/chat/completions";
+
+/**
+ * 쓸 GPT 모델을 정한다.
+ *
+ * **이름을 지어내지 않는다.** `OPENAI_DETECT_MODEL` 이 있으면 그대로 쓰고,
+ * 없으면 계정의 실제 목록(`/v1/models`, 무료)에서 `OPENAI_DETECT_MATCH`(기본
+ * "luna")가 든 id 를 찾는다. 못 찾으면 후보를 알려 주고 멈춘다 — 비슷해 보이는
+ * 다른 모델로 몰래 갈아타지 않는다(고른 적 없는 모델에 요금이 나간 적이 있다).
+ */
+async function openaiModel(key: string): Promise<string> {
+  const fixed = process.env.OPENAI_DETECT_MODEL;
+  if (fixed) return fixed;
+  const want = (process.env.OPENAI_DETECT_MATCH ?? "luna").toLowerCase();
+
+  const res = await fetch(OPENAI_MODELS, { headers: { Authorization: `Bearer ${key}` } });
+  if (!res.ok) {
+    throw new DetectError(
+      `모델 목록을 받지 못했습니다 (HTTP ${res.status}). OPENAI_DETECT_MODEL 로 이름을 직접 지정해 주세요.`,
+      res.status,
+    );
   }
+  const ids: string[] = ((await res.json())?.data ?? [])
+    .map((m: { id?: string }) => String(m.id ?? ""))
+    .filter(Boolean);
+  const hit = ids.filter((id) => id.toLowerCase().includes(want)).sort();
+  if (hit.length === 0) {
+    const gpt = ids.filter((id) => id.startsWith("gpt")).sort().slice(0, 20);
+    throw new DetectError(
+      `"${want}"가 든 모델이 이 계정에 없습니다. OPENAI_DETECT_MODEL 로 지정해 주세요. ` +
+        `쓸 수 있는 gpt 계열: ${gpt.join(", ") || "(없음)"}`,
+      404,
+    );
+  }
+  return hit[0];
+}
+
+async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[]; model: string }> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new DetectError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
+  const model = await openaiModel(key);
+
+  const res = await fetch(OPENAI_CHAT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `${PROMPT}\n\n답은 {"problems": [...]} 꼴의 JSON 객체로 주세요.` },
+            // 좌표를 재야 하므로 이미지를 흐리게 보면 안 된다.
+            { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+          ],
+        },
+      ],
+      response_format: { type: "json_object" },
+      // temperature 는 보내지 않는다 — 받지 않는 모델이 있어서 400 이 난다.
+    }),
+  });
+
+  const body = await res.text();
+  if (!res.ok) {
+    throw new DetectError(
+      res.status === 404
+        ? `모델 "${model}"을 찾을 수 없습니다. OPENAI_DETECT_MODEL 로 바꿔 주세요.`
+        : `문제 영역 인식에 실패했습니다 (${model}, HTTP ${res.status}). ${body.slice(0, 200)}`,
+      res.status,
+    );
+  }
+  let text: string;
+  try {
+    text = JSON.parse(body)?.choices?.[0]?.message?.content ?? "";
+  } catch {
+    throw new DetectError("모델이 정상적인 응답을 주지 않았습니다.", 502);
+  }
+  return { problems: parse(text), model };
+}
+
+/** 어느 갈래로 부를지. 기본은 gemini. */
+export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "openai" ? "openai" : "gemini";
+
+export async function detectProblems(
+  dataUrl: string,
+): Promise<{ problems: DetectedProblem[]; model: string }> {
+  return DETECT_PROVIDER === "openai" ? withOpenAI(dataUrl) : withGemini(dataUrl);
 }

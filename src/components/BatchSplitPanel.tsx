@@ -71,6 +71,8 @@ export default function BatchSplitPanel({ onSave }: Props) {
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** 어떤 모델이 영역을 잡았는지. 모델을 바꿔 가며 견줄 때 필요하다. */
+  const [usedModel, setUsedModel] = useState<string | null>(null);
   const { enqueue } = useFigureJobs();
 
   async function pick(file: File | undefined) {
@@ -131,9 +133,11 @@ export default function BatchSplitPanel({ onSave }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image: small }),
       });
-      const json: { problems?: DetectedProblem[]; error?: string } = await res.json();
+      const json: { problems?: DetectedProblem[]; model?: string; error?: string } =
+        await res.json();
       if (!res.ok) throw new Error(json.error ?? "문제 영역 인식에 실패했습니다.");
       found = json.problems ?? [];
+      setUsedModel(json.model ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "문제 영역 인식에 실패했습니다.");
       setBusy(null);
@@ -296,6 +300,11 @@ export default function BatchSplitPanel({ onSave }: Props) {
       )}
 
       {busy && <p className="text-xs text-slate-500">{busy}</p>}
+      {!busy && usedModel && pieces.length > 0 && (
+        <p className="text-[11px] text-slate-400">
+          {usedModel} 로 {pieces.length}개를 잡았습니다
+        </p>
+      )}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {pieces.length > 0 && (
