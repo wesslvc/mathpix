@@ -13,6 +13,15 @@
 /** 0~1 로 정규화된 영역. 왼쪽 위가 (0,0). */
 export type ProblemBox = { x: number; y: number; w: number; h: number };
 
+/**
+ * 문제 하나. `boxes` 가 둘 이상이면 **단을 넘어 이어진 문제**다.
+ *
+ * 모의고사 지면에서는 문제 하나가 왼쪽 단 아래에서 시작해 오른쪽 단 위로
+ * 이어지는 경우가 흔하다. 그런 문제는 조각을 따로 잘라 세로로 이어 붙여야
+ * 한 문제가 된다.
+ */
+export type DetectedProblem = { boxes: ProblemBox[] };
+
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /**
@@ -37,16 +46,22 @@ const PROMPT = `이 이미지는 한국 고등학교 문제집·모의고사 지
 - 잘려서 일부만 보이는 문제도 보이는 만큼 잡으세요.
 - 글자가 잘리지 않게 사방으로 조금 넉넉하게 잡으세요.
 
-결과는 JSON 배열로만 답하세요. 각 항목은
-{"box_2d": [ymin, xmin, ymax, xmax], "label": "12번"} 형식이고
-좌표는 0~1000 으로 정규화한 값입니다. 설명은 쓰지 마세요.`;
+**단을 넘어 이어진 문제**가 흔합니다. 왼쪽 단 아래에서 시작해 오른쪽 단 위로
+이어지는 문제는 **조각마다 하나씩** 잡되, no 에 **같은 문제 번호**를 적어
+주세요(뒤 조각에 번호가 안 보여도 앞 조각의 번호를 그대로 적습니다).
+그렇게 해야 두 조각을 이어 붙여 한 문제로 만들 수 있습니다.
 
-type GeminiBox = { box_2d?: unknown; label?: unknown };
+결과는 JSON 배열로만 답하세요. 각 항목은
+{"box_2d": [ymin, xmin, ymax, xmax], "no": "12"} 형식이고
+좌표는 0~1000 으로 정규화한 값, no 는 문제 번호(숫자만)입니다.
+번호를 알 수 없으면 no 를 빈 문자열로 두세요. 설명은 쓰지 마세요.`;
+
+type GeminiBox = { box_2d?: unknown; no?: unknown; label?: unknown };
 
 /** 응답에서 배열을 뽑아 0~1 좌표로 바꾼다. 모양이 이상한 항목은 버린다. */
-function toBoxes(raw: unknown): ProblemBox[] {
+function toBoxes(raw: unknown): (ProblemBox & { no: string })[] {
   if (!Array.isArray(raw)) return [];
-  const out: ProblemBox[] = [];
+  const out: (ProblemBox & { no: string })[] = [];
   for (const item of raw as GeminiBox[]) {
     const b = item?.box_2d;
     if (!Array.isArray(b) || b.length !== 4) continue;
@@ -58,11 +73,14 @@ function toBoxes(raw: unknown): ProblemBox[] {
     const h = Math.abs(ymax - ymin) / 1000;
     // 너무 작은 것은 문제가 아니라 부스러기다(쪽번호·머리말 조각 등).
     if (w < 0.05 || h < 0.03) continue;
+    // 번호는 숫자만 남긴다("12번", "12." 처럼 붙여 오는 경우가 있다).
+    const no = String(item?.no ?? item?.label ?? "").replace(/[^0-9]/g, "");
     out.push({
       x: Math.max(0, Math.min(1, x)),
       y: Math.max(0, Math.min(1, y)),
       w: Math.min(w, 1 - Math.max(0, Math.min(1, x))),
       h: Math.min(h, 1 - Math.max(0, Math.min(1, y))),
+      no,
     });
   }
   // 왼쪽 단 → 오른쪽 단, 각 단에서는 위에서 아래로. 모델이 순서를 지키지
@@ -85,7 +103,32 @@ export class DetectError extends Error {
   }
 }
 
-export async function detectProblemBoxes(dataUrl: string): Promise<ProblemBox[]> {
+/**
+ * 같은 문제 번호를 단 조각들을 **한 문제로 묶는다.**
+ *
+ * 단을 넘어 이어진 문제는 조각이 왼쪽 단 맨 아래와 오른쪽 단 맨 위에 있어
+ * 순서상 붙어 있지 않다. 번호로 묶으면 자리가 떨어져 있어도 하나가 된다.
+ * 번호가 없는 조각은 묶을 근거가 없으므로 각각 한 문제로 둔다.
+ *
+ * 묶음의 순서는 **첫 조각이 나온 차례**다(자른 차례가 곧 문제 차례다).
+ */
+function group(boxes: (ProblemBox & { no: string })[]): DetectedProblem[] {
+  const out: DetectedProblem[] = [];
+  const byNo = new Map<string, DetectedProblem>();
+  for (const { no, ...box } of boxes) {
+    const found = no ? byNo.get(no) : undefined;
+    if (found) {
+      found.boxes.push(box);
+      continue;
+    }
+    const made: DetectedProblem = { boxes: [box] };
+    if (no) byNo.set(no, made);
+    out.push(made);
+  }
+  return out;
+}
+
+export async function detectProblems(dataUrl: string): Promise<DetectedProblem[]> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) {
     throw new DetectError("GEMINI_API_KEY가 설정되지 않았습니다.", 500);
@@ -129,14 +172,14 @@ export async function detectProblemBoxes(dataUrl: string): Promise<ProblemBox[]>
     throw new DetectError("모델이 정상적인 응답을 주지 않았습니다.", 502);
   }
   try {
-    return toBoxes(JSON.parse(text));
+    return group(toBoxes(JSON.parse(text)));
   } catch {
     // 가끔 앞뒤에 설명을 붙여 준다. 배열만 도려내 다시 해 본다.
     const s = text.indexOf("[");
     const e = text.lastIndexOf("]");
     if (s === -1 || e <= s) throw new DetectError("영역을 읽지 못했습니다.", 502);
     try {
-      return toBoxes(JSON.parse(text.slice(s, e + 1)));
+      return group(toBoxes(JSON.parse(text.slice(s, e + 1))));
     } catch {
       throw new DetectError("영역을 읽지 못했습니다.", 502);
     }

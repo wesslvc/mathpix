@@ -2,13 +2,18 @@
 
 import { useRef, useState } from "react";
 import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage } from "@/lib/cropImage";
-import { PROBLEM_INPUT_DIM, prepareFigureForModel, rasterToSvg } from "@/lib/figureImage";
+import {
+  PROBLEM_INPUT_DIM,
+  prepareFigureForModel,
+  rasterToSvg,
+  stitchVertically,
+} from "@/lib/figureImage";
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import { toStoredFigures, type StoredBoxRange } from "@/lib/storedFigures";
 import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
-import type { ProblemBox } from "@/lib/detectProblems";
+import type { DetectedProblem } from "@/lib/detectProblems";
 import { useFigureJobs } from "./FigureJobsProvider";
 
 /**
@@ -30,7 +35,8 @@ const WHOLE_PROBLEM_LAYOUT: DiagramLayout = { scale: 100, offsetX: 0, offsetY: 0
 /** 인식한 영역을 자를 때 사방으로 더 주는 여유(비율). 글자가 잘리는 걸 막는다. */
 const PAD = 0.01;
 
-type Piece = { id: string; crop: string };
+/** `parts` 가 2 이상이면 단을 넘어 이어진 문제를 이어 붙인 것이다. */
+type Piece = { id: string; crop: string; parts: number };
 
 type Props = {
   /** 문제 하나를 저장하고 그 행 id를 돌려준다(AddProblemFlow가 준다). */
@@ -78,26 +84,31 @@ export default function BatchSplitPanel({ onSave }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image: small }),
       });
-      const json: { boxes?: ProblemBox[]; error?: string } = await res.json();
+      const json: { problems?: DetectedProblem[]; error?: string } = await res.json();
       if (!res.ok) throw new Error(json.error ?? "문제 영역 인식에 실패했습니다.");
-      const boxes = json.boxes ?? [];
-      if (boxes.length === 0) {
+      const found = json.problems ?? [];
+      if (found.length === 0) {
         setError("문제 영역을 찾지 못했습니다. 지면이 또렷하게 나온 사진으로 다시 해보세요.");
         setPieces([]);
         return;
       }
 
       const img = await loadImage(pageImage);
-      const next: Piece[] = boxes.map((b) => {
+      const cut = (b: DetectedProblem["boxes"][number]) => {
         const x = Math.max(0, b.x - PAD) * img.naturalWidth;
         const y = Math.max(0, b.y - PAD) * img.naturalHeight;
         const w = Math.min(1 - b.x + PAD, b.w + PAD * 2) * img.naturalWidth;
         const h = Math.min(1 - b.y + PAD, b.h + PAD * 2) * img.naturalHeight;
-        return {
+        return cropImageToDataUrl(img, { x, y, width: w, height: h });
+      };
+      // 단을 넘어 이어진 문제는 조각을 **읽는 차례대로 세로로 이어 붙인다.**
+      const next: Piece[] = await Promise.all(
+        found.map(async (prob) => ({
           id: crypto.randomUUID(),
-          crop: cropImageToDataUrl(img, { x, y, width: w, height: h }),
-        };
-      });
+          crop: await stitchVertically(prob.boxes.map(cut)),
+          parts: prob.boxes.length,
+        })),
+      );
       setPieces(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "문제 영역 인식에 실패했습니다.");
@@ -229,6 +240,7 @@ export default function BatchSplitPanel({ onSave }: Props) {
               <img src={p.crop} alt="" className="w-full object-contain" />
               <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 text-[11px] text-white">
                 {i + 1}
+                {p.parts > 1 && ` · ${p.parts}조각 합침`}
               </span>
               <button
                 type="button"
