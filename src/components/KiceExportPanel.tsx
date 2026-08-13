@@ -32,6 +32,8 @@ import { KICE_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
  */
 const LAYOUTS = [
   { key: "tamgu", label: "탐구 기본 (4·6·6·4)", pattern: [4, 6, 6, 4] },
+  // 한 쪽에 하나만. 왼쪽 단에 문제, 오른쪽 단은 통째로 풀이 공간이 된다.
+  { key: "p1", label: "한 쪽에 1개", pattern: [1] },
   { key: "c1", label: "한 단에 1개", pattern: [2] },
   { key: "c2", label: "한 단에 2개", pattern: [4] },
   { key: "c3", label: "한 단에 3개", pattern: [6] },
