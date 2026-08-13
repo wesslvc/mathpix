@@ -9,6 +9,7 @@ import {
   type KiceArea,
 } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
+import { stripCardBorder } from "@/lib/kice/stripBorder";
 import { KICE_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
 
 /**
@@ -53,7 +54,9 @@ type Props = {
 async function loadPng(url: string): Promise<Uint8Array> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`이미지를 불러오지 못했습니다 (HTTP ${res.status}).`);
-  return new Uint8Array(await res.arrayBuffer());
+  // 예전에 저장된 문제에는 카드 테두리가 구워져 있다. 실제 문제지에는 없는
+  // 네모라서 여기서 지운다.
+  return stripCardBorder(new Uint8Array(await res.arrayBuffer()));
 }
 
 export default function KiceExportPanel({ title, items }: Props) {
