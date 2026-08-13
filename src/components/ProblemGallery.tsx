@@ -78,10 +78,80 @@ async function captureNode(node: HTMLElement): Promise<Blob> {
   return await (await fetch(dataUrl)).blob();
 }
 
+/**
+ * 자리 번호 칸. **숫자를 직접 적어 그 자리로 보낼 수 있다.**
+ *
+ * 화살표만으로는 20번을 1번으로 보내려면 열아홉 번을 눌러야 한다.
+ * 적은 값은 Enter 나 칸을 벗어날 때 반영하고, 실제 자리가 바뀌면 그 값으로
+ * 되돌린다(범위를 벗어난 값을 적었을 때 화면과 어긋나지 않게).
+ */
+function OrderInput({
+  index,
+  total,
+  disabled,
+  onCommit,
+}: {
+  index: number;
+  total: number;
+  disabled: boolean;
+  onCommit: (to: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(index + 1));
+  useEffect(() => setDraft(String(index + 1)), [index]);
+
+  function commit() {
+    const n = Number.parseInt(draft, 10);
+    if (!Number.isFinite(n) || n === index + 1) {
+      setDraft(String(index + 1));
+      return;
+    }
+    onCommit(Math.min(Math.max(n, 1), total) - 1);
+    // 옮겨지면 index 가 바뀌어 위 이펙트가 새 번호를 넣어 준다. **안 바뀌는
+    // 경우**(자리가 그대로거나 저장에 실패해 되돌아간 경우)에도 칸에 적어 둔
+    // 값이 남아 있으면 화면과 어긋나므로 여기서 원래 번호로 되돌린다.
+    setDraft(String(index + 1));
+  }
+
+  return (
+    <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") setDraft(String(index + 1));
+        }}
+        disabled={disabled}
+        inputMode="numeric"
+        aria-label="자리 번호"
+        className="w-10 rounded border border-slate-300 px-1 py-0.5 text-center text-xs text-ink focus:border-blue-500 focus:outline-none disabled:opacity-40"
+      />
+      번
+    </label>
+  );
+}
+
 export default function ProblemGallery({ problems }: Props) {
   const router = useRouter();
   const [list, setList] = useState<GalleryProblem[]>(problems);
   const [busyId, setBusyId] = useState<string | null>(null);
+  /**
+   * 카드로 볼지 목록으로 볼지.
+   *
+   * 순서를 바꿀 때는 카드가 불편하다 — 한 화면에 두세 개밖에 안 들어와서 멀리
+   * 보내려면 계속 스크롤해야 한다. 목록은 한 줄에 하나씩이라 한눈에 들어오고,
+   * 자리 번호를 직접 적어 곧바로 보낼 수도 있다.
+   */
+  const [view, setView] = useState<"card" | "list">("card");
+  useEffect(() => {
+    const saved = window.localStorage.getItem("gallery-view");
+    if (saved === "list" || saved === "card") setView(saved);
+  }, []);
+  function pickView(next: "card" | "list") {
+    setView(next);
+    window.localStorage.setItem("gallery-view", next);
+  }
   const [editing, setEditing] = useState<GalleryProblem | null>(null);
   const [editText, setEditText] = useState("");
   const [editAnswer, setEditAnswer] = useState("");
@@ -241,36 +311,50 @@ export default function ProblemGallery({ problems }: Props) {
     return cardFigures.filter((f) => f.id !== id && f.position === here).length;
   }
 
-  async function move(index: number, dir: -1 | 1) {
-    const j = index + dir;
-    if (j < 0 || j >= list.length) return;
+  /**
+   * 문제를 **원하는 자리로 보낸다.**
+   *
+   * 자리마다 붙어 있던 `sort_order` 값은 그대로 두고 **누가 그 자리를 갖는지만**
+   * 바꾼다. 새 값을 지어내면(예: 사이 값 끼워넣기) 값이 점점 촘촘해지다 결국
+   * 끼울 자리가 없어지는데, 자리를 돌려 쓰면 그 일이 없다.
+   *
+   * 바뀐 행만 갱신한다 — 한 칸 옮기면 두 행, 멀리 보내면 그 사이 행들만이다.
+   */
+  async function moveTo(index: number, target: number) {
+    const to = Math.max(0, Math.min(list.length - 1, target));
+    if (to === index) return;
 
-    const a = list[index];
-    const b = list[j];
-    if (a.sortOrder == null || b.sortOrder == null) {
+    const orders = list.map((p) => p.sortOrder);
+    if (orders.some((o) => o == null)) {
       window.alert(
         "정렬 순서가 아직 준비되지 않았습니다. 0003 마이그레이션 SQL을 실행했는지 확인해주세요.",
       );
       return;
     }
+    const slots = [...(orders as number[])].sort((a, b) => a - b);
 
-    setBusyId(a.id);
+    const moved = list[index];
+    setBusyId(moved.id);
 
-    // 두 문제의 sort_order 값을 서로 맞바꾼다.
-    const next = [...list];
-    next[index] = { ...b, sortOrder: a.sortOrder };
-    next[j] = { ...a, sortOrder: b.sortOrder };
+    const reordered = [...list];
+    reordered.splice(index, 1);
+    reordered.splice(to, 0, moved);
+    const next = reordered.map((p, i) => ({ ...p, sortOrder: slots[i] }));
+    const changed = next.filter(
+      (p) => p.sortOrder !== list.find((x) => x.id === p.id)?.sortOrder,
+    );
     setList(next);
 
     try {
       const supabase = createClient();
-      // 서로 독립된 두 행 갱신이라 동시에 보내도 안전하다(순서대로 기다리면
-      // 왕복이 두 번 겹쳐 느려진다).
-      const [{ error: e1 }, { error: e2 }] = await Promise.all([
-        supabase.from("problems").update({ sort_order: b.sortOrder }).eq("id", a.id),
-        supabase.from("problems").update({ sort_order: a.sortOrder }).eq("id", b.id),
-      ]);
-      if (e1 || e2) throw e1 ?? e2;
+      // 서로 독립된 행 갱신이라 동시에 보낸다(순서대로 기다리면 왕복이 겹쳐 느리다).
+      const results = await Promise.all(
+        changed.map((p) =>
+          supabase.from("problems").update({ sort_order: p.sortOrder }).eq("id", p.id),
+        ),
+      );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
     } catch (err) {
       // 실패하면 원래 순서로 되돌린다.
       setList(list);
@@ -408,61 +492,138 @@ export default function ProblemGallery({ problems }: Props) {
     );
   }
 
+  /** 목록에서 보여줄 한 줄짜리 본문 미리보기. */
+  function preview(problem: GalleryProblem): string {
+    const t = problem.text.replace(/\s+/g, " ").trim();
+    if (!t) return "이미지 문제";
+    return t.length > 60 ? `${t.slice(0, 60)}…` : t;
+  }
+
+  const rowButtons = (problem: GalleryProblem, index: number) => (
+    <>
+      <button
+        type="button"
+        onClick={() => moveTo(index, index - 1)}
+        disabled={index === 0 || busyId === problem.id}
+        aria-label="앞으로"
+        className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+      >
+        ↑
+      </button>
+      <button
+        type="button"
+        onClick={() => moveTo(index, index + 1)}
+        disabled={index === list.length - 1 || busyId === problem.id}
+        aria-label="뒤로"
+        className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+      >
+        ↓
+      </button>
+      <button
+        type="button"
+        onClick={() => openEdit(problem)}
+        className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+      >
+        수정
+      </button>
+      <button
+        type="button"
+        onClick={() => remove(problem)}
+        disabled={busyId === problem.id}
+        className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+      >
+        삭제
+      </button>
+    </>
+  );
+
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {list.map((problem, index) => (
-          <div
-            key={problem.id}
-            className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={problem.imageUrl}
-              alt="저장된 오답"
-              className="w-full rounded object-contain"
-            />
-            <div className="flex flex-wrap items-center justify-between gap-1 px-1 pb-1">
-              <span className="text-xs text-slate-400">{index + 1}번</span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => move(index, -1)}
-                  disabled={index === 0 || busyId === problem.id}
-                  aria-label="앞으로"
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  onClick={() => move(index, 1)}
-                  disabled={index === list.length - 1 || busyId === problem.id}
-                  aria-label="뒤로"
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openEdit(problem)}
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
-                >
-                  수정
-                </button>
-                <button
-                  type="button"
-                  onClick={() => remove(problem)}
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs text-slate-400">
+          {list.length}개 · 번호 칸에 자리를 직접 적으면 그 자리로 보냅니다
+        </p>
+        <div className="flex gap-1">
+          {(["card", "list"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => pickView(v)}
+              className={`rounded-lg border px-3 py-1 text-xs font-medium ${
+                view === v
+                  ? "border-blue-600 bg-blue-50 text-blue-700"
+                  : "border-slate-300 text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              {v === "card" ? "카드" : "목록"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {view === "list" ? (
+        <ul className="flex flex-col divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+          {list.map((problem, index) => (
+            <li
+              key={problem.id}
+              className={`flex items-center gap-2 px-2 py-1.5 ${
+                busyId === problem.id ? "opacity-50" : ""
+              }`}
+            >
+              <OrderInput
+                index={index}
+                total={list.length}
+                disabled={busyId === problem.id}
+                onCommit={(to) => void moveTo(index, to)}
+              />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={problem.imageUrl}
+                alt=""
+                className="h-10 w-14 shrink-0 rounded border border-slate-200 object-cover object-top"
+              />
+              <span className="min-w-0 flex-1 truncate text-xs text-slate-600">
+                {preview(problem)}
+              </span>
+              {problem.answer.trim() !== "" && (
+                <span className="shrink-0 text-xs text-slate-400">
+                  {formatAnswer(problem.answer, problem.answerType)}
+                </span>
+              )}
+              <div className="flex shrink-0 items-center gap-1">
+                {rowButtons(problem, index)}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {list.map((problem, index) => (
+            <div
+              key={problem.id}
+              className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={problem.imageUrl}
+                alt="저장된 오답"
+                className="w-full rounded object-contain"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-1 px-1 pb-1">
+                <OrderInput
+                  index={index}
+                  total={list.length}
                   disabled={busyId === problem.id}
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-                >
-                  삭제
-                </button>
+                  onCommit={(to) => void moveTo(index, to)}
+                />
+                <div className="flex items-center gap-1">
+                  {rowButtons(problem, index)}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {editing && (
         <div
