@@ -12,6 +12,7 @@ import type { StoredBoxRange } from "@/lib/storedFigures";
 import type { TokenStatus } from "@/app/api/tokens/route";
 import { rasterToSvg } from "@/lib/figureImage";
 import type { DiagramLayout } from "@/lib/diagramLayout";
+import BatchSplitPanel from "./BatchSplitPanel";
 
 /**
  * "통째로 AI로 다시 그리기"로 만든 문제 이미지의 배치.
@@ -322,6 +323,12 @@ export default function AddProblemFlow({
         >
           + 오답 추가
         </button>
+      )}
+
+      {/* 지면 통째로 넣기. 실험적인 기능이라 무제한 계정에서만 보인다
+          (서버에서도 막는다 — 화면은 얼마든지 우회할 수 있다). */}
+      {stage === "idle" && tokenStatus?.unlimited && (
+        <BatchSplitPanel onSave={handleSaveToCategory} />
       )}
 
       {stage === "idle" && !canAdd && (
