@@ -126,43 +126,84 @@ export class DetectError extends Error {
   }
 }
 
+/** 어느 단에 있는가. 0 = 왼쪽, 1 = 오른쪽. */
+const columnOf = (b: ProblemBox) => (b.x + b.w / 2 < 0.5 ? 0 : 1);
+
 /**
- * 같은 문제 번호를 단 조각들을 **한 문제로 묶는다.**
+ * 묶을 때 쓰는 기준들.
  *
- * 단을 넘어 이어진 문제는 조각이 왼쪽 단 맨 아래와 오른쪽 단 맨 위에 있어
- * 순서상 붙어 있지 않다. 번호로 묶으면 자리가 떨어져 있어도 하나가 된다.
- * 번호가 없는 조각은 묶을 근거가 없으므로 각각 한 문제로 둔다.
+ * **잘못 묶으면 문제가 사라진다**(같은 단이면 하나로 합쳐지므로). 못 묶으면
+ * 조각 두 개로 남을 뿐이고 사용자가 눈으로 보고 지우면 된다. 그래서 기준은
+ * 전부 **안 묶는 쪽으로 기울여** 잡는다.
+ */
+/** 같은 단에서 이어진 조각으로 볼 세로 간격(지면 높이 대비). */
+const ADJACENT = 0.06;
+/** 앞 조각이 단 아래까지 내려왔다고 볼 자리. */
+const NEAR_BOTTOM = 0.85;
+/** 이 조각이 단 맨 위에서 시작한다고 볼 자리. */
+const NEAR_TOP = 0.15;
+
+/** 같은 번호가 붙은 조각을 정말 이어 붙여도 되는가. */
+function canJoin(target: DetectedProblem, box: ProblemBox): boolean {
+  const last = target.boxes[target.boxes.length - 1];
+  // 단이 다르면 단을 넘어간 것이다.
+  if (columnOf(last) !== columnOf(box)) return true;
+  // 같은 단이면 **붙어 있어야** 한 문제다. 멀리 떨어져 있으면 모델이 서로 다른
+  // 문제에 같은 번호를 붙인 것이고, 그대로 합치면 사이에 있던 문제가 사라진다.
+  return box.y - (last.y + last.h) < ADJACENT;
+}
+
+/**
+ * 번호가 없는 조각이 **앞 문제가 단을 넘어온 것**인가.
  *
- * 묶음의 순서는 **첫 조각이 나온 차례**다(자른 차례가 곧 문제 차례다).
+ * 새 문제는 반드시 번호로 시작하므로 번호가 없으면 앞 문제의 나머지다 —
+ * 다만 그건 모델이 번호를 **읽었는데 안 적은** 경우에만 맞는 말이다. 번호를
+ * 아예 안 적어 주는 모델도 있어서, 그때 이 규칙을 그대로 믿으면 오른쪽 단
+ * 첫 문제가 통째로 앞 문제에 흡수돼 **사라진다**(실제로 그랬다).
+ * 그래서 두 가지를 함께 본다:
+ * ① **모델이 번호를 실제로 적어 주고 있어야 한다**(적어도 절반은). 아무 조각에도
+ *    번호가 없다면 "번호가 없다"는 사실이 아무 뜻도 없기 때문이다 — 자리만으로는
+ *    "단을 넘어온 뒷부분"과 "오른쪽 단의 첫 문제"를 구분할 방법이 없다(둘 다
+ *    왼쪽은 바닥까지, 오른쪽은 꼭대기부터다).
+ * ② 앞 조각이 단 아래까지 내려왔고 이 조각이 단 맨 위에서 시작해야 한다.
+ */
+function continuesAcrossColumn(prev: DetectedProblem, box: ProblemBox): boolean {
+  const last = prev.boxes[prev.boxes.length - 1];
+  if (columnOf(last) === columnOf(box)) return false;
+  return last.y + last.h > NEAR_BOTTOM && box.y < NEAR_TOP;
+}
+
+/**
+ * 조각들을 문제 단위로 묶는다.
+ *
+ * 묶는 근거는 두 가지다 — ① 같은 문제 번호, ② 번호가 없는데 단을 넘어온 자리.
+ * 어느 쪽이든 위의 기준을 통과해야 한다. 묶음의 순서는 **첫 조각이 나온
+ * 차례**다(자른 차례가 곧 문제 차례다).
  */
 function group(boxes: (ProblemBox & { no: string })[]): DetectedProblem[] {
   const out: DetectedProblem[] = [];
   const byNo = new Map<string, DetectedProblem>();
+  // 모델이 번호를 실제로 적어 주고 있는가. 아니면 "번호 없음"은 아무 뜻도 없다.
+  const numbersUsable = boxes.filter((b) => b.no).length * 2 >= boxes.length;
   let prevColumn = -1;
   for (const { no, ...box } of boxes) {
-    const column = box.x + box.w / 2 < 0.5 ? 0 : 1;
+    const column = columnOf(box);
     const firstInColumn = column !== prevColumn;
     prevColumn = column;
 
-    if (no) {
-      const found = byNo.get(no);
-      if (found) found.boxes.push(box);
-      else {
-        const made: DetectedProblem = { boxes: [box] };
-        byNo.set(no, made);
-        out.push(made);
-      }
+    const sameNo = no ? byNo.get(no) : undefined;
+    if (sameNo && canJoin(sameNo, box)) {
+      sameNo.boxes.push(box);
       continue;
     }
-    // **번호가 없는 조각은 새 문제가 아니다.** 새 문제는 반드시 번호로
-    // 시작하므로, 번호 없이 시작하는 덩어리는 앞 문제의 나머지다. 그런 일이
-    // 생기는 자리는 **단이 바뀐 첫 덩어리**뿐이다(한 단 안에서는 문제가
-    // 끊기지 않는다). 지면 맨 처음 조각은 앞 문제가 없으므로 그냥 둔다.
-    if (firstInColumn && out.length > 0) {
-      out[out.length - 1].boxes.push(box);
+    const prev = out[out.length - 1];
+    if (!no && numbersUsable && firstInColumn && prev && continuesAcrossColumn(prev, box)) {
+      prev.boxes.push(box);
       continue;
     }
-    out.push({ boxes: [box] });
+    const made: DetectedProblem = { boxes: [box] };
+    if (no) byNo.set(no, made);
+    out.push(made);
   }
   return out.map(mergeWithinColumn);
 }
@@ -181,7 +222,7 @@ function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
   if (problem.boxes.length < 2) return problem;
   const columns = new Map<number, ProblemBox>();
   for (const b of problem.boxes) {
-    const col = b.x + b.w / 2 < 0.5 ? 0 : 1;
+    const col = columnOf(b);
     const cur = columns.get(col);
     if (!cur) {
       columns.set(col, b);
