@@ -70,8 +70,14 @@ export const frameKeyFor = (area: KiceArea): keyof KiceFrames =>
 
 let cached: Promise<KiceFrames> | null = null;
 
+/**
+ * **`force-cache` 를 쓰면 안 된다.** 그러면 브라우저가 오래된 사본을 그대로
+ * 내주어서, 틀을 고쳐 배포해도 쓰던 사람에게는 며칠씩 옛 문제지가 나온다
+ * (실제로 수학 표지에서 없앤 칸이 계속 보였다). `no-cache` 는 캐시를 쓰되
+ * 매번 확인은 한다 — 안 바뀌었으면 304 라 26KB 를 다시 받지 않는다.
+ */
 export function loadKiceFrames(): Promise<KiceFrames> {
-  cached ??= fetch("/kice/frames.json", { cache: "force-cache" }).then((res) => {
+  cached ??= fetch("/kice/frames.json", { cache: "no-cache" }).then((res) => {
     if (!res.ok) throw new Error("평가원 문제지 틀을 불러오지 못했습니다.");
     return res.json() as Promise<KiceFrames>;
   });
@@ -87,7 +93,7 @@ export async function loadFrameImages(set: FrameSet): Promise<Record<string, Uin
   const out: Record<string, Uint8Array> = {};
   await Promise.all(
     [...names].map(async (name) => {
-      const res = await fetch(`/kice/${name}`, { cache: "force-cache" });
+      const res = await fetch(`/kice/${name}`, { cache: "no-cache" });
       if (!res.ok) throw new Error(`틀 그림을 불러오지 못했습니다 (${name}).`);
       out[name] = new Uint8Array(await res.arrayBuffer());
     }),
