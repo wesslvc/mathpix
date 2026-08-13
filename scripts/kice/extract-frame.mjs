@@ -8,6 +8,7 @@
 // 단위: SVG 는 96dpi px, PDF 는 pt. pt = px * 0.75.
 
 import fs from "node:fs";
+import path from "node:path";
 
 const PX_TO_PT = 0.75;
 
@@ -127,7 +128,9 @@ export function extractFrame(svgPath) {
   return { width, height, items };
 }
 
-if (process.argv[2]) {
+// 직접 실행했을 때만 CLI 로 동작한다. 이 조건이 없으면 이 파일을 **불러 쓰는**
+// 쪽의 인자를 SVG 경로로 착각해서 엉뚱한 것을 읽는다.
+if (process.argv[1] && import.meta.url.endsWith(path.basename(process.argv[1])) && process.argv[2]) {
   const frame = extractFrame(process.argv[2]);
   const counts = frame.items.reduce((acc, i) => ((acc[i.k] = (acc[i.k] ?? 0) + 1), acc), {});
   console.error(
