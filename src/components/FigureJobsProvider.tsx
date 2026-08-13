@@ -11,8 +11,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import {
   MODEL_INPUT_DIM,
-  PROBLEM_INPUT_DIM,
   prepareFigureForModel,
+  prepareProblemForModel,
   rasterToSvg,
   trimBlankBorder,
 } from "@/lib/figureImage";
@@ -221,13 +221,14 @@ export default function FigureJobsProvider({
 
     (async () => {
       try {
-        // 입력 토큰을 줄이려고 긴 변을 낮춰 보낸다. 문제 전체는 본문 글자까지
-        // 살아야 해서 그림 하나(768px)보다 크게 보낸다.
+        // 입력 토큰을 줄이려고 크기를 낮춰 보낸다. 그림 하나는 긴 변 768px이면
+        // 되지만, 문제 전체는 본문 글자까지 살아야 해서 **폭**을 기준으로 맞춘다
+        // (긴 변으로 줄이면 세로로 긴 문제의 폭이 무너져 글자가 뭉개진다).
         const mode: FigureMode = next.mode ?? "figure";
-        const forModel = await prepareFigureForModel(
-          next.crop,
-          mode === "problem" ? PROBLEM_INPUT_DIM : MODEL_INPUT_DIM,
-        );
+        const forModel =
+          mode === "problem"
+            ? await prepareProblemForModel(next.crop)
+            : await prepareFigureForModel(next.crop, MODEL_INPUT_DIM);
 
         // 같은 그림을 이미 그린 적이 있으면 그대로 쓴다(세트 문항 대비).
         // 모드를 키에 섞는다 — 같은 이미지라도 그림용과 문제 전체용은 결과가

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage } from "@/lib/cropImage";
 import {
   PROBLEM_INPUT_DIM,
+  PROBLEM_MAX_HEIGHT,
   prepareFigureForModel,
   rasterToSvg,
   stitchVertically,
@@ -56,6 +57,16 @@ type Props = {
 
 export default function BatchSplitPanel({ onSave }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  /**
+   * 고른 사진 **원본**. 자르는 재료는 이것이다.
+   *
+   * `fileToDataUrl` 로 만든 축소본(긴 변 1600px)에서 자르면, 지면 한 장이
+   * 1600px 인데 문제 하나는 그 4분의 1쯤이라 **폭 450px 짜리 조각**이 나온다.
+   * 그걸 그대로 모델에 보내면 본문 글자가 뭉개져서 못 읽는다(손으로 한 문제만
+   * 찍었을 때는 1200~1600px 이 나가던 자리다). 그래서 감지에는 축소본을 쓰고
+   * **자르기는 원본에서** 한다.
+   */
+  const [pageFile, setPageFile] = useState<File | null>(null);
   const [pageImage, setPageImage] = useState<string | null>(null);
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -71,7 +82,9 @@ export default function BatchSplitPanel({ onSave }: Props) {
       return;
     }
     try {
+      // 화면 표시·영역 감지에는 축소본이면 충분하다(자르기는 원본에서 한다).
       setPageImage(await fileToDataUrl(file));
+      setPageFile(file);
     } catch (err) {
       setError(err instanceof Error ? err.message : "사진을 불러오지 못했습니다.");
     }
@@ -98,13 +111,22 @@ export default function BatchSplitPanel({ onSave }: Props) {
         return;
       }
 
-      const img = await loadImage(pageImage);
+      // **원본에서 자른다.** 원본은 data URL 로 만들지 않는다 — 카메라 사진을
+      // 통째로 문자열로 바꾸면 수십 MB가 되어 일부 브라우저에서 터진다.
+      const objectUrl = pageFile ? URL.createObjectURL(pageFile) : pageImage;
+      const img = await loadImage(objectUrl);
       const cut = (b: DetectedProblem["boxes"][number]) => {
         const x = Math.max(0, b.x - PAD) * img.naturalWidth;
         const y = Math.max(0, b.y - PAD) * img.naturalHeight;
         const w = Math.min(1 - b.x + PAD, b.w + PAD * 2) * img.naturalWidth;
         const h = Math.min(1 - b.y + PAD, b.h + PAD * 2) * img.naturalHeight;
-        return cropImageToDataUrl(img, { x, y, width: w, height: h });
+        // 폭을 지켜서 자른다 — 긴 변 기준으로 줄이면 세로로 긴 문제의 폭이
+        // 무너져 본문 글자가 뭉개진다.
+        return cropImageToDataUrl(
+          img,
+          { x, y, width: w, height: h },
+          { maxWidth: PROBLEM_INPUT_DIM, maxHeight: PROBLEM_MAX_HEIGHT },
+        );
       };
       // 단을 넘어 이어진 문제는 조각을 **읽는 차례대로 세로로 이어 붙인다.**
       const next: Piece[] = await Promise.all(
@@ -114,6 +136,7 @@ export default function BatchSplitPanel({ onSave }: Props) {
           parts: prob.boxes.length,
         })),
       );
+      if (objectUrl !== pageImage) URL.revokeObjectURL(objectUrl);
       setPieces(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "문제 영역 인식에 실패했습니다.");
@@ -182,6 +205,7 @@ export default function BatchSplitPanel({ onSave }: Props) {
       // 넣은 것은 목록에서 뺀다(같은 것을 두 번 넣지 않게).
       setPieces((prev) => prev.slice(done));
       setPageImage(null);
+      setPageFile(null);
       if (fileRef.current) fileRef.current.value = "";
     }
   }
