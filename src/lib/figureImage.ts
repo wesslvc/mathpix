@@ -179,7 +179,8 @@ export function rasterFromSvg(markup: string): string | null {
  *
  * 조각마다 폭이 조금씩 다르므로 **가장 넓은 조각에 폭을 맞춘다**(좁은 것을
  * 늘리는 쪽이다 — 넓은 것을 줄이면 글자가 작아져 읽기 나빠진다).
- * 사이에는 얇은 흰 띠를 둬서 두 조각의 글줄이 맞붙어 보이지 않게 한다.
+ * 사이는 **아주 좁게** 둔다(글줄 사이 정도). 원래 한 문제였던 것이므로 두
+ * 조각이 떨어져 보이면 안 된다 — 글줄이 맞붙지 않을 만큼만 띄운다.
  */
 export async function stitchVertically(dataUrls: string[]): Promise<string> {
   if (dataUrls.length === 0) throw new Error("이어 붙일 조각이 없습니다.");
@@ -187,7 +188,7 @@ export async function stitchVertically(dataUrls: string[]): Promise<string> {
 
   const imgs = await Promise.all(dataUrls.map((u) => loadImage(u)));
   const width = Math.max(...imgs.map((i) => i.naturalWidth));
-  const gap = Math.round(width * 0.02);
+  const gap = Math.max(2, Math.round(width * 0.004));
   const heights = imgs.map((i) => Math.round((i.naturalHeight * width) / i.naturalWidth));
   const height = heights.reduce((a, b) => a + b, 0) + gap * (imgs.length - 1);
 

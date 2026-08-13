@@ -81,17 +81,26 @@ const PROMPT = `이 이미지는 한국 고등학교 문제집·모의고사 지
 - 발문, 조건 박스, <보기>, 표·그래프·지도 같은 자료,
 - 선지(①②③④⑤)의 마지막 줄까지.
 
-지켜 주세요:
+영역은 **딱 맞게** 잡으세요:
+- 내용의 바깥 경계(맨 위 글자의 위, 맨 아래 글자의 아래, 가장 왼쪽·오른쪽 끝)에
+  **바짝 붙이세요.** 빈 여백을 넣지 마세요.
+- 글자가 잘리지만 않을 정도로 아주 조금만 남기세요. 넉넉하게 잡지 마세요.
+- 문제와 문제 사이의 빈 줄, 단 사이의 빈 공간, 종이 가장자리 여백은 넣지 마세요.
 - 문제마다 하나씩, 서로 겹치지 않게 잡으세요.
 - 지면에 단이 둘이면 왼쪽 단을 위에서 아래로 먼저, 그다음 오른쪽 단 순서로 두세요.
-- 머리말, 쪽번호, 여백, 광고, 해설은 넣지 마세요.
-- 잘려서 일부만 보이는 문제도 보이는 만큼 잡으세요.
-- 글자가 잘리지 않게 사방으로 조금 넉넉하게 잡으세요.
+- 머리말, 쪽번호, 광고, 해설은 넣지 마세요.
 
-**단을 넘어 이어진 문제**가 흔합니다. 왼쪽 단 아래에서 시작해 오른쪽 단 위로
-이어지는 문제는 **조각마다 하나씩** 잡되, no 에 **같은 문제 번호**를 적어
-주세요(뒤 조각에 번호가 안 보여도 앞 조각의 번호를 그대로 적습니다).
-그렇게 해야 두 조각을 이어 붙여 한 문제로 만들 수 있습니다.
+**단을 넘어 이어진 문제**를 놓치지 마세요. 이게 가장 중요합니다:
+- 새 문제는 **반드시 문제 번호로 시작합니다**(예: "12.").
+- 그러니 어떤 덩어리가 **번호 없이** 그냥 글자나 선지(①②③④⑤)로 시작하면
+  그건 새 문제가 아니라 **앞 문제의 나머지**입니다.
+- 특히 오른쪽 단 맨 위가 번호 없이 시작하면, 왼쪽 단 맨 아래 문제가 거기로
+  이어진 것입니다. 반대쪽 단으로 넘어간 겁니다.
+- 그런 경우 **조각을 따로 하나씩** 잡되, no 에 **앞 조각과 같은 문제 번호**를
+  적어 주세요(뒤 조각에 번호가 안 보여도 앞 조각의 번호를 그대로 적습니다).
+  그래야 두 조각을 이어 붙여 한 문제로 만들 수 있습니다.
+- 이어지는 조각의 영역도 여백 없이 딱 맞게 잡으세요 — 두 조각을 붙였을 때
+  원래 한 문제였던 것처럼 이어져야 합니다.
 
 결과는 JSON 배열로만 답하세요. 각 항목은
 {"box_2d": [ymin, xmin, ymax, xmax], "no": "12"} 형식이고
@@ -157,15 +166,31 @@ export class DetectError extends Error {
 function group(boxes: (ProblemBox & { no: string })[]): DetectedProblem[] {
   const out: DetectedProblem[] = [];
   const byNo = new Map<string, DetectedProblem>();
+  let prevColumn = -1;
   for (const { no, ...box } of boxes) {
-    const found = no ? byNo.get(no) : undefined;
-    if (found) {
-      found.boxes.push(box);
+    const column = box.x + box.w / 2 < 0.5 ? 0 : 1;
+    const firstInColumn = column !== prevColumn;
+    prevColumn = column;
+
+    if (no) {
+      const found = byNo.get(no);
+      if (found) found.boxes.push(box);
+      else {
+        const made: DetectedProblem = { boxes: [box] };
+        byNo.set(no, made);
+        out.push(made);
+      }
       continue;
     }
-    const made: DetectedProblem = { boxes: [box] };
-    if (no) byNo.set(no, made);
-    out.push(made);
+    // **번호가 없는 조각은 새 문제가 아니다.** 새 문제는 반드시 번호로
+    // 시작하므로, 번호 없이 시작하는 덩어리는 앞 문제의 나머지다. 그런 일이
+    // 생기는 자리는 **단이 바뀐 첫 덩어리**뿐이다(한 단 안에서는 문제가
+    // 끊기지 않는다). 지면 맨 처음 조각은 앞 문제가 없으므로 그냥 둔다.
+    if (firstInColumn && out.length > 0) {
+      out[out.length - 1].boxes.push(box);
+      continue;
+    }
+    out.push({ boxes: [box] });
   }
   return out;
 }

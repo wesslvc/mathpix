@@ -32,8 +32,13 @@ import { useFigureJobs } from "./FigureJobsProvider";
 /** 통째로 그린 문제 이미지의 배치(AddProblemFlow와 같은 값). */
 const WHOLE_PROBLEM_LAYOUT: DiagramLayout = { scale: 100, offsetX: 0, offsetY: 0 };
 
-/** 인식한 영역을 자를 때 사방으로 더 주는 여유(비율). 글자가 잘리는 걸 막는다. */
-const PAD = 0.01;
+/**
+ * 인식한 영역을 자를 때 사방으로 더 주는 여유(지면 크기 대비 비율).
+ *
+ * **아주 조금만 준다.** 여백이 넓으면 문제 사이의 빈 줄까지 딸려 들어와
+ * 문제지에 앉혔을 때 헐렁해 보인다. 글자가 한 획 잘리는 것만 막을 정도다.
+ */
+const PAD = 0.004;
 
 /** `parts` 가 2 이상이면 단을 넘어 이어진 문제를 이어 붙인 것이다. */
 type Piece = { id: string; crop: string; parts: number };
