@@ -90,10 +90,39 @@ export default function BatchSplitPanel({ onSave }: Props) {
     }
   }
 
+  /**
+   * 자를 재료가 될 이미지를 연다.
+   *
+   * **원본에서 자른다** — 화면용 축소본(긴 변 1600px)에서 자르면 지면 한 장이
+   * 1600px 인데 문제 하나는 그 4분의 1쯤이라 폭 450px 짜리 조각이 나오고,
+   * 그러면 모델이 본문을 못 읽는다. 원본은 data URL 로 만들지 않고
+   * `createObjectURL` 로 읽는다(카메라 사진을 통째로 문자열로 바꾸면 수십 MB가
+   * 되어 일부 브라우저에서 터진다).
+   *
+   * 원본을 못 여는 경우에는 **축소본으로라도 자른다.** 흐릴지언정 아무것도
+   * 못 하는 것보다는 낫다.
+   */
+  async function openSource(): Promise<{ img: HTMLImageElement; revoke: () => void }> {
+    if (pageFile) {
+      const url = URL.createObjectURL(pageFile);
+      try {
+        return { img: await loadImage(url), revoke: () => URL.revokeObjectURL(url) };
+      } catch {
+        URL.revokeObjectURL(url);
+      }
+    }
+    if (!pageImage) throw new Error("사진을 먼저 골라주세요.");
+    return { img: await loadImage(pageImage), revoke: () => {} };
+  }
+
   async function detect() {
     if (!pageImage) return;
     setBusy("문제 영역을 찾는 중...");
     setError(null);
+
+    // 영역 찾기와 자르기를 나눠 둔다. 한 덩어리로 감싸면 자르다 난 오류까지
+    // "문제 영역 인식 실패"로 보여서 어디가 잘못됐는지 알 수 없다.
+    let found: DetectedProblem[];
     try {
       // 자리를 재는 데는 큰 해상도가 필요 없다. 자르는 건 원본에서 한다.
       const small = await prepareFigureForModel(pageImage, PROBLEM_INPUT_DIM);
@@ -104,42 +133,53 @@ export default function BatchSplitPanel({ onSave }: Props) {
       });
       const json: { problems?: DetectedProblem[]; error?: string } = await res.json();
       if (!res.ok) throw new Error(json.error ?? "문제 영역 인식에 실패했습니다.");
-      const found = json.problems ?? [];
-      if (found.length === 0) {
-        setError("문제 영역을 찾지 못했습니다. 지면이 또렷하게 나온 사진으로 다시 해보세요.");
-        setPieces([]);
-        return;
-      }
-
-      // **원본에서 자른다.** 원본은 data URL 로 만들지 않는다 — 카메라 사진을
-      // 통째로 문자열로 바꾸면 수십 MB가 되어 일부 브라우저에서 터진다.
-      const objectUrl = pageFile ? URL.createObjectURL(pageFile) : pageImage;
-      const img = await loadImage(objectUrl);
-      const cut = (b: DetectedProblem["boxes"][number]) => {
-        const x = Math.max(0, b.x - PAD) * img.naturalWidth;
-        const y = Math.max(0, b.y - PAD) * img.naturalHeight;
-        const w = Math.min(1 - b.x + PAD, b.w + PAD * 2) * img.naturalWidth;
-        const h = Math.min(1 - b.y + PAD, b.h + PAD * 2) * img.naturalHeight;
-        // 폭을 지켜서 자른다 — 긴 변 기준으로 줄이면 세로로 긴 문제의 폭이
-        // 무너져 본문 글자가 뭉개진다.
-        return cropImageToDataUrl(
-          img,
-          { x, y, width: w, height: h },
-          { maxWidth: PROBLEM_INPUT_DIM, maxHeight: PROBLEM_MAX_HEIGHT },
-        );
-      };
-      // 단을 넘어 이어진 문제는 조각을 **읽는 차례대로 세로로 이어 붙인다.**
-      const next: Piece[] = await Promise.all(
-        found.map(async (prob) => ({
-          id: crypto.randomUUID(),
-          crop: await stitchVertically(prob.boxes.map(cut)),
-          parts: prob.boxes.length,
-        })),
-      );
-      if (objectUrl !== pageImage) URL.revokeObjectURL(objectUrl);
-      setPieces(next);
+      found = json.problems ?? [];
     } catch (err) {
       setError(err instanceof Error ? err.message : "문제 영역 인식에 실패했습니다.");
+      setBusy(null);
+      return;
+    }
+    if (found.length === 0) {
+      setError("문제 영역을 찾지 못했습니다. 지면이 또렷하게 나온 사진으로 다시 해보세요.");
+      setPieces([]);
+      setBusy(null);
+      return;
+    }
+
+    setBusy(`영역 ${found.length}개를 자르는 중...`);
+    try {
+      const { img, revoke } = await openSource();
+      try {
+        const cut = (b: DetectedProblem["boxes"][number]) => {
+          const x = Math.max(0, b.x - PAD) * img.naturalWidth;
+          const y = Math.max(0, b.y - PAD) * img.naturalHeight;
+          const w = Math.min(1 - b.x + PAD, b.w + PAD * 2) * img.naturalWidth;
+          const h = Math.min(1 - b.y + PAD, b.h + PAD * 2) * img.naturalHeight;
+          // 폭을 지켜서 자른다 — 긴 변 기준으로 줄이면 세로로 긴 문제의 폭이
+          // 무너져 본문 글자가 뭉개진다.
+          return cropImageToDataUrl(
+            img,
+            { x, y, width: w, height: h },
+            { maxWidth: PROBLEM_INPUT_DIM, maxHeight: PROBLEM_MAX_HEIGHT },
+          );
+        };
+        // 단을 넘어 이어진 문제는 조각을 **읽는 차례대로 세로로 이어 붙인다.**
+        const next: Piece[] = await Promise.all(
+          found.map(async (prob) => ({
+            id: crypto.randomUUID(),
+            crop: await stitchVertically(prob.boxes.map(cut)),
+            parts: prob.boxes.length,
+          })),
+        );
+        setPieces(next);
+      } finally {
+        revoke();
+      }
+    } catch (err) {
+      setError(
+        "영역은 찾았는데 사진을 자르지 못했습니다: " +
+          (err instanceof Error ? err.message : "알 수 없는 오류"),
+      );
     } finally {
       setBusy(null);
     }
