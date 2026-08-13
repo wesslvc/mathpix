@@ -1,5 +1,5 @@
 import { toPng } from "html-to-image";
-import { PROBLEM_CARD_WIDTH } from "./layout";
+import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "./layout";
 import { cardHtmlFromSpec, type CardSpec } from "./cardHtml";
 
 /**
@@ -22,6 +22,8 @@ export async function renderCardOffscreen(spec: CardSpec): Promise<string> {
   host.style.pointerEvents = "none";
 
   const card = document.createElement("div");
+  // 화면의 카드와 **글자 하나까지 같은 폭**이어야 한다. 테두리는 캡처할 때
+  // 투명하게 처리되므로 여기서 빼면 안 된다 — 빼면 본문 폭이 2px 늘어난다.
   card.className =
     "problem-surface rounded-2xl border border-slate-200 bg-white p-8 shadow-sm";
   card.style.width = `${PROBLEM_CARD_WIDTH}px`;
@@ -44,7 +46,7 @@ export async function renderCardOffscreen(spec: CardSpec): Promise<string> {
     }
     // 붙인 이미지(그림)가 실제로 그려질 때까지 한 번 기다린다.
     await new Promise((r) => requestAnimationFrame(() => r(null)));
-    return await toPng(card, { pixelRatio: 2, backgroundColor: "#ffffff" });
+    return await toPng(card, CARD_CAPTURE_OPTIONS);
   } finally {
     host.remove();
   }

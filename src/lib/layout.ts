@@ -6,3 +6,24 @@
  * 화면이 이보다 좁으면 가로 스크롤로 보게 한다(줄바꿈은 그대로 유지).
  */
 export const PROBLEM_CARD_WIDTH = 640;
+
+/**
+ * 카드를 PNG로 캡처할 때 쓰는 공통 설정.
+ *
+ * **화면용 장식은 벗기고 찍는다.** 인식 결과 화면의 카드에는 둥근 모서리와
+ * 회색 테두리, 옅은 그림자가 걸려 있는데 그건 "여기가 카드다"를 보여 주는
+ * 화면 장치일 뿐이다. 그대로 캡처하면 그 테두리가 **저장된 이미지에 구워져**
+ * 나중에 어떤 양식으로 인쇄하든 따라다닌다(평가원 문제지 양식에서는 실제
+ * 문제지에 없는 네모가 문항마다 생긴다). `style` 은 html-to-image 가 복제한
+ * 노드에만 적용하므로 화면은 그대로 둔 채 캡처만 깨끗해진다.
+ *
+ * **테두리를 없애지 않고 투명하게만 한다.** `border: none` 으로 지우면 좌우
+ * 1px 씩이 본문 폭으로 돌아가 줄바꿈이 달라질 수 있다 — 이 카드의 폭을 못
+ * 박아 둔 이유가 바로 그것(어느 기기에서 저장하든 같은 줄바꿈)이라, 보이지만
+ * 않게 하고 자리는 그대로 둔다.
+ */
+export const CARD_CAPTURE_OPTIONS = {
+  pixelRatio: 2,
+  backgroundColor: "#ffffff",
+  style: { borderColor: "transparent", boxShadow: "none" } as Partial<CSSStyleDeclaration>,
+};

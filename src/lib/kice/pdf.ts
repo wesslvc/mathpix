@@ -173,45 +173,77 @@ type Placed = {
   h: number;
 };
 
+type Shot = { img: PDFImage; label: string };
+
 /**
- * 그림을 단에 흘려 넣어 **쪽을 미리 짜 둔다.**
+ * 한 단을 채운다. **넣기로 한 개수는 반드시 다 넣는다.**
  *
- * 실제로 그리기 전에 한 번 짜 보는 이유는 전체 쪽수 때문이다. 쪽번호 상자의
- * 사선 아래에 전체 쪽수가 찍히는데, 그 값은 마지막 쪽까지 짜 봐야 안다.
+ * 남는 자리는 문제 사이에 고르게 나눠 준다(실제 문제지도 단을 꽉 채운다).
+ * 모자라면 그림을 줄여서 넣는다 — 다음 쪽으로 미루면 쪽마다 정해 둔 문항 수가
+ * 무너진다.
  */
-function layoutPages(images: { img: PDFImage; label: string }[], frames: FrameSet) {
-  type Page = { colTop: number; bottom: number; col: number; cursor: number; items: Placed[] };
-  const pages: Page[] = [];
-  let page!: Page;
-  const startPage = () => {
-    const b = frameBounds(frameFor(frames, pages.length + 1));
-    page = {
-      colTop: b.headerBottom + LAYOUT.gap,
-      bottom: b.contentBottom,
-      col: 0,
-      cursor: b.headerBottom + LAYOUT.gap,
-      items: [],
-    };
-    pages.push(page);
-  };
-  startPage();
-  for (const { img, label } of images) {
-    const scale = Math.min(LAYOUT.columnWidth / img.width, 1);
-    const w = img.width * scale;
-    const h = img.height * scale;
-    const head = label ? LABEL_SIZE + LABEL_GAP : 0;
-    // 지금 단에 안 들어가면 오른쪽 단으로, 거기도 안 되면 다음 쪽으로.
-    if (page.cursor > page.colTop && page.cursor + head + h > page.bottom) {
-      if (page.col === 0) {
-        page.col = 1;
-        page.cursor = page.colTop;
-      } else {
-        startPage();
-      }
-    }
-    page.items.push({ img, label, x: columnX(page.col), y: page.cursor + head, w, h });
-    page.cursor += head + h + LAYOUT.gap;
+function fitColumn(items: Shot[], x: number, top: number, bottom: number): Placed[] {
+  if (!items.length) return [];
+  const heads = items.map((it) => (it.label ? LABEL_SIZE + LABEL_GAP : 0));
+  const base = items.map((it) => Math.min(LAYOUT.columnWidth / it.img.width, 1));
+  let hs = items.map((it, n) => it.img.height * base[n]);
+
+  const avail = bottom - top;
+  const headSum = heads.reduce((a, b) => a + b, 0);
+  const gaps = items.length - 1;
+  const sum = () => hs.reduce((a, b) => a + b, 0);
+
+  let k = 1;
+  if (headSum + sum() + LAYOUT.gap * gaps > avail) {
+    k = Math.max((avail - LAYOUT.gap * gaps - headSum) / sum(), 0.1);
+    hs = hs.map((h) => h * k);
   }
+  const gap = gaps > 0 ? Math.max((avail - headSum - sum()) / gaps, LAYOUT.gap) : 0;
+
+  const out: Placed[] = [];
+  let y = top;
+  items.forEach((it, n) => {
+    out.push({
+      img: it.img,
+      label: it.label,
+      x,
+      y: y + heads[n],
+      w: it.img.width * base[n] * k,
+      h: hs[n],
+    });
+    y += heads[n] + hs[n] + gap;
+  });
+  return out;
+}
+
+/**
+ * **쪽마다 몇 문제**를 넣을지 정해 두고 그대로 짠다.
+ *
+ * 실제 탐구 문제지가 4·6·6·4 로 짜여 있어서, 흘러가는 대로 두면 아무리
+ * 판형이 같아도 문제지처럼 보이지 않는다. `pattern` 은 쪽 순서대로 읽고
+ * 모자라면 처음으로 돌아가 되풀이한다.
+ *
+ * 그리기 전에 한 번 짜 보는 이유는 전체 쪽수 때문이다 — 쪽번호 상자의 사선
+ * 아래에 전체 쪽수가 찍히는데, 그 값은 마지막 쪽까지 짜 봐야 안다.
+ */
+function layoutPages(images: Shot[], frames: FrameSet, pattern: number[]) {
+  const pages: { items: Placed[] }[] = [];
+  let at = 0;
+  do {
+    const b = frameBounds(frameFor(frames, pages.length + 1));
+    const top = b.headerBottom + LAYOUT.gap;
+    const want = pattern[pages.length % pattern.length];
+    const take = images.slice(at, at + want);
+    at += want;
+    // 왼쪽 단부터 채운다. 홀수면 왼쪽이 하나 더 갖는다.
+    const half = Math.ceil(take.length / 2);
+    pages.push({
+      items: [
+        ...fitColumn(take.slice(0, half), columnX(0), top, b.contentBottom),
+        ...fitColumn(take.slice(half), columnX(1), top, b.contentBottom),
+      ],
+    });
+  } while (at < images.length);
   return pages;
 }
 
@@ -225,6 +257,8 @@ export type KiceSpec = {
   images: Record<string, Uint8Array>;
   /** `label` 은 문제 위에 작게 찍히는 출처 표기(빈 문자열이면 찍지 않는다). */
   problems: { png: Uint8Array; label?: string }[];
+  /** 쪽마다 넣을 문제 수. 쪽 순서대로 읽고 모자라면 되풀이한다(예: `[4,6,6,4]`). */
+  pagePattern: number[];
 };
 
 export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
@@ -415,7 +449,8 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     images.push({ img: await pdf.embedPng(p.png), label: p.label ?? "" });
   }
 
-  const pages = layoutPages(images, spec.frames);
+  const pattern = spec.pagePattern.filter((n) => n > 0);
+  const pages = layoutPages(images, spec.frames, pattern.length ? pattern : [4]);
   const labelFont = await fontFor(LABEL_FONT);
 
   for (let n = 0; n < pages.length; n++) {
