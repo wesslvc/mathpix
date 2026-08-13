@@ -260,88 +260,130 @@ async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[
 }
 
 const OPENAI_MODELS = "https://api.openai.com/v1/models";
+const OPENAI_RESPONSES = "https://api.openai.com/v1/responses";
 const OPENAI_CHAT = "https://api.openai.com/v1/chat/completions";
 
 /**
- * 쓸 GPT 모델을 정한다.
+ * 쓸 GPT 모델.
  *
- * **이름을 지어내지 않는다.** `OPENAI_DETECT_MODEL` 이 있으면 그대로 쓰고,
- * 없으면 계정의 실제 목록(`/v1/models`, 무료)에서 `OPENAI_DETECT_MATCH`(기본
- * "luna")가 든 id 를 찾는다. 못 찾으면 후보를 알려 주고 멈춘다 — 비슷해 보이는
- * 다른 모델로 몰래 갈아타지 않는다(고른 적 없는 모델에 요금이 나간 적이 있다).
+ * 이 저장소가 예전에 쓰던 비전 모델이 `gpt-5.6-terra` 였으니 같은 계열의
+ * 이름 규칙을 따른다. 틀렸으면 **404 에 이 계정이 가진 gpt 이름들이 함께
+ * 찍혀 나오므로**(아래 `explain404`) 거기서 골라 `OPENAI_DETECT_MODEL` 로
+ * 못박으면 된다. 비슷해 보이는 다른 모델로 몰래 갈아타지는 않는다 — 고른 적
+ * 없는 모델에 요금이 나간 적이 있다.
  */
-async function openaiModel(key: string): Promise<string> {
-  const fixed = process.env.OPENAI_DETECT_MODEL;
-  if (fixed) return fixed;
-  const want = (process.env.OPENAI_DETECT_MATCH ?? "luna").toLowerCase();
+export const OPENAI_DETECT_MODEL = process.env.OPENAI_DETECT_MODEL ?? "gpt-5.6-luna";
 
-  const res = await fetch(OPENAI_MODELS, { headers: { Authorization: `Bearer ${key}` } });
-  if (!res.ok) {
-    throw new DetectError(
-      `모델 목록을 받지 못했습니다 (HTTP ${res.status}). OPENAI_DETECT_MODEL 로 이름을 직접 지정해 주세요.`,
-      res.status,
-    );
+/** 404 가 났을 때, 이 계정이 실제로 가진 이름들을 붙여 준다(목록 조회는 무료). */
+async function explain404(key: string, model: string): Promise<string> {
+  try {
+    const res = await fetch(OPENAI_MODELS, { headers: { Authorization: `Bearer ${key}` } });
+    if (!res.ok) return "";
+    const ids: string[] = ((await res.json())?.data ?? [])
+      .map((m: { id?: string }) => String(m.id ?? ""))
+      .filter((id: string) => id.startsWith("gpt"))
+      .sort();
+    const near = ids.filter((id) => id.includes(model.split("-")[1] ?? ""));
+    const show = (near.length ? near : ids).slice(0, 25);
+    return show.length ? ` 이 계정의 gpt 계열: ${show.join(", ")}` : "";
+  } catch {
+    return "";
   }
-  const ids: string[] = ((await res.json())?.data ?? [])
-    .map((m: { id?: string }) => String(m.id ?? ""))
-    .filter(Boolean);
-  const hit = ids.filter((id) => id.toLowerCase().includes(want)).sort();
-  if (hit.length === 0) {
-    const gpt = ids.filter((id) => id.startsWith("gpt")).sort().slice(0, 20);
-    throw new DetectError(
-      `"${want}"가 든 모델이 이 계정에 없습니다. OPENAI_DETECT_MODEL 로 지정해 주세요. ` +
-        `쓸 수 있는 gpt 계열: ${gpt.join(", ") || "(없음)"}`,
-      404,
-    );
-  }
-  return hit[0];
+}
+
+/** 응답에서 글자만 긁어모은다(Responses API 는 여러 조각으로 나눠 준다). */
+function harvest(json: unknown): string {
+  const o = json as Record<string, unknown>;
+  if (typeof o?.output_text === "string") return o.output_text;
+  const out: string[] = [];
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (!v || typeof v !== "object") return;
+    const n = v as Record<string, unknown>;
+    if (typeof n.text === "string") out.push(n.text);
+    walk(n.content);
+    walk(n.output);
+  };
+  walk(o?.output);
+  return out.join("");
 }
 
 async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[]; model: string }> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new DetectError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
-  const model = await openaiModel(key);
+  const model = OPENAI_DETECT_MODEL;
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
+  const text = `${PROMPT}\n\n답은 {"problems": [...]} 꼴의 JSON 객체로 주세요.`;
 
-  const res = await fetch(OPENAI_CHAT, {
+  // **먼저 Responses API 로 부른다.** 요즘 모델은 이쪽만 받는 경우가 있다.
+  // 안 받으면 Chat Completions 로 내려간다 — 이건 **같은 모델을 다른 길로**
+  // 부르는 것이라, 고른 적 없는 모델로 갈아타는 것과는 다른 이야기다.
+  let res = await fetch(OPENAI_RESPONSES, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    headers,
     body: JSON.stringify({
       model,
-      messages: [
+      input: [
         {
           role: "user",
           content: [
-            { type: "text", text: `${PROMPT}\n\n답은 {"problems": [...]} 꼴의 JSON 객체로 주세요.` },
+            { type: "input_text", text },
             // 좌표를 재야 하므로 이미지를 흐리게 보면 안 된다.
-            { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+            { type: "input_image", image_url: dataUrl, detail: "high" },
           ],
         },
       ],
-      response_format: { type: "json_object" },
-      // temperature 는 보내지 않는다 — 받지 않는 모델이 있어서 400 이 난다.
+      text: { format: { type: "json_object" } },
     }),
   });
+  let body = await res.text();
+  let viaResponses = true;
 
-  const body = await res.text();
+  if (!res.ok && res.status !== 404) {
+    // 파라미터를 안 받는 경우 등. 같은 모델을 옛 길로 한 번 더 불러 본다.
+    res = await fetch(OPENAI_CHAT, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text },
+              { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+            ],
+          },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+    body = await res.text();
+    viaResponses = false;
+  }
+
   if (!res.ok) {
+    const extra = res.status === 404 ? await explain404(key, model) : ` ${body.slice(0, 200)}`;
     throw new DetectError(
       res.status === 404
-        ? `모델 "${model}"을 찾을 수 없습니다. OPENAI_DETECT_MODEL 로 바꿔 주세요.`
-        : `문제 영역 인식에 실패했습니다 (${model}, HTTP ${res.status}). ${body.slice(0, 200)}`,
+        ? `모델 "${model}"을 찾을 수 없습니다. OPENAI_DETECT_MODEL 로 바꿔 주세요.${extra}`
+        : `문제 영역 인식에 실패했습니다 (${model}, HTTP ${res.status}).${extra}`,
       res.status,
     );
   }
-  let text: string;
+
+  let out: string;
   try {
-    text = JSON.parse(body)?.choices?.[0]?.message?.content ?? "";
+    const json = JSON.parse(body);
+    out = viaResponses ? harvest(json) : (json?.choices?.[0]?.message?.content ?? "");
   } catch {
     throw new DetectError("모델이 정상적인 응답을 주지 않았습니다.", 502);
   }
-  return { problems: parse(text), model };
+  return { problems: parse(out), model };
 }
 
-/** 어느 갈래로 부를지. 기본은 gemini. */
-export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "openai" ? "openai" : "gemini";
+/** 어느 갈래로 부를지. 기본은 GPT — `DETECT_PROVIDER=gemini` 로 되돌린다. */
+export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "gemini" ? "gemini" : "openai";
 
 export async function detectProblems(
   dataUrl: string,
