@@ -101,6 +101,17 @@ export default function FigureJobsProvider({
   const snapshotsRef = useRef<Map<string, ProblemSnapshot>>(new Map());
   /** 한 번에 하나씩만 돌린다(순차 처리). */
   const runningRef = useRef<string | null>(null);
+  /**
+   * 하나가 끝났으니 다음 것을 보라고 일꾼을 깨우는 신호.
+   *
+   * **`jobs` 만 바라보면 큐가 멈춘다.** 작업이 끝날 때 순서가 이렇다 —
+   * `setJobs(완료)` → React 가 다시 그림 → 일꾼 이펙트가 도는데 이때
+   * `runningRef` 는 아직 비워지기 전이라 그냥 돌아간다 → 그 뒤에 `runningRef`
+   * 가 비워지지만 **더 이상 상태가 바뀌지 않아 이펙트가 다시 돌지 않는다.**
+   * 대기 중인 작업이 있어도 아무도 집어가지 않고 그대로 쌓인다(실제로 몇 개
+   * 넣으면 멈췄다). 그래서 ref 를 비운 **다음에** 이 값을 올려 확실히 깨운다.
+   */
+  const [wake, setWake] = useState(0);
 
   const putSnapshot = useCallback(
     (problemKey: string, snapshot: ProblemSnapshot) => {
@@ -268,11 +279,11 @@ export default function FigureJobsProvider({
         );
 
         // 화면이 닫혔으면 저장본을 여기서 갱신한다(열려 있으면 화면이 한다).
-        try {
-          await resaveIfClosed({ ...next, svg }, svg);
-        } catch (err) {
+        // **기다리지 않는다.** 이건 이미지를 올리고 DB를 고치는 일이라 몇 초씩
+        // 걸리는데, 그동안 다음 작업이 시작도 못 하면 줄이 하염없이 밀린다.
+        void resaveIfClosed({ ...next, svg }, svg).catch((err) => {
           console.error("[figureJobs] 저장본 갱신 실패:", err);
-        }
+        });
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "그림을 그리지 못했습니다.";
@@ -283,9 +294,11 @@ export default function FigureJobsProvider({
         );
       } finally {
         runningRef.current = null;
+        // 비운 **다음에** 깨운다. 순서가 바뀌면 다음 작업을 아무도 집어가지 않는다.
+        setWake((n) => n + 1);
       }
     })();
-  }, [jobs, resaveIfClosed]);
+  }, [jobs, wake, resaveIfClosed]);
 
   const activeCount = jobs.filter(
     (j) => j.status === "pending" || j.status === "running",
