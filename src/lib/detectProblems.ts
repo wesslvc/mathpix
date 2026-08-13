@@ -36,9 +36,10 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
  * `GEMINI_DETECT_MODEL` 로 바꾼다. 404 가 나면 그 이름을 그대로 알린다 —
  * 조용히 다른 모델로 갈아타지 않는다(고른 적 없는 모델에 요금이 나간 적이 있다).
  *
- * 자리를 재는 일이라 가장 값싼 등급이면 충분하다.
+ * 한때 `-lite` 를 썼는데 되돌렸다 — 자리를 재는 일이라 값싼 등급으로도 될 줄
+ * 알았지만, 좌표를 잡는 정확도가 아쉬웠다.
  */
-export const DETECT_MODEL = process.env.GEMINI_DETECT_MODEL ?? "gemini-flash-lite-latest";
+export const DETECT_MODEL = process.env.GEMINI_DETECT_MODEL ?? "gemini-flash-latest";
 
 const PROMPT = `이 이미지는 한국 고등학교 문제집·모의고사 지면입니다.
 **문제 한 개씩** 차지하는 영역을 모두 찾아 주세요.
@@ -382,8 +383,12 @@ async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[
   return { problems: parse(out), model };
 }
 
-/** 어느 갈래로 부를지. 기본은 GPT — `DETECT_PROVIDER=gemini` 로 되돌린다. */
-export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "gemini" ? "gemini" : "openai";
+/**
+ * 어느 갈래로 부를지. **기본은 Gemini** 다 — 좌표를 재는 일에 맞춰 훈련된
+ * `box_2d` 규격이 있어 이 일에는 이쪽이 낫다. GPT 로 견주고 싶으면
+ * `DETECT_PROVIDER=openai` 로 바꾼다(모델은 `OPENAI_DETECT_MODEL`).
+ */
+export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "openai" ? "openai" : "gemini";
 
 export async function detectProblems(
   dataUrl: string,
