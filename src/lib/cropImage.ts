@@ -12,11 +12,21 @@ const JPEG_QUALITY = 0.9;
 export function cropImageToDataUrl(
   image: HTMLImageElement,
   rect: CropRect,
+  /**
+   * 가로·세로를 따로 제한하고 싶을 때.
+   *
+   * 기본값은 **긴 변** 기준인데, 세로로 긴 문제에서는 그러면 폭이 무너진다
+   * (글자 크기는 폭으로 정해진다). 문제 전체를 모델에 보낼 때는 폭을 지켜야
+   * 해서 이 길로 부른다.
+   */
+  limits?: { maxWidth: number; maxHeight: number },
 ): string {
   const cropWidth = Math.max(1, Math.round(rect.width));
   const cropHeight = Math.max(1, Math.round(rect.height));
 
-  const scale = Math.min(1, MAX_DIMENSION / Math.max(cropWidth, cropHeight));
+  const scale = limits
+    ? Math.min(1, limits.maxWidth / cropWidth, limits.maxHeight / cropHeight)
+    : Math.min(1, MAX_DIMENSION / Math.max(cropWidth, cropHeight));
   const outWidth = Math.max(1, Math.round(cropWidth * scale));
   const outHeight = Math.max(1, Math.round(cropHeight * scale));
 

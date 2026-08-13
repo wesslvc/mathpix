@@ -26,6 +26,16 @@ export const MODEL_INPUT_DIM = 768;
  */
 export const PROBLEM_INPUT_DIM = 1536;
 
+/**
+ * 문제 전체를 보낼 때의 **높이** 상한.
+ *
+ * 문제 전체는 긴 변이 아니라 **폭**을 지켜야 한다 — 글자 크기가 폭으로
+ * 정해지기 때문이다. 세로로 긴 문제(단을 넘어 이어 붙인 것이 특히 그렇다)를
+ * 긴 변 기준으로 줄이면 폭이 800px 아래로 떨어져 본문이 뭉개지고, 모델이
+ * 못 읽은 글자를 지어낸다. 그래서 폭을 먼저 맞추고 높이는 여기까지만 본다.
+ */
+export const PROBLEM_MAX_HEIGHT = 3000;
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -54,6 +64,34 @@ export async function prepareFigureForModel(
   const w = Math.max(1, Math.round(img.naturalWidth * scale));
   const h = Math.max(1, Math.round(img.naturalHeight * scale));
 
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("캔버스 컨텍스트를 생성할 수 없습니다.");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+/**
+ * 문제 **전체**를 보낼 때 쓰는 축소.
+ *
+ * `prepareFigureForModel`과 달리 **폭을 기준**으로 맞춘다(위 상수 주석 참고).
+ * 원본보다 키우지는 않는다 — 없는 해상도는 만들어지지 않는다.
+ */
+export async function prepareProblemForModel(dataUrl: string): Promise<string> {
+  const img = await loadImage(dataUrl);
+  const scale = Math.min(
+    1,
+    PROBLEM_INPUT_DIM / img.naturalWidth,
+    PROBLEM_MAX_HEIGHT / img.naturalHeight,
+  );
+  if (scale >= 1) return dataUrl;
+
+  const w = Math.max(1, Math.round(img.naturalWidth * scale));
+  const h = Math.max(1, Math.round(img.naturalHeight * scale));
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
