@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { DetectError, detectProblemBoxes } from "@/lib/detectProblems";
+import { DetectError, detectProblems } from "@/lib/detectProblems";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -51,8 +51,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const boxes = await detectProblemBoxes(body.image);
-    return NextResponse.json({ boxes });
+    const problems = await detectProblems(body.image);
+    return NextResponse.json({ problems });
   } catch (err) {
     const status = err instanceof DetectError ? err.status : 500;
     return NextResponse.json(

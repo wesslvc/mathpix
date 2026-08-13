@@ -170,3 +170,39 @@ export function rasterFromSvg(markup: string): string | null {
   const m = markup.match(/(?:href|src)="(data:image\/[^"]+)"/);
   return m ? m[1] : null;
 }
+
+/**
+ * 여러 조각을 **세로로 이어 붙여 한 장으로** 만든다.
+ *
+ * 모의고사 지면에서는 문제 하나가 왼쪽 단 아래에서 시작해 오른쪽 단 위로
+ * 이어진다. 읽는 차례대로 위에서 아래로 쌓으면 원래 한 문제가 된다.
+ *
+ * 조각마다 폭이 조금씩 다르므로 **가장 넓은 조각에 폭을 맞춘다**(좁은 것을
+ * 늘리는 쪽이다 — 넓은 것을 줄이면 글자가 작아져 읽기 나빠진다).
+ * 사이에는 얇은 흰 띠를 둬서 두 조각의 글줄이 맞붙어 보이지 않게 한다.
+ */
+export async function stitchVertically(dataUrls: string[]): Promise<string> {
+  if (dataUrls.length === 0) throw new Error("이어 붙일 조각이 없습니다.");
+  if (dataUrls.length === 1) return dataUrls[0];
+
+  const imgs = await Promise.all(dataUrls.map((u) => loadImage(u)));
+  const width = Math.max(...imgs.map((i) => i.naturalWidth));
+  const gap = Math.round(width * 0.02);
+  const heights = imgs.map((i) => Math.round((i.naturalHeight * width) / i.naturalWidth));
+  const height = heights.reduce((a, b) => a + b, 0) + gap * (imgs.length - 1);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("캔버스 컨텍스트를 생성할 수 없습니다.");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+
+  let y = 0;
+  imgs.forEach((img, i) => {
+    ctx.drawImage(img, 0, y, width, heights[i]);
+    y += heights[i] + gap;
+  });
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
