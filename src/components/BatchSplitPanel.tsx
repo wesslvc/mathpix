@@ -3,9 +3,10 @@
 import { useRef, useState } from "react";
 import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage } from "@/lib/cropImage";
 import {
+  DETECT_INPUT_DIM,
+  MAX_UPLOAD_CHARS,
   PROBLEM_INPUT_DIM,
   PROBLEM_MAX_HEIGHT,
-  prepareFigureForModel,
   rasterToSvg,
   stitchVertically,
 } from "@/lib/figureImage";
@@ -117,43 +118,68 @@ export default function BatchSplitPanel({ onSave }: Props) {
     return { img: await loadImage(pageImage), revoke: () => {} };
   }
 
+  /**
+   * 영역을 찾을 때 보낼 이미지를 만든다. **원본에서 만든다.**
+   *
+   * 지면 한 장에 문제가 열 몇 개 들어 있으면 문제 하나는 화면의 몇 %밖에
+   * 안 된다. 작게 보내면 경계를 대충 잡으므로 되도록 크게 보낸다.
+   *
+   * 다만 요청 본문에는 상한이 있어(Vercel 4.5MB) 넘으면 요청 자체가 실패한다 —
+   * 그래서 실제 길이를 보고 들어갈 때까지 한 단씩 낮춘다.
+   */
+  function detectImage(img: HTMLImageElement): string {
+    const whole = { x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight };
+    let last = "";
+    for (const dim of [DETECT_INPUT_DIM, 2400, 2000, 1600, 1200]) {
+      last = cropImageToDataUrl(img, whole, { maxWidth: dim, maxHeight: dim });
+      if (last.length <= MAX_UPLOAD_CHARS) return last;
+    }
+    return last;
+  }
+
   async function detect() {
     if (!pageImage) return;
-    setBusy("문제 영역을 찾는 중...");
+    setBusy("사진을 여는 중...");
     setError(null);
 
-    // 영역 찾기와 자르기를 나눠 둔다. 한 덩어리로 감싸면 자르다 난 오류까지
-    // "문제 영역 인식 실패"로 보여서 어디가 잘못됐는지 알 수 없다.
-    let found: DetectedProblem[];
+    let source: { img: HTMLImageElement; revoke: () => void };
     try {
-      // 자리를 재는 데는 큰 해상도가 필요 없다. 자르는 건 원본에서 한다.
-      const small = await prepareFigureForModel(pageImage, PROBLEM_INPUT_DIM);
-      const res = await fetch("/api/detect-problems", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: small }),
-      });
-      const json: { problems?: DetectedProblem[]; model?: string; error?: string } =
-        await res.json();
-      if (!res.ok) throw new Error(json.error ?? "문제 영역 인식에 실패했습니다.");
-      found = json.problems ?? [];
-      setUsedModel(json.model ?? null);
+      source = await openSource();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "문제 영역 인식에 실패했습니다.");
-      setBusy(null);
-      return;
-    }
-    if (found.length === 0) {
-      setError("문제 영역을 찾지 못했습니다. 지면이 또렷하게 나온 사진으로 다시 해보세요.");
-      setPieces([]);
+      setError(err instanceof Error ? err.message : "사진을 열지 못했습니다.");
       setBusy(null);
       return;
     }
 
-    setBusy(`영역 ${found.length}개를 자르는 중...`);
     try {
-      const { img, revoke } = await openSource();
+      // 영역 찾기와 자르기를 나눠 둔다. 한 덩어리로 감싸면 자르다 난 오류까지
+      // "문제 영역 인식 실패"로 보여서 어디가 잘못됐는지 알 수 없다.
+      let found: DetectedProblem[];
+      setBusy("문제 영역을 찾는 중...");
       try {
+        const res = await fetch("/api/detect-problems", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: detectImage(source.img) }),
+        });
+        const json: { problems?: DetectedProblem[]; model?: string; error?: string } =
+          await res.json();
+        if (!res.ok) throw new Error(json.error ?? "문제 영역 인식에 실패했습니다.");
+        found = json.problems ?? [];
+        setUsedModel(json.model ?? null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "문제 영역 인식에 실패했습니다.");
+        return;
+      }
+      if (found.length === 0) {
+        setError("문제 영역을 찾지 못했습니다. 지면이 또렷하게 나온 사진으로 다시 해보세요.");
+        setPieces([]);
+        return;
+      }
+
+      setBusy(`영역 ${found.length}개를 자르는 중...`);
+      try {
+        const img = source.img;
         const cut = (b: DetectedProblem["boxes"][number]) => {
           const x = Math.max(0, b.x - PAD) * img.naturalWidth;
           const y = Math.max(0, b.y - PAD) * img.naturalHeight;
@@ -176,15 +202,14 @@ export default function BatchSplitPanel({ onSave }: Props) {
           })),
         );
         setPieces(next);
-      } finally {
-        revoke();
+      } catch (err) {
+        setError(
+          "영역은 찾았는데 사진을 자르지 못했습니다: " +
+            (err instanceof Error ? err.message : "알 수 없는 오류"),
+        );
       }
-    } catch (err) {
-      setError(
-        "영역은 찾았는데 사진을 자르지 못했습니다: " +
-          (err instanceof Error ? err.message : "알 수 없는 오류"),
-      );
     } finally {
+      source.revoke();
       setBusy(null);
     }
   }

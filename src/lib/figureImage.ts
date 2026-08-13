@@ -36,6 +36,22 @@ export const PROBLEM_INPUT_DIM = 1536;
  */
 export const PROBLEM_MAX_HEIGHT = 3000;
 
+/**
+ * 영역을 **찾을 때** 보내는 이미지의 긴 변 상한.
+ *
+ * 자리를 재는 일이라 작아도 될 것 같지만, 지면 한 장에 문제가 열 몇 개 들어
+ * 있으면 문제 하나가 화면의 몇 %밖에 안 된다. 작게 보내면 경계를 대충 잡는다.
+ * 그래서 **원본에 가깝게** 보낸다.
+ *
+ * 다만 무한정 키울 수는 없다 — 서버로 올라가는 요청 본문에 상한이 있어서
+ * (Vercel 은 4.5MB) 넘으면 요청 자체가 실패한다. 그래서 `fitForUpload` 가
+ * 실제 크기를 보고 단계적으로 낮춘다.
+ */
+export const DETECT_INPUT_DIM = 3000;
+
+/** 요청 본문으로 안전한 data URL 길이(글자 수 ≈ 바이트). */
+export const MAX_UPLOAD_CHARS = 3_400_000;
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
