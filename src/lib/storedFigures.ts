@@ -31,6 +31,8 @@ export type StoredFigure = {
   position: number;
   kind?: "figure" | "table";
   row?: boolean;
+  /** AI 가 다시 그린 그림인가. 수정 화면에서 다시 그리기를 막는 데 쓴다. */
+  ai?: boolean;
 };
 
 /** 카드에 붙은 것들을 저장할 형태로. 표에서는 마크업을 뗀다. */
@@ -42,6 +44,7 @@ export function toStoredFigures(figures: CardFigure[]): StoredFigure[] {
     position: f.position,
     kind: f.kind,
     row: f.row,
+    ...(f.ai ? { ai: true } : {}),
   }));
 }
 
@@ -92,6 +95,7 @@ export function readStoredFigures(boxRange: unknown): StoredFigure[] {
       position: f.position as number,
       kind,
       row: f.row === true,
+      ai: f.ai === true,
     });
   }
   return out;
@@ -131,6 +135,7 @@ export function restoreCardFigures(
       position: s.position,
       kind: "figure" as const,
       row: s.row ?? false,
+      ai: s.ai === true,
     }));
 
   return [...tables, ...figures];

@@ -162,7 +162,7 @@ export default function FigureJobsProvider({
       const spec: CardSpec = {
         ...snap.spec,
         figures: snap.spec.figures.map((f) =>
-          f.id === job.id ? { ...f, markup: svg } : f,
+          f.id === job.id ? { ...f, markup: svg, ai: true } : f,
         ),
       };
 
