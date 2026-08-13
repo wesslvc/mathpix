@@ -98,6 +98,8 @@ type Props = {
 type ManualFigure = {
   id: string;
   svg: string;
+  /** AI 가 다시 그린 것인가. 저장되어 수정 화면에서 다시 그리기를 막는다. */
+  ai?: boolean;
 };
 
 // 정답 입력이 멎고 이만큼 지나면 자동 저장한다. 너무 짧으면 아직 타는 중에
@@ -299,7 +301,7 @@ export default function ResultStage({
           id: d.id,
           markup: `<img src="${rasterFallbacks[d.id]}" alt="" />`,
         })),
-      ...manualDiagramSvgs.map((d) => ({ id: d.id, markup: d.svg })),
+      ...manualDiagramSvgs.map((d) => ({ id: d.id, markup: d.svg, ai: d.ai })),
     ]
       // 마크업이 비어 있으면 카드에 끼워 넣지 않는다. 문자열 조립이라 undefined가
       // 하나만 섞여도 "undefined"라는 글자가 그대로 문제에 인쇄돼 버린다.
@@ -544,7 +546,7 @@ export default function ResultStage({
         const j = done.find((d) => d.id === f.id);
         if (!j?.svg || j.svg === f.svg) return f;
         changed = true;
-        return { ...f, svg: j.svg };
+        return { ...f, svg: j.svg, ai: true };
       });
       return changed ? next : prev;
     });

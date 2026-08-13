@@ -157,3 +157,16 @@ export async function rasterToSvg(dataUrl: string): Promise<string> {
     `</svg>`
   );
 }
+
+/**
+ * 그림 마크업에서 **원본 이미지를 도로 꺼낸다.**
+ *
+ * 수정 화면에서 붙어 있는 그림을 다시 오려내거나 AI 로 다시 그리려면 원본
+ * 픽셀이 필요한데, 저장된 것은 마크업뿐이라 거기서 되꺼낸다.
+ * `rasterToSvg` 가 감싼 `<svg><image href=…>` 와 옛 형태인 `<img src=…>` 를
+ * 둘 다 받는다(꺼낼 수 없으면 null — 그때는 다시 그리기 단추를 보여주지 않는다).
+ */
+export function rasterFromSvg(markup: string): string | null {
+  const m = markup.match(/(?:href|src)="(data:image\/[^"]+)"/);
+  return m ? m[1] : null;
+}

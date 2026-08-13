@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toPng } from "html-to-image";
 import { createClient } from "@/lib/supabase/client";
@@ -25,6 +25,9 @@ import DiagramAdjuster, {
 } from "./DiagramAdjuster";
 import { DEFAULT_TABLE_LAYOUT } from "@/lib/diagramLayout";
 import DraggableCard from "./DraggableCard";
+import DiagramCropModal from "./DiagramCropModal";
+import { useFigureJobs } from "./FigureJobsProvider";
+import { rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
 import {
   ANSWER_TYPE_LABEL,
   formatAnswer,
@@ -100,6 +103,18 @@ export default function ProblemGallery({ problems }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  /**
+   * 오려내기 창을 무엇 때문에 열었는가.
+   *   add   : 새 그림을 붙인다(새로 찍은 사진에서 오려낸다).
+   *   recrop: 이미 붙어 있는 그림을 다시 오려낸다(그 그림 자체가 재료다).
+   */
+  const [cropTarget, setCropTarget] = useState<
+    { mode: "add" } | { mode: "recrop"; id: string; src: string } | null
+  >(null);
+
+  // AI 그림 작업은 화면 바깥(FigureJobsProvider)에서 돈다 — 인식 화면과 같은
+  // 큐를 쓴다. 수정 창을 닫아도 작업은 계속 돌고, 끝나면 저장본이 갱신된다.
+  const { jobs, enqueue, dismiss, putSnapshot } = useFigureJobs();
 
   // 미리보기에 그릴 것들. 표는 본문에서 다시 뽑고(본문을 고치면 따라 바뀐다)
   // 저장돼 있던 자리·크기만 입힌다.
@@ -146,6 +161,79 @@ export default function ProblemGallery({ problems }: Props) {
       ];
     });
   }
+
+  /**
+   * 새로 붙인 그림이 갈 자리. 자리 목록의 범위를 벗어나면 맨 아래로 본다
+   * (`CardFigure.position`). 붙인 뒤 미리보기에서 끌어 옮기면 실제 자리가 잡힌다.
+   */
+  const BOTTOM = 9999;
+
+  /** 이 문제를 가리키는 키. 큐가 결과를 어느 문제로 돌려줄지 아는 데 쓴다. */
+  const problemKey = editing ? `edit:${editing.id}` : "";
+
+  /**
+   * 큐에 넣는다.
+   *
+   * **같은 id 를 두 번 넣을 수 없으므로**(중복 과금을 막는 자리다) 다시 그릴
+   * 때는 먼저 옛 작업을 목록에서 지운다.
+   */
+  function requestRedraw(id: string, crop: string) {
+    dismiss(id);
+    enqueue({ id, problemKey, label: editing?.text?.slice(0, 20) || "수정 중인 문제", crop });
+  }
+
+  /** 오려낸 그림을 붙인다(원본 그대로). AI 는 그 뒤에 따로 요청한다. */
+  async function attachCrop(crop: string) {
+    const target = cropTarget;
+    const markup = await rasterToSvg(crop);
+    if (target?.mode === "recrop") {
+      // 다시 오려낸 것은 **원본 픽셀**이므로 AI 표시를 떼어 다시 그릴 수 있게 한다.
+      updateFigure(target.id, { markup, ai: false });
+    } else {
+      setEditFigures((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          markup,
+          layout: DEFAULT_DIAGRAM_LAYOUT,
+          position: BOTTOM,
+          kind: "figure",
+          row: false,
+        },
+      ]);
+    }
+    setCropTarget(null);
+  }
+
+  // 뒤에서 돌던 AI 작업이 끝나면 그 자리를 완성된 그림으로 갈아끼운다.
+  useEffect(() => {
+    const done = jobs.filter((j) => j.status === "done" && j.svg);
+    if (!done.length) return;
+    setEditFigures((prev) => {
+      let changed = false;
+      const next = prev.map((f) => {
+        const j = done.find((d) => d.id === f.id);
+        if (!j?.svg || j.svg === f.markup) return f;
+        changed = true;
+        return { ...f, markup: j.svg, ai: true };
+      });
+      return changed ? next : prev;
+    });
+  }, [jobs]);
+
+  // 수정 창을 닫은 뒤에 작업이 끝나도 결과가 남도록, 지금 상태를 큐에 알려둔다.
+  useEffect(() => {
+    if (!editing) return;
+    putSnapshot(problemKey, {
+      problemId: editing.id,
+      spec: {
+        text: editText,
+        boxOverride: editBox,
+        fontSizePx: ptToPx(editFontPt),
+        figures: cardFigures,
+      },
+    });
+  }, [putSnapshot, problemKey, editing, editText, editBox, editFontPt, cardFigures]);
 
   /** 같은 자리에 놓인 다른 것의 개수("나란히 놓기"가 뜻이 있는지). */
   function slotMateCount(id: string): number {
@@ -498,37 +586,95 @@ export default function ProblemGallery({ problems }: Props) {
 
                 {/* 그림·표 조절. 위치는 미리보기에서 끌어 옮기는 게 기본이고,
                     여기서는 크기·여백과 나란히 놓기를 다룬다. */}
-                {cardFigures.length > 0 && (
-                  <div className="mt-2 flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
+                <div className="mt-2 flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
                     <p className="text-[11px] text-slate-400">
                       미리보기에서 그림이나 표를 잡아 끌면 원하는 문단 사이로
                       옮길 수 있어요. 같은 자리에 둘을 놓고 “옆으로 나란히”를
                       켜면 가로로 놓입니다.
                     </p>
-                    {cardFigures.map((f, i) => (
-                      <DiagramAdjuster
-                        key={f.id}
-                        label={
-                          f.kind === "table"
-                            ? `표 ${cardFigures.filter((x) => x.kind === "table").indexOf(f) + 1}`
-                            : `그림 ${cardFigures.filter((x) => x.kind !== "table").indexOf(f) + 1}`
-                        }
-                        layout={f.layout}
-                        defaultLayout={
-                          f.kind === "table"
-                            ? DEFAULT_TABLE_LAYOUT
-                            : DEFAULT_DIAGRAM_LAYOUT
-                        }
-                        onChange={(layout) => updateFigure(f.id, { layout })}
-                        row={f.row ?? false}
-                        rowMates={slotMateCount(f.id)}
-                        onRowChange={(row) => updateFigure(f.id, { row })}
-                      />
-                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setCropTarget({ mode: "add" })}
+                      className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                    >
+                      그림 추가
+                    </button>
                   </div>
-                )}
+                  {cardFigures.map((f) => {
+                    const job = jobs.find((j) => j.id === f.id);
+                    const busy = job?.status === "pending" || job?.status === "running";
+                    // 다시 그리려면 원본 픽셀이 있어야 한다(마크업에서 되꺼낸다).
+                    const raster = f.markup ? rasterFromSvg(f.markup) : null;
+                    return (
+                      <div key={f.id} className="flex flex-col gap-1">
+                        <DiagramAdjuster
+                          label={
+                            f.kind === "table"
+                              ? `표 ${cardFigures.filter((x) => x.kind === "table").indexOf(f) + 1}`
+                              : `그림 ${cardFigures.filter((x) => x.kind !== "table").indexOf(f) + 1}`
+                          }
+                          layout={f.layout}
+                          defaultLayout={
+                            f.kind === "table"
+                              ? DEFAULT_TABLE_LAYOUT
+                              : DEFAULT_DIAGRAM_LAYOUT
+                          }
+                          onChange={(layout) => updateFigure(f.id, { layout })}
+                          row={f.row ?? false}
+                          rowMates={slotMateCount(f.id)}
+                          onRowChange={(row) => updateFigure(f.id, { row })}
+                        />
+                        {/* 표는 본문에서 만들어지는 것이라 오려내거나 다시 그릴 대상이 아니다. */}
+                        {f.kind !== "table" && raster && (
+                          <div className="flex flex-wrap items-center gap-1.5 pl-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCropTarget({ mode: "recrop", id: f.id, src: raster })
+                              }
+                              disabled={busy}
+                              className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                            >
+                              다시 오려내기
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => requestRedraw(f.id, raster)}
+                              disabled={busy || f.ai === true}
+                              className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                            >
+                              {busy ? "다시 그리는 중..." : "AI로 다시 그리기"}
+                            </button>
+                            {f.ai === true && (
+                              <span className="text-[11px] text-slate-400">
+                                이미 AI로 그린 그림입니다. 다시 오려내면 원본으로
+                                돌아가 다시 그릴 수 있어요.
+                              </span>
+                            )}
+                            {job?.status === "error" && (
+                              <span className="text-[11px] text-red-600">{job.error}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
+
+            {cropTarget && (
+              <DiagramCropModal
+                // 원본 사진은 저장하지 않으므로(변환 결과만 남긴다) 새 그림은
+                // 새로 찍은 사진에서만 오려낼 수 있다. 다시 오려내기는 붙어
+                // 있는 그림 자체가 재료다.
+                imageSrc={cropTarget.mode === "recrop" ? cropTarget.src : null}
+                purpose="figure"
+                onConfirm={(crop) => void attachCrop(crop)}
+                onCancel={() => setCropTarget(null)}
+              />
+            )}
 
             {editError && <p className="text-sm text-red-600">{editError}</p>}
 
