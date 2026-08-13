@@ -22,6 +22,21 @@ import { KICE_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
  * 있지 않으면 그 사실을 그대로 알려 준다.
  */
 
+/**
+ * 쪽마다 몇 문제를 넣을지.
+ *
+ * `탐구 기본` 은 실제 수능 탐구 문제지의 배치다(20문항 4쪽: 4·6·6·4).
+ * 문제가 더 많으면 이 차례를 되풀이한다. 나머지는 단순히 한 단에 몇 개씩
+ * 넣을지 정하는 것이고, 한 쪽이 두 단이라 쪽당 개수는 그 두 배가 된다.
+ */
+const LAYOUTS = [
+  { key: "tamgu", label: "탐구 기본 (4·6·6·4)", pattern: [4, 6, 6, 4] },
+  { key: "c1", label: "한 단에 1개", pattern: [2] },
+  { key: "c2", label: "한 단에 2개", pattern: [4] },
+  { key: "c3", label: "한 단에 3개", pattern: [6] },
+  { key: "c4", label: "한 단에 4개", pattern: [8] },
+] as const;
+
 export type KiceItem = {
   id: string;
   imageUrl: string;
@@ -44,7 +59,9 @@ async function loadPng(url: string): Promise<Uint8Array> {
 export default function KiceExportPanel({ title, items }: Props) {
   const [area, setArea] = useState<KiceArea>("사회탐구");
   const [subject, setSubject] = useState<string>(KICE_SUBJECTS["사회탐구"][0]);
-  const [showSource, setShowSource] = useState(true);
+  // 기본은 **표시하지 않음** — 실제 문제지에는 없는 글자다.
+  const [showSource, setShowSource] = useState(false);
+  const [layoutKey, setLayoutKey] = useState<(typeof LAYOUTS)[number]["key"]>("tamgu");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +101,7 @@ export default function KiceExportPanel({ title, items }: Props) {
           png,
           label: showSource ? items[i].label : "",
         })),
+        pagePattern: [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
       });
 
       const blob = new Blob([bytes.slice().buffer], { type: "application/pdf" });
@@ -145,6 +163,26 @@ export default function KiceExportPanel({ title, items }: Props) {
         </div>
       )}
 
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium text-slate-700">배치</span>
+        <div className="flex flex-wrap gap-1">
+          {LAYOUTS.map((l) => (
+            <button
+              key={l.key}
+              type="button"
+              onClick={() => setLayoutKey(l.key)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                layoutKey === l.key
+                  ? "border-blue-600 bg-blue-50 text-blue-700"
+                  : "border-slate-300 text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <label className="flex items-center gap-2 text-sm text-slate-700">
         <input
           type="checkbox"
@@ -154,13 +192,14 @@ export default function KiceExportPanel({ title, items }: Props) {
         />
         문제 위에 출처 표기
         <span className="text-xs text-slate-400">
-          끄면 실제 문제지와 똑같아집니다(어디서 틀린 문제인지는 알 수 없습니다).
+          켜면 어디서 틀린 문제인지 작게 적힙니다(실제 문제지에는 없는 글자입니다).
         </span>
       </label>
 
       <p className="rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
-        실제 수능 문제지 판형(272×394mm, 2단)에 오답을 차례로 흘려 넣습니다. 쪽수는
-        문제 양에 따라 자동으로 늘고, 쪽번호와 아래쪽 전체 쪽수도 그에 맞춰 찍힙니다.
+        실제 수능 문제지 판형(272×394mm, 2단)에 오답을 배치합니다. 정해진 개수는 반드시
+        그 쪽에 들어가며, 남는 자리는 문제 사이에 고르게 나누고 모자라면 조금 줄여서
+        넣습니다. 쪽번호와 아래쪽 전체 쪽수는 실제 쪽수에 맞춰 찍힙니다.
       </p>
 
       {error && <p className="text-sm text-red-600">{error}</p>}

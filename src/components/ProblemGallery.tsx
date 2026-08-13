@@ -17,7 +17,7 @@ import {
 } from "@/lib/storedFigures";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import FontSizeControl from "./FontSizeControl";
-import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
+import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import BoxRangeEditor from "./BoxRangeEditor";
 import TextEditTabs from "./TextEditTabs";
 import DiagramAdjuster, {
@@ -70,7 +70,7 @@ async function captureNode(node: HTMLElement): Promise<Blob> {
   let dataUrl = "";
   // Safari 첫 렌더가 비는 문제 대비로 몇 번 반복(마지막 결과 사용).
   for (let i = 0; i < 3; i++) {
-    dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: "#ffffff" });
+    dataUrl = await toPng(node, CARD_CAPTURE_OPTIONS);
   }
   return await (await fetch(dataUrl)).blob();
 }
