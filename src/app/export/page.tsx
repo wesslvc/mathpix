@@ -2,7 +2,7 @@ import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { categoryLabel, type Category, type Problem } from "@/lib/supabase/types";
-import { parseProblemNumber } from "@/lib/problemNumber";
+import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { formatAnswer, toAnswerType } from "@/lib/answer";
 import ExportComposer, {
   type ComposerProblem,
@@ -89,6 +89,9 @@ export default async function ExportPage({
         // 점수를 뺀 출처. 같은 출처가 여러 페이지에 걸칠 때 점수를 반복하지 않는다.
         sourceBase: cat?.source ?? "출처",
         origNumber: parseProblemNumber(p.text_content || p.latex || ""),
+        // 손으로 정해 둔 번호가 있으면 그게 우선이다(통째로 그린 문제는 본문이
+        // 없어서 뽑을 것도 없다).
+        manualNumber: readProblemNumber(p.box_range),
         // 객관식이면 "1" -> "①"로 바꿔 정답표에 찍는다. 저장은 원문 그대로이고
         // 변환은 표시할 때만 한다(유형을 바꾸면 되돌아가야 하므로).
         answer: formatAnswer(p.answer, toAnswerType(p.answer_type)),
