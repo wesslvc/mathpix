@@ -66,6 +66,8 @@ export default function KiceExportPanel({ title, items }: Props) {
   const [subject, setSubject] = useState<string>(KICE_SUBJECTS["사회탐구"][0]);
   // 기본은 **표시하지 않음** — 실제 문제지에는 없는 글자다.
   const [showSource, setShowSource] = useState(false);
+  /** 맨 뒤에 정답표를 붙일지. 오답프린트라 기본은 켜짐이다. */
+  const [showAnswers, setShowAnswers] = useState(true);
   const [layoutKey, setLayoutKey] = useState<(typeof LAYOUTS)[number]["key"]>("tamgu");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +109,9 @@ export default function KiceExportPanel({ title, items }: Props) {
           label: showSource ? items[i].label : "",
         })),
         pagePattern: [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
+        answers: showAnswers
+          ? items.map((item) => ({ label: item.answerLabel, answer: item.answer }))
+          : [],
       });
 
       const blob = new Blob([bytes.slice().buffer], { type: "application/pdf" });
@@ -187,6 +192,19 @@ export default function KiceExportPanel({ title, items }: Props) {
           ))}
         </div>
       </div>
+
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={showAnswers}
+          onChange={(e) => setShowAnswers(e.target.checked)}
+          className="h-4 w-4"
+        />
+        맨 뒤에 정답표 붙이기
+        <span className="text-xs text-slate-400">
+          정답을 적어 둔 문제만 표에 들어갑니다.
+        </span>
+      </label>
 
       <label className="flex items-center gap-2 text-sm text-slate-700">
         <input
