@@ -10,9 +10,11 @@ import ProblemGallery, {
 } from "@/components/ProblemGallery";
 import BillingStatus from "@/components/BillingStatus";
 import Logo from "@/components/Logo";
+import CategoryTitleEditor from "@/components/CategoryTitleEditor";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
+import { readProblemNumber } from "@/lib/problemNumber";
 import type { BoxOverride } from "@/lib/renderMathText";
 
 /**
@@ -40,6 +42,7 @@ type ProblemListRow = {
   boxStart: number | null;
   boxEnd: number | null;
   boxNone: boolean | null;
+  problemNo: number | null;
 };
 
 const PROBLEM_LIST_COLUMNS = [
@@ -56,6 +59,7 @@ const PROBLEM_LIST_COLUMNS = [
   "boxStart:box_range->start",
   "boxEnd:box_range->end",
   "boxNone:box_range->none",
+  "problemNo:box_range->number",
 ].join(", ");
 
 /** 목록 행에서 조건 박스 값을 되살린다(옛 형태 셋을 모두 받는다). */
@@ -124,6 +128,7 @@ export default async function CategoryPage({
         boxStart: (box.start as number | null) ?? null,
         boxEnd: (box.end as number | null) ?? null,
         boxNone: (box.none as boolean | null) ?? null,
+        problemNo: (box.number as number | null) ?? null,
       };
     });
   }
@@ -157,6 +162,7 @@ export default async function CategoryPage({
         answerType: toAnswerType(p.answer_type),
         boxRange: boxRangeOf(p),
         fontPt: readFontPt({ fontPt: p.fontPt }),
+        number: readProblemNumber({ number: p.problemNo }),
       };
     })
     .filter((p): p is GalleryProblem => p !== null);
@@ -170,9 +176,11 @@ export default async function CategoryPage({
           <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline">
             ← 목록으로
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-ink">
-            {categoryLabel(category)}
-          </h1>
+          <CategoryTitleEditor
+            id={category.id}
+            source={category.source}
+            label={categoryLabel(category)}
+          />
           <p className="text-sm text-slate-500">
             문제 {problems?.length ?? 0}개 저장됨
           </p>

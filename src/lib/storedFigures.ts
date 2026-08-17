@@ -152,4 +152,11 @@ export type StoredBoxRange = {
   ranges: BoxRange[] | null;
   fontPt: number;
   figures?: StoredFigure[];
+  /**
+   * 사용자가 손으로 정해 둔 문제 번호(예: 15, 22, 28).
+   *
+   * 없으면 본문 맨 앞에서 뽑거나(`parseProblemNumber`) 그것도 없으면 차례대로
+   * 1번부터 매긴다. 통째로 그린 문제는 본문이 없어서 손으로 적어야 한다.
+   */
+  number?: number | null;
 };

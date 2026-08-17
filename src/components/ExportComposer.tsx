@@ -19,6 +19,8 @@ export type ComposerProblem = {
   /** 점수를 뺀 출처(예: "강대2회"). 같은 출처가 반복될 때 쓴다. */
   sourceBase: string;
   origNumber: number | null;
+  /** 사용자가 손으로 정해 둔 번호. 있으면 무조건 이걸 쓴다. */
+  manualNumber: number | null;
   answer: string;
 };
 
@@ -251,7 +253,15 @@ export default function ExportComposer({
   }
 
   /** 각 문제 번호: 단일이면 원래 번호, 복수 선택이면 1번부터 다시 매긴다. */
+  /**
+   * 문제에 찍을 번호.
+   *
+   * 손으로 정해 둔 값이 있으면 **무엇보다 우선**한다 — 실제 시험지 번호를
+   * 그대로 쓰고 싶을 때가 있다(15·22·28처럼 띄엄띄엄). 없으면 예전대로:
+   * 여러 묶음을 한 번에 뽑을 때는 차례대로, 한 묶음이면 본문에서 뽑은 번호.
+   */
   function numberFor(problem: ComposerProblem, index: number): number {
+    if (problem.manualNumber != null) return problem.manualNumber;
     return multi ? index + 1 : (problem.origNumber ?? index + 1);
   }
 

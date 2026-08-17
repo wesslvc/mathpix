@@ -46,6 +46,8 @@ export type GalleryProblem = {
   boxRange: BoxOverride | null;
   /** 저장된 글자 크기(pt). */
   fontPt: number;
+  /** 손으로 정해 둔 문제 번호. null이면 본문에서 뽑거나 차례대로 매긴다. */
+  number: number | null;
 };
 
 /** 같은 폴더 안에 새 파일명을 만든다. (덮어쓰기 대신 새 오브젝트로 저장) */
@@ -159,6 +161,13 @@ export default function ProblemGallery({ problems }: Props) {
   // undefined = 자동 감지에 맡김. 그 외는 사용자가 직접 정한 범위.
   const [editBox, setEditBox] = useState<BoxOverride | undefined>(undefined);
   const [editFontPt, setEditFontPt] = useState(DEFAULT_FONT_PT);
+  /**
+   * 손으로 정해 둔 문제 번호. 빈 칸이면 "정하지 않음"이다.
+   *
+   * 실제 시험지의 번호를 그대로 쓰고 싶을 때가 있다(15번·22번·28번처럼 띄엄띄엄).
+   * 비워 두면 예전처럼 본문 맨 앞에서 뽑거나 차례대로 1번부터 매긴다.
+   */
+  const [editNumber, setEditNumber] = useState("");
   // 저장돼 있던 그림들. 목록 조회에는 들어 있지 않아서(용량 때문에) 수정할
   // 문제 하나만 따로 가져온다.
   const [editFigures, setEditFigures] = useState<StoredFigure[]>([]);
@@ -376,6 +385,7 @@ export default function ProblemGallery({ problems }: Props) {
     // 저장할 때의 크기로 연다. 예전에는 24px로 고정돼 있어서 수정만 하면
     // 글씨가 저 혼자 커졌다.
     setEditFontPt(problem.fontPt);
+    setEditNumber(problem.number == null ? "" : String(problem.number));
     setEditError(null);
     setEditFigures([]);
     setMaybeLostFigures(false);
@@ -439,6 +449,8 @@ export default function ProblemGallery({ problems }: Props) {
             ranges: toBoxRanges(editBox),
             fontPt: editFontPt,
             figures: toStoredFigures(cardFigures),
+            // 빈 칸이면 "정하지 않음" — 본문에서 뽑거나 차례대로 매긴다.
+            number: editNumber.trim() === "" ? null : Number(editNumber),
           },
         })
         .eq("id", editing.id);
@@ -583,6 +595,11 @@ export default function ProblemGallery({ problems }: Props) {
                 className="h-10 w-14 shrink-0 rounded border border-slate-200 object-cover object-top"
               />
               <span className="min-w-0 flex-1 truncate text-xs text-slate-600">
+                {problem.number != null && (
+                  <span className="mr-1 font-medium text-slate-500">
+                    {problem.number}번
+                  </span>
+                )}
                 {preview(problem)}
               </span>
               {problem.answer.trim() !== "" && (
@@ -699,6 +716,23 @@ export default function ProblemGallery({ problems }: Props) {
                       }
                       className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                     />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <span className="shrink-0 text-xs font-medium text-slate-500">
+                      문제 번호
+                    </span>
+                    <input
+                      value={editNumber}
+                      onChange={(e) =>
+                        setEditNumber(e.target.value.replace(/[^0-9]/g, ""))
+                      }
+                      inputMode="numeric"
+                      placeholder="비우면 자동"
+                      className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                    />
+                    <span className="text-[11px] text-slate-400">
+                      인쇄물에 찍히는 번호입니다. 비우면 본문에서 뽑거나 차례대로 매깁니다.
+                    </span>
                   </label>
                   {editAnswer.trim() !== "" && (
                     <p className="text-[11px] text-slate-500">
