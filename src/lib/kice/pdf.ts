@@ -259,6 +259,13 @@ export type KiceSpec = {
   problems: { png: Uint8Array; label?: string }[];
   /** 쪽마다 넣을 문제 수. 쪽 순서대로 읽고 모자라면 되풀이한다(예: `[4,6,6,4]`). */
   pagePattern: number[];
+  /**
+   * 마지막에 붙일 **정답표**. 비어 있으면 붙이지 않는다.
+   *
+   * 실제 문제지에는 없는 쪽이지만, 이건 문제지가 아니라 **오답프린트**다 —
+   * 풀고 나서 맞춰 볼 답이 없으면 쓸모가 반이다. 그래서 맨 뒤에 한 쪽 붙인다.
+   */
+  answers?: { label: string; answer: string }[];
 };
 
 export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
@@ -451,11 +458,14 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
 
   const pattern = spec.pagePattern.filter((n) => n > 0);
   const pages = layoutPages(images, spec.frames, pattern.length ? pattern : [4]);
+  const answers = (spec.answers ?? []).filter((a) => a.answer.trim() !== "");
+  // 정답표도 한 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
+  const total = pages.length + (answers.length > 0 ? 1 : 0);
   const labelFont = await fontFor(LABEL_FONT);
 
   for (let n = 0; n < pages.length; n++) {
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
-    await drawFrame(page, frameFor(spec.frames, n + 1), { pageNo: n + 1, total: pages.length });
+    await drawFrame(page, frameFor(spec.frames, n + 1), { pageNo: n + 1, total });
     for (const it of pages[n].items) {
       if (it.label) {
         page.drawText(it.label, {
@@ -470,5 +480,119 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     }
   }
 
+  if (answers.length > 0) {
+    const pageNo = total;
+    const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
+    const frame = frameFor(spec.frames, pageNo);
+    // 정답표 쪽에는 **단 구분선을 긋지 않는다.** 표를 세로로 관통해 버린다.
+    // 머리말·쪽번호는 그대로 둬서 앞쪽들과 한 묶음으로 보이게 한다.
+    const bare: Frame = {
+      ...frame,
+      items: frame.items.filter(
+        (i) =>
+          !(i.k === "line" && Math.abs(i.x1 - i.x2) < 0.5 && Math.abs(i.y2 - i.y1) > 300),
+      ),
+    };
+    await drawFrame(page, bare, { pageNo, total });
+    // 본문 위아래 끝은 **원래 틀**에서 잰다(구분선을 뺀 틀에는 아래 끝이 없다).
+    await drawAnswers(page, frame, answers, fontFor, flip);
+  }
+
   return pdf.save();
+}
+
+/** 정답표 한 칸의 높이. 글자 12pt 가 넉넉히 들어간다. */
+const ANSWER_ROW = 26;
+/** 한 벌(번호+정답)의 폭. 종이 폭을 다 늘리면 표가 아니라 줄자처럼 보인다. */
+const ANSWER_GROUP_W = 150;
+const ANSWER_FONT = "(한)신중명조";
+
+/**
+ * 마지막 쪽에 정답표를 그린다.
+ *
+ * 문제 쪽과 같은 틀 위에 그린다 — 머리말·쪽번호가 이어져야 한 묶음으로 보인다.
+ * 표는 `번호 | 정답` 짝을 여러 벌 가로로 늘어놓는다. 답이 많을수록 벌 수를
+ * 늘려 세로로 길어지지 않게 한다(한 쪽에 들어가야 한다).
+ */
+async function drawAnswers(
+  page: PDFPage,
+  frame: Frame,
+  rows: { label: string; answer: string }[],
+  fontFor: (name: string) => Promise<PDFFont>,
+  flip: (y: number) => number,
+) {
+  const font = await fontFor(ANSWER_FONT);
+  const bounds = frameBounds(frame);
+  const left = LAYOUT.marginLeft;
+  const width = LAYOUT.columnWidth * 2 + LAYOUT.columnGap;
+
+  const title = "정답";
+  const titleSize = 20;
+  const titleY = bounds.headerBottom + LAYOUT.gap + titleSize;
+  page.drawText(title, {
+    x: left + (width - font.widthOfTextAtSize(title, titleSize)) / 2,
+    y: flip(titleY),
+    size: titleSize,
+    font,
+    color: rgb(0, 0, 0),
+  });
+
+  const top = titleY + LAYOUT.gap * 2;
+  const avail = bounds.contentBottom - top;
+  // 벌 수는 **개수에 맞춰** 정하고(한 벌에 열두 줄쯤), 그래도 한 쪽에 안 들어가면
+  // 더 늘린다. 폭은 벌마다 고정이라 답이 적으면 표도 작게 나온다.
+  const maxGroups = Math.max(1, Math.floor(width / ANSWER_GROUP_W));
+  let groups = Math.min(maxGroups, Math.max(1, Math.ceil(rows.length / 12)));
+  while (groups < maxGroups && (Math.ceil(rows.length / groups) + 1) * ANSWER_ROW > avail) {
+    groups += 1;
+  }
+  const perGroup = Math.ceil(rows.length / groups);
+  const groupW = ANSWER_GROUP_W;
+  const numW = groupW * 0.5;
+  // 표 전체를 종이 가운데에 놓는다.
+  const tableLeft = left + (width - groupW * groups) / 2;
+
+  const line = (x1: number, y1: number, x2: number, y2: number) =>
+    page.drawLine({
+      start: { x: x1, y: flip(y1) },
+      end: { x: x2, y: flip(y2) },
+      thickness: 0.5,
+      color: rgb(0, 0, 0),
+    });
+  const cell = (text: string, x: number, w: number, y: number, size = 12) => {
+    if (!text) return;
+    page.drawText(text, {
+      x: x + (w - font.widthOfTextAtSize(text, size)) / 2,
+      y: flip(y + ANSWER_ROW / 2 + size * 0.36),
+      size,
+      font,
+      color: rgb(0, 0, 0),
+    });
+  };
+
+  for (let g = 0; g < groups; g++) {
+    const x = tableLeft + g * groupW;
+    const count = Math.min(perGroup, Math.max(0, rows.length - g * perGroup));
+    if (count === 0) continue;
+    const height = (count + 1) * ANSWER_ROW;
+
+    // 바깥 테두리와 가운데 세로선.
+    line(x, top, x + groupW, top);
+    line(x, top + height, x + groupW, top + height);
+    line(x, top, x, top + height);
+    line(x + groupW, top, x + groupW, top + height);
+    line(x + numW, top, x + numW, top + height);
+
+    cell("번호", x, numW, top);
+    cell("정답", x + numW, groupW - numW, top);
+    line(x, top + ANSWER_ROW, x + groupW, top + ANSWER_ROW);
+
+    for (let r = 0; r < count; r++) {
+      const row = rows[g * perGroup + r];
+      const y = top + (r + 1) * ANSWER_ROW;
+      cell(row.label, x, numW, y);
+      cell(row.answer, x + numW, groupW - numW, y);
+      line(x, y + ANSWER_ROW, x + groupW, y + ANSWER_ROW);
+    }
+  }
 }
