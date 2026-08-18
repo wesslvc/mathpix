@@ -16,6 +16,7 @@ import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import type { DetectedProblem } from "@/lib/detectProblems";
+import { mergeWithinColumn, type ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { useFigureJobs } from "./FigureJobsProvider";
 
@@ -58,8 +59,24 @@ const PAD = 0.004;
 /** 이보다 작은 네모는 그리다 만 것으로 본다(지면 크기 대비 비율). */
 const MIN_BOX = 0.02;
 
-/** `parts` 가 2 이상이면 단을 넘어 이어진 문제를 이어 붙인 것이다. */
-type Piece = { id: string; crop: string; parts: number };
+/**
+ * 잘린 문제 하나.
+ *
+ * `parts` 가 2 이상이면 단을 넘어 이어진 문제를 세로로 이어 붙인 것이다.
+ *
+ * **자른 자리(`boxes`)를 들고 있는 이유**: 나중에 조각 둘을 합칠 때 그림을
+ * 이어 붙이는 게 아니라 **원본에서 다시 잘라야** 하기 때문이다. 같은 단에
+ * 있던 것을 이어 붙이면 폭을 다시 맞추고 사이에 띠가 들어가 잘렸다 붙인
+ * 티가 난다 — 자리를 알고 있으면 아우르는 네모 하나로 다시 자를 수 있다.
+ */
+type Piece = {
+  id: string;
+  crop: string;
+  parts: number;
+  boxes: ProblemBox[];
+  /** 자를 때 준 여유. 손으로 그린 것은 0, 자동으로 찾은 것은 PAD. */
+  pad: number;
+};
 
 /** 손으로 그린 네모. 값은 전부 지면 크기 대비 비율(0~1)이다. */
 type Box = { id: string; x: number; y: number; w: number; h: number };
@@ -96,6 +113,8 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
   const [pageImage, setPageImage] = useState<string | null>(null);
   const [boxes, setBoxes] = useState<Box[]>([]);
   const [pieces, setPieces] = useState<Piece[]>([]);
+  /** 합치려고 고른 조각들. */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** 어떤 모델이 영역을 잡았는지. 모델을 바꿔 가며 견줄 때 필요하다. */
@@ -201,6 +220,7 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
     if (!file) return;
     setError(null);
     setPieces([]);
+    setPicked(new Set());
     setBoxes([]);
     setUsedModel(null);
     if (isHeicFile(file)) {
@@ -287,8 +307,11 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
           id: crypto.randomUUID(),
           crop: cutBox(source.img, b, 0),
           parts: 1,
+          boxes: [{ x: b.x, y: b.y, w: b.w, h: b.h }],
+          pad: 0,
         })),
       );
+      setPicked(new Set());
       setUsedModel(null);
     } catch (err) {
       setError(
@@ -372,9 +395,12 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
             id: crypto.randomUUID(),
             crop: await stitchVertically(prob.boxes.map((b) => cutBox(img, b, PAD))),
             parts: prob.boxes.length,
+            boxes: prob.boxes,
+            pad: PAD,
           })),
         );
         setPieces(next);
+        setPicked(new Set());
         setBoxes([]);
       } catch (err) {
         setError(
@@ -382,6 +408,74 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
             (err instanceof Error ? err.message : "알 수 없는 오류"),
         );
       }
+    } finally {
+      source.revoke();
+      setBusy(null);
+    }
+  }
+
+  /**
+   * 고른 조각들을 **한 문제로 합친다.**
+   *
+   * 자동으로 찾은 결과가 한 문제를 둘로 쪼개 놓는 일이 있다(발문과 선지가
+   * 따로 잡히거나, 단을 넘어간 문제를 못 묶거나). 손으로 그릴 때도 나눠
+   * 그렸다가 합치고 싶을 수 있다. 그때 이걸로 붙인다.
+   *
+   * **그림을 이어 붙이는 게 아니라 원본에서 다시 자른다.** 그래서 조각마다
+   * 자른 자리를 들고 있었다. 붙이는 규칙은 서버가 자동으로 묶을 때와 **같은
+   * 것**을 쓴다(`mergeWithinColumn`) — 같은 단에 있던 것은 아우르는 네모
+   * 하나로 다시 잘라 이음매가 없고, 단을 넘어간 것만 세로로 이어 붙인다.
+   *
+   * 합친 것은 **고른 것들 중 가장 앞자리**에 놓는다. 문제 차례가 유지된다.
+   */
+  async function mergeSelected() {
+    const chosen = pieces.filter((p) => picked.has(p.id));
+    if (chosen.length < 2) return;
+    setError(null);
+    setBusy("사진을 여는 중...");
+
+    let source: { img: HTMLImageElement; revoke: () => void };
+    try {
+      source = await openSource();
+    } catch (err) {
+      setError(
+        (err instanceof Error ? err.message : "사진을 열지 못했습니다.") +
+          " 합치려면 지면 사진이 그대로 있어야 합니다.",
+      );
+      setBusy(null);
+      return;
+    }
+
+    try {
+      setBusy(`${chosen.length}개를 합치는 중...`);
+      const all = chosen.flatMap((p) => p.boxes);
+      // 여유는 가장 큰 것에 맞춘다. 손으로 그린 것(0)과 자동으로 찾은 것(PAD)이
+      // 섞일 수 있는데, 좁은 쪽에 맞추면 자동으로 찾은 쪽 글자가 잘릴 수 있다.
+      const pad = Math.max(...chosen.map((p) => p.pad));
+      const merged = mergeWithinColumn(all);
+      const crop = await stitchVertically(
+        merged.map((b) => cutBox(source.img, b, pad)),
+      );
+      const at = pieces.findIndex((p) => picked.has(p.id));
+      const next: Piece = {
+        id: crypto.randomUUID(),
+        crop,
+        parts: merged.length,
+        boxes: merged,
+        pad,
+      };
+      setPieces((prev) => {
+        const rest = prev.filter((p) => !picked.has(p.id));
+        // 없앤 것들 중 가장 앞자리를 셈해 그 자리에 끼운다.
+        const before = prev.slice(0, at).filter((p) => !picked.has(p.id)).length;
+        return [...rest.slice(0, before), next, ...rest.slice(before)];
+      });
+      setPicked(new Set());
+    } catch (err) {
+      setError(
+        "합치지 못했습니다: " +
+          (err instanceof Error ? err.message : "알 수 없는 오류"),
+      );
     } finally {
       source.revoke();
       setBusy(null);
@@ -447,6 +541,7 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
     if (done > 0) {
       // 넣은 것은 목록에서 뺀다(같은 것을 두 번 넣지 않게).
       setPieces((prev) => prev.slice(done));
+      setPicked(new Set());
       setBoxes([]);
       setPageImage(null);
       setPageFile(null);
@@ -553,6 +648,16 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
               자동으로 찾기
             </button>
           )}
+          {picked.size >= 2 && (
+            <button
+              type="button"
+              onClick={() => void mergeSelected()}
+              disabled={busy !== null}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              고른 것 합치기 ({picked.size}개)
+            </button>
+          )}
           {pieces.length > 0 && (
             <button
               type="button"
@@ -576,21 +681,52 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {pieces.length > 0 && (
+        <p className="text-[11px] text-slate-500">
+          한 문제가 둘로 쪼개졌으면 그 조각들을 눌러 고른 뒤 “고른 것 합치기”를
+          누르세요. 원본에서 다시 잘라 붙이므로 이음매가 남지 않습니다.
+        </p>
+      )}
+
+      {pieces.length > 0 && (
         <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {pieces.map((p, i) => (
             <li
               key={p.id}
-              className="relative overflow-hidden rounded-lg border border-slate-200 bg-white"
+              /* 카드를 누르면 고른다/뗀다. 둘 이상 고르면 합칠 수 있다. */
+              onClick={() =>
+                setPicked((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(p.id)) next.delete(p.id);
+                  else next.add(p.id);
+                  return next;
+                })
+              }
+              className={
+                "relative cursor-pointer overflow-hidden rounded-lg border bg-white " +
+                (picked.has(p.id)
+                  ? "border-blue-500 ring-2 ring-blue-400"
+                  : "border-slate-200")
+              }
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={p.crop} alt="" className="w-full object-contain" />
               <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 text-[11px] text-white">
+                {picked.has(p.id) ? "✓ " : ""}
                 {i + 1}
                 {p.parts > 1 && ` · ${p.parts}조각 합침`}
               </span>
               <button
                 type="button"
-                onClick={() => setPieces((prev) => prev.filter((x) => x.id !== p.id))}
+                onClick={(e) => {
+                  // 카드의 "고르기"까지 같이 걸리면 지우면서 선택이 켜진다.
+                  e.stopPropagation();
+                  setPieces((prev) => prev.filter((x) => x.id !== p.id));
+                  setPicked((prev) => {
+                    const next = new Set(prev);
+                    next.delete(p.id);
+                    return next;
+                  });
+                }}
                 disabled={busy !== null}
                 aria-label="이 영역 빼기"
                 className="absolute right-1 top-1 rounded bg-black/60 px-1.5 text-[11px] text-white hover:bg-red-600 disabled:opacity-40"
