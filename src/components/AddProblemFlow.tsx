@@ -11,6 +11,7 @@ import type { AnswerType } from "@/lib/answer";
 import type { StoredBoxRange } from "@/lib/storedFigures";
 import type { TokenStatus } from "@/app/api/tokens/route";
 import { rasterToSvg } from "@/lib/figureImage";
+import { enhanceContrast } from "@/lib/autoContrast";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import BatchSplitPanel from "./BatchSplitPanel";
 
@@ -148,7 +149,9 @@ export default function AddProblemFlow({
       const res = await fetch("/api/mathpix", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: croppedDataUrl }),
+        // 인식에 보낼 때만 대비를 올린다. 화면에 남는 원본은 그대로 둔다
+        // (도형을 오려낼 때 원래 픽셀이 필요하다).
+        body: JSON.stringify({ image: await enhanceContrast(croppedDataUrl) }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "인식에 실패했습니다.");

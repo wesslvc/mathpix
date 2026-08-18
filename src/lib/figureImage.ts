@@ -1,3 +1,5 @@
+import { enhanceContrast } from "./autoContrast";
+
 // 사과탐 자료를 LLM에 보내기 전에 브라우저에서 처리하는 것들.
 // 여기서 하는 일은 전부 공짜이고, 목적은 "LLM 호출을 줄이고, 부를 때는 싸게"다.
 //
@@ -72,6 +74,7 @@ export async function prepareFigureForModel(
   dataUrl: string,
   maxDim: number = MODEL_INPUT_DIM,
 ): Promise<string> {
+  dataUrl = await enhanceContrast(dataUrl);
   const img = await loadImage(dataUrl);
   if (Math.max(img.naturalWidth, img.naturalHeight) <= maxDim) {
     return dataUrl;
@@ -98,6 +101,8 @@ export async function prepareFigureForModel(
  * 원본보다 키우지는 않는다 — 없는 해상도는 만들어지지 않는다.
  */
 export async function prepareProblemForModel(dataUrl: string): Promise<string> {
+  // 손으로 찍은 사진은 종이가 회색이라 글자가 옅다. 보내기 전에 한 번 편다.
+  dataUrl = await enhanceContrast(dataUrl);
   const img = await loadImage(dataUrl);
   const scale = Math.min(
     1,
