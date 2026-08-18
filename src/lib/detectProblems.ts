@@ -14,8 +14,9 @@
  * 결과가 좌표뿐이라 틀려도 사용자가 눈으로 보고 지우면 그만이다.
  */
 
-/** 0~1 로 정규화된 영역. 왼쪽 위가 (0,0). */
-export type ProblemBox = { x: number; y: number; w: number; h: number };
+import { columnOf, mergeWithinColumn as unionByColumn } from "./problemBoxes";
+export type { ProblemBox } from "./problemBoxes";
+import type { ProblemBox } from "./problemBoxes";
 
 /**
  * 문제 하나. `boxes` 가 둘 이상이면 **단을 넘어 이어진 문제**다.
@@ -126,9 +127,6 @@ export class DetectError extends Error {
   }
 }
 
-/** 어느 단에 있는가. 0 = 왼쪽, 1 = 오른쪽. */
-const columnOf = (b: ProblemBox) => (b.x + b.w / 2 < 0.5 ? 0 : 1);
-
 /**
  * 묶을 때 쓰는 기준들.
  *
@@ -219,23 +217,7 @@ function group(boxes: (ProblemBox & { no: string })[]): DetectedProblem[] {
  * (모델이 한 문제를 발문/자료/선지처럼 여러 조각으로 나눠 주는 일이 잦다.)
  */
 function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
-  if (problem.boxes.length < 2) return problem;
-  const columns = new Map<number, ProblemBox>();
-  for (const b of problem.boxes) {
-    const col = columnOf(b);
-    const cur = columns.get(col);
-    if (!cur) {
-      columns.set(col, b);
-      continue;
-    }
-    const x = Math.min(cur.x, b.x);
-    const y = Math.min(cur.y, b.y);
-    const right = Math.max(cur.x + cur.w, b.x + b.w);
-    const bottom = Math.max(cur.y + cur.h, b.y + b.h);
-    columns.set(col, { x, y, w: right - x, h: bottom - y });
-  }
-  // 왼쪽 단이 먼저다(읽는 차례).
-  return { boxes: [...columns.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b) };
+  return { boxes: unionByColumn(problem.boxes) };
 }
 
 /** 모델이 돌려준 글에서 배열을 꺼내 묶는다. 두 갈래가 똑같이 쓴다. */
