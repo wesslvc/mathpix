@@ -11,6 +11,39 @@ const STATUS_TEXT = {
 } as const;
 
 /**
+ * 글자 인식(Mathpix)이 어떻게 됐는지 보여 주는 줄.
+ *
+ * 문제 전체를 그릴 때는 **Mathpix 가 읽은 글자를 프롬프트에 참고로 넣는다**
+ * (그래야 이미지 생성 모델이 글자를 지어내지 않는다). 그 단계가 됐는지 안
+ * 됐는지는 결과물의 글자 정확도를 좌우하므로 눈에 보여야 한다.
+ */
+function OcrLine({ ocr, preview }: { ocr?: string; preview?: string }) {
+  if (!ocr) return null;
+  if (ocr === "reading") {
+    return (
+      <p className="animate-soft-pulse text-[11px] text-slate-500">
+        Mathpix로 글자 읽는 중…
+      </p>
+    );
+  }
+  if (ocr === "none") {
+    return (
+      <p className="text-[11px] text-amber-700">
+        Mathpix 글자 참고 없음 — 그림만 보고 그립니다
+      </p>
+    );
+  }
+  return (
+    <>
+      <p className="text-[11px] text-emerald-700">Mathpix 글자 참고 ✓</p>
+      {preview && (
+        <p className="mt-0.5 truncate text-[10px] text-slate-400">“{preview}…”</p>
+      )}
+    </>
+  );
+}
+
+/**
  * AI 그림 작업 현황을 화면 구석에 띄우는 패널.
  *
  * 작업이 도는 동안 사용자는 다음 문제로 넘어가 계속 작업한다. 그래서 진행
@@ -74,6 +107,7 @@ export default function FigureJobsPanel() {
                   >
                     {STATUS_TEXT[j.status]}
                   </p>
+                  <OcrLine ocr={j.ocr} preview={j.ocrPreview} />
                   {j.error && (
                     <p className="mt-0.5 text-[10px] leading-snug text-slate-400">
                       {j.error}

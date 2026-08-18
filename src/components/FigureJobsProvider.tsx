@@ -70,6 +70,17 @@ export type FigureJob = {
    */
   problemId?: string | null;
   status: "pending" | "running" | "done" | "error";
+  /**
+   * 글자 인식(Mathpix)이 어떻게 됐는가. **문제 전체를 그릴 때만** 쓴다.
+   *   reading — 지금 읽는 중
+   *   ok      — 읽어서 프롬프트에 참고로 넣었다
+   *   none    — 못 읽었다(키가 없거나 실패). 참고 없이 그린다
+   * 화면에 그대로 보여 준다 — 글자 정확도가 걸린 단계라 됐는지 안 됐는지
+   * 눈에 보여야 한다.
+   */
+  ocr?: "reading" | "ok" | "none";
+  /** 읽어 낸 글자의 앞부분. 무엇을 참고했는지 눈으로 확인할 수 있게. */
+  ocrPreview?: string;
   error?: string;
   /** 완성된 그림 마크업. 화면이 열려 있으면 미리보기에 바로 반영된다. */
   svg?: string;
@@ -270,8 +281,24 @@ export default function FigureJobsProvider({
           //
           // **실패해도 그냥 진행한다.** 참고가 없으면 예전과 똑같이 동작할
           // 뿐이라, 이것 때문에 그림 생성을 막을 이유가 없다.
-          const reference =
-            mode === "problem" ? await readTextForReference(forModel) : undefined;
+          let reference: string | undefined;
+          if (mode === "problem") {
+            setJobs((prev) =>
+              prev.map((j) => (j.id === id ? { ...j, ocr: "reading" as const } : j)),
+            );
+            reference = await readTextForReference(forModel);
+            setJobs((prev) =>
+              prev.map((j) =>
+                j.id === id
+                  ? {
+                      ...j,
+                      ocr: reference ? ("ok" as const) : ("none" as const),
+                      ocrPreview: reference?.replace(/\s+/g, " ").slice(0, 60),
+                    }
+                  : j,
+              ),
+            );
+          }
           const res = await fetch("/api/figure", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
