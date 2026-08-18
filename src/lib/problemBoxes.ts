@@ -71,19 +71,60 @@ export function mergeWithinColumn(boxes: ProblemBox[]): ProblemBox[] {
 export function mergeChosen(boxes: ProblemBox[]): ProblemBox[] {
   if (boxes.length < 2) return boxes;
   const out: ProblemBox[] = [];
-  for (const col of [0, 1]) {
-    const inCol = boxes
-      .filter((b) => columnOf(b) === col)
-      .sort((a, b) => a.y - b.y);
-    for (const b of inCol) {
-      const last = out[out.length - 1];
-      // 바로 앞 것과 **같은 단이면서 붙어 있을 때만** 아우른다.
-      if (last && columnOf(last) === col && b.y - (last.y + last.h) <= ADJACENT) {
-        out[out.length - 1] = union(last, b);
+  for (const group of groupByColumn(boxes)) {
+    // **단마다 따로 훑는다.** 앞 단의 마지막 것과 견주면 단을 넘어선 것끼리
+    // 아울러 버린다 — 그러면 두 단을 통째로 감싸는 네모가 되어 사이의 여백까지
+    // 딸려 온다(실제로 그렇게 됐다: 좌·우단을 합쳤더니 1104×1088 백지).
+    const col: ProblemBox[] = [];
+    for (const b of [...group].sort((a, b) => a.y - b.y)) {
+      const last = col[col.length - 1];
+      // 바로 앞 것과 **붙어 있을 때만** 아우른다(같은 단인 건 이미 보장됐다).
+      if (last && b.y - (last.y + last.h) <= ADJACENT) {
+        col[col.length - 1] = union(last, b);
       } else {
-        out.push(b);
+        col.push(b);
       }
     }
+    out.push(...col);
   }
   return out;
+}
+
+/** 이만큼 가로로 겹치면 같은 단으로 본다(좁은 쪽 폭 대비). */
+const SAME_COLUMN = 0.5;
+
+/**
+ * 고른 네모들을 **실제로 겹치는지** 보고 단으로 나눈다. 왼쪽 단이 먼저다.
+ *
+ * `columnOf`(가운데 0.5 로 가르기)를 쓰면 안 된다. 그건 두 단짜리 시험지에서
+ * 조각이 확실히 한쪽에 몰려 있을 때 쓰는 기준이라, **한 단짜리 지면에서는
+ * 통째로 틀린다.** 손으로 그린 네모는 좌우가 딱 대칭이 아니어서 가운데가
+ * 0.5 를 아슬아슬하게 넘나드는데, 그러면 위 조각이 "오른쪽 단", 아래 조각이
+ * "왼쪽 단"으로 갈리고 **왼쪽 단이 먼저**라는 규칙 때문에 아래가 위로 올라온다.
+ * 실제로 그렇게 뒤집혔다(위 x 0.08~0.96 → 가운데 0.52, 아래 x 0.03~0.91 →
+ * 가운데 0.47).
+ *
+ * 가로로 반 넘게 겹치면 같은 단이다 — 위아래로 놓인 것은 언제나 겹치고,
+ * 나란히 놓인 두 단은 겹치지 않는다. 기준이 자리(0.5)가 아니라 조각들 사이의
+ * 관계라서 한 단짜리든 두 단짜리든 그대로 맞는다.
+ */
+function groupByColumn(boxes: ProblemBox[]): ProblemBox[][] {
+  const cols: { span: ProblemBox; items: ProblemBox[] }[] = [];
+  for (const b of [...boxes].sort((p, q) => p.x - q.x)) {
+    const hit = cols.find((c) => overlapRatio(c.span, b) >= SAME_COLUMN);
+    if (hit) {
+      hit.items.push(b);
+      hit.span = union(hit.span, b);
+    } else {
+      cols.push({ span: b, items: [b] });
+    }
+  }
+  return cols.sort((a, b) => a.span.x - b.span.x).map((c) => c.items);
+}
+
+/** 가로로 얼마나 겹치는가. 좁은 쪽 폭을 1 로 본다. */
+function overlapRatio(a: ProblemBox, b: ProblemBox): number {
+  const over = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  if (over <= 0) return 0;
+  return over / Math.min(a.w, b.w);
 }
