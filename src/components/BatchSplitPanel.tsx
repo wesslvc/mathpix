@@ -16,6 +16,7 @@ import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import type { DetectedProblem } from "@/lib/detectProblems";
+import { enhanceContrast } from "@/lib/autoContrast";
 import { useFigureJobs } from "./FigureJobsProvider";
 
 /**
@@ -127,14 +128,17 @@ export default function BatchSplitPanel({ onSave }: Props) {
    * 다만 요청 본문에는 상한이 있어(Vercel 4.5MB) 넘으면 요청 자체가 실패한다 —
    * 그래서 실제 길이를 보고 들어갈 때까지 한 단씩 낮춘다.
    */
-  function detectImage(img: HTMLImageElement): string {
+  async function detectImage(img: HTMLImageElement): Promise<string> {
     const whole = { x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight };
     let last = "";
     for (const dim of [DETECT_INPUT_DIM, 2400, 2000, 1600, 1200]) {
       last = cropImageToDataUrl(img, whole, { maxWidth: dim, maxHeight: dim });
-      if (last.length <= MAX_UPLOAD_CHARS) return last;
+      if (last.length <= MAX_UPLOAD_CHARS) break;
     }
-    return last;
+    // 대비를 올리면 글자와 종이의 경계가 또렷해져 영역을 더 잘 잡는다.
+    // 크기를 맞춘 **뒤에** 한다(전에 하면 늘린 값이 다시 뭉개진다).
+    const enhanced = await enhanceContrast(last);
+    return enhanced.length <= MAX_UPLOAD_CHARS ? enhanced : last;
   }
 
   async function detect() {
@@ -160,7 +164,7 @@ export default function BatchSplitPanel({ onSave }: Props) {
         const res = await fetch("/api/detect-problems", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: detectImage(source.img) }),
+          body: JSON.stringify({ image: await detectImage(source.img) }),
         });
         const json: { problems?: DetectedProblem[]; model?: string; error?: string } =
           await res.json();
