@@ -16,7 +16,7 @@ import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import type { DetectedProblem } from "@/lib/detectProblems";
-import { mergeWithinColumn, type ProblemBox } from "@/lib/problemBoxes";
+import { mergeChosen, type ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { useFigureJobs } from "./FigureJobsProvider";
 
@@ -422,9 +422,13 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
    * 그렸다가 합치고 싶을 수 있다. 그때 이걸로 붙인다.
    *
    * **그림을 이어 붙이는 게 아니라 원본에서 다시 자른다.** 그래서 조각마다
-   * 자른 자리를 들고 있었다. 붙이는 규칙은 서버가 자동으로 묶을 때와 **같은
-   * 것**을 쓴다(`mergeWithinColumn`) — 같은 단에 있던 것은 아우르는 네모
-   * 하나로 다시 잘라 이음매가 없고, 단을 넘어간 것만 세로로 이어 붙인다.
+   * 자른 자리를 들고 있었다. 같은 단에서 **붙어 있던** 것은 아우르는 네모
+   * 하나로 다시 잘려 이음매가 없고, 단을 넘어갔거나 멀리 떨어진 것은 세로로
+   * 이어 붙는다(`mergeChosen`).
+   *
+   * **멀리 떨어진 것을 아우르면 안 된다** — 사이에 있던 다른 문제까지 딸려
+   * 들어와 지면이 통째로 한 조각이 되고, 그 문제는 목록에도 따로 남아 두 번
+   * 나온다. 실제로 그렇게 됐다.
    *
    * 합친 것은 **고른 것들 중 가장 앞자리**에 놓는다. 문제 차례가 유지된다.
    */
@@ -452,7 +456,7 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
       // 여유는 가장 큰 것에 맞춘다. 손으로 그린 것(0)과 자동으로 찾은 것(PAD)이
       // 섞일 수 있는데, 좁은 쪽에 맞추면 자동으로 찾은 쪽 글자가 잘릴 수 있다.
       const pad = Math.max(...chosen.map((p) => p.pad));
-      const merged = mergeWithinColumn(all);
+      const merged = mergeChosen(all);
       const crop = await stitchVertically(
         merged.map((b) => cutBox(source.img, b, pad)),
       );
