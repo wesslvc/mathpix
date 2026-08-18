@@ -106,7 +106,13 @@ async function persistWholeProblem(
 }
 
 export async function POST(req: NextRequest) {
-  let body: { image?: string; mode?: string; problemId?: string; figureId?: string };
+  let body: {
+    image?: string;
+    mode?: string;
+    problemId?: string;
+    figureId?: string;
+    reference?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -123,6 +129,10 @@ export async function POST(req: NextRequest) {
   // 닫아도 결과가 남게 하려는 것이다(자세한 이유는 persistWholeProblem 주석).
   const problemId = typeof body.problemId === "string" ? body.problemId : null;
   const figureId = typeof body.figureId === "string" ? body.figureId : null;
+  // OCR 로 읽은 본문. 프롬프트에 덧붙여 글자를 베껴 쓰게 한다(문제 전체 전용).
+  // 길이를 잘라 둔다 — 프롬프트가 무한정 길어질 이유가 없다.
+  const reference =
+    typeof body.reference === "string" ? body.reference.slice(0, 4000) : undefined;
   if (!image || typeof image !== "string") {
     return NextResponse.json(
       { error: "image(base64 data URL) 필드가 필요합니다." },
@@ -196,7 +206,7 @@ export async function POST(req: NextRequest) {
   for (let i = 0; i < Math.min(modelIds.length, MAX_MODEL_ATTEMPTS); i++) {
     const modelId = modelIds[i];
     try {
-      const result = await generateFigureImage(image, modelId, mode);
+      const result = await generateFigureImage(image, modelId, mode, reference);
       if (!result) {
         await refund();
         return NextResponse.json(

@@ -25,6 +25,31 @@ import {
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import type { CardSpec } from "@/lib/cardHtml";
 
+/**
+ * 같은 크롭을 글자 인식기(Mathpix)에 한 번 보내 본문을 읽어 둔다.
+ *
+ * 실패하면 조용히 포기한다 — 참고 없이도 그림은 만들어진다. 인식 토큰이
+ * 하나 들지만, 문제 전체를 다시 그리는 값(FIGURE_TOKEN_COST)에 비하면 작고
+ * 글자가 틀리는 쪽이 훨씬 비싸다.
+ */
+async function readTextForReference(image: string): Promise<string | undefined> {
+  try {
+    const res = await fetch("/api/mathpix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image }),
+    });
+    if (!res.ok) return undefined;
+    const json: { text?: string; latex?: string; mock?: boolean } = await res.json();
+    // mock 응답(키 미설정)은 가짜 글자라 참고로 쓰면 오히려 해롭다.
+    if (json.mock) return undefined;
+    const text = (json.text || json.latex || "").trim();
+    return text.length > 0 ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export type FigureJob = {
   id: string;
   /** 어느 문제의 그림인가. 화면이 닫힌 뒤 저장본을 갱신할 때 쓴다. */
@@ -237,6 +262,16 @@ export default function FigureJobsProvider({
         let svg = readFigureCache(key);
 
         if (!svg) {
+          // **문제 전체는 글자 인식을 함께 쓴다.**
+          // 이미지 생성 모델은 글자를 자주 틀리는데(그림은 모양만 맞으면 되지만
+          // 문제는 한 글자로 답이 뒤집힌다), Mathpix 는 반대로 글자를 읽는 일에
+          // 맞춰져 있다. 읽은 본문을 프롬프트에 함께 주면 모델이 지어내지 않고
+          // 베껴 쓴다. 둘의 잘하는 것을 겹쳐 쓰는 셈이다.
+          //
+          // **실패해도 그냥 진행한다.** 참고가 없으면 예전과 똑같이 동작할
+          // 뿐이라, 이것 때문에 그림 생성을 막을 이유가 없다.
+          const reference =
+            mode === "problem" ? await readTextForReference(forModel) : undefined;
           const res = await fetch("/api/figure", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -251,6 +286,7 @@ export default function FigureJobsProvider({
                 snapshotsRef.current.get(next.problemKey)?.problemId ??
                 null,
               figureId: next.id,
+              reference,
             }),
           });
           let json: { image?: string; error?: string };
