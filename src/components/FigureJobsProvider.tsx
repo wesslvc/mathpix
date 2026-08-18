@@ -321,7 +321,7 @@ export default function FigureJobsProvider({
             json = await res.json();
           } catch {
             throw new Error(
-              "서버에서 정상적인 응답을 받지 못했어요. 이미지 생성이 60초를 넘겨 요청이 끊겼을 수 있습니다. 영역을 더 좁게 잘라 다시 시도해주세요.",
+              "서버에서 정상적인 응답을 받지 못했어요. 이미지 생성이 제한 시간을 넘겨 요청이 끊겼을 수 있습니다. 영역을 더 좁게 잘라 다시 시도해주세요.",
             );
           }
           if (!res.ok) throw new Error(json.error ?? "그림을 그리지 못했습니다.");
