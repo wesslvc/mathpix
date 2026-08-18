@@ -79,10 +79,20 @@ export class FigureImageError extends Error {
  *
  * input_fidelity는 "원본을 얼마나 그대로 따라갈지"라 자료 재현에는 높을수록
  * 좋지만, 받지 않는 모델이면 400이 나므로 다음 조합으로 내려간다.
+ *
+ * **지금 쓰는 gpt-image-2 는 input_fidelity 를 받지 않는다.** 그래서 그걸 뺀
+ * 조합을 맨 앞에 둔다. 예전에는 앞에 두고 "거부당하면 다음으로" 갔는데, 그
+ * 대가가 생각보다 컸다 — 거부당하는 요청도 **이미지를 통째로 업로드한 뒤에야**
+ * 거부당한다. 문제 한 장이 3MB쯤이라 매 요청마다 3MB를 헛되이 올리고 있었다.
+ * 운영 로그에서 성공한 요청까지 전부 이 400을 한 번씩 맞고 있는 게 보였다.
+ *
+ * 한 번 통한 조합을 기억해 두는 workingVariant 로는 이걸 막지 못한다. 그건
+ * 모듈 수준 Map 이라 **서버리스 인스턴스마다 새로 빈다** — 실제로 매 요청이
+ * 처음부터 다시 시작하고 있었다. 순서 자체를 고쳐야 하는 이유다.
  */
 const PARAM_VARIANTS: Record<string, string>[] = [
-  { size: "auto", input_fidelity: "high" },
   { size: "auto" },
+  { size: "auto", input_fidelity: "high" },
   { input_fidelity: "high" },
   {},
 ];
@@ -399,6 +409,14 @@ export async function generateFigureImage(
   mode: FigureMode = "figure",
   /** 문제 전체를 그릴 때 함께 주는 OCR 본문. 없으면 예전과 똑같이 동작한다. */
   reference?: string,
+  /**
+   * 시간이 다 됐을 때 요청을 끊는 신호.
+   *
+   * 이게 없으면 Vercel 이 함수를 통째로 죽여서 **환불 코드가 아예 돌지 못한다**
+   * — 토큰만 나가고 아무것도 안 남는다. 우리가 먼저 끊으면 그 뒤를 이어서
+   * 환불하고 사람이 읽을 수 있는 오류를 돌려줄 수 있다.
+   */
+  signal?: AbortSignal,
 ): Promise<FigureImageResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -446,6 +464,7 @@ export async function generateFigureImage(
       // Content-Type은 지정하지 않는다 — fetch가 multipart 경계값까지 붙여준다.
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
+      signal,
     });
 
     if (res.ok) {
