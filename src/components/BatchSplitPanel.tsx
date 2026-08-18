@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage } from "@/lib/cropImage";
 import {
   DETECT_INPUT_DIM,
@@ -20,31 +20,51 @@ import { enhanceContrast } from "@/lib/autoContrast";
 import { useFigureJobs } from "./FigureJobsProvider";
 
 /**
- * 지면 한 장을 문제 여러 개로 잘라 한꺼번에 넣는 패널. **무제한 계정 전용.**
+ * 지면 한 장을 문제 여러 개로 잘라 한꺼번에 넣는 패널.
  *
- * 한 장에 문제가 여러 개 있는 지면(모의고사·문제집 한 쪽)을 올리면 Gemini 가
- * 문제마다의 영역을 찾아 주고, 그 자리대로 잘라 문제 하나씩 만든다. 이어서
- * "모두 AI로 재생성"을 누르면 잘린 것들이 전부 **문제 전체 다시 그리기** 큐에
- * 들어가 한 개씩 순서대로 처리된다.
+ * 자리를 정하는 방법이 **두 가지**다:
  *
- * 잘라 넣는 것과 다시 그리는 것을 나눠 둔 이유: 영역 인식은 값이 싸고 빠르지만
- * 다시 그리기는 문제마다 1분쯤 걸리는 유료 호출이다. 잘린 결과를 먼저 눈으로
- * 보고 잘못 잡힌 것을 지운 다음 돌리는 편이 안전하다.
+ *  1. **손으로 네모 그리기 — 누구나 쓴다.** 사진 위에 문제마다 네모를 끌어
+ *     그리면 그 자리대로 자른다. 모델을 부르지 않으므로 공짜고, 자리를
+ *     사람이 정하니 틀릴 일도 없다.
+ *  2. **자동으로 찾기 — 무제한 계정 전용.** Gemini 가 문제마다의 영역을 찾아
+ *     준다(단을 넘어 이어진 문제까지 이어 붙인다). 편하지만 유료 호출이고,
+ *     막는 자리는 서버다(`entitlements.unlimited`) — 화면은 얼마든지 우회할
+ *     수 있다.
+ *
+ * 어느 쪽으로 잘랐든 그다음은 같다. 잘린 것을 눈으로 보고 잘못된 것을 지운 뒤
+ * "모두 AI로 재생성"을 누르면 전부 **문제 전체 다시 그리기** 큐에 들어가 한
+ * 개씩 순서대로 처리된다.
+ *
+ * 자르기와 다시 그리기를 나눠 둔 이유: 자르는 건 (손으로 하면) 공짜지만 다시
+ * 그리기는 문제마다 1분쯤 걸리는 유료 호출이다. 먼저 보고 거른 다음 돌리는
+ * 편이 안전하다.
  */
 
 /** 통째로 그린 문제 이미지의 배치(AddProblemFlow와 같은 값). */
 const WHOLE_PROBLEM_LAYOUT: DiagramLayout = { scale: 100, offsetX: 0, offsetY: 0 };
 
 /**
- * 인식한 영역을 자를 때 사방으로 더 주는 여유(지면 크기 대비 비율).
+ * 자동으로 찾은 영역을 자를 때 사방으로 더 주는 여유(지면 크기 대비 비율).
  *
  * **아주 조금만 준다.** 여백이 넓으면 문제 사이의 빈 줄까지 딸려 들어와
  * 문제지에 앉혔을 때 헐렁해 보인다. 글자가 한 획 잘리는 것만 막을 정도다.
+ *
+ * **손으로 그린 네모에는 주지 않는다.** 그건 사용자가 정한 자리라 우리가 몰래
+ * 넓히면 보이는 것과 잘리는 것이 달라진다.
  */
 const PAD = 0.004;
 
+/** 이보다 작은 네모는 그리다 만 것으로 본다(지면 크기 대비 비율). */
+const MIN_BOX = 0.02;
+
 /** `parts` 가 2 이상이면 단을 넘어 이어진 문제를 이어 붙인 것이다. */
 type Piece = { id: string; crop: string; parts: number };
+
+/** 손으로 그린 네모. 값은 전부 지면 크기 대비 비율(0~1)이다. */
+type Box = { id: string; x: number; y: number; w: number; h: number };
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 type Props = {
   /** 문제 하나를 저장하고 그 행 id를 돌려준다(AddProblemFlow가 준다). */
@@ -55,9 +75,13 @@ type Props = {
     answerType: "choice";
     boxRange: StoredBoxRange;
   }) => Promise<string>;
+  /** 자동 영역 찾기(Gemini)를 보여줄지. 서버에서도 같은 조건으로 막는다. */
+  unlimited?: boolean;
+  /** 문제 하나를 다시 그리는 데 드는 토큰. 서버가 알려준 값을 그대로 쓴다. */
+  figureCost?: number | null;
 };
 
-export default function BatchSplitPanel({ onSave }: Props) {
+export default function BatchSplitPanel({ onSave, unlimited = false, figureCost }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   /**
    * 고른 사진 **원본**. 자르는 재료는 이것이다.
@@ -65,11 +89,12 @@ export default function BatchSplitPanel({ onSave }: Props) {
    * `fileToDataUrl` 로 만든 축소본(긴 변 1600px)에서 자르면, 지면 한 장이
    * 1600px 인데 문제 하나는 그 4분의 1쯤이라 **폭 450px 짜리 조각**이 나온다.
    * 그걸 그대로 모델에 보내면 본문 글자가 뭉개져서 못 읽는다(손으로 한 문제만
-   * 찍었을 때는 1200~1600px 이 나가던 자리다). 그래서 감지에는 축소본을 쓰고
+   * 찍었을 때는 1200~1600px 이 나가던 자리다). 그래서 화면에는 축소본을 쓰고
    * **자르기는 원본에서** 한다.
    */
   const [pageFile, setPageFile] = useState<File | null>(null);
   const [pageImage, setPageImage] = useState<string | null>(null);
+  const [boxes, setBoxes] = useState<Box[]>([]);
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,10 +102,107 @@ export default function BatchSplitPanel({ onSave }: Props) {
   const [usedModel, setUsedModel] = useState<string | null>(null);
   const { enqueue } = useFigureJobs();
 
+  /** 그리는 중인 네모. 손을 뗄 때 boxes 로 옮긴다. */
+  const [draft, setDraft] = useState<Box | null>(null);
+  /**
+   * 그리는 중인 네모의 **최신 값**. 손을 뗄 때 이걸 읽는다.
+   *
+   * state 갱신 함수 안에서 다른 state 를 바꾸면 안 된다 — 갱신 함수는 순수해야
+   * 하고 React 가 두 번 부를 수 있다. 실제로 `setDraft(d => { setBoxes(...) })`
+   * 로 썼다가 **끌기 한 번에 네모가 두 개** 생겼다(브라우저로 확인했다).
+   */
+  const draftRef = useRef<Box | null>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  /** 끌기 시작한 자리(비율). 그리는 중이 아니면 null. */
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+
+  /**
+   * 화면 좌표를 사진 안의 비율로 바꾼다.
+   *
+   * 사진은 화면 폭에 맞춰 줄여 그리므로 화면 픽셀과 사진 픽셀이 다르다. 비율로
+   * 들고 있으면 화면 크기가 바뀌어도, 자를 때 원본 해상도로 되돌려도 그대로
+   * 맞는다.
+   */
+  const ratio = useCallback((clientX: number, clientY: number) => {
+    const el = frameRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return null;
+    return {
+      x: clamp01((clientX - r.left) / r.width),
+      y: clamp01((clientY - r.top) / r.height),
+    };
+  }, []);
+
+  /**
+   * 끌기는 **window 에서 받는다**(setPointerCapture 가 아니라).
+   *
+   * 그리는 중에 네모가 바뀌면서 화면이 다시 그려지는데, 그때 처음 잡았던 DOM
+   * 노드가 떨어져 나가면 포인터 캡처가 조용히 풀린다. 사진 **바깥**에서 손을
+   * 놓는 일도 흔하다(가장자리 문제를 그릴 때가 그렇다) — 그때 pointerup 이
+   * 아무 데도 닿지 않으면 그린 게 통째로 사라진다.
+   *
+   * 이 두 함수는 ref 와 setState 만 쓰므로 렌더가 바뀌어도 그대로다. 그래서
+   * 참조가 안정적이고 그냥 붙였다 뗄 수 있다.
+   */
+  const onMove = useCallback(
+    (e: PointerEvent) => {
+      const start = startRef.current;
+      if (!start) return;
+      const now = ratio(e.clientX, e.clientY);
+      if (!now) return;
+      const next: Box = {
+        id: "draft",
+        x: Math.min(start.x, now.x),
+        y: Math.min(start.y, now.y),
+        w: Math.abs(now.x - start.x),
+        h: Math.abs(now.y - start.y),
+      };
+      draftRef.current = next;
+      setDraft(next);
+    },
+    [ratio],
+  );
+
+  const onUp = useCallback(() => {
+    if (!startRef.current) return;
+    startRef.current = null;
+    const d = draftRef.current;
+    draftRef.current = null;
+    setDraft(null);
+    // 너무 작으면 그리다 만 것(또는 그냥 톡 누른 것)으로 보고 버린다.
+    if (d && d.w >= MIN_BOX && d.h >= MIN_BOX) {
+      setBoxes((prev) => [...prev, { ...d, id: crypto.randomUUID() }]);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [onMove, onUp]);
+
+  function startDraw(e: React.PointerEvent) {
+    if (busy) return;
+    const at = ratio(e.clientX, e.clientY);
+    if (!at) return;
+    startRef.current = at;
+    const seed: Box = { id: "draft", x: at.x, y: at.y, w: 0, h: 0 };
+    draftRef.current = seed;
+    setDraft(seed);
+  }
+
   async function pick(file: File | undefined) {
     if (!file) return;
     setError(null);
     setPieces([]);
+    setBoxes([]);
+    setUsedModel(null);
     if (isHeicFile(file)) {
       setError("HEIC 사진은 아직 지원하지 않습니다. JPG나 PNG로 바꿔 올려주세요.");
       return;
@@ -117,6 +239,66 @@ export default function BatchSplitPanel({ onSave }: Props) {
     }
     if (!pageImage) throw new Error("사진을 먼저 골라주세요.");
     return { img: await loadImage(pageImage), revoke: () => {} };
+  }
+
+  /**
+   * 비율로 적힌 자리 하나를 원본에서 잘라낸다.
+   *
+   * 폭을 지켜서 자른다 — 긴 변 기준으로 줄이면 세로로 긴 문제의 폭이 무너져
+   * 본문 글자가 뭉개진다.
+   */
+  function cutBox(
+    img: HTMLImageElement,
+    b: { x: number; y: number; w: number; h: number },
+    pad: number,
+  ): string {
+    const x = Math.max(0, b.x - pad) * img.naturalWidth;
+    const y = Math.max(0, b.y - pad) * img.naturalHeight;
+    const w = Math.min(1 - b.x + pad, b.w + pad * 2) * img.naturalWidth;
+    const h = Math.min(1 - b.y + pad, b.h + pad * 2) * img.naturalHeight;
+    return cropImageToDataUrl(
+      img,
+      { x, y, width: w, height: h },
+      { maxWidth: PROBLEM_INPUT_DIM, maxHeight: PROBLEM_MAX_HEIGHT },
+    );
+  }
+
+  /**
+   * 손으로 그린 네모대로 자른다. **그린 차례가 곧 문제 차례다** — 사람은
+   * 읽는 순서대로 그리므로 우리가 다시 정렬할 이유가 없다(자동으로 찾을
+   * 때와 다른 점이다. 그쪽은 모델이 순서를 지키지 않아 우리가 정렬한다).
+   */
+  async function cutManual() {
+    if (boxes.length === 0) return;
+    setError(null);
+    setBusy("사진을 여는 중...");
+    let source: { img: HTMLImageElement; revoke: () => void };
+    try {
+      source = await openSource();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "사진을 열지 못했습니다.");
+      setBusy(null);
+      return;
+    }
+    try {
+      setBusy(`${boxes.length}개를 자르는 중...`);
+      setPieces(
+        boxes.map((b) => ({
+          id: crypto.randomUUID(),
+          crop: cutBox(source.img, b, 0),
+          parts: 1,
+        })),
+      );
+      setUsedModel(null);
+    } catch (err) {
+      setError(
+        "사진을 자르지 못했습니다: " +
+          (err instanceof Error ? err.message : "알 수 없는 오류"),
+      );
+    } finally {
+      source.revoke();
+      setBusy(null);
+    }
   }
 
   /**
@@ -184,28 +366,16 @@ export default function BatchSplitPanel({ onSave }: Props) {
       setBusy(`영역 ${found.length}개를 자르는 중...`);
       try {
         const img = source.img;
-        const cut = (b: DetectedProblem["boxes"][number]) => {
-          const x = Math.max(0, b.x - PAD) * img.naturalWidth;
-          const y = Math.max(0, b.y - PAD) * img.naturalHeight;
-          const w = Math.min(1 - b.x + PAD, b.w + PAD * 2) * img.naturalWidth;
-          const h = Math.min(1 - b.y + PAD, b.h + PAD * 2) * img.naturalHeight;
-          // 폭을 지켜서 자른다 — 긴 변 기준으로 줄이면 세로로 긴 문제의 폭이
-          // 무너져 본문 글자가 뭉개진다.
-          return cropImageToDataUrl(
-            img,
-            { x, y, width: w, height: h },
-            { maxWidth: PROBLEM_INPUT_DIM, maxHeight: PROBLEM_MAX_HEIGHT },
-          );
-        };
         // 단을 넘어 이어진 문제는 조각을 **읽는 차례대로 세로로 이어 붙인다.**
         const next: Piece[] = await Promise.all(
           found.map(async (prob) => ({
             id: crypto.randomUUID(),
-            crop: await stitchVertically(prob.boxes.map(cut)),
+            crop: await stitchVertically(prob.boxes.map((b) => cutBox(img, b, PAD))),
             parts: prob.boxes.length,
           })),
         );
         setPieces(next);
+        setBoxes([]);
       } catch (err) {
         setError(
           "영역은 찾았는데 사진을 자르지 못했습니다: " +
@@ -277,24 +447,25 @@ export default function BatchSplitPanel({ onSave }: Props) {
     if (done > 0) {
       // 넣은 것은 목록에서 뺀다(같은 것을 두 번 넣지 않게).
       setPieces((prev) => prev.slice(done));
+      setBoxes([]);
       setPageImage(null);
       setPageFile(null);
       if (fileRef.current) fileRef.current.value = "";
     }
   }
 
+  const totalCost =
+    typeof figureCost === "number" ? figureCost * pieces.length : null;
+
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-violet-200 bg-violet-50/40 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700">
-          무제한 계정 전용
-        </span>
         <span className="text-sm font-medium text-slate-700">지면 통째로 넣기</span>
       </div>
       <p className="text-xs leading-relaxed text-slate-500">
-        문제가 여러 개 있는 지면을 올리면 문제마다의 영역을 찾아 하나씩 잘라 줍니다.
-        잘린 것을 보고 잘못 잡힌 것을 지운 다음 “모두 AI로 재생성”을 누르면 전부
-        큐에 들어가 한 개씩 다시 그려집니다.
+        문제가 여러 개 있는 지면을 올리고 <b>문제마다 네모를 끌어 그리면</b> 그
+        자리대로 하나씩 잘라 줍니다. 잘린 것을 보고 잘못된 것을 지운 다음 “모두
+        AI로 재생성”을 누르면 전부 큐에 들어가 한 개씩 다시 그려집니다.
       </p>
 
       <input
@@ -306,15 +477,82 @@ export default function BatchSplitPanel({ onSave }: Props) {
       />
 
       {pageImage && (
+        <>
+          <p className="text-[11px] text-slate-500">
+            {boxes.length === 0
+              ? "사진 위에서 손가락이나 마우스로 문제 하나를 감싸는 네모를 그리세요."
+              : `${boxes.length}개를 그렸습니다. 이어서 더 그리거나, 네모의 × 로 지울 수 있어요.`}
+          </p>
+          <div
+            ref={frameRef}
+            onPointerDown={startDraw}
+            /* 터치가 스크롤로 먹히지 않게 한다. 없으면 화면만 밀린다. */
+            className="relative w-full touch-none select-none overflow-hidden rounded-lg border border-slate-300 bg-white"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={pageImage} alt="" draggable={false} className="w-full" />
+            {[...boxes, ...(draft ? [draft] : [])].map((b, i) => (
+              <div
+                key={b.id}
+                className={
+                  "absolute border-2 " +
+                  (b.id === "draft"
+                    ? "border-dashed border-violet-400 bg-violet-400/10"
+                    : "border-violet-600 bg-violet-600/10")
+                }
+                style={{
+                  left: `${b.x * 100}%`,
+                  top: `${b.y * 100}%`,
+                  width: `${b.w * 100}%`,
+                  height: `${b.h * 100}%`,
+                }}
+              >
+                {b.id !== "draft" && (
+                  <>
+                    <span className="absolute left-0 top-0 bg-violet-600 px-1 text-[11px] leading-tight text-white">
+                      {i + 1}
+                    </span>
+                    <button
+                      type="button"
+                      /* 여기서 pointerdown 을 멈추지 않으면 지우려고 누른 것이
+                         새 네모를 그리기 시작한다. */
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => setBoxes((prev) => prev.filter((x) => x.id !== b.id))}
+                      aria-label={`${i + 1}번째 네모 지우기`}
+                      className="absolute right-0 top-0 bg-violet-600 px-1 text-[11px] leading-tight text-white hover:bg-red-600"
+                    >
+                      ×
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {pageImage && (
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void detect()}
-            disabled={busy !== null}
+            onClick={() => void cutManual()}
+            disabled={busy !== null || boxes.length === 0}
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
           >
-            문제 영역 인식
+            그린 자리대로 자르기{boxes.length > 0 && ` (${boxes.length}개)`}
           </button>
+          {/* 자동으로 찾기는 유료 호출이라 무제한 계정에서만 보인다.
+              막는 자리는 서버다 — 화면은 얼마든지 우회할 수 있다. */}
+          {unlimited && (
+            <button
+              type="button"
+              onClick={() => void detect()}
+              disabled={busy !== null}
+              className="rounded-lg border border-violet-300 bg-white px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+            >
+              자동으로 찾기
+            </button>
+          )}
           {pieces.length > 0 && (
             <button
               type="button"
@@ -322,7 +560,8 @@ export default function BatchSplitPanel({ onSave }: Props) {
               disabled={busy !== null}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              모두 AI로 재생성 ({pieces.length}개)
+              모두 AI로 재생성 ({pieces.length}개
+              {totalCost !== null && !unlimited && ` · ${totalCost}토큰`})
             </button>
           )}
         </div>

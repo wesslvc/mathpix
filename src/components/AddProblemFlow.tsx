@@ -328,10 +328,15 @@ export default function AddProblemFlow({
         </button>
       )}
 
-      {/* 지면 통째로 넣기. 실험적인 기능이라 무제한 계정에서만 보인다
-          (서버에서도 막는다 — 화면은 얼마든지 우회할 수 있다). */}
-      {stage === "idle" && tokenStatus?.unlimited && (
-        <BatchSplitPanel onSave={handleSaveToCategory} />
+      {/* 지면 통째로 넣기. 손으로 네모를 그려 자르는 것은 누구나 쓴다 —
+          모델을 부르지 않아 공짜다. 영역을 **자동으로** 찾는 것만 무제한
+          계정에서 보이고, 막는 자리는 서버다(화면은 우회할 수 있다). */}
+      {stage === "idle" && canAdd && (
+        <BatchSplitPanel
+          onSave={handleSaveToCategory}
+          unlimited={tokenStatus?.unlimited ?? false}
+          figureCost={tokenStatus?.figureCost ?? null}
+        />
       )}
 
       {stage === "idle" && !canAdd && (
