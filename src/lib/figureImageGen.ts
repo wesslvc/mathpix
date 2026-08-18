@@ -293,10 +293,41 @@ export type FigureImageResult = {
  */
 export type FigureMode = "figure" | "problem";
 
+/**
+ * OCR 로 읽어 둔 본문을 프롬프트에 덧붙인다(**문제 전체를 그릴 때만**).
+ *
+ * 이미지 생성 모델은 글자를 자주 틀린다 — 그림은 모양만 맞으면 되지만 문제는
+ * "옳은/옳지 않은" 한 글자로 답이 뒤집힌다. Mathpix 는 반대로 **글자를 읽는
+ * 일**에 맞춰져 있으니, 그쪽이 읽은 글자를 함께 주면 모델이 지어내지 않고
+ * 베껴 쓸 수 있다. 둘의 잘하는 것을 겹쳐 쓰는 셈이다.
+ *
+ * **다만 참고 글도 틀릴 수 있다.** Mathpix 가 잘못 읽는 경우가 있어서, 어긋날
+ * 때는 **사진이 우선**이라고 못박는다. 안 그러면 OCR 오류가 그대로 인쇄된다.
+ * 표·그림의 배치는 참고 글에 없으므로 그것도 사진을 따르게 한다.
+ */
+function withReference(prompt: string, reference: string): string {
+  const text = reference.trim();
+  if (!text) return prompt;
+  return `${prompt}
+
+참고 — 이 문제를 글자 인식기로 읽은 결과입니다(수식은 LaTeX 표기):
+"""
+${text}
+"""
+글자를 그릴 때 이 참고를 보고 **그대로 옮겨 적으세요.** 읽기 어려운 글자를
+지어내는 것보다 이쪽이 정확합니다.
+다만 참고도 틀릴 수 있습니다 — **사진과 어긋나면 사진이 맞습니다.** 참고에
+없는 것(표·그림의 배치, 선지 기호, 줄 나눔)은 사진을 그대로 따르세요.
+LaTeX 표기는 글자 그대로 쓰지 말고 **수식으로 그리세요**(예: \\frac{1}{2} 는
+분수로).`;
+}
+
 export async function generateFigureImage(
   imageDataUrl: string,
   modelId: string,
   mode: FigureMode = "figure",
+  /** 문제 전체를 그릴 때 함께 주는 OCR 본문. 없으면 예전과 똑같이 동작한다. */
+  reference?: string,
 ): Promise<FigureImageResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -330,7 +361,12 @@ export async function generateFigureImage(
     const form = new FormData();
     form.append("model", modelId);
     form.append("image", source.blob, source.filename);
-    form.append("prompt", mode === "problem" ? WHOLE_PROBLEM_PROMPT : PROMPT);
+    form.append(
+      "prompt",
+      mode === "problem"
+        ? withReference(WHOLE_PROBLEM_PROMPT, reference ?? "")
+        : PROMPT,
+    );
     form.append("n", "1");
     for (const [k, v] of Object.entries(params)) form.append(k, v);
 
