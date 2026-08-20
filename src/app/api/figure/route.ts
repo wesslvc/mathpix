@@ -273,7 +273,14 @@ export async function POST(req: NextRequest) {
             result.dataUrl,
           );
         }
-        return NextResponse.json({ image: result.dataUrl, modelId, persisted });
+        // usage 를 함께 돌려준다 — 화면이 "이번에 얼마 나갔나"를 바로 보여준다.
+        // 추정치라는 것은 화면 쪽에서 분명히 적는다.
+        return NextResponse.json({
+          image: result.dataUrl,
+          modelId,
+          persisted,
+          usage: result.usage,
+        });
       } catch (err) {
         // 시간이 다 돼 우리가 끊은 경우. 다음 모델로 내려가 봐야 남은 시간이
         // 없으므로 여기서 끝내고, **토큰을 돌려준다.**
