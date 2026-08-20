@@ -118,10 +118,7 @@ const OUTPUT_SIZES: { name: string; ratio: number }[] = [
  *
  * 크기를 모르면(브라우저가 안 알려줬으면) null 을 돌려 예전처럼 auto 로 둔다.
  */
-export function pickOutputSize(
-  width?: number,
-  height?: number,
-): string | null {
+export function pickOutputSize(width?: number, height?: number): string | null {
   const forced = process.env.OPENAI_IMAGE_SIZE?.trim();
   if (forced) return forced;
   if (!width || !height || width <= 0 || height <= 0) return null;
@@ -129,7 +126,10 @@ export function pickOutputSize(
   let best = OUTPUT_SIZES[0];
   for (const s of OUTPUT_SIZES) {
     // 로그 비로 견준다 — 그래야 "2배 가로"와 "2배 세로"가 같은 거리로 잡힌다.
-    if (Math.abs(Math.log(ratio / s.ratio)) < Math.abs(Math.log(ratio / best.ratio))) {
+    if (
+      Math.abs(Math.log(ratio / s.ratio)) <
+      Math.abs(Math.log(ratio / best.ratio))
+    ) {
       best = s;
     }
   }
@@ -148,6 +148,18 @@ export function pickOutputSize(
  */
 const PRICE_PER_MTOK = { textIn: 2.5, imageIn: 10, imageOut: 30 };
 
+/**
+ * 달러를 원으로 옮길 때 쓰는 환율.
+ *
+ * 요금은 달러로 나가지만 읽는 사람은 원이 감이 온다. 환율은 움직이므로
+ * `USD_TO_KRW` 로 재배포 없이 바꿀 수 있게 해 둔다(서버에서 읽으므로 값만
+ * 고치면 바로 반영된다).
+ */
+const USD_TO_KRW = (() => {
+  const raw = Number(process.env.USD_TO_KRW);
+  return Number.isFinite(raw) && raw > 0 ? raw : 1400;
+})();
+
 type ImageUsage = {
   input_tokens?: number;
   output_tokens?: number;
@@ -161,6 +173,13 @@ export type FigureUsage = {
   output: number;
   /** 위 역산 단가로 계산한 **추정** 비용(달러). 청구액이 아니다. */
   estUsd: number;
+  /**
+   * 같은 값을 원으로 옮긴 것(USD_TO_KRW 기준, 원 단위 반올림).
+   *
+   * 환율까지 화면에서 계산하지 않고 여기서 함께 내려보낸다 — 그래야 로그와
+   * 화면이 같은 환율을 쓴다(따로 두면 어느 쪽이 맞는지 알 수 없어진다).
+   */
+  estKrw: number;
 };
 
 /**
@@ -180,19 +199,32 @@ function readUsage(usage: ImageUsage | undefined): FigureUsage | undefined {
       inputImage * PRICE_PER_MTOK.imageIn +
       output * PRICE_PER_MTOK.imageOut) /
     1e6;
-  return { inputText, inputImage, output, estUsd };
+  return {
+    inputText,
+    inputImage,
+    output,
+    estUsd,
+    estKrw: Math.round(estUsd * USD_TO_KRW),
+  };
 }
 
 function logUsage(
   u: FigureUsage | undefined,
-  info: { modelId: string; mode: FigureMode; size: string; width?: number; height?: number },
+  info: {
+    modelId: string;
+    mode: FigureMode;
+    size: string;
+    width?: number;
+    height?: number;
+  },
 ): void {
   if (!u) return;
-  const input = info.width && info.height ? `${info.width}x${info.height}` : "?";
+  const input =
+    info.width && info.height ? `${info.width}x${info.height}` : "?";
   console.info(
     `[figureImageGen] usage model=${info.modelId} mode=${info.mode} size=${info.size} 입력=${input} ` +
       `in=${u.inputText + u.inputImage}(text=${u.inputText} image=${u.inputImage}) ` +
-      `out=${u.output} est=$${u.estUsd.toFixed(4)}`,
+      `out=${u.output} est=$${u.estUsd.toFixed(4)}(${u.estKrw}원)`,
   );
 }
 
@@ -452,14 +484,18 @@ function insideCircle(ch: string): string | null {
   if (c === undefined) return null;
   // ㉠~㉭ (동그라미 안 자음). ㄱ~ㅎ 구간(U+3131~)이 쌍자음·겹받침 때문에
   // 이어져 있지 않아서 표를 그대로 적는다.
-  if (c >= 0x3260 && c <= 0x326d) return "ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ"[c - 0x3260];
+  if (c >= 0x3260 && c <= 0x326d)
+    return "ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ"[c - 0x3260];
   // ㉮~㉻ (동그라미 안 가나다)
-  if (c >= 0x326e && c <= 0x327b) return "가나다라마바사아자차카타파하"[c - 0x326e];
+  if (c >= 0x326e && c <= 0x327b)
+    return "가나다라마바사아자차카타파하"[c - 0x326e];
   // ①~⑳
   if (c >= 0x2460 && c <= 0x2473) return String(c - 0x2460 + 1);
   // Ⓐ~Ⓩ / ⓐ~ⓩ
-  if (c >= 0x24b6 && c <= 0x24cf) return String.fromCodePoint(0x41 + c - 0x24b6);
-  if (c >= 0x24d0 && c <= 0x24e9) return String.fromCodePoint(0x61 + c - 0x24d0);
+  if (c >= 0x24b6 && c <= 0x24cf)
+    return String.fromCodePoint(0x41 + c - 0x24b6);
+  if (c >= 0x24d0 && c <= 0x24e9)
+    return String.fromCodePoint(0x61 + c - 0x24d0);
   return null;
 }
 
@@ -644,4 +680,3 @@ export async function generateFigureImage(
 
   return { dataUrl: `data:image/png;base64,${b64}`, modelId, usage };
 }
-

@@ -87,6 +87,8 @@ export type FigureJob = {
    * 어느 문제가 비쌌는지 눈으로 보려는 것이다.
    */
   costUsd?: number;
+  /** 같은 값을 원으로 옮긴 것. 서버가 환율까지 계산해 내려준다. */
+  costKrw?: number;
   error?: string;
   /** 완성된 그림 마크업. 화면이 열려 있으면 미리보기에 바로 반영된다. */
   svg?: string;
@@ -121,6 +123,8 @@ type Ctx = {
    * 화면에도 "추정치"라고 적어 둔다. 정확한 금액은 OpenAI 대시보드가 정답지다.
    */
   spentUsd: number;
+  /** 같은 합계를 원으로. 환율은 서버가 정한다(USD_TO_KRW). */
+  spentKrw: number;
   enqueue: (job: Omit<FigureJob, "status">) => void;
   retry: (id: string) => void;
   dismiss: (id: string) => void;
@@ -159,6 +163,8 @@ export default function FigureJobsProvider({
   const [calls, setCalls] = useState(0);
   /** 그 호출들의 추정 비용 합계(달러). 캐시 적중은 더하지 않는다. */
   const [spentUsd, setSpentUsd] = useState(0);
+  /** 같은 합계를 원으로. 원 단위 반올림한 값을 더한다. */
+  const [spentKrw, setSpentKrw] = useState(0);
   /** 한 번에 하나씩만 돌린다(순차 처리). */
   const runningRef = useRef<string | null>(null);
   /**
@@ -297,6 +303,7 @@ export default function FigureJobsProvider({
         let svg = readFigureCache(key);
         /** 이 작업에 실제로 든 추정 비용. 캐시에 걸리면 끝까지 undefined 다. */
         let costUsd: number | undefined;
+        let costKrw: number | undefined;
 
         if (!svg) {
           // **문제 전체는 글자 인식을 함께 쓴다.**
@@ -369,7 +376,9 @@ export default function FigureJobsProvider({
           // 그때는 돈이 안 나갔으므로 0 이 아니라 "없음"이 맞다.
           if (typeof json.usage?.estUsd === "number") {
             costUsd = json.usage.estUsd;
+            costKrw = json.usage.estKrw;
             setSpentUsd((v) => v + json.usage!.estUsd);
+            setSpentKrw((v) => v + (json.usage!.estKrw ?? 0));
           }
           // 생성 모델은 자기 비율에 맞춰 그려서 둘레에 흰 여백을 붙여 준다.
           svg = await rasterToSvg(await trimBlankBorder(json.image));
@@ -379,7 +388,7 @@ export default function FigureJobsProvider({
         setJobs((prev) =>
           prev.map((j) =>
             j.id === id
-              ? { ...j, status: "done", svg: svg as string, costUsd }
+              ? { ...j, status: "done", svg: svg as string, costUsd, costKrw }
               : j,
           ),
         );
@@ -417,6 +426,7 @@ export default function FigureJobsProvider({
         activeCount,
         calls,
         spentUsd,
+        spentKrw,
         enqueue,
         retry,
         dismiss,
