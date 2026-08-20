@@ -37,7 +37,9 @@ function OcrLine({ ocr, preview }: { ocr?: string; preview?: string }) {
     <>
       <p className="text-[11px] text-emerald-700">Mathpix 글자 참고 ✓</p>
       {preview && (
-        <p className="mt-0.5 truncate text-[10px] text-slate-400">“{preview}…”</p>
+        <p className="mt-0.5 truncate text-[10px] text-slate-400">
+          “{preview}…”
+        </p>
       )}
     </>
   );
@@ -51,7 +53,8 @@ function OcrLine({ ocr, preview }: { ocr?: string; preview?: string }) {
  * 작업이 하나도 없으면 아예 나타나지 않는다.
  */
 export default function FigureJobsPanel() {
-  const { jobs, activeCount, calls, spentUsd, retry, dismiss } = useFigureJobs();
+  const { jobs, activeCount, calls, spentUsd, spentKrw, retry, dismiss } =
+    useFigureJobs();
   const [open, setOpen] = useState(false);
 
   if (jobs.length === 0) return null;
@@ -85,7 +88,8 @@ export default function FigureJobsPanel() {
               캐시에 걸린 것은 세지 않는다 — 그건 돈이 안 나갔다. */}
           {calls > 0 && (
             <span className="shrink-0 text-[11px] text-slate-400">
-              생성 {calls}회{spentUsd > 0 && ` · 약 $${spentUsd.toFixed(2)}`}
+              생성 {calls}회
+              {spentUsd > 0 && ` · 약 ${spentKrw.toLocaleString()}원`}
             </span>
           )}
           <span className="shrink-0 text-[11px] text-slate-400">
@@ -121,6 +125,8 @@ export default function FigureJobsPanel() {
                   {typeof j.costUsd === "number" && (
                     <p className="mt-0.5 text-[10px] text-slate-400">
                       약 ${j.costUsd.toFixed(3)}
+                      {typeof j.costKrw === "number" &&
+                        ` (${j.costKrw.toLocaleString()}원)`}
                     </p>
                   )}
                   {j.error && (
@@ -155,7 +161,9 @@ export default function FigureJobsPanel() {
                 화면에서 분명히 해 두지 않으면 청구액으로 오해한다. */}
             {spentUsd > 0 && (
               <li className="px-3 py-2 text-[10px] leading-snug text-slate-400">
-                금액은 추정치입니다. 실제 청구액은 OpenAI 대시보드를 보세요.
+                합계 약 ${spentUsd.toFixed(2)} ({spentKrw.toLocaleString()}원).
+                환율과 단가로 계산한 추정치이며, 실제 청구액은 OpenAI 대시보드를
+                보세요.
               </li>
             )}
           </ul>
