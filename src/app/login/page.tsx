@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/client";
+import { emailConfirmRedirect } from "@/lib/siteUrl";
 import Logo from "@/components/Logo";
 
 type Mode = "login" | "signup";
@@ -24,10 +25,17 @@ function LoginForm() {
   // 사용자는 왜 안 되는지 알 수 없다.
   useEffect(() => {
     const fromLink = params.get("error");
-    if (fromLink) {
-      setError(fromLink);
-      setCanResend(true);
+    if (!fromLink) return;
+    // **확인은 끝났는데 자동 로그인만 실패한 경우**(`confirmed=1`)는 실패가
+    // 아니다. 빨간 글씨로 보여주고 "확인 메일 다시 보내기"를 띄우면 이미 끝난
+    // 일을 다시 하게 만들 뿐이고, 다시 받아도 같은 자리에서 또 막힌다.
+    // 이때 필요한 것은 그냥 로그인이다.
+    if (params.get("confirmed")) {
+      setNotice(fromLink);
+      return;
     }
+    setError(fromLink);
+    setCanResend(true);
   }, [params]);
 
   /** 확인 메일을 다시 보낸다. 메일을 잃었거나 만료됐을 때 쓸 길이 필요하다. */
@@ -43,7 +51,7 @@ function LoginForm() {
     const { error } = await supabase.auth.resend({
       type: "signup",
       email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      options: { emailRedirectTo: emailConfirmRedirect() },
     });
     if (error) setError(error.message);
     else
@@ -100,7 +108,7 @@ function LoginForm() {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: emailConfirmRedirect(),
         },
       });
       if (error) {

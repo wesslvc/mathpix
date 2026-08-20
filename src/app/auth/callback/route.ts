@@ -44,10 +44,17 @@ export async function GET(request: NextRequest) {
       "[auth/callback] exchangeCodeForSession 실패:",
       error.message,
     );
+    // **여기까지 왔으면 이메일 확인 자체는 이미 끝났다.** Supabase 의
+    // `/verify` 가 `email_confirmed_at` 을 먼저 찍고 나서 이쪽으로 코드를
+    // 넘겨주기 때문이다(운영 데이터로 확인 — 확인 시각이 `/verify` 시각과
+    // 같고, 교환은 한 번도 일어나지 않았는데도 계정은 확인 상태였다).
+    // 실패한 것은 **자동 로그인**뿐이다. 그런데 예전 문구는 "확인 링크를
+    // 처리하지 못했다, 메일을 다시 받아라"라고 해서 이미 끝난 일을 다시
+    // 하게 만들었다 — 그래 봐야 같은 자리에서 또 막힌다.
     return NextResponse.redirect(
       `${base}/login?error=${encodeURIComponent(
-        "확인 링크를 처리하지 못했습니다. 가입할 때 쓴 것과 다른 기기·브라우저에서 링크를 열면 이렇게 됩니다. 로그인 화면에서 확인 메일을 다시 보내 같은 기기에서 열어주세요.",
-      )}`,
+        "이메일 확인은 끝났습니다. 다만 자동 로그인은 되지 않았어요(가입할 때와 다른 기기·브라우저에서 링크를 열면 이렇게 됩니다). 아래에 가입한 이메일과 비밀번호로 로그인해주세요.",
+      )}&confirmed=1`,
     );
   }
 

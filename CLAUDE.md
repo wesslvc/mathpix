@@ -15,9 +15,11 @@ Mathpix OCR로 인식해서 → 나눔명조 + KaTeX로 가독성 좋게 재구�
   Vercel 프로젝트 `mathpix`도 같은 저장소에 연결돼 있지만 Production Branch가
   `main`을 따라가지 않아 실사용 배포가 아닙니다. 헷갈리지 말 것.
 - Supabase 프로젝트: `bmhupmkxzvbqndxkvjmx` (URL: `https://bmhupmkxzvbqndxkvjmx.supabase.co`).
-  이 세션의 Supabase MCP 커넥터는 다른 프로젝트(`seji`, ref `brgvpmpqvqhdjsnrxzhh`)에만
-  접근 권한이 있어서 위 프로젝트는 MCP로 직접 조작 불가 — SQL은 사용자가 대시보드에서
-  직접 실행해야 함.
+  **Supabase MCP 커넥터가 이제 이 프로젝트에 붙는다**(2026-08-20 확인).
+  예전에는 다른 프로젝트(`seji`)에만 권한이 있어서 "SQL은 사용자가 대시보드에서
+  직접"이었는데, 지금은 `execute_sql`·`list_tables`·`apply_migration`·`query_logs`·
+  `get_advisors` 를 그대로 쓸 수 있다. **다만 Auth 설정(Site URL / Redirect URLs)과
+  메일 템플릿은 MCP 에 없다** — 그건 여전히 대시보드에서만 고칠 수 있다.
 
 ## 사용자가 확정한 요구사항
 
@@ -962,6 +964,53 @@ localStorage에 남는다.
 **확인 메일 재발송**(`auth.resend`)을 넣었다. 메일을 잃거나 링크가 만료되면
 예전에는 길이 막혔다 — 다시 가입해도 위 이유로 조용히 성공한 척했기 때문이다.
 
+#### 운영 로그로 실제 원인을 확인했다 (2026-08-20)
+
+Supabase MCP 로 auth 로그와 `auth.*` 테이블을 직접 봤다. 짐작이 아니라 숫자다.
+
+- 사용자 23명 중 **21명이 확인은 됐는데 6명은 세션을 한 번도 못 얻었다**
+  (`email_confirmed_at` 은 있는데 `last_sign_in_at` 이 null).
+- 24시간 동안 `/token` 호출이 `password`·`refresh_token` 뿐 — **`grant_type=pkce`
+  가 0건이다.** 코드 교환이 아예 시도조차 안 됐다는 뜻이다.
+- `auth.flow_state` 에 **쓰이지 않은 코드 12건**(9건은 코드까지 발급됨)이 7월
+  28일 것부터 그대로 쌓여 있다.
+
+갈래가 둘이고 **둘 다 대시보드 설정 문제**다.
+
+**① 허용목록에 없는 도메인은 조용히 Site URL 로 떨어진다.** GoTrue 는 `/verify`
+로그의 `referer` 에 **실제로 보낸 목적지**를 적는다. 그날 확인 링크 11건 중
+`/auth/callback` 으로 간 건 3건뿐이고 **6건이 `https://reprintocr.vercel.app`**
+(= Site URL 맨몸)으로 갔다. 거기엔 `?code=` 를 받을 코드가 없으니 아무 일도
+안 일어난다. `emailRedirectTo` 가 `window.location.origin` 이라 도메인 넷이
+제각각인데 허용목록이 그걸 다 담고 있지 않았던 것이다.
+
+**② PKCE 는 요청도 안 보내고 실패한다.** `/auth/callback` 에 제대로 닿은 것조차
+세션이 안 됐다. supabase-js 는 `code_verifier` 가 없으면 **네트워크 호출 전에**
+던진다(`PKCE code verifier not found in storage`) — 그래서 auth 로그에 pkce 가
+0건인 것이다. 로그만 보고 "요청이 안 왔다"고 읽으면 안 된다.
+
+**코드로 막은 것 세 가지** (설정이 틀려 있어도 동작하게):
+
+- `src/lib/siteUrl.ts` — `NEXT_PUBLIC_SITE_URL` 이 있으면 **어느 도메인에서
+  가입하든 한 곳으로** 돌아온다. 허용목록에 한 줄만 있으면 된다.
+  **localhost 는 예외로 둔다** — 개발 중 가입한 링크가 운영으로 날아가면
+  그 자리에서 확인을 못 한다.
+- `src/middleware.ts` 의 `rescueAuthLink()` — `/` 나 `/login` 에 `?code=` /
+  `?token_hash=` 가 떨어지면 알맞은 `/auth/*` 로 넘긴다. **①을 통째로 무력화한다.**
+  `/auth/*` 와 다른 화면은 건드리지 않는다(`code` 는 흔한 이름이라 아무 데서나
+  낚아채면 안 된다).
+- **"확인 실패"라고 말하지 않는다.** `/verify` 가 `email_confirmed_at` 을 먼저
+  찍으므로 `/auth/callback` 에 도착한 시점에 **확인은 이미 끝나 있다.** 실패한
+  것은 자동 로그인뿐이다. 그런데 예전 문구는 "확인 링크를 처리하지 못했습니다,
+  메일을 다시 받으세요"라고 해서 **이미 끝난 일을 다시 하게** 만들었고, 다시
+  받아도 같은 자리에서 또 막혔다. 지금은 `?confirmed=1` 을 달아 초록 안내로
+  "확인은 끝났으니 로그인하세요"라고 하고 재발송 버튼도 감춘다.
+
+**그래도 대시보드에서 해야 하는 것**(MCP 에 Auth 설정 API 가 없다): 메일
+템플릿을 `/auth/confirm?token_hash=...` 로 바꾸는 것. ②는 이것으로만 근본적으로
+없어진다 — `token_hash` 는 짝이 필요 없어서 어느 기기에서 열어도 **로그인까지**
+된다. 미들웨어 구조 덕분에 템플릿을 바꾸면 그 즉시 그쪽 길을 탄다.
+
 ### 과거에 해결한 버그 (재발 시 참고)
 
 - Mathpix가 `latex_styled`만 주거나 `\( \)` / `\[ \]` 델리미터를 쓰면 LaTeX가 그대로
@@ -1138,42 +1187,43 @@ SVG 의 글꼴 **이름만** 믿고 모양은 우리가 심은 TTF 로 그린다
 
 ## 남은 작업 (여기서부터 이어서)
 
-1. **DB 마이그레이션 재확인** — `supabase/migrations/0001_init.sql`(categories/problems/
-   problem-images 버킷)이 실제 `bmhupmkxzvbqndxkvjmx` 프로젝트에 적용됐는지 확인 필요.
-   이전에 사용자에게 실수로 다른(지금은 버려진) 스키마인 `problem_history` 테이블
-   SQL을 먼저 전달한 적이 있어서, `0001_init.sql`을 아직 안 돌렸을 수 있음.
-   **`0009_diagram_credit_amount.sql`도 아직 실행 안 됐을 수 있음** — 이게 없으면
-   "도형 추가인식" 버튼이 크레딧 차감에 실패해 500 에러가 남(RPC가 `p_amount`
-   인자를 못 받는 옛 함수로 남아있기 때문).
-   **`0010_diagram_model_quota.sql`은 반드시 실행해야 함** — 도형 모델 선택/
-   결제자 전용/플래시쿠폰이 전부 이 파일의 함수에 의존한다. 안 돌리면
-   `consume_diagram_credit` 함수가 없어서 도형 추가인식이 500으로 죽는다.
-2. **이메일 확인 리디렉션 URL 등록(아직 안 됐을 가능성이 높다)** — Supabase
-   대시보드 Authentication > URL Configuration.
-   - **Site URL** 을 실제 도메인(`https://reprintocr.vercel.app`)으로.
-   - **Redirect URLs 에 도메인을 전부 넣어야 한다.** 이 프로젝트는 도메인이
-     넷이다(`reprintocr` / `mathocr-liard` / `mathocr-wesslvcs-projects` /
-     `mathocr-git-main-...`). 코드가 `emailRedirectTo` 를
-     `window.location.origin` 으로 만들기 때문에 **접속한 도메인마다 값이
-     달라진다** — 허용목록에 없는 도메인이면 Supabase 가 Site URL 로 떨어뜨려
-     엉뚱한 데로 간다. 도메인마다 `/auth/callback` 과 `/auth/confirm` 을 넣거나
-     와일드카드를 쓸 것.
-   - **메일 템플릿을 `/auth/confirm` 으로 바꾸는 것을 권한다**:
-     `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup`
-     (아래 "이메일 확인" 문단 참고).
-   - Supabase 기본 SMTP 는 **시간당 몇 통** 제한이라 시험하다 조용히 막힌다.
-     실제 서비스라면 SMTP 를 따로 붙일 것.
-3. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
+**끝난 것부터 적어 둔다** (2026-08-20, MCP 로 실제 DB 를 보고 확인했다. 오래
+"안 돌렸을지 모른다"고 적혀 있던 것들인데 전부 돌아가 있었다):
+
+- 마이그레이션 **0001 · 0009 · 0010 · 0015 전부 적용됨.** `categories`(21행)·
+  `problems`(59행)·`entitlements` 가 있고, `consume_recognition_credit(p_amount
+  integer)` / `refund_recognition_credit(p_amount integer)` / `consume_diagram_credit`
+  이 다 있다. 버킷도 `problem-images`·`kice-fonts` 둘 다 비공개로 있다.
+  (`supabase_migrations` 테이블은 비어 있다 — 대시보드에서 손으로 돌렸기
+  때문이다. **`list_migrations` 가 비었다고 안 돌아간 게 아니다**, 함수와
+  테이블을 직접 볼 것.)
+- **평가원 글꼴도 이미 올라가 있다** — `kice-fonts` 에 5개 파일 1957 kB
+  (미리 서브셋한 크기와 맞는다).
+
+남은 것:
+
+1. **메일 템플릿을 `/auth/confirm` 으로 바꾸기** — Supabase 대시보드
+   Authentication > Email Templates:
+   `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup`
+   **이게 이메일 인증 문제의 마지막 조각이다**(위 "운영 로그로 실제 원인을
+   확인했다" 참고). 코드 쪽은 다 막아 뒀지만 PKCE 가 기기를 못 넘는 것만은
+   템플릿을 바꿔야 없어진다. MCP 에 Auth 설정 API 가 없어 대시보드에서만 된다.
+2. **URL Configuration** — Site URL 을 `https://reprintocr.vercel.app` 로,
+   Redirect URLs 에 도메인 넷(`reprintocr` / `mathocr-liard` /
+   `mathocr-wesslvcs-projects` / `mathocr-git-main-...`)의 `/auth/callback` 과
+   `/auth/confirm` 을 넣는다.
+   **`NEXT_PUBLIC_SITE_URL` 을 Vercel 에 넣으면 한 줄로 끝난다** — 어느
+   도메인에서 가입해도 그 주소로 돌아오기 때문이다(`src/lib/siteUrl.ts`).
+   허용목록이 틀려도 미들웨어가 건져내지만, 맞춰 두는 편이 낫다.
+3. **SMTP** — Supabase 기본 SMTP 는 **시간당 몇 통** 제한이라 시험하다 조용히
+   막힌다. 실제 서비스라면 따로 붙일 것.
+4. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-   `MATHPIX_APP_ID`, `MATHPIX_APP_KEY`가 들어있는지 확인.
-   `GEMINI_API_KEY`(도형 SVG 재구성용)는 선택 사항 — 없어도 원본 크롭
-   이미지로 대체 표시되니 앱이 죽지 않음. `NVIDIA_API_KEY`는 이제 안 씀.
-4. **실제 동작 검증** — 회원가입 → 이메일 확인 → 로그인 → 실모추가 → 오답추가 →
+   `MATHPIX_APP_ID`, `MATHPIX_APP_KEY`, `NEXT_PUBLIC_SITE_URL`.
+   `GEMINI_API_KEY`(문제 영역 자동 찾기용)는 선택 사항 — 없으면 그 기능만
+   안 되고 앱은 죽지 않음. `NVIDIA_API_KEY`는 이제 안 씀.
+5. **실제 동작 검증** — 회원가입 → 이메일 확인 → 로그인 → 실모추가 → 오답추가 →
    PDF 내보내기 전 과정.
-5. **평가원 양식 글꼴 올리기** — `0015_kice_fonts_bucket.sql` 을 돌린 뒤
-   `node scripts/upload-kice-fonts.mjs <글꼴 폴더>` 로 다섯 벌을 올려야 한다.
-   안 올리면 "평가원 양식 PDF 만들기"가 404 로 실패한다(그 사실을 화면에 그대로
-   알려 준다). 파일은 저작권 때문에 저장소에 없다.
 
 ### 문제 카드는 축소해서 보여준다 (ScaledCard)
 
