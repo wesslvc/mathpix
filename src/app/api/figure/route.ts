@@ -84,10 +84,24 @@ async function persistWholeProblem(
       ? (box.figures as Record<string, unknown>[])
       : [];
     const markup = `<img src="${dataUrl}" alt="" />`;
+    // 갈아치우기 전의 그림을 원본으로 남긴다. **이미 있으면 덮지 않는다** —
+    // 두 번째 AI 결과가 첫 번째 AI 결과를 원본으로 만들어 버리면 안 된다.
+    // 브라우저를 닫았을 때는 이 길로 저장되므로, 여기가 빠지면 탭을 닫고
+    // 돌아온 문제에만 원본이 없어진다.
     const nextFigures =
       figures.length > 0
         ? figures.map((f) =>
-            !figureId || f.id === figureId ? { ...f, markup } : f,
+            !figureId || f.id === figureId
+              ? {
+                  ...f,
+                  ...(typeof f.origin === "string" ||
+                  typeof f.markup !== "string"
+                    ? {}
+                    : { origin: f.markup }),
+                  markup,
+                  ai: true,
+                }
+              : f,
           )
         : [
             {
@@ -127,6 +141,7 @@ export async function POST(req: NextRequest) {
     problemId?: string;
     figureId?: string;
     reference?: string;
+    instruction?: string;
     width?: number;
     height?: number;
   };
@@ -151,6 +166,12 @@ export async function POST(req: NextRequest) {
   const reference =
     typeof body.reference === "string"
       ? body.reference.slice(0, 4000)
+      : undefined;
+  // 사용자가 적어 준 "이렇게 그려 주세요". 프롬프트 끝에 붙는다.
+  // reference 와 같은 이유로 길이를 잘라 둔다.
+  const instruction =
+    typeof body.instruction === "string"
+      ? body.instruction.slice(0, 500).trim() || undefined
       : undefined;
   // 보낸 그림의 픽셀 크기. 출력 캔버스를 이 비율에 맞추는 데 쓴다 — 비율이
   // 어긋나면 모델이 흰 여백을 붙여 주고 우리는 그걸 잘라 버리므로, 그 여백이
@@ -255,6 +276,7 @@ export async function POST(req: NextRequest) {
           reference,
           deadline.signal,
           inputSize,
+          instruction,
         );
         if (!result) {
           await refund();

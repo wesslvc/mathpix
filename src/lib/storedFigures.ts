@@ -33,6 +33,19 @@ export type StoredFigure = {
   row?: boolean;
   /** AI 가 다시 그린 그림인가. 수정 화면에서 다시 그리기를 막는 데 쓴다. */
   ai?: boolean;
+  /**
+   * **AI 가 갈아치우기 전의 마크업.** 사람이 오려낸 그 픽셀이다.
+   *
+   * 예전에는 AI 결과가 `markup` 을 통째로 덮어써서 원본이 어디에도 안 남았다.
+   * 그러면 되돌릴 수도, 다른 지시로 다시 그릴 수도 없다(입력으로 쓸 원본이
+   * 없으니까). 그래서 따로 들고 있는다.
+   *
+   * **한 번 담기면 덮지 않는다** — 두 번째 AI 결과가 첫 번째 AI 결과를 원본으로
+   * 만들어 버리면 안 된다. 원본은 언제나 사람이 오려낸 그 그림이다.
+   *
+   * AI 를 돌린 그림에만 생긴다(그만큼 저장 용량이 는다). 표에는 없다.
+   */
+  origin?: string;
 };
 
 /** 카드에 붙은 것들을 저장할 형태로. 표에서는 마크업을 뗀다. */
@@ -45,6 +58,7 @@ export function toStoredFigures(figures: CardFigure[]): StoredFigure[] {
     kind: f.kind,
     row: f.row,
     ...(f.ai ? { ai: true } : {}),
+    ...(f.kind !== "table" && f.origin ? { origin: f.origin } : {}),
   }));
 }
 
@@ -96,6 +110,8 @@ export function readStoredFigures(boxRange: unknown): StoredFigure[] {
       kind,
       row: f.row === true,
       ai: f.ai === true,
+      // 원본도 카드에 그대로 붙을 수 있는 값이라 마크업과 같은 검사를 거친다.
+      origin: isFigureMarkup(f.origin) ? (f.origin as string) : undefined,
     });
   }
   return out;
@@ -136,6 +152,7 @@ export function restoreCardFigures(
       kind: "figure" as const,
       row: s.row ?? false,
       ai: s.ai === true,
+      origin: s.origin,
     }));
 
   return [...tables, ...figures];

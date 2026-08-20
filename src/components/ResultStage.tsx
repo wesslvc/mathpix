@@ -100,6 +100,11 @@ type ManualFigure = {
   svg: string;
   /** AI 가 다시 그린 것인가. 저장되어 수정 화면에서 다시 그리기를 막는다. */
   ai?: boolean;
+  /**
+   * AI 가 갈아치우기 전의 그림. 함께 저장돼야 수정 화면에서 되돌리거나 다른
+   * 지시로 다시 그릴 수 있다(입력으로 원본을 써야 하기 때문이다).
+   */
+  origin?: string;
 };
 
 // 정답 입력이 멎고 이만큼 지나면 자동 저장한다. 너무 짧으면 아직 타는 중에
@@ -301,7 +306,12 @@ export default function ResultStage({
           id: d.id,
           markup: `<img src="${rasterFallbacks[d.id]}" alt="" />`,
         })),
-      ...manualDiagramSvgs.map((d) => ({ id: d.id, markup: d.svg, ai: d.ai })),
+      ...manualDiagramSvgs.map((d) => ({
+        id: d.id,
+        markup: d.svg,
+        ai: d.ai,
+        origin: d.origin,
+      })),
     ]
       // 마크업이 비어 있으면 카드에 끼워 넣지 않는다. 문자열 조립이라 undefined가
       // 하나만 섞여도 "undefined"라는 글자가 그대로 문제에 인쇄돼 버린다.
@@ -546,7 +556,9 @@ export default function ResultStage({
         const j = done.find((d) => d.id === f.id);
         if (!j?.svg || j.svg === f.svg) return f;
         changed = true;
-        return { ...f, svg: j.svg, ai: true };
+        // 원본을 남긴다(이미 있으면 덮지 않는다) — 수정 화면에서 되돌리거나
+        // 다른 지시로 다시 그릴 때 이 그림을 입력으로 쓴다.
+        return { ...f, origin: f.origin ?? f.svg, svg: j.svg, ai: true };
       });
       return changed ? next : prev;
     });
