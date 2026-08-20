@@ -30,7 +30,7 @@ import type { CardSpec } from "@/lib/cardHtml";
  * 같은 크롭을 글자 인식기(Mathpix)에 한 번 보내 본문을 읽어 둔다.
  *
  * 실패하면 조용히 포기한다 — 참고 없이도 그림은 만들어진다. 인식 토큰이
- * 하나 들지만, 문제 전체를 다시 그리는 값(FIGURE_TOKEN_COST)에 비하면 작고
+ * 하나 들지만, 문제 전체를 다시 그리는 값에 비하면 작고
  * 글자가 틀리는 쪽이 훨씬 비싸다.
  */
 async function readTextForReference(image: string): Promise<string | undefined> {
@@ -95,6 +95,11 @@ export type FigureJob = {
   costUsd?: number;
   /** 같은 값을 원으로 옮긴 것. 서버가 환율까지 계산해 내려준다. */
   costKrw?: number;
+  /**
+   * 이 작업에 실제로 물린 토큰. 금액과 달리 **누구에게나 보인다** —
+   * 변동 차감이라 얼마가 빠졌는지 안 보이면 불신이 생긴다.
+   */
+  chargedTokens?: number;
   error?: string;
   /** 완성된 그림 마크업. 화면이 열려 있으면 미리보기에 바로 반영된다. */
   svg?: string;
@@ -133,6 +138,8 @@ type Ctx = {
   spentKrw: number;
   /** 서버가 쓴 환율. 화면이 "1달러=N원 기준"이라고 적는 데 쓴다. */
   krwRate: number | null;
+  /** 이번에 물린 토큰 합계. 금액이 안 오는 일반 사용자는 이걸 본다. */
+  spentTokens: number;
   enqueue: (job: Omit<FigureJob, "status">) => void;
   retry: (id: string) => void;
   dismiss: (id: string) => void;
@@ -175,6 +182,8 @@ export default function FigureJobsProvider({
   const [spentKrw, setSpentKrw] = useState(0);
   /** 서버가 쓴 환율. 화면에 숫자를 하드코딩하지 않으려고 받아 둔다. */
   const [krwRate, setKrwRate] = useState<number | null>(null);
+  /** 실제로 물린 토큰 합계(캐시 적중은 제외 — 차감이 없었다). */
+  const [spentTokens, setSpentTokens] = useState(0);
   /** 한 번에 하나씩만 돌린다(순차 처리). */
   const runningRef = useRef<string | null>(null);
   /**
@@ -324,6 +333,7 @@ export default function FigureJobsProvider({
         /** 이 작업에 실제로 든 추정 비용. 캐시에 걸리면 끝까지 undefined 다. */
         let costUsd: number | undefined;
         let costKrw: number | undefined;
+        let chargedTokens: number | undefined;
 
         if (!svg) {
           // **문제 전체는 글자 인식을 함께 쓴다.**
@@ -378,7 +388,12 @@ export default function FigureJobsProvider({
               instruction: next.instruction,
             }),
           });
-          let json: { image?: string; error?: string; usage?: FigureUsage };
+          let json: {
+            image?: string;
+            error?: string;
+            usage?: FigureUsage;
+            chargedTokens?: number | null;
+          };
           try {
             json = await res.json();
           } catch {
@@ -395,6 +410,11 @@ export default function FigureJobsProvider({
           }
           // 이 요청에 실제로 든 값. 캐시에 걸린 작업에는 붙지 않는다 —
           // 그때는 돈이 안 나갔으므로 0 이 아니라 "없음"이 맞다.
+          if (typeof json.chargedTokens === "number") {
+            chargedTokens = json.chargedTokens;
+            setSpentTokens((v) => v + json.chargedTokens!);
+          }
+          // 금액은 무제한 계정에만 온다(서버가 가린다). 오면 쌓고, 안 오면 만다.
           if (typeof json.usage?.estUsd === "number") {
             costUsd = json.usage.estUsd;
             costKrw = json.usage.estKrw;
@@ -410,7 +430,14 @@ export default function FigureJobsProvider({
         setJobs((prev) =>
           prev.map((j) =>
             j.id === id
-              ? { ...j, status: "done", svg: svg as string, costUsd, costKrw }
+              ? {
+                  ...j,
+                  status: "done",
+                  svg: svg as string,
+                  costUsd,
+                  costKrw,
+                  chargedTokens,
+                }
               : j,
           ),
         );
@@ -450,6 +477,7 @@ export default function FigureJobsProvider({
         spentUsd,
         spentKrw,
         krwRate,
+        spentTokens,
         enqueue,
         retry,
         dismiss,

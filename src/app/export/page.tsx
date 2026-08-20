@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { categoryLabel, type Category, type Problem } from "@/lib/supabase/types";
+import {
+  categoryLabel,
+  type Category,
+  type Problem,
+} from "@/lib/supabase/types";
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { formatAnswer, toAnswerType } from "@/lib/answer";
 import ExportComposer, {
@@ -14,7 +18,10 @@ export default async function ExportPage({
   searchParams: Promise<{ ids?: string }>;
 }) {
   const { ids } = await searchParams;
-  const idList = (ids ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const idList = (ids ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   if (!isSupabaseConfigured()) {
     return (
@@ -55,16 +62,32 @@ export default async function ExportPage({
     .in("category_id", idList)
     .returns<Problem[]>();
 
+  /**
+   * 미납으로 잠긴 문제는 뺀다.
+   *
+   * **여기서 안 빼면 잠금이 겉모양뿐이다** — 목록에서만 가려 놓고 인쇄물에는
+   * 그대로 나오면 막은 게 아니다. 몇 개가 빠졌는지는 아래에서 알려 준다
+   * (조용히 사라지면 문제가 없어진 줄 안다).
+   */
+  const isLocked = (p: Problem) => {
+    const box = (p.box_range ?? {}) as Record<string, unknown>;
+    return typeof box.debt === "number" && box.debt > 0;
+  };
+  const lockedCount = (problems ?? []).filter(isLocked).length;
+
   // 선택한 실모 순서대로, 각 실모 안에서는 sort_order 순으로 정렬.
-  const ordered = (problems ?? []).slice().sort((a, b) => {
-    const ai = idList.indexOf(a.category_id);
-    const bi = idList.indexOf(b.category_id);
-    if (ai !== bi) return ai - bi;
-    const ao = a.sort_order ?? Number.MAX_SAFE_INTEGER;
-    const bo = b.sort_order ?? Number.MAX_SAFE_INTEGER;
-    if (ao !== bo) return ao - bo;
-    return a.created_at.localeCompare(b.created_at);
-  });
+  const ordered = (problems ?? [])
+    .filter((p) => !isLocked(p))
+    .slice()
+    .sort((a, b) => {
+      const ai = idList.indexOf(a.category_id);
+      const bi = idList.indexOf(b.category_id);
+      if (ai !== bi) return ai - bi;
+      const ao = a.sort_order ?? Number.MAX_SAFE_INTEGER;
+      const bo = b.sort_order ?? Number.MAX_SAFE_INTEGER;
+      if (ao !== bo) return ao - bo;
+      return a.created_at.localeCompare(b.created_at);
+    });
 
   const paths = ordered.map((p) => p.image_path);
   const signedUrlByPath = new Map<string, string>();
@@ -113,13 +136,23 @@ export default async function ExportPage({
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10">
       <header>
-        <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline"
+        >
           ← 목록으로
         </Link>
         <h1 className="mt-1 text-2xl font-bold text-ink">PDF 만들기</h1>
         <p className="text-sm text-slate-500">
           실모 {idList.length}개 · 문제 {composerProblems.length}개
         </p>
+        {/* 조용히 빠지면 문제가 없어진 줄 안다. 왜 빠졌는지 밝힌다. */}
+        {lockedCount > 0 && (
+          <p className="mt-1 text-sm text-amber-700">
+            토큰이 모자라 잠긴 문제 {lockedCount}개는 빠졌습니다. 실모 화면에서
+            잠금을 해제하면 함께 인쇄돼요.
+          </p>
+        )}
       </header>
 
       {composerProblems.length === 0 ? (

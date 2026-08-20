@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { FIGURE_TOKEN_COST, OCR_TOKEN_COST } from "@/lib/tokens";
+import { FIGURE_TOKEN_DEPOSIT, OCR_TOKEN_COST } from "@/lib/tokens";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -14,6 +14,10 @@ export type TokenStatus = {
   paid: boolean;
   /** 기능별 소모량. 화면에 숫자를 하드코딩하지 않으려고 서버가 알려준다. */
   ocrCost: number;
+  /**
+   * AI 그림 생성의 **보증금**. 실제 차감은 쓴 만큼 정산되므로 이보다 적을 수도
+   * 많을 수도 있다. 화면은 "보증금 N토큰 · 쓴 만큼 정산"으로 적는다.
+   */
   figureCost: number;
   /** AI 그림 생성이 가능한 상태인가(OPENAI_API_KEY 설정 여부). */
   figureReady: boolean;
@@ -28,7 +32,7 @@ export type TokenStatus = {
 export async function GET() {
   const base = {
     ocrCost: OCR_TOKEN_COST,
-    figureCost: FIGURE_TOKEN_COST,
+    figureCost: FIGURE_TOKEN_DEPOSIT,
     figureReady: Boolean(process.env.OPENAI_API_KEY),
   };
 

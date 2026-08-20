@@ -43,6 +43,8 @@ type ProblemListRow = {
   boxEnd: number | null;
   boxNone: boolean | null;
   problemNo: number | null;
+  /** 미납 토큰. 0보다 크면 잠긴 문제다. */
+  debt: number | null;
 };
 
 const PROBLEM_LIST_COLUMNS = [
@@ -60,6 +62,8 @@ const PROBLEM_LIST_COLUMNS = [
   "boxEnd:box_range->end",
   "boxNone:box_range->none",
   "problemNo:box_range->number",
+  // 미납으로 잠긴 문제. 결제 전에는 목록에서 가리고 PDF 에서도 뺀다.
+  "debt:box_range->debt",
 ].join(", ");
 
 /** 목록 행에서 조건 박스 값을 되살린다(옛 형태 셋을 모두 받는다). */
@@ -143,7 +147,9 @@ export default async function CategoryPage({
 
     signedUrlByPath = new Map(
       (signedUrls ?? [])
-        .filter((s): s is typeof s & { signedUrl: string } => Boolean(s.signedUrl))
+        .filter((s): s is typeof s & { signedUrl: string } =>
+          Boolean(s.signedUrl),
+        )
         .map((s) => [s.path ?? "", s.signedUrl]),
     );
   }
@@ -163,6 +169,7 @@ export default async function CategoryPage({
         boxRange: boxRangeOf(p),
         fontPt: readFontPt({ fontPt: p.fontPt }),
         number: readProblemNumber({ number: p.problemNo }),
+        debt: typeof p.debt === "number" && p.debt > 0 ? p.debt : null,
       };
     })
     .filter((p): p is GalleryProblem => p !== null);
@@ -173,7 +180,10 @@ export default async function CategoryPage({
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline"
+          >
             ← 목록으로
           </Link>
           <CategoryTitleEditor

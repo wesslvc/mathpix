@@ -553,6 +553,8 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
     }
   }
 
+  // 보증금 × 개수. **실제 차감은 쓴 만큼 정산되므로 이보다 적을 수 있다** —
+  // 그래서 "최대"라고 적는다.
   const totalCost =
     typeof figureCost === "number" ? figureCost * pieces.length : null;
 
@@ -670,7 +672,7 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
               모두 AI로 재생성 ({pieces.length}개
-              {totalCost !== null && !unlimited && ` · ${totalCost}토큰`})
+              {totalCost !== null && !unlimited && ` · 최대 ${totalCost}토큰`})
             </button>
           )}
         </div>

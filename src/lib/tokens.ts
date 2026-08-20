@@ -13,15 +13,61 @@
 export const OCR_TOKEN_COST = 1;
 
 /**
- * AI 그림 생성(GPT 이미지) 1회.
+ * 토큰 하나의 판매가(원). 1000토큰을 3000원에 판다.
  *
- * 실제로 요금이 나가는 유료 API라 인식보다 훨씬 비싸다. 환경변수
- * FIGURE_TOKEN_COST로 재배포 없이 조정할 수 있다.
+ * **AI 그림 생성을 얼마 받을지 계산하는 기준이다.** 판매가가 바뀌면 여기만
+ * 고치면 차감량이 저절로 따라온다.
  */
-export const FIGURE_TOKEN_COST = (() => {
-  const raw = Number(process.env.FIGURE_TOKEN_COST);
-  return Number.isInteger(raw) && raw >= 0 ? raw : 50;
+export const KRW_PER_TOKEN = (() => {
+  const raw = Number(process.env.KRW_PER_TOKEN);
+  return Number.isFinite(raw) && raw > 0 ? raw : 3;
 })();
+
+/**
+ * AI 그림 생성을 **원가의 몇 배**로 받을지.
+ *
+ * 원가는 요청마다 96~143원으로 1.5배까지 널뛴다. 고정 요금으로는 어느 쪽으로도
+ * 틀리므로(싼 요청은 사용자가 더 내고, 비싼 요청은 우리가 밑진다) 실제 쓴
+ * 값에 이 배수를 곱해 받는다.
+ */
+export const FIGURE_MARGIN = (() => {
+  const raw = Number(process.env.FIGURE_MARGIN);
+  return Number.isFinite(raw) && raw > 0 ? raw : 1.5;
+})();
+
+/**
+ * AI 그림 생성 1회의 **보증금**. 부르기 전에 이만큼 먼저 차감한다.
+ *
+ * 선차감이 있어야 잔액이 없는 사람이 생성을 시작하지 못한다. 끝나면 실제 값과
+ * 견주어 남으면 돌려주고 모자라면 더 받는다.
+ */
+export const FIGURE_TOKEN_DEPOSIT = (() => {
+  const raw = Number(process.env.FIGURE_TOKEN_DEPOSIT);
+  return Number.isInteger(raw) && raw > 0 ? raw : 50;
+})();
+
+/**
+ * 응답에 usage 가 없어 실제 값을 모를 때 물릴 토큰.
+ *
+ * 보증금을 다 물리면 과다 청구고, 안 물리면 공짜다. 관측 중앙값(원가 120원
+ * → 60토큰)을 쓴다.
+ */
+export const FIGURE_TOKEN_FALLBACK = (() => {
+  const raw = Number(process.env.FIGURE_TOKEN_FALLBACK);
+  return Number.isInteger(raw) && raw > 0 ? raw : 60;
+})();
+
+/**
+ * 이번 생성에 물릴 토큰. 원가(원)에 마진을 곱해 토큰으로 바꾼다.
+ *
+ * 원가를 모르면(usage 가 안 왔으면) 폴백. 아무리 싸도 0 토큰은 아니다.
+ */
+export function figureTokenCharge(estKrw: number | undefined): number {
+  if (typeof estKrw !== "number" || !Number.isFinite(estKrw) || estKrw <= 0) {
+    return FIGURE_TOKEN_FALLBACK;
+  }
+  return Math.max(1, Math.ceil((estKrw * FIGURE_MARGIN) / KRW_PER_TOKEN));
+}
 
 /**
  * 게이지를 그릴 때 "가득 찬 상태"로 볼 기준. 이용권 1회 구매분이다.
