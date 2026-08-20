@@ -127,6 +127,8 @@ export async function POST(req: NextRequest) {
     problemId?: string;
     figureId?: string;
     reference?: string;
+    width?: number;
+    height?: number;
   };
   try {
     body = await req.json();
@@ -149,6 +151,16 @@ export async function POST(req: NextRequest) {
   const reference =
     typeof body.reference === "string"
       ? body.reference.slice(0, 4000)
+      : undefined;
+  // 보낸 그림의 픽셀 크기. 출력 캔버스를 이 비율에 맞추는 데 쓴다 — 비율이
+  // 어긋나면 모델이 흰 여백을 붙여 주고 우리는 그걸 잘라 버리므로, 그 여백이
+  // 곧 버리는 돈이다. 없으면 예전처럼 auto 로 둔다.
+  const inputSize =
+    typeof body.width === "number" &&
+    typeof body.height === "number" &&
+    body.width > 0 &&
+    body.height > 0
+      ? { width: body.width, height: body.height }
       : undefined;
   if (!image || typeof image !== "string") {
     return NextResponse.json(
@@ -242,6 +254,7 @@ export async function POST(req: NextRequest) {
           mode,
           reference,
           deadline.signal,
+          inputSize,
         );
         if (!result) {
           await refund();

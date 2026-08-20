@@ -97,6 +97,83 @@ const PARAM_VARIANTS: Record<string, string>[] = [
   {},
 ];
 
+/** 모델이 그려 주는 캔버스 크기들. 이 셋 중에서만 고를 수 있다. */
+const OUTPUT_SIZES: { name: string; ratio: number }[] = [
+  { name: "1024x1024", ratio: 1 },
+  { name: "1024x1536", ratio: 1024 / 1536 },
+  { name: "1536x1024", ratio: 1536 / 1024 },
+];
+
+/**
+ * 보낸 그림의 비율에 가장 가까운 캔버스를 고른다.
+ *
+ * **화질을 낮추는 게 아니라 버려지는 픽셀을 없애는 것이다.** `size: "auto"` 로
+ * 두면 모델이 제 비율로 그리고 둘레에 흰 여백을 붙여 돌려주는데, 우리는 그
+ * 여백을 받자마자 `trimBlankBorder()` 로 잘라 버린다(가로로 긴 도식이
+ * 1024×1024 로 와서 세로 여백의 66%를 버린 적이 있다). 즉 **돈 내고 받은
+ * 픽셀의 상당 부분을 그대로 버리고 있었다.**
+ *
+ * 비율을 맞추면 같은 토큰으로 내용이 캔버스를 꽉 채우므로 실효 해상도는
+ * 오히려 올라간다. `quality` 는 건드리지 않는다 — 그건 화질을 직접 깎는다.
+ *
+ * 크기를 모르면(브라우저가 안 알려줬으면) null 을 돌려 예전처럼 auto 로 둔다.
+ */
+export function pickOutputSize(
+  width?: number,
+  height?: number,
+): string | null {
+  const forced = process.env.OPENAI_IMAGE_SIZE?.trim();
+  if (forced) return forced;
+  if (!width || !height || width <= 0 || height <= 0) return null;
+  const ratio = width / height;
+  let best = OUTPUT_SIZES[0];
+  for (const s of OUTPUT_SIZES) {
+    // 로그 비로 견준다 — 그래야 "2배 가로"와 "2배 세로"가 같은 거리로 잡힌다.
+    if (Math.abs(Math.log(ratio / s.ratio)) < Math.abs(Math.log(ratio / best.ratio))) {
+      best = s;
+    }
+  }
+  return best.name;
+}
+
+/**
+ * 요청 하나가 실제로 쓴 토큰을 남긴다.
+ *
+ * 청구서는 하루 단위로만 나와서, 무엇이 비용을 끌어올리는지 일별 합계로는
+ * 알 수 없었다(출력 토큰이 왜 뛰었는지 끝내 단정하지 못했다). 요청마다 찍어
+ * 두면 크기·모드별로 바로 견줄 수 있다.
+ *
+ * 단가는 **사용자의 실제 청구액에서 역산한 값**이다(8일치 합계 오차
+ * $0.13/$10.84). 정확한 청구액이 아니라 **요청끼리 견주는 용도**다.
+ */
+const PRICE_PER_MTOK = { textIn: 2.5, imageIn: 10, imageOut: 30 };
+
+type ImageUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  input_tokens_details?: { text_tokens?: number; image_tokens?: number };
+};
+
+function logUsage(
+  usage: ImageUsage | undefined,
+  info: { modelId: string; mode: FigureMode; size: string; width?: number; height?: number },
+): void {
+  if (!usage) return;
+  const textIn = usage.input_tokens_details?.text_tokens ?? 0;
+  const imageIn = usage.input_tokens_details?.image_tokens ?? 0;
+  const out = usage.output_tokens ?? 0;
+  const est =
+    (textIn * PRICE_PER_MTOK.textIn +
+      imageIn * PRICE_PER_MTOK.imageIn +
+      out * PRICE_PER_MTOK.imageOut) /
+    1e6;
+  const input = info.width && info.height ? `${info.width}x${info.height}` : "?";
+  console.info(
+    `[figureImageGen] usage model=${info.modelId} mode=${info.mode} size=${info.size} 입력=${input} ` +
+      `in=${usage.input_tokens ?? 0}(text=${textIn} image=${imageIn}) out=${out} est=$${est.toFixed(4)}`,
+  );
+}
+
 function isUnsupportedParamError(status: number, body: string): boolean {
   if (status !== 400) return false;
   // 파라미터 이름이 언급된 400만 "다음 조합으로"의 대상이다. 이미지 파일
@@ -417,6 +494,14 @@ export async function generateFigureImage(
    * 환불하고 사람이 읽을 수 있는 오류를 돌려줄 수 있다.
    */
   signal?: AbortSignal,
+  /**
+   * 보낸 그림의 픽셀 크기. 출력 캔버스를 이 비율에 맞추는 데 쓴다.
+   *
+   * 이 파일은 서버(Node)라 이미지를 열어 크기를 잴 수 없다. 크기를 아는 곳은
+   * 그림을 만든 브라우저 쪽(`prepareProblemForModel` / `prepareFigureForModel`)
+   * 이라 거기서 재서 넘겨준다. 없으면 예전처럼 auto 로 둔다.
+   */
+  size?: { width: number; height: number },
 ): Promise<FigureImageResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -444,8 +529,12 @@ export async function generateFigureImage(
   let res: Response | null = null;
   let usedVariant = startAt;
 
+  // 비율에 맞는 캔버스를 고른다. 못 고르면 조합에 적힌 값(대개 auto)을 그대로 쓴다.
+  const wanted = pickOutputSize(size?.width, size?.height);
+
   for (let i = 0; i < order.length; i++) {
-    const params = order[i];
+    const params = { ...order[i] };
+    if (wanted && "size" in params) params.size = wanted;
 
     const form = new FormData();
     form.append("model", modelId);
@@ -498,6 +587,13 @@ export async function generateFigureImage(
   workingVariant.set(modelId, usedVariant);
 
   const json = await res.json();
+  logUsage(json?.usage, {
+    modelId,
+    mode,
+    size: wanted ?? "auto",
+    width: size?.width,
+    height: size?.height,
+  });
   const first = json?.data?.[0];
   const b64: string | undefined = first?.b64_json;
 

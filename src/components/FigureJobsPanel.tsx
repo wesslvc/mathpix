@@ -51,7 +51,7 @@ function OcrLine({ ocr, preview }: { ocr?: string; preview?: string }) {
  * 작업이 하나도 없으면 아예 나타나지 않는다.
  */
 export default function FigureJobsPanel() {
-  const { jobs, activeCount, retry, dismiss } = useFigureJobs();
+  const { jobs, activeCount, calls, retry, dismiss } = useFigureJobs();
   const [open, setOpen] = useState(false);
 
   if (jobs.length === 0) return null;
@@ -80,6 +80,14 @@ export default function FigureJobsPanel() {
                 ? `${failed}개 실패`
                 : "AI 작업 완료"}
           </span>
+          {/* 실제로 나간 유료 호출 수. 문제 수보다 많아지면(재시도가 쌓이면)
+              그만큼 요금이 더 나간 것인데 지금까지 아무 단서가 없었다.
+              캐시에 걸린 것은 세지 않는다 — 그건 돈이 안 나갔다. */}
+          {calls > 0 && (
+            <span className="shrink-0 text-[11px] text-slate-400">
+              생성 {calls}회
+            </span>
+          )}
           <span className="shrink-0 text-[11px] text-slate-400">
             {open ? "닫기 ▾" : "보기 ▴"}
           </span>
