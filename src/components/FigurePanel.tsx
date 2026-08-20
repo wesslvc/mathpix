@@ -112,7 +112,8 @@ export default function FigurePanel({
               className="g-btn g-btn-outline w-full text-xs"
             >
               AI로 깨끗하게 다시 그리기
-              {unlimited ? " (무제한)" : ` (${cost}토큰)`}
+              {/* 실제 차감은 쓴 만큼 정산되므로 확정 금액처럼 적으면 안 된다. */}
+              {unlimited ? " (무제한)" : ` (보증금 ${cost}토큰 · 쓴 만큼 정산)`}
             </button>
             <p className="px-1 text-[11px] text-slate-500">
               선과 글자로 된 도식·그래프·회로도라면 이쪽이 훨씬 깨끗하게

@@ -5,7 +5,7 @@ import {
   generateFigureImage,
   type FigureMode,
 } from "@/lib/figureImageGen";
-import { FIGURE_TOKEN_COST } from "@/lib/tokens";
+import { FIGURE_TOKEN_DEPOSIT, figureTokenCharge } from "@/lib/tokens";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -39,6 +39,50 @@ const DEADLINE_MS = (maxDuration - 15) * 1000;
  * 요금이 나갔다. 폴백은 OPENAI_FIGURE_IMAGE_MODELS로 명시했을 때만 생긴다.
  */
 const MAX_MODEL_ATTEMPTS = 2;
+
+/**
+ * 못 낸 만큼을 그 문제에 적어 **잠근다**.
+ *
+ * 생성은 이미 끝났는데(=우리는 이미 돈을 냈는데) 사용자 잔액이 모자란 경우다.
+ * 만든 그림을 버리지는 않되, 결제하기 전에는 그 문제를 쓰지 못하게 한다 —
+ * 목록에서 가려지고 PDF 에서도 빠진다.
+ *
+ * 저장 위치는 `problems.box_range.debt` 다. 글자 크기·그림·번호를 거기 얹은
+ * 것과 같은 이유로 **마이그레이션이 필요 없다.**
+ *
+ * **어느 문제인지 모르면 잠글 대상이 없다.** 그때는 초과분을 우리가 먹고 로그만
+ * 남긴다 — 붙잡아 둘 대상이 없는데 조용히 빚을 지울 수는 없다.
+ */
+async function lockProblem(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  problemId: string | null,
+  debt: number,
+): Promise<void> {
+  if (!problemId) {
+    console.warn(
+      `[api/figure] 잔액이 ${debt}토큰 모자라지만 대상 문제를 몰라 잠그지 못했습니다.`,
+    );
+    return;
+  }
+  try {
+    const { data: row } = await supabase
+      .from("problems")
+      .select("box_range")
+      .eq("id", problemId)
+      .maybeSingle();
+    const box = (row?.box_range ?? {}) as Record<string, unknown>;
+    const before = typeof box.debt === "number" ? box.debt : 0;
+    await supabase
+      .from("problems")
+      .update({ box_range: { ...box, debt: before + debt } })
+      .eq("id", problemId);
+    console.warn(
+      `[api/figure] ${problemId} 를 ${before + debt}토큰 미납으로 잠갔습니다.`,
+    );
+  } catch (err) {
+    console.error("[api/figure] 잠금 기록 실패:", err);
+  }
+}
 
 /**
  * 다 그린 문제 이미지를 서버가 직접 저장한다.
@@ -202,6 +246,14 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = isSupabaseConfigured() ? await createClient() : null;
+  /**
+   * 무제한 계정인가.
+   *
+   * **차감도 잠금도 건너뛴다.** 예전에는 이 검사가 아예 없어서, 무제한인데
+   * 잔액이 0 이면 402 로 막혔다(consume 이 `credits >= p_amount` 를 요구한다).
+   * 무제한의 뜻과 어긋난다. 실제로 쓴 금액을 화면에 보여주는 것도 이 계정만이다.
+   */
+  let unlimited = false;
   if (supabase) {
     const {
       data: { user },
@@ -212,23 +264,34 @@ export async function POST(req: NextRequest) {
         { status: 401 },
       );
     }
+    const { data: ent } = await supabase
+      .from("entitlements")
+      .select("unlimited")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    unlimited = ent?.unlimited === true;
   }
 
   // AI 그림 생성은 실제로 돈이 나가는 유료 API라 토큰으로 과금한다.
-  // 차감은 요청당 딱 한 번만 한다 —
-  // 모델을 갈아타며 재시도하는 것은 우리 사정이지 사용자가 더 낼 이유가 아니다.
+  //
+  // **보증금을 먼저 걸고, 끝나면 실제로 쓴 값으로 정산한다.** 원가가 요청마다
+  // 1.5배까지 널뛰어서 고정 요금은 어느 쪽으로도 틀린다. 선차감을 두는 이유는
+  // 잔액이 없는 사람이 생성을 시작하지 못하게 하려는 것이다.
+  //
+  // 차감은 요청당 한 번이다 — 모델을 갈아타며 재시도하는 것은 우리 사정이지
+  // 사용자가 더 낼 이유가 아니다.
   let charged = false;
-  if (supabase) {
+  if (supabase && !unlimited) {
     try {
       const { data, error } = await supabase.rpc("consume_recognition_credit", {
-        p_amount: FIGURE_TOKEN_COST,
+        p_amount: FIGURE_TOKEN_DEPOSIT,
       });
       if (error) throw error;
       // 함수는 남은 크레딧을 돌려주고, 부족하면 null을 준다.
       if (data === null) {
         return NextResponse.json(
           {
-            error: `토큰이 부족해요. AI 그림 생성에는 ${FIGURE_TOKEN_COST}토큰이 필요합니다.`,
+            error: `토큰이 부족해요. AI 그림 생성에는 최소 ${FIGURE_TOKEN_DEPOSIT}토큰이 필요합니다.`,
           },
           { status: 402 },
         );
@@ -251,11 +314,43 @@ export async function POST(req: NextRequest) {
     if (!supabase || !charged) return;
     try {
       await supabase.rpc("refund_recognition_credit", {
-        p_amount: FIGURE_TOKEN_COST,
+        p_amount: FIGURE_TOKEN_DEPOSIT,
       });
     } catch {
       // 환불 실패는 무시 — 사용자에게는 원래 오류만 보여준다.
     }
+  }
+
+  /**
+   * 보증금과 실제 값의 차이를 맞춘다. 돌려주는 것은 **실제로 물린 토큰 수**다.
+   *
+   * 모자란데 잔액이 없으면 그만큼을 미납으로 적어 그 문제를 잠근다
+   * (`lockProblem`). 이미 그림은 만들어졌으므로 요청 자체는 성공으로 돌려준다 —
+   * 만든 것을 버릴 이유가 없다.
+   */
+  async function settle(estKrw: number | undefined): Promise<number | null> {
+    if (!supabase || !charged) return null;
+    const want = figureTokenCharge(estKrw);
+    if (estKrw === undefined) {
+      console.warn(
+        `[api/figure] usage 를 못 받아 폴백으로 ${want}토큰을 물립니다.`,
+      );
+    }
+    const diff = want - FIGURE_TOKEN_DEPOSIT;
+    try {
+      if (diff < 0) {
+        await supabase.rpc("refund_recognition_credit", { p_amount: -diff });
+      } else if (diff > 0) {
+        const { data } = await supabase.rpc("consume_recognition_credit", {
+          p_amount: diff,
+        });
+        // null 이면 잔액이 모자란 것이다 — 미납으로 남기고 문제를 잠근다.
+        if (data === null) await lockProblem(supabase, problemId, diff);
+      }
+    } catch (err) {
+      console.error("[api/figure] 정산 실패:", err);
+    }
+    return want;
   }
 
   const modelIds = figureImageModelIds();
@@ -295,13 +390,26 @@ export async function POST(req: NextRequest) {
             result.dataUrl,
           );
         }
-        // usage 를 함께 돌려준다 — 화면이 "이번에 얼마 나갔나"를 바로 보여준다.
-        // 추정치라는 것은 화면 쪽에서 분명히 적는다.
+        // 실제로 쓴 값으로 정산한다(보증금과의 차액을 맞춘다).
+        const chargedTokens = await settle(result.usage?.estKrw);
+
+        // **금액은 무제한 계정에만 보여준다.** 막는 자리는 서버다 — 화면에서
+        // 숨기는 건 얼마든지 우회할 수 있다. 일반 사용자에게는 토큰 수만 준다.
+        const usage = unlimited
+          ? result.usage
+          : result.usage && {
+              inputText: result.usage.inputText,
+              inputImage: result.usage.inputImage,
+              output: result.usage.output,
+              cached: result.usage.cached,
+            };
+
         return NextResponse.json({
           image: result.dataUrl,
           modelId,
           persisted,
-          usage: result.usage,
+          usage,
+          chargedTokens,
         });
       } catch (err) {
         // 시간이 다 돼 우리가 끊은 경우. 다음 모델로 내려가 봐야 남은 시간이

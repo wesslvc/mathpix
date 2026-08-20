@@ -46,6 +46,13 @@ export type GalleryProblem = {
   fontPt: number;
   /** 손으로 정해 둔 문제 번호. null이면 본문에서 뽑거나 차례대로 매긴다. */
   number: number | null;
+  /**
+   * 못 낸 토큰. 0보다 크면 **잠긴 문제**다.
+   *
+   * AI 생성은 끝났는데(=우리는 이미 돈을 냈는데) 잔액이 모자랐던 경우다.
+   * 결제 전에는 쓰지 못하게 막는다 — 여기서 가리고 PDF 에서도 뺀다.
+   */
+  debt?: number | null;
 };
 
 /** 같은 폴더 안에 새 파일명을 만든다. (덮어쓰기 대신 새 오브젝트로 저장) */
@@ -275,6 +282,8 @@ export default function ProblemGallery({ problems }: Props) {
       label: editing?.text?.slice(0, 20) || "수정 중인 문제",
       crop,
       instruction,
+      // 정산이 모자랐을 때 **어느 문제를 잠글지** 서버가 알아야 한다.
+      problemId: editing?.id ?? null,
     });
   }
 
@@ -550,6 +559,70 @@ export default function ProblemGallery({ problems }: Props) {
     return t.length > 60 ? `${t.slice(0, 60)}…` : t;
   }
 
+  /**
+   * 미납을 갚고 잠금을 푼다. 잔액이 모자라면 이용권 구매로 보낸다.
+   *
+   * 갚는 것은 `consume_recognition_credit` 그대로다 — 미납은 "덜 낸 차감"이라
+   * 새 함수가 필요 없다.
+   */
+  async function unlock(problem: GalleryProblem) {
+    const debt = problem.debt ?? 0;
+    if (debt <= 0) return;
+    setBusyId(problem.id);
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.rpc("consume_recognition_credit", {
+        p_amount: debt,
+      });
+      if (error) throw error;
+      if (data === null) {
+        alert(`토큰이 ${debt}개 모자랍니다. 이용권을 구매하면 잠금이 풀려요.`);
+        return;
+      }
+      const { data: row } = await supabase
+        .from("problems")
+        .select("box_range")
+        .eq("id", problem.id)
+        .maybeSingle();
+      const box = (row?.box_range ?? {}) as Record<string, unknown>;
+      delete box.debt;
+      await supabase
+        .from("problems")
+        .update({ box_range: box })
+        .eq("id", problem.id);
+      router.refresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "잠금을 풀지 못했습니다.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** 잠긴 문제에 붙는 안내와 해제 버튼. 수정·순서 변경 대신 이것만 보인다. */
+  const lockedRow = (problem: GalleryProblem) => (
+    <>
+      <span className="shrink-0 text-[11px] text-amber-700">
+        🔒 {problem.debt}토큰이 모자라 잠겼어요
+      </span>
+      <button
+        type="button"
+        onClick={() => void unlock(problem)}
+        disabled={busyId === problem.id}
+        className="shrink-0 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-40"
+      >
+        잠금 해제
+      </button>
+      <button
+        type="button"
+        onClick={() => remove(problem)}
+        disabled={busyId === problem.id}
+        className="shrink-0 rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+      >
+        삭제
+      </button>
+    </>
+  );
+
   const rowButtons = (problem: GalleryProblem, index: number) => (
     <>
       <button
@@ -628,10 +701,13 @@ export default function ProblemGallery({ problems }: Props) {
                 onCommit={(to) => void moveTo(index, to)}
               />
               {/* eslint-disable-next-line @next/next/no-img-element */}
+              {/* 잠긴 문제는 내용을 가린다 — 결제 전에는 못 쓰는 게 요점이다. */}
               <img
                 src={problem.imageUrl}
                 alt=""
-                className="h-10 w-14 shrink-0 rounded border border-slate-200 object-cover object-top"
+                className={`h-10 w-14 shrink-0 rounded border border-slate-200 object-cover object-top ${
+                  problem.debt ? "blur-[3px]" : ""
+                }`}
               />
               <span className="min-w-0 flex-1 truncate text-xs text-slate-600">
                 {problem.number != null && (
@@ -647,7 +723,7 @@ export default function ProblemGallery({ problems }: Props) {
                 </span>
               )}
               <div className="flex shrink-0 items-center gap-1">
-                {rowButtons(problem, index)}
+                {problem.debt ? lockedRow(problem) : rowButtons(problem, index)}
               </div>
             </li>
           ))}
@@ -663,17 +739,23 @@ export default function ProblemGallery({ problems }: Props) {
               <img
                 src={problem.imageUrl}
                 alt="저장된 오답"
-                className="w-full rounded object-contain"
+                className={`w-full rounded object-contain ${
+                  problem.debt ? "blur-md" : ""
+                }`}
               />
               <div className="flex flex-wrap items-center justify-between gap-1 px-1 pb-1">
-                <OrderInput
-                  index={index}
-                  total={list.length}
-                  disabled={busyId === problem.id}
-                  onCommit={(to) => void moveTo(index, to)}
-                />
-                <div className="flex items-center gap-1">
-                  {rowButtons(problem, index)}
+                {!problem.debt && (
+                  <OrderInput
+                    index={index}
+                    total={list.length}
+                    disabled={busyId === problem.id}
+                    onCommit={(to) => void moveTo(index, to)}
+                  />
+                )}
+                <div className="flex flex-wrap items-center gap-1">
+                  {problem.debt
+                    ? lockedRow(problem)
+                    : rowButtons(problem, index)}
                 </div>
               </div>
             </div>

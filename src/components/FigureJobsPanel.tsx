@@ -60,6 +60,7 @@ export default function FigureJobsPanel() {
     spentUsd,
     spentKrw,
     krwRate,
+    spentTokens,
     retry,
     dismiss,
   } = useFigureJobs();
@@ -97,7 +98,11 @@ export default function FigureJobsPanel() {
           {calls > 0 && (
             <span className="shrink-0 text-[11px] text-slate-400">
               생성 {calls}회
-              {spentUsd > 0 && ` · 약 ${spentKrw.toLocaleString()}원`}
+              {/* 금액은 무제한 계정에만 온다(서버가 가린다). 일반 사용자에게는
+                  토큰이 곧 비용이므로 그쪽을 보여준다. */}
+              {spentUsd > 0
+                ? ` · 약 ${spentKrw.toLocaleString()}원`
+                : spentTokens > 0 && ` · ${spentTokens.toLocaleString()}토큰`}
             </span>
           )}
           <span className="shrink-0 text-[11px] text-slate-400">
@@ -130,11 +135,19 @@ export default function FigureJobsPanel() {
                   <OcrLine ocr={j.ocr} preview={j.ocrPreview} />
                   {/* 어느 문제가 비쌌는지 보이게 한다. 캐시에 걸린 작업에는
                       값이 없다 — 그때는 돈이 안 나갔다. */}
-                  {typeof j.costUsd === "number" && (
+                  {(typeof j.costUsd === "number" ||
+                    typeof j.chargedTokens === "number") && (
                     <p className="mt-0.5 text-[10px] text-slate-400">
-                      약 ${j.costUsd.toFixed(3)}
-                      {typeof j.costKrw === "number" &&
-                        ` (${j.costKrw.toLocaleString()}원)`}
+                      {typeof j.chargedTokens === "number" &&
+                        `${j.chargedTokens}토큰`}
+                      {typeof j.costUsd === "number" && (
+                        <>
+                          {typeof j.chargedTokens === "number" && " · "}약 $
+                          {j.costUsd.toFixed(3)}
+                          {typeof j.costKrw === "number" &&
+                            ` (${j.costKrw.toLocaleString()}원)`}
+                        </>
+                      )}
                     </p>
                   )}
                   {j.error && (
@@ -167,13 +180,22 @@ export default function FigureJobsPanel() {
             ))}
             {/* 이 금액은 청구서가 아니라 우리가 역산한 단가로 계산한 값이다.
                 화면에서 분명히 해 두지 않으면 청구액으로 오해한다. */}
-            {spentUsd > 0 && (
+            {(spentUsd > 0 || spentTokens > 0) && (
               <li className="px-3 py-2 text-[10px] leading-snug text-slate-400">
-                합계 약 ${spentUsd.toFixed(2)} ({spentKrw.toLocaleString()}원).
-                금액은 공표된 토큰 요금으로 계산한 값입니다
-                {krwRate &&
-                  ` (원화는 1달러=${krwRate.toLocaleString()}원 기준)`}
-                . 최종 청구액은 OpenAI 대시보드를 보세요.
+                {spentUsd > 0 ? (
+                  <>
+                    합계 약 ${spentUsd.toFixed(2)} ({spentKrw.toLocaleString()}
+                    원). 금액은 공표된 토큰 요금으로 계산한 값입니다
+                    {krwRate &&
+                      ` (원화는 1달러=${krwRate.toLocaleString()}원 기준)`}
+                    . 최종 청구액은 OpenAI 대시보드를 보세요.
+                  </>
+                ) : (
+                  <>
+                    이번에 {spentTokens.toLocaleString()}토큰이 차감됐습니다. 쓴
+                    만큼 정산되므로 문제마다 다를 수 있어요.
+                  </>
+                )}
               </li>
             )}
           </ul>
