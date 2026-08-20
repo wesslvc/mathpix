@@ -125,6 +125,8 @@ type Ctx = {
   spentUsd: number;
   /** 같은 합계를 원으로. 환율은 서버가 정한다(USD_TO_KRW). */
   spentKrw: number;
+  /** 서버가 쓴 환율. 화면이 "1달러=N원 기준"이라고 적는 데 쓴다. */
+  krwRate: number | null;
   enqueue: (job: Omit<FigureJob, "status">) => void;
   retry: (id: string) => void;
   dismiss: (id: string) => void;
@@ -165,6 +167,8 @@ export default function FigureJobsProvider({
   const [spentUsd, setSpentUsd] = useState(0);
   /** 같은 합계를 원으로. 원 단위 반올림한 값을 더한다. */
   const [spentKrw, setSpentKrw] = useState(0);
+  /** 서버가 쓴 환율. 화면에 숫자를 하드코딩하지 않으려고 받아 둔다. */
+  const [krwRate, setKrwRate] = useState<number | null>(null);
   /** 한 번에 하나씩만 돌린다(순차 처리). */
   const runningRef = useRef<string | null>(null);
   /**
@@ -379,6 +383,7 @@ export default function FigureJobsProvider({
             costKrw = json.usage.estKrw;
             setSpentUsd((v) => v + json.usage!.estUsd);
             setSpentKrw((v) => v + (json.usage!.estKrw ?? 0));
+            if (json.usage.krwRate) setKrwRate(json.usage.krwRate);
           }
           // 생성 모델은 자기 비율에 맞춰 그려서 둘레에 흰 여백을 붙여 준다.
           svg = await rasterToSvg(await trimBlankBorder(json.image));
@@ -427,6 +432,7 @@ export default function FigureJobsProvider({
         calls,
         spentUsd,
         spentKrw,
+        krwRate,
         enqueue,
         retry,
         dismiss,

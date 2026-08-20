@@ -53,8 +53,16 @@ function OcrLine({ ocr, preview }: { ocr?: string; preview?: string }) {
  * 작업이 하나도 없으면 아예 나타나지 않는다.
  */
 export default function FigureJobsPanel() {
-  const { jobs, activeCount, calls, spentUsd, spentKrw, retry, dismiss } =
-    useFigureJobs();
+  const {
+    jobs,
+    activeCount,
+    calls,
+    spentUsd,
+    spentKrw,
+    krwRate,
+    retry,
+    dismiss,
+  } = useFigureJobs();
   const [open, setOpen] = useState(false);
 
   if (jobs.length === 0) return null;
@@ -162,8 +170,10 @@ export default function FigureJobsPanel() {
             {spentUsd > 0 && (
               <li className="px-3 py-2 text-[10px] leading-snug text-slate-400">
                 합계 약 ${spentUsd.toFixed(2)} ({spentKrw.toLocaleString()}원).
-                환율과 단가로 계산한 추정치이며, 실제 청구액은 OpenAI 대시보드를
-                보세요.
+                금액은 공표된 토큰 요금으로 계산한 값입니다
+                {krwRate &&
+                  ` (원화는 1달러=${krwRate.toLocaleString()}원 기준)`}
+                . 최종 청구액은 OpenAI 대시보드를 보세요.
               </li>
             )}
           </ul>
