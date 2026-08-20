@@ -70,6 +70,12 @@ export type FigureJob = {
    * 저장한다 — 브라우저를 닫아도 결과가 남게 하려는 것이다.
    */
   problemId?: string | null;
+  /**
+   * "이렇게 다시 그려 주세요" — 사용자가 적어 준 요청. 프롬프트 끝에 붙는다.
+   *
+   * 없으면 프롬프트도 캐시 키도 예전과 **한 글자도 다르지 않다.**
+   */
+  instruction?: string;
   status: "pending" | "running" | "done" | "error";
   /**
    * 글자 인식(Mathpix)이 어떻게 됐는가. **문제 전체를 그릴 때만** 쓴다.
@@ -232,7 +238,11 @@ export default function FigureJobsProvider({
       const spec: CardSpec = {
         ...snap.spec,
         figures: snap.spec.figures.map((f) =>
-          f.id === job.id ? { ...f, markup: svg, ai: true } : f,
+          // 원본을 남긴다. 이미 있으면 덮지 않는다 — 두 번째 AI 결과가 첫
+          // 번째 AI 결과를 원본으로 만들어 버리면 안 된다.
+          f.id === job.id
+            ? { ...f, origin: f.origin ?? f.markup, markup: svg, ai: true }
+            : f,
         ),
       };
 
@@ -303,7 +313,13 @@ export default function FigureJobsProvider({
         // 같은 그림을 이미 그린 적이 있으면 그대로 쓴다(세트 문항 대비).
         // 모드를 키에 섞는다 — 같은 이미지라도 그림용과 문제 전체용은 결과가
         // 다르므로 서로의 결과를 물려받으면 안 된다.
-        const key = await figureCacheKey(`${mode}:${forModel}`);
+        // **지시를 키에 넣어야 한다.** 안 넣으면 같은 크롭에 지시만 바꿔도
+        // 캐시가 걸려 예전 그림이 그대로 나온다 — 사용자 눈에는 지시를 적었는데
+        // 아무것도 안 바뀐 것으로 보인다. 지시가 없으면 빈 문자열이라 예전
+        // 키와 같다.
+        const key = await figureCacheKey(
+          `${mode}:${next.instruction ?? ""}:${forModel}`,
+        );
         let svg = readFigureCache(key);
         /** 이 작업에 실제로 든 추정 비용. 캐시에 걸리면 끝까지 undefined 다. */
         let costUsd: number | undefined;
@@ -359,6 +375,7 @@ export default function FigureJobsProvider({
                 null,
               figureId: next.id,
               reference,
+              instruction: next.instruction,
             }),
           });
           let json: { image?: string; error?: string; usage?: FigureUsage };

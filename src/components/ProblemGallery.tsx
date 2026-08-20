@@ -20,9 +20,7 @@ import FontSizeControl from "./FontSizeControl";
 import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import BoxRangeEditor from "./BoxRangeEditor";
 import TextEditTabs from "./TextEditTabs";
-import DiagramAdjuster, {
-  DEFAULT_DIAGRAM_LAYOUT,
-} from "./DiagramAdjuster";
+import DiagramAdjuster, { DEFAULT_DIAGRAM_LAYOUT } from "./DiagramAdjuster";
 import { DEFAULT_TABLE_LAYOUT } from "@/lib/diagramLayout";
 import DraggableCard from "./DraggableCard";
 import DiagramCropModal from "./DiagramCropModal";
@@ -67,7 +65,10 @@ type Props = {
  */
 async function captureNode(node: HTMLElement): Promise<Blob> {
   if (document.fonts?.ready) {
-    await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 2000))]);
+    await Promise.race([
+      document.fonts.ready,
+      new Promise((r) => setTimeout(r, 2000)),
+    ]);
   }
   // 다음 페인트까지 기다린다.
   await new Promise((r) => requestAnimationFrame(() => r(null)));
@@ -251,6 +252,15 @@ export default function ProblemGallery({ problems }: Props) {
   const problemKey = editing ? `edit:${editing.id}` : "";
 
   /**
+   * 그림마다 적어 둔 "이렇게 다시 그려 주세요" 지시.
+   *
+   * 그림별로 따로 들고 있어야 한다 — 그림이 여러 개인 문제에서 하나에 적은
+   * 지시가 다른 것에 새면 엉뚱한 그림이 바뀐다. 한 번 쓰고 버리는 값이라
+   * 저장하지 않는다.
+   */
+  const [redrawNote, setRedrawNote] = useState<Record<string, string>>({});
+
+  /**
    * 큐에 넣는다.
    *
    * **같은 id 를 두 번 넣을 수 없으므로**(중복 과금을 막는 자리다) 다시 그릴
@@ -258,7 +268,25 @@ export default function ProblemGallery({ problems }: Props) {
    */
   function requestRedraw(id: string, crop: string) {
     dismiss(id);
-    enqueue({ id, problemKey, label: editing?.text?.slice(0, 20) || "수정 중인 문제", crop });
+    const instruction = redrawNote[id]?.trim() || undefined;
+    enqueue({
+      id,
+      problemKey,
+      label: editing?.text?.slice(0, 20) || "수정 중인 문제",
+      crop,
+      instruction,
+    });
+  }
+
+  /**
+   * AI 로 그리기 전의 그림으로 되돌린다. 공짜다(모델을 안 부른다).
+   *
+   * `ai` 를 풀어 주므로 그 뒤에는 다른 지시로 다시 그릴 수도 있다.
+   */
+  function revertToOrigin(id: string) {
+    const f = cardFigures.find((x) => x.id === id);
+    if (!f?.origin) return;
+    updateFigure(id, { markup: f.origin, origin: undefined, ai: false });
   }
 
   /** 오려낸 그림을 붙인다(원본 그대로). AI 는 그 뒤에 따로 요청한다. */
@@ -294,7 +322,9 @@ export default function ProblemGallery({ problems }: Props) {
         const j = done.find((d) => d.id === f.id);
         if (!j?.svg || j.svg === f.markup) return f;
         changed = true;
-        return { ...f, markup: j.svg, ai: true };
+        // 원본을 남긴다(이미 있으면 덮지 않는다). 되돌리기와 다른 지시로
+        // 다시 그리기가 이 값에 달려 있다.
+        return { ...f, origin: f.origin ?? f.markup, markup: j.svg, ai: true };
       });
       return changed ? next : prev;
     });
@@ -312,7 +342,15 @@ export default function ProblemGallery({ problems }: Props) {
         figures: cardFigures,
       },
     });
-  }, [putSnapshot, problemKey, editing, editText, editBox, editFontPt, cardFigures]);
+  }, [
+    putSnapshot,
+    problemKey,
+    editing,
+    editText,
+    editBox,
+    editFontPt,
+    cardFigures,
+  ]);
 
   /** 같은 자리에 놓인 다른 것의 개수("나란히 놓기"가 뜻이 있는지). */
   function slotMateCount(id: string): number {
@@ -359,7 +397,10 @@ export default function ProblemGallery({ problems }: Props) {
       // 서로 독립된 행 갱신이라 동시에 보낸다(순서대로 기다리면 왕복이 겹쳐 느리다).
       const results = await Promise.all(
         changed.map((p) =>
-          supabase.from("problems").update({ sort_order: p.sortOrder }).eq("id", p.id),
+          supabase
+            .from("problems")
+            .update({ sort_order: p.sortOrder })
+            .eq("id", p.id),
         ),
       );
       const failed = results.find((r) => r.error);
@@ -461,9 +502,7 @@ export default function ProblemGallery({ problems }: Props) {
       }
 
       // 예전 이미지는 정리(실패해도 치명적이지 않으므로 무시).
-      await supabase.storage
-        .from("problem-images")
-        .remove([editing.imagePath]);
+      await supabase.storage.from("problem-images").remove([editing.imagePath]);
 
       setEditing(null);
       router.refresh();
@@ -674,9 +713,10 @@ export default function ProblemGallery({ problems }: Props) {
               <div className="flex flex-col gap-4">
                 {isImageOnly ? (
                   <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
-                    이 문제는 AI가 통째로 다시 그린 <strong>이미지</strong>입니다.
-                    글자를 따로 들고 있지 않아 본문 수정·조건 박스는 쓰지 않습니다.
-                    그림의 크기·위치는 오른쪽 미리보기에서 조절할 수 있어요.
+                    이 문제는 AI가 통째로 다시 그린 <strong>이미지</strong>
+                    입니다. 글자를 따로 들고 있지 않아 본문 수정·조건 박스는
+                    쓰지 않습니다. 그림의 크기·위치는 오른쪽 미리보기에서 조절할
+                    수 있어요.
                   </p>
                 ) : (
                   <TextEditTabs value={editText} onChange={setEditText} />
@@ -731,7 +771,8 @@ export default function ProblemGallery({ problems }: Props) {
                       className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                     />
                     <span className="text-[11px] text-slate-400">
-                      인쇄물에 찍히는 번호입니다. 비우면 본문에서 뽑거나 차례대로 매깁니다.
+                      인쇄물에 찍히는 번호입니다. 비우면 본문에서 뽑거나
+                      차례대로 매깁니다.
                     </span>
                   </label>
                   {editAnswer.trim() !== "" && (
@@ -760,7 +801,10 @@ export default function ProblemGallery({ problems }: Props) {
                   <p className="text-xs font-medium text-slate-500">
                     미리보기 (이 모습 그대로 저장됩니다)
                   </p>
-                  <FontSizeControl value={editFontPt} onChange={setEditFontPt} />
+                  <FontSizeControl
+                    value={editFontPt}
+                    onChange={setEditFontPt}
+                  />
                 </div>
                 {/* 휴대폰에서 가로로 밀지 않고 한눈에 보이도록 축소한다.
                     카드 너비는 고정이라 저장되는 결과는 달라지지 않는다. */}
@@ -772,7 +816,9 @@ export default function ProblemGallery({ problems }: Props) {
                     width={PROBLEM_CARD_WIDTH}
                     cardRef={previewRef}
                     cardClassName="problem-surface bg-white p-8"
-                    onLayoutChange={(id, layout) => updateFigure(id, { layout })}
+                    onLayoutChange={(id, layout) =>
+                      updateFigure(id, { layout })
+                    }
                     onPositionChange={(id, position) =>
                       updateFigure(id, { position })
                     }
@@ -798,7 +844,8 @@ export default function ProblemGallery({ problems }: Props) {
                   </div>
                   {cardFigures.map((f) => {
                     const job = jobs.find((j) => j.id === f.id);
-                    const busy = job?.status === "pending" || job?.status === "running";
+                    const busy =
+                      job?.status === "pending" || job?.status === "running";
                     // 다시 그리려면 원본 픽셀이 있어야 한다(마크업에서 되꺼낸다).
                     const raster = f.markup ? rasterFromSvg(f.markup) : null;
                     return (
@@ -826,30 +873,66 @@ export default function ProblemGallery({ problems }: Props) {
                             <button
                               type="button"
                               onClick={() =>
-                                setCropTarget({ mode: "recrop", id: f.id, src: raster })
+                                setCropTarget({
+                                  mode: "recrop",
+                                  id: f.id,
+                                  src: raster,
+                                })
                               }
                               disabled={busy}
                               className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
                             >
                               다시 오려내기
                             </button>
+                            {/* 다시 그릴 때는 **원본**을 보낸다. AI 결과를 또
+                                AI 에 넣으면 원본에서 멀어지기만 한다. */}
                             <button
                               type="button"
-                              onClick={() => requestRedraw(f.id, raster)}
-                              disabled={busy || f.ai === true}
+                              onClick={() =>
+                                requestRedraw(f.id, f.origin ?? raster)
+                              }
+                              disabled={busy || (f.ai === true && !f.origin)}
                               className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
                             >
                               {busy ? "다시 그리는 중..." : "AI로 다시 그리기"}
                             </button>
-                            {f.ai === true && (
+                            {f.origin && (
+                              <button
+                                type="button"
+                                onClick={() => revertToOrigin(f.id)}
+                                disabled={busy}
+                                className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                              >
+                                원본으로 되돌리기
+                              </button>
+                            )}
+                            {f.ai === true && !f.origin && (
                               <span className="text-[11px] text-slate-400">
-                                이미 AI로 그린 그림입니다. 다시 오려내면 원본으로
-                                돌아가 다시 그릴 수 있어요.
+                                이미 AI로 그린 그림입니다. 다시 오려내면
+                                원본으로 돌아가 다시 그릴 수 있어요.
                               </span>
                             )}
                             {job?.status === "error" && (
-                              <span className="text-[11px] text-red-600">{job.error}</span>
+                              <span className="text-[11px] text-red-600">
+                                {job.error}
+                              </span>
                             )}
+                            {/* 무엇이 잘못됐는지는 사용자가 보고 있다. 그대로
+                                적어 넘기면 두 번째 시도의 성공률이 오른다.
+                                비워 두면 예전과 똑같이 동작한다. */}
+                            <input
+                              type="text"
+                              value={redrawNote[f.id] ?? ""}
+                              onChange={(e) =>
+                                setRedrawNote((prev) => ({
+                                  ...prev,
+                                  [f.id]: e.target.value,
+                                }))
+                              }
+                              disabled={busy}
+                              placeholder="다시 그릴 때 요청할 것 (예: 표 테두리를 진하게)"
+                              className="w-full rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-700 placeholder:text-slate-400 disabled:opacity-50"
+                            />
                           </div>
                         )}
                       </div>
