@@ -13,6 +13,7 @@ import {
   MODEL_INPUT_DIM,
   prepareFigureForModel,
   prepareProblemForModel,
+  imageSizeOf,
   rasterToSvg,
   trimBlankBorder,
 } from "@/lib/figureImage";
@@ -101,6 +102,13 @@ type Ctx = {
   jobs: FigureJob[];
   /** 진행 중이거나 대기 중인 작업 수. */
   activeCount: number;
+  /**
+   * 이번에 실제로 나간 **유료** 생성 호출 수. 캐시에 걸린 것은 세지 않는다.
+   *
+   * 요청 수가 문제 수보다 훨씬 많아지는 것이 비용의 주범인데(재시도가 쌓인다)
+   * 지금까지 화면에 아무 단서가 없었다. 숫자가 보이면 바로 알아챈다.
+   */
+  calls: number;
   enqueue: (job: Omit<FigureJob, "status">) => void;
   retry: (id: string) => void;
   dismiss: (id: string) => void;
@@ -135,6 +143,8 @@ export default function FigureJobsProvider({
   const [jobs, setJobs] = useState<FigureJob[]>([]);
   /** problemKey -> 그 문제의 최신 상태. 화면이 닫혀도 남는다. */
   const snapshotsRef = useRef<Map<string, ProblemSnapshot>>(new Map());
+  /** 실제로 나간 유료 호출 수(캐시 적중은 제외). */
+  const [calls, setCalls] = useState(0);
   /** 한 번에 하나씩만 돌린다(순차 처리). */
   const runningRef = useRef<string | null>(null);
   /**
@@ -299,12 +309,20 @@ export default function FigureJobsProvider({
               ),
             );
           }
+          // 보낼 그림의 크기를 재서 함께 넘긴다. 서버가 **출력 캔버스를 이
+          // 비율에 맞추는** 데 쓴다 — 비율이 어긋나면 모델이 흰 여백을 붙여
+          // 돌려주는데 우리는 그걸 잘라 버리므로, 그 여백이 곧 버리는 돈이다.
+          const forModelSize = await imageSizeOf(forModel);
+          // 실제로 나간 유료 호출을 센다(캐시에 걸린 것은 여기까지 오지 않는다).
+          setCalls((n) => n + 1);
           const res = await fetch("/api/figure", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               image: forModel,
               mode,
+              width: forModelSize?.width,
+              height: forModelSize?.height,
               // 서버가 결과를 직접 저장할 수 있게 알려준다(탭을 닫아도 남는다).
               // 작업을 넣을 때는 아직 저장 전일 수 있어서, 화면이 계속 갱신해
               // 주는 스냅샷에서 **호출 직전에** 최신 행 id를 읽는다.
@@ -370,7 +388,7 @@ export default function FigureJobsProvider({
 
   return (
     <FigureJobsContext.Provider
-      value={{ jobs, activeCount, enqueue, retry, dismiss, putSnapshot }}
+      value={{ jobs, activeCount, calls, enqueue, retry, dismiss, putSnapshot }}
     >
       {children}
     </FigureJobsContext.Provider>

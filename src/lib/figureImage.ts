@@ -124,6 +124,25 @@ export async function prepareProblemForModel(dataUrl: string): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 
+/**
+ * 그림의 픽셀 크기를 잰다. 못 열면 null.
+ *
+ * 서버가 **출력 캔버스를 입력 비율에 맞추는 데** 쓴다(`pickOutputSize`).
+ * 재는 일을 여기서 하는 이유는 서버(Node)에는 이미지를 여는 수단이 없어서다.
+ */
+export async function imageSizeOf(
+  dataUrl: string,
+): Promise<{ width: number; height: number } | null> {
+  try {
+    const img = await loadImage(dataUrl);
+    if (!img.naturalWidth || !img.naturalHeight) return null;
+    return { width: img.naturalWidth, height: img.naturalHeight };
+  } catch {
+    // 크기를 못 재도 그림 생성 자체는 돌아가야 한다(서버가 auto 로 둔다).
+    return null;
+  }
+}
+
 /** 이 밝기 이상이면 "빈 여백"으로 본다(0~255). */
 const BLANK_LUMINANCE = 244;
 
