@@ -931,6 +931,37 @@ localStorage에 남는다.
 아래 칸에 쓰면 주관식. 저장되는 값은 여전히 원문("3")이고 원숫자 변환은
 표시할 때만 한다.
 
+### 이메일 확인 — PKCE 는 기기를 넘지 못한다
+
+`@supabase/ssr` 의 기본은 PKCE 다. `signUp()` 이 **가입한 그 브라우저에**
+`code_verifier` 를 저장해 두고, 확인 링크가 돌려주는 `?code=` 와 짝을 맞춰야
+세션이 된다. 그런데 **메일은 다른 기기에서 열리는 일이 아주 흔하다**(PC 로
+가입하고 폰에서 확인). 그러면 `exchangeCodeForSession` 이 실패한다.
+
+예전에는 실패하면 **아무 말 없이 `/login` 으로 보냈다.** 사용자는 왜 안 되는지
+모르고, 로그도 없어 우리도 진단하지 못했다. "이메일 인증이 제대로 작동하지
+않는다"의 정체가 이것이다.
+
+- **`/auth/confirm` 을 새로 뒀다**(`token_hash` + `verifyOtp`). 이건 저장해 둔
+  짝이 필요 없어서 **어느 기기에서 열어도 된다.** 메일 템플릿을
+  `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup` 로
+  바꾸면 이쪽으로 들어온다.
+- `/auth/callback`(PKCE)은 **예전 링크를 위해 남겨 뒀다.** 실패하면 이유를
+  `?error=` 로 실어 보내고, 로그인 화면이 그것을 보여 준다.
+- **리다이렉트 주소는 `x-forwarded-host` 로 만든다**(`redirectBase`).
+  `new URL(request.url).origin` 은 프록시 뒤에서 내부 주소일 수 있어 확인을
+  마친 사용자가 엉뚱한 도메인으로 튕긴다.
+- 미들웨어의 공개 경로를 `/auth/callback` 에서 **`/auth`** 로 넓혔다 — 확인
+  링크는 로그인 전에 열리는 것이라 가드에 걸리면 처리 자체가 안 된다.
+
+**이미 가입된 이메일로 가입하면 Supabase 는 성공을 돌려준다**(누가 가입했는지
+알아내지 못하게 하려는 것이다). 메일은 오지 않는데 화면은 "보냈습니다"라고 해서
+오지 않는 메일을 하염없이 기다리게 된다. `data.user.identities` 가 **빈 배열**인
+것으로 이 경우를 알 수 있고, 지금은 "이미 가입된 이메일"이라고 알린다.
+
+**확인 메일 재발송**(`auth.resend`)을 넣었다. 메일을 잃거나 링크가 만료되면
+예전에는 길이 막혔다 — 다시 가입해도 위 이유로 조용히 성공한 척했기 때문이다.
+
 ### 과거에 해결한 버그 (재발 시 참고)
 
 - Mathpix가 `latex_styled`만 주거나 `\( \)` / `\[ \]` 델리미터를 쓰면 LaTeX가 그대로
@@ -1117,8 +1148,21 @@ SVG 의 글꼴 **이름만** 믿고 모양은 우리가 심은 TTF 로 그린다
    **`0010_diagram_model_quota.sql`은 반드시 실행해야 함** — 도형 모델 선택/
    결제자 전용/플래시쿠폰이 전부 이 파일의 함수에 의존한다. 안 돌리면
    `consume_diagram_credit` 함수가 없어서 도형 추가인식이 500으로 죽는다.
-2. **이메일 확인 리디렉션 URL 등록** — Supabase 대시보드 Authentication > URL
-   Configuration에 `{mathocr 배포 도메인}/auth/callback` 추가.
+2. **이메일 확인 리디렉션 URL 등록(아직 안 됐을 가능성이 높다)** — Supabase
+   대시보드 Authentication > URL Configuration.
+   - **Site URL** 을 실제 도메인(`https://reprintocr.vercel.app`)으로.
+   - **Redirect URLs 에 도메인을 전부 넣어야 한다.** 이 프로젝트는 도메인이
+     넷이다(`reprintocr` / `mathocr-liard` / `mathocr-wesslvcs-projects` /
+     `mathocr-git-main-...`). 코드가 `emailRedirectTo` 를
+     `window.location.origin` 으로 만들기 때문에 **접속한 도메인마다 값이
+     달라진다** — 허용목록에 없는 도메인이면 Supabase 가 Site URL 로 떨어뜨려
+     엉뚱한 데로 간다. 도메인마다 `/auth/callback` 과 `/auth/confirm` 을 넣거나
+     와일드카드를 쓸 것.
+   - **메일 템플릿을 `/auth/confirm` 으로 바꾸는 것을 권한다**:
+     `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup`
+     (아래 "이메일 확인" 문단 참고).
+   - Supabase 기본 SMTP 는 **시간당 몇 통** 제한이라 시험하다 조용히 막힌다.
+     실제 서비스라면 SMTP 를 따로 붙일 것.
 3. **Vercel 환경변수 확인** — `mathocr` 프로젝트(배포에 실제 쓰이는 프로젝트)에
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
    `MATHPIX_APP_ID`, `MATHPIX_APP_KEY`가 들어있는지 확인.
