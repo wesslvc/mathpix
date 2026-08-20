@@ -154,23 +154,45 @@ type ImageUsage = {
   input_tokens_details?: { text_tokens?: number; image_tokens?: number };
 };
 
+/** 화면과 로그가 같이 쓰는 사용량. 토큰 수와 추정 비용. */
+export type FigureUsage = {
+  inputText: number;
+  inputImage: number;
+  output: number;
+  /** 위 역산 단가로 계산한 **추정** 비용(달러). 청구액이 아니다. */
+  estUsd: number;
+};
+
+/**
+ * 응답의 usage 를 우리 형태로 옮긴다.
+ *
+ * **로그와 화면이 같은 함수를 써야 한다.** 양쪽에서 따로 계산하면 반드시
+ * 어긋나고, 그러면 화면의 숫자와 로그의 숫자가 다른데 어느 쪽이 맞는지 알
+ * 방법이 없어진다.
+ */
+function readUsage(usage: ImageUsage | undefined): FigureUsage | undefined {
+  if (!usage) return undefined;
+  const inputText = usage.input_tokens_details?.text_tokens ?? 0;
+  const inputImage = usage.input_tokens_details?.image_tokens ?? 0;
+  const output = usage.output_tokens ?? 0;
+  const estUsd =
+    (inputText * PRICE_PER_MTOK.textIn +
+      inputImage * PRICE_PER_MTOK.imageIn +
+      output * PRICE_PER_MTOK.imageOut) /
+    1e6;
+  return { inputText, inputImage, output, estUsd };
+}
+
 function logUsage(
-  usage: ImageUsage | undefined,
+  u: FigureUsage | undefined,
   info: { modelId: string; mode: FigureMode; size: string; width?: number; height?: number },
 ): void {
-  if (!usage) return;
-  const textIn = usage.input_tokens_details?.text_tokens ?? 0;
-  const imageIn = usage.input_tokens_details?.image_tokens ?? 0;
-  const out = usage.output_tokens ?? 0;
-  const est =
-    (textIn * PRICE_PER_MTOK.textIn +
-      imageIn * PRICE_PER_MTOK.imageIn +
-      out * PRICE_PER_MTOK.imageOut) /
-    1e6;
+  if (!u) return;
   const input = info.width && info.height ? `${info.width}x${info.height}` : "?";
   console.info(
     `[figureImageGen] usage model=${info.modelId} mode=${info.mode} size=${info.size} 입력=${input} ` +
-      `in=${usage.input_tokens ?? 0}(text=${textIn} image=${imageIn}) out=${out} est=$${est.toFixed(4)}`,
+      `in=${u.inputText + u.inputImage}(text=${u.inputText} image=${u.inputImage}) ` +
+      `out=${u.output} est=$${u.estUsd.toFixed(4)}`,
   );
 }
 
@@ -387,6 +409,8 @@ export type FigureImageResult = {
   /** "data:image/png;base64,..." 형태의 완성 이미지. */
   dataUrl: string;
   modelId: string;
+  /** 이 요청이 쓴 토큰과 추정 비용. 응답에 usage 가 없으면 undefined. */
+  usage?: FigureUsage;
 };
 
 /**
@@ -587,7 +611,8 @@ export async function generateFigureImage(
   workingVariant.set(modelId, usedVariant);
 
   const json = await res.json();
-  logUsage(json?.usage, {
+  const usage = readUsage(json?.usage);
+  logUsage(usage, {
     modelId,
     mode,
     size: wanted ?? "auto",
@@ -607,6 +632,7 @@ export async function generateFigureImage(
         return {
           dataUrl: `data:image/png;base64,${buf.toString("base64")}`,
           modelId,
+          usage,
         };
       }
     }
@@ -616,6 +642,6 @@ export async function generateFigureImage(
     return null;
   }
 
-  return { dataUrl: `data:image/png;base64,${b64}`, modelId };
+  return { dataUrl: `data:image/png;base64,${b64}`, modelId, usage };
 }
 

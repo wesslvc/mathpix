@@ -51,7 +51,7 @@ function OcrLine({ ocr, preview }: { ocr?: string; preview?: string }) {
  * 작업이 하나도 없으면 아예 나타나지 않는다.
  */
 export default function FigureJobsPanel() {
-  const { jobs, activeCount, calls, retry, dismiss } = useFigureJobs();
+  const { jobs, activeCount, calls, spentUsd, retry, dismiss } = useFigureJobs();
   const [open, setOpen] = useState(false);
 
   if (jobs.length === 0) return null;
@@ -85,7 +85,7 @@ export default function FigureJobsPanel() {
               캐시에 걸린 것은 세지 않는다 — 그건 돈이 안 나갔다. */}
           {calls > 0 && (
             <span className="shrink-0 text-[11px] text-slate-400">
-              생성 {calls}회
+              생성 {calls}회{spentUsd > 0 && ` · 약 $${spentUsd.toFixed(2)}`}
             </span>
           )}
           <span className="shrink-0 text-[11px] text-slate-400">
@@ -116,6 +116,13 @@ export default function FigureJobsPanel() {
                     {STATUS_TEXT[j.status]}
                   </p>
                   <OcrLine ocr={j.ocr} preview={j.ocrPreview} />
+                  {/* 어느 문제가 비쌌는지 보이게 한다. 캐시에 걸린 작업에는
+                      값이 없다 — 그때는 돈이 안 나갔다. */}
+                  {typeof j.costUsd === "number" && (
+                    <p className="mt-0.5 text-[10px] text-slate-400">
+                      약 ${j.costUsd.toFixed(3)}
+                    </p>
+                  )}
                   {j.error && (
                     <p className="mt-0.5 text-[10px] leading-snug text-slate-400">
                       {j.error}
@@ -144,6 +151,13 @@ export default function FigureJobsPanel() {
                 </div>
               </li>
             ))}
+            {/* 이 금액은 청구서가 아니라 우리가 역산한 단가로 계산한 값이다.
+                화면에서 분명히 해 두지 않으면 청구액으로 오해한다. */}
+            {spentUsd > 0 && (
+              <li className="px-3 py-2 text-[10px] leading-snug text-slate-400">
+                금액은 추정치입니다. 실제 청구액은 OpenAI 대시보드를 보세요.
+              </li>
+            )}
           </ul>
         )}
 

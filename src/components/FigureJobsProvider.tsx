@@ -17,7 +17,7 @@ import {
   rasterToSvg,
   trimBlankBorder,
 } from "@/lib/figureImage";
-import type { FigureMode } from "@/lib/figureImageGen";
+import type { FigureMode, FigureUsage } from "@/lib/figureImageGen";
 import {
   figureCacheKey,
   readFigureCache,
@@ -82,6 +82,11 @@ export type FigureJob = {
   ocr?: "reading" | "ok" | "none";
   /** 읽어 낸 글자의 앞부분. 무엇을 참고했는지 눈으로 확인할 수 있게. */
   ocrPreview?: string;
+  /**
+   * 이 작업에 실제로 든 **추정** 비용(달러). 캐시에 걸렸으면 없다(돈이 안 났다).
+   * 어느 문제가 비쌌는지 눈으로 보려는 것이다.
+   */
+  costUsd?: number;
   error?: string;
   /** 완성된 그림 마크업. 화면이 열려 있으면 미리보기에 바로 반영된다. */
   svg?: string;
@@ -109,6 +114,13 @@ type Ctx = {
    * 지금까지 화면에 아무 단서가 없었다. 숫자가 보이면 바로 알아챈다.
    */
   calls: number;
+  /**
+   * 이번에 나간 유료 호출의 **추정** 비용 합계(달러).
+   *
+   * 청구액이 아니다 — 사용자 청구 CSV 에서 역산한 단가로 계산한 값이라,
+   * 화면에도 "추정치"라고 적어 둔다. 정확한 금액은 OpenAI 대시보드가 정답지다.
+   */
+  spentUsd: number;
   enqueue: (job: Omit<FigureJob, "status">) => void;
   retry: (id: string) => void;
   dismiss: (id: string) => void;
@@ -145,6 +157,8 @@ export default function FigureJobsProvider({
   const snapshotsRef = useRef<Map<string, ProblemSnapshot>>(new Map());
   /** 실제로 나간 유료 호출 수(캐시 적중은 제외). */
   const [calls, setCalls] = useState(0);
+  /** 그 호출들의 추정 비용 합계(달러). 캐시 적중은 더하지 않는다. */
+  const [spentUsd, setSpentUsd] = useState(0);
   /** 한 번에 하나씩만 돌린다(순차 처리). */
   const runningRef = useRef<string | null>(null);
   /**
@@ -281,6 +295,8 @@ export default function FigureJobsProvider({
         // 다르므로 서로의 결과를 물려받으면 안 된다.
         const key = await figureCacheKey(`${mode}:${forModel}`);
         let svg = readFigureCache(key);
+        /** 이 작업에 실제로 든 추정 비용. 캐시에 걸리면 끝까지 undefined 다. */
+        let costUsd: number | undefined;
 
         if (!svg) {
           // **문제 전체는 글자 인식을 함께 쓴다.**
@@ -334,7 +350,7 @@ export default function FigureJobsProvider({
               reference,
             }),
           });
-          let json: { image?: string; error?: string };
+          let json: { image?: string; error?: string; usage?: FigureUsage };
           try {
             json = await res.json();
           } catch {
@@ -349,6 +365,12 @@ export default function FigureJobsProvider({
           ) {
             throw new Error("서버가 이미지를 돌려주지 않았어요.");
           }
+          // 이 요청에 실제로 든 값. 캐시에 걸린 작업에는 붙지 않는다 —
+          // 그때는 돈이 안 나갔으므로 0 이 아니라 "없음"이 맞다.
+          if (typeof json.usage?.estUsd === "number") {
+            costUsd = json.usage.estUsd;
+            setSpentUsd((v) => v + json.usage!.estUsd);
+          }
           // 생성 모델은 자기 비율에 맞춰 그려서 둘레에 흰 여백을 붙여 준다.
           svg = await rasterToSvg(await trimBlankBorder(json.image));
           writeFigureCache(key, svg);
@@ -356,7 +378,9 @@ export default function FigureJobsProvider({
 
         setJobs((prev) =>
           prev.map((j) =>
-            j.id === id ? { ...j, status: "done", svg: svg as string } : j,
+            j.id === id
+              ? { ...j, status: "done", svg: svg as string, costUsd }
+              : j,
           ),
         );
 
@@ -388,7 +412,16 @@ export default function FigureJobsProvider({
 
   return (
     <FigureJobsContext.Provider
-      value={{ jobs, activeCount, calls, enqueue, retry, dismiss, putSnapshot }}
+      value={{
+        jobs,
+        activeCount,
+        calls,
+        spentUsd,
+        enqueue,
+        retry,
+        dismiss,
+        putSnapshot,
+      }}
     >
       {children}
     </FigureJobsContext.Provider>
