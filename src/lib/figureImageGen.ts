@@ -143,10 +143,22 @@ export function pickOutputSize(width?: number, height?: number): string | null {
  * 알 수 없었다(출력 토큰이 왜 뛰었는지 끝내 단정하지 못했다). 요청마다 찍어
  * 두면 크기·모드별로 바로 견줄 수 있다.
  *
- * 단가는 **사용자의 실제 청구액에서 역산한 값**이다(8일치 합계 오차
- * $0.13/$10.84). 정확한 청구액이 아니라 **요청끼리 견주는 용도**다.
+ * **공표된 요금표 값이다. 청구액에서 역산하지 말 것.** 한때 역산해서 썼다가
+ * 틀렸다 — 입력 글자를 $2.5(실제의 절반), 입력 그림을 $10(실제보다 비싸게)로
+ * 잡아 하루 최대 $0.077 어긋났다. 여러 단가 조합이 합계만 얼추 맞출 수 있어서
+ * 역산으로는 각 항목을 가려낼 수 없다.
+ *
+ * 이 값으로 계산하면 실제 청구액과 **센트 단위까지 맞는다**(다른 모델이 섞이지
+ * 않은 6일 전부 일치). 요금이 바뀌면 여기만 고치면 된다.
  */
-const PRICE_PER_MTOK = { textIn: 2.5, imageIn: 10, imageOut: 30 };
+const PRICE_PER_MTOK = {
+  textIn: 5,
+  imageIn: 8,
+  imageOut: 30,
+  /** 캐시에서 읽은 입력은 싸다. 오늘 gpt-image-2 는 항상 0 이지만 대비해 둔다. */
+  textCached: 1.25,
+  imageCached: 2,
+};
 
 /**
  * 달러를 원으로 옮길 때 쓰는 환율.
@@ -163,7 +175,14 @@ const USD_TO_KRW = (() => {
 type ImageUsage = {
   input_tokens?: number;
   output_tokens?: number;
-  input_tokens_details?: { text_tokens?: number; image_tokens?: number };
+  input_tokens_details?: {
+    text_tokens?: number;
+    image_tokens?: number;
+    /** 캐시에서 읽은 입력. 글자/그림별로 나뉘어 올 수도, 합계로만 올 수도 있다. */
+    cached_tokens?: number;
+    cached_text_tokens?: number;
+    cached_image_tokens?: number;
+  };
 };
 
 /** 화면과 로그가 같이 쓰는 사용량. 토큰 수와 추정 비용. */
@@ -171,7 +190,9 @@ export type FigureUsage = {
   inputText: number;
   inputImage: number;
   output: number;
-  /** 위 역산 단가로 계산한 **추정** 비용(달러). 청구액이 아니다. */
+  /** 캐시에서 읽어 싸게 계산된 입력 토큰 수. 없으면 0. */
+  cached: number;
+  /** 공표된 요금으로 계산한 비용(달러). */
   estUsd: number;
   /**
    * 같은 값을 원으로 옮긴 것(USD_TO_KRW 기준, 원 단위 반올림).
@@ -180,6 +201,8 @@ export type FigureUsage = {
    * 화면이 같은 환율을 쓴다(따로 두면 어느 쪽이 맞는지 알 수 없어진다).
    */
   estKrw: number;
+  /** 원화로 옮길 때 쓴 환율. 화면이 "1달러=N원 기준"이라고 적을 수 있게. */
+  krwRate: number;
 };
 
 /**
@@ -191,20 +214,35 @@ export type FigureUsage = {
  */
 function readUsage(usage: ImageUsage | undefined): FigureUsage | undefined {
   if (!usage) return undefined;
-  const inputText = usage.input_tokens_details?.text_tokens ?? 0;
-  const inputImage = usage.input_tokens_details?.image_tokens ?? 0;
+  const d = usage.input_tokens_details;
+  const inputText = d?.text_tokens ?? 0;
+  const inputImage = d?.image_tokens ?? 0;
   const output = usage.output_tokens ?? 0;
+
+  // 캐시에서 읽은 만큼은 할인 단가로 친다. **글자/그림으로 나뉘어 올 때만**
+  // 할인한다 — 합계로만 오면 어느 쪽이 캐시된 것인지 알 수 없는데, 비싼 쪽으로
+  // 가정해 깎으면 실제보다 싸게 보인다. 적게 잡아 놀라게 하느니 그냥 안 깎는다.
+  const cachedText = d?.cached_text_tokens ?? 0;
+  const cachedImage = d?.cached_image_tokens ?? 0;
+  const cached = cachedText + cachedImage;
+
+  const p = PRICE_PER_MTOK;
   const estUsd =
-    (inputText * PRICE_PER_MTOK.textIn +
-      inputImage * PRICE_PER_MTOK.imageIn +
-      output * PRICE_PER_MTOK.imageOut) /
+    ((inputText - cachedText) * p.textIn +
+      cachedText * p.textCached +
+      (inputImage - cachedImage) * p.imageIn +
+      cachedImage * p.imageCached +
+      output * p.imageOut) /
     1e6;
+
   return {
     inputText,
     inputImage,
     output,
+    cached,
     estUsd,
     estKrw: Math.round(estUsd * USD_TO_KRW),
+    krwRate: USD_TO_KRW,
   };
 }
 
@@ -224,7 +262,8 @@ function logUsage(
   console.info(
     `[figureImageGen] usage model=${info.modelId} mode=${info.mode} size=${info.size} 입력=${input} ` +
       `in=${u.inputText + u.inputImage}(text=${u.inputText} image=${u.inputImage}) ` +
-      `out=${u.output} est=$${u.estUsd.toFixed(4)}(${u.estKrw}원)`,
+      `out=${u.output}${u.cached > 0 ? ` cached=${u.cached}` : ""} ` +
+      `est=$${u.estUsd.toFixed(4)}(${u.estKrw}원)`,
   );
 }
 
@@ -680,3 +719,4 @@ export async function generateFigureImage(
 
   return { dataUrl: `data:image/png;base64,${b64}`, modelId, usage };
 }
+
