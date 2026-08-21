@@ -11,6 +11,7 @@ import type { AnswerType } from "@/lib/answer";
 import type { StoredBoxRange } from "@/lib/storedFigures";
 import type { TokenStatus } from "@/app/api/tokens/route";
 import { rasterToSvg } from "@/lib/figureImage";
+import { uploadThumb } from "@/lib/cardThumb";
 import { enhanceContrast } from "@/lib/autoContrast";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import BatchSplitPanel from "./BatchSplitPanel";
@@ -253,6 +254,10 @@ export default function AddProblemFlow({
       .from("problem-images")
       .upload(path, blob, { contentType: "image/png" });
     if (uploadError) throw uploadError;
+
+    // 목록에 쓸 작은 미리보기를 같이 올린다(cardThumb.ts 참고). 실패해도
+    // 그냥 진행한다 — 없으면 목록이 원본을 쓸 뿐이다.
+    await uploadThumb(supabase, path, pngDataUrl);
 
     // 새 오답은 목록 맨 뒤에 오도록 기존 최대 sort_order + 1을 준다.
     const { data: maxRow } = await supabase
