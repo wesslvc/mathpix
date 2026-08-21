@@ -18,6 +18,7 @@ import {
   trimBlankBorder,
 } from "@/lib/figureImage";
 import type { FigureMode, FigureUsage } from "@/lib/figureImageGen";
+import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
 import {
   figureCacheKey,
   readFigureCache,
@@ -278,17 +279,23 @@ export default function FigureJobsProvider({
         .upload(newPath, blob, { contentType: "image/png" });
       if (upErr) throw upErr;
 
+      // 목록용 작은 미리보기도 같이(cardThumb.ts). 이걸 빠뜨리면 이 경로로
+      // 갱신된 문제만 목록에서 원본을 받게 된다.
+      await uploadThumb(supabase, newPath, blob);
+
       const { error: dbErr } = await supabase
         .from("problems")
         .update({ image_path: newPath })
         .eq("id", snap.problemId);
       if (dbErr) {
-        await supabase.storage.from("problem-images").remove([newPath]);
+        await supabase.storage
+          .from("problem-images")
+          .remove([newPath, thumbPathFor(newPath)]);
         throw dbErr;
       }
       await supabase.storage
         .from("problem-images")
-        .remove([String(row.image_path)]);
+        .remove([String(row.image_path), thumbPathFor(String(row.image_path))]);
 
       // 다음 갱신 때도 최신 마크업을 쓰도록 스냅샷을 갱신해 둔다.
       snapshotsRef.current.set(job.problemKey, { ...snap, spec });

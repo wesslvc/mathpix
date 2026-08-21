@@ -15,6 +15,7 @@ import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
 import { readProblemNumber } from "@/lib/problemNumber";
+import { thumbPathFor } from "@/lib/cardThumb";
 import type { BoxOverride } from "@/lib/renderMathText";
 
 /**
@@ -138,21 +139,39 @@ export default async function CategoryPage({
   }
 
   const paths = (problems ?? []).map((p) => p.image_path);
-  let signedUrlByPath = new Map<string, string>();
 
-  if (paths.length > 0) {
-    const { data: signedUrls } = await supabase.storage
+  /** 주어진 경로들을 서명해 map 으로. 실패하면 빈 map 이다. */
+  async function sign(list: string[]): Promise<Map<string, string>> {
+    if (list.length === 0) return new Map();
+    const { data } = await supabase.storage
       .from("problem-images")
-      .createSignedUrls(paths, 60 * 60);
-
-    signedUrlByPath = new Map(
-      (signedUrls ?? [])
+      .createSignedUrls(list, 60 * 60);
+    return new Map(
+      (data ?? [])
         .filter((s): s is typeof s & { signedUrl: string } =>
           Boolean(s.signedUrl),
         )
         .map((s) => [s.path ?? "", s.signedUrl]),
     );
   }
+
+  /**
+   * **목록용 작은 미리보기를 따로 서명한다.**
+   *
+   * 저장된 카드 PNG 는 평균 760kB 인데 이 화면은 그걸 56×40px(목록 보기)이나
+   * 320px 안쪽(카드 보기)으로 보여 준다. 20문제짜리 실모를 한 번 여는 데
+   * 15MB 를 받고 있었고, 서명 URL 은 열 때마다 주소가 달라져 **브라우저 캐시가
+   * 한 번도 안 걸린다** — 들어갈 때마다 전부 다시 받는다.
+   *
+   * **한 번에 묶어 서명하지 않는다.** 옛 문제에는 미리보기가 없는데, 없는 경로가
+   * 섞였을 때 그 요청이 통째로 실패하는지 그 경로만 비는지에 우리 목록 전체가
+   * 걸린다(통째로 실패하면 그림이 하나도 안 뜬다). 나눠서 부르면 미리보기 쪽이
+   * 어떻게 되든 원본은 영향을 받지 않는다 — 왕복 한 번 값에 그 위험을 없앤다.
+   */
+  const [signedUrlByPath, thumbUrlByPath] = await Promise.all([
+    sign(paths),
+    sign(paths.map(thumbPathFor)),
+  ]);
 
   const galleryProblems: GalleryProblem[] = (problems ?? [])
     .map((p): GalleryProblem | null => {
@@ -161,6 +180,8 @@ export default async function CategoryPage({
       return {
         id: p.id,
         imageUrl,
+        // 목록·카드에 그릴 작은 그림. 없으면(옛 문제) 화면이 원본을 쓴다.
+        thumbUrl: thumbUrlByPath.get(thumbPathFor(p.image_path)) ?? null,
         imagePath: p.image_path,
         text: p.text_content || p.latex || "",
         sortOrder: p.sort_order,

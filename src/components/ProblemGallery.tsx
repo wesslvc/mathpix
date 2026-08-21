@@ -26,6 +26,7 @@ import DraggableCard from "./DraggableCard";
 import DiagramCropModal from "./DiagramCropModal";
 import { useFigureJobs } from "./FigureJobsProvider";
 import { rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
+import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
 import {
   ANSWER_TYPE_LABEL,
   formatAnswer,
@@ -36,6 +37,14 @@ import {
 export type GalleryProblem = {
   id: string;
   imageUrl: string;
+  /**
+   * 목록·카드에 그릴 **작은 미리보기**. 없으면(옛 문제) `imageUrl` 을 쓴다.
+   *
+   * 원본은 평균 760kB 인데 여기서 그리는 크기는 56×40px(목록)이나 320px 안쪽
+   * (카드)이다. 미리보기는 15~30kB 라 실모 하나 여는 트래픽이 40분의 1 아래로
+   * 떨어진다. **수정·저장에는 쓰지 않는다** — 그건 원본이어야 한다.
+   */
+  thumbUrl?: string | null;
   imagePath: string;
   text: string;
   sortOrder: number | null;
@@ -487,6 +496,9 @@ export default function ProblemGallery({ problems }: Props) {
         .upload(newPath, blob, { contentType: "image/png" });
       if (upErr) throw upErr;
 
+      // 목록용 작은 미리보기도 같이(cardThumb.ts). 실패하면 목록이 원본을 쓴다.
+      await uploadThumb(supabase, newPath, blob);
+
       const { error: dbErr } = await supabase
         .from("problems")
         .update({
@@ -506,12 +518,17 @@ export default function ProblemGallery({ problems }: Props) {
         .eq("id", editing.id);
       if (dbErr) {
         // DB 갱신 실패 시 방금 올린 파일을 정리한다.
-        await supabase.storage.from("problem-images").remove([newPath]);
+        await supabase.storage
+          .from("problem-images")
+          .remove([newPath, thumbPathFor(newPath)]);
         throw dbErr;
       }
 
-      // 예전 이미지는 정리(실패해도 치명적이지 않으므로 무시).
-      await supabase.storage.from("problem-images").remove([editing.imagePath]);
+      // 예전 이미지는 정리(실패해도 치명적이지 않으므로 무시). 미리보기도 같이
+      // 지운다 — 안 지우면 아무도 안 보는 파일이 저장 용량만 차지한다.
+      await supabase.storage
+        .from("problem-images")
+        .remove([editing.imagePath, thumbPathFor(editing.imagePath)]);
 
       setEditing(null);
       router.refresh();
@@ -529,7 +546,9 @@ export default function ProblemGallery({ problems }: Props) {
     setBusyId(problem.id);
     try {
       const supabase = createClient();
-      await supabase.storage.from("problem-images").remove([problem.imagePath]);
+      await supabase.storage
+        .from("problem-images")
+        .remove([problem.imagePath, thumbPathFor(problem.imagePath)]);
       const { error } = await supabase
         .from("problems")
         .delete()
@@ -703,8 +722,9 @@ export default function ProblemGallery({ problems }: Props) {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {/* 잠긴 문제는 내용을 가린다 — 결제 전에는 못 쓰는 게 요점이다. */}
               <img
-                src={problem.imageUrl}
+                src={problem.thumbUrl ?? problem.imageUrl}
                 alt=""
+                loading="lazy"
                 className={`h-10 w-14 shrink-0 rounded border border-slate-200 object-cover object-top ${
                   problem.debt ? "blur-[3px]" : ""
                 }`}
@@ -737,8 +757,9 @@ export default function ProblemGallery({ problems }: Props) {
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={problem.imageUrl}
+                src={problem.thumbUrl ?? problem.imageUrl}
                 alt="저장된 오답"
+                loading="lazy"
                 className={`w-full rounded object-contain ${
                   problem.debt ? "blur-md" : ""
                 }`}

@@ -6,6 +6,7 @@ import {
   type FigureMode,
 } from "@/lib/figureImageGen";
 import { FIGURE_TOKEN_DEPOSIT, figureTokenCharge } from "@/lib/tokens";
+import { thumbPathFor } from "@/lib/cardThumb";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -168,9 +169,16 @@ async function persistWholeProblem(
       await supabase.storage.from("problem-images").remove([newPath]);
       return false;
     }
+    // 예전 원본과 그 미리보기를 함께 지운다.
+    //
+    // **여기서는 새 미리보기를 만들지 않는다** — 서버에는 이미지를 줄일 수단이
+    // 없다(그래서 `cardThumb.ts` 는 브라우저 전용이다). 미리보기가 없는 동안
+    // 목록은 예전처럼 원본을 쓰고, 화면이 열려 있으면 곧 더 예쁜 카드로 다시
+    // 저장하면서 미리보기도 생긴다. 낡은 미리보기를 남겨 두는 것보다 낫다 —
+    // 그건 지금 그림과 다른 그림을 목록에 보여주게 된다.
     await supabase.storage
       .from("problem-images")
-      .remove([String(row.image_path)]);
+      .remove([String(row.image_path), thumbPathFor(String(row.image_path))]);
     return true;
   } catch (err) {
     console.error("[api/figure] 결과 저장 실패:", err);
