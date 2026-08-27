@@ -17,6 +17,8 @@ import { readFontPt } from "@/lib/fontSize";
 import { readProblemNumber } from "@/lib/problemNumber";
 import { thumbPathFor } from "@/lib/cardThumb";
 import type { BoxOverride } from "@/lib/renderMathText";
+import type { ExamScore } from "@/lib/supabase/types";
+import WrongNumberChecklist from "@/components/WrongNumberChecklist";
 
 /**
  * 목록 조회에서 실제로 받아오는 모양.
@@ -79,10 +81,13 @@ function boxRangeOf(p: ProblemListRow): BoxOverride | null {
 
 export default async function CategoryPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ gradeId?: string }>;
 }) {
   const { id } = await params;
+  const { gradeId } = await searchParams;
 
   if (!isSupabaseConfigured()) {
     return (
@@ -197,6 +202,23 @@ export default async function CategoryPage({
 
   const access = await getAccessState(supabase);
 
+  // 자동채점에서 "틀린문제 오답 업로드하기"로 넘어온 경우. RLS가 이미 본인
+  // 것만 걸러 주지만, 다른 실모의 채점 결과가 실려 오는 사고를 막기 위해
+  // category_id도 함께 맞춘다.
+  const grade = gradeId
+    ? (
+        await supabase
+          .from("exam_scores")
+          .select("*")
+          .eq("id", gradeId)
+          .eq("category_id", id)
+          .maybeSingle<ExamScore>()
+      ).data
+    : null;
+  const existingNumbers = galleryProblems
+    .map((p) => p.number)
+    .filter((n): n is number => n != null);
+
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10">
       <header className="flex items-start justify-between gap-4">
@@ -229,6 +251,13 @@ export default async function CategoryPage({
         unlimited={access.unlimited}
         checkoutReady={isCheckoutReady()}
       />
+
+      {grade && (
+        <WrongNumberChecklist
+          wrongNumbers={grade.wrong_numbers}
+          existingNumbers={existingNumbers}
+        />
+      )}
 
       {/* 작업 큐(FigureJobsProvider)와 진행 패널은 루트 레이아웃에 있다 —
           목록으로 돌아가도 작업이 계속 돌아야 하기 때문이다. */}
