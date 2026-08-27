@@ -639,6 +639,7 @@ export default function GradeExamFlow() {
                   <ExamNameEditor
                     examScoreId={slot.examScoreId}
                     value={slot.examName ?? examName}
+                    categoryId={slot.categoryId ?? null}
                     onSaved={(name) =>
                       setSlots((prev) => {
                         const next = [...prev];
@@ -697,6 +698,13 @@ export default function GradeExamFlow() {
                           : `${SUBJECT_LABEL[subject]} ${takenAt}`)
                       }
                       takenAt={takenAt}
+                      onExamNameSynced={(name) =>
+                        setSlots((prev) => {
+                          const next = [...prev];
+                          next[si] = { ...next[si], examName: name };
+                          return next;
+                        })
+                      }
                       onLinked={(categoryId) => {
                         setSlots((prev) => {
                           const next = [...prev];

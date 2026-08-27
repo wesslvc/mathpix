@@ -75,7 +75,13 @@ export default async function GradeDetailPage({
           ← 채점 기록
         </Link>
         <div className="mt-2">
-          <ExamNameEditor examScoreId={row.id} value={row.exam_name ?? ""} onSaved={() => {}} />
+          <ExamNameEditor
+            key={row.exam_name ?? ""}
+            examScoreId={row.id}
+            value={row.exam_name ?? ""}
+            categoryId={row.category_id}
+            onSaved={() => {}}
+          />
         </div>
         <h1 className="text-xl font-semibold text-ink">{title}</h1>
         <p className="text-sm text-slate-500">

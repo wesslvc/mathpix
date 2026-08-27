@@ -75,6 +75,10 @@ export default function GradeDetailActions({
             suggestedSource={suggestedSource}
             takenAt={takenAt}
             onLinked={setCategoryId}
+            // 헤더의 ExamNameEditor는 서버가 내려준 값을 초기값으로만 쓰므로
+            // (key={row.exam_name}로 값이 바뀌면 다시 마운트) 새로고침해야
+            // 방금 맞춰진 시험 이름이 그 자리에 반영된다.
+            onExamNameSynced={() => router.refresh()}
           />
         )}
 

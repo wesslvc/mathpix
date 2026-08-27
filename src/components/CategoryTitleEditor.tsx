@@ -46,6 +46,10 @@ export default function CategoryTitleEditor({
         .update({ source: next })
         .eq("id", id);
       if (err) throw err;
+      // 이 실모에 연결된 채점 기록의 시험 이름도 자동으로 맞춘다 — 실모
+      // 제목만 바꾸고 연결된 시험 이름은 그대로 두면 같은 시험을 가리키는
+      // 두 이름이 서로 달라진다(사용자 요청).
+      await supabase.from("exam_scores").update({ exam_name: next }).eq("category_id", id);
       setEditing(false);
       router.refresh();
     } catch (err) {

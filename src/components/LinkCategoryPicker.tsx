@@ -17,6 +17,12 @@ type Props = {
   takenAt: string;
   /** 연결이 끝나면(또는 바뀌면) 알려준다 — 카테고리 id, 또는 연결 해제면 null. */
   onLinked: (categoryId: string | null) => void;
+  /**
+   * 연결하면서 시험 이름(`exam_scores.exam_name`)을 실모 제목과 자동으로
+   * 맞췄을 때 그 이름을 알려준다 — 호출하는 쪽 화면에 이름을 따로 보여주고
+   * 있으면(ExamNameEditor) 새로고침 없이 갱신할 수 있게.
+   */
+  onExamNameSynced?: (name: string) => void;
 };
 
 /**
@@ -36,6 +42,7 @@ export default function LinkCategoryPicker({
   suggestedSource,
   takenAt,
   onLinked,
+  onExamNameSynced,
 }: Props) {
   const [categories, setCategories] = useState<Category[] | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -75,14 +82,26 @@ export default function LinkCategoryPicker({
     };
   }, []);
 
-  async function linkTo(categoryId: string) {
+  /**
+   * @param nameOverride 방금 만든 실모처럼 `categories` 목록에 아직 없는
+   * 경우에만 넘긴다. 없으면 이미 불러와 둔 목록에서 찾는다.
+   */
+  async function linkTo(categoryId: string, nameOverride?: string) {
     setBusy(true);
     setError(null);
     try {
       const supabase = createClient();
+      const name = nameOverride ?? categories?.find((c) => c.id === categoryId)?.source;
       const { error: updErr } = await supabase
         .from("exam_scores")
-        .update({ category_id: categoryId })
+        .update({
+          category_id: categoryId,
+          // 시험 이름을 실모 제목과 자동으로 맞춘다 — 같은 시험을 가리키는
+          // 두 이름이 서로 달라지면 헷갈린다는 요청이다. 이미 적어 둔 이름이
+          // 있어도 "이 실모로 연결한다"는 선택 자체가 이름을 맞추겠다는
+          // 뜻이라 덮어쓴다.
+          ...(name ? { exam_name: name } : {}),
+        })
         .eq("id", examScoreId);
       if (updErr) throw updErr;
 
@@ -95,6 +114,7 @@ export default function LinkCategoryPicker({
       }
       setLinkedTo(categoryId);
       onLinked(categoryId);
+      if (name) onExamNameSynced?.(name);
     } catch (err) {
       setError(err instanceof Error ? err.message : "실모 연결에 실패했습니다.");
     } finally {
@@ -113,11 +133,12 @@ export default function LinkCategoryPicker({
       } = await supabase.auth.getUser();
       if (!user) throw new Error("로그인이 필요합니다.");
 
+      const sourceName = newSource.trim();
       const { data, error: insErr } = await supabase
         .from("categories")
         .insert({
           user_id: user.id,
-          source: newSource.trim(),
+          source: sourceName,
           is_exam: true,
           score,
           exam_date: takenAt,
@@ -126,7 +147,8 @@ export default function LinkCategoryPicker({
         .select("id")
         .single();
       if (insErr || !data) throw insErr ?? new Error("실모 생성에 실패했습니다.");
-      await linkTo(data.id);
+      // 방금 만든 실모라 categories 목록에 아직 없다 — 이름을 직접 넘긴다.
+      await linkTo(data.id, sourceName);
       setCreating(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "실모 생성에 실패했습니다.");
