@@ -19,10 +19,17 @@ import { createClient } from "@/lib/supabase/client";
 export default function ExamNameEditor({
   examScoreId,
   value,
+  categoryId = null,
   onSaved,
 }: {
   examScoreId: string;
   value: string;
+  /**
+   * 연결된 실모(카테고리) id. 있으면 시험 이름을 바꿀 때 실모 제목도
+   * 자동으로 같이 맞춘다 — 같은 시험을 가리키는 두 이름이 서로 달라지지
+   * 않게 하려는 것이다(사용자 요청).
+   */
+  categoryId?: string | null;
   onSaved: (name: string) => void;
 }) {
   const [name, setName] = useState(value);
@@ -46,6 +53,12 @@ export default function ExamNameEditor({
         .update({ exam_name: next || null })
         .eq("id", examScoreId);
       if (err) throw err;
+      // 연결된 실모가 있으면 제목도 자동으로 맞춘다. 이름을 비우는 건
+      // "이 시험 이름을 없앰"이지 "실모 제목까지 지움"이 아니므로, 비게
+      // 만들 때는 실모 쪽을 건드리지 않는다.
+      if (categoryId && next) {
+        await supabase.from("categories").update({ source: next }).eq("id", categoryId);
+      }
       setName(next);
       setEditing(false);
       onSaved(next);
