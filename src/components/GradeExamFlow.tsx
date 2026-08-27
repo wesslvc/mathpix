@@ -69,9 +69,9 @@ type SlotDraft = {
   /** 국어 전용 — 시험지 전체에 대한 메모. */
   comment?: string;
   /**
-   * 이 슬롯만의 시험 이름. 저장 뒤 화면에서 고치면 여기 반영된다 — 처음엔
-   * 설정 단계에서 적은 공통 examName을 보여주다가, 고치면 슬롯마다 다른
-   * 이름을 가질 수 있다(탐구 1선택·2선택을 각각 다르게 부르고 싶을 수 있다).
+   * 이 슬롯만의 시험 이름. 탐구는 설정 단계에서 1선택·2선택 이름을 따로
+   * 적으므로 처음부터 슬롯마다 값이 다르고, 국어·수학은 공통 examName을
+   * 보여주다가 저장 뒤 화면에서 고치면 그때부터 슬롯마다 값이 갈린다.
    */
   examName?: string;
 };
@@ -102,6 +102,10 @@ export default function GradeExamFlow() {
   const [subject, setSubject] = useState<Subject>("korean");
   const [takenAt, setTakenAt] = useState(todayString());
   const [examName, setExamName] = useState("");
+  // 탐구는 1선택·2선택이 서로 다른 시험(과목)이라 이름도 따로 쓴다 —
+  // 예: 1선택 "생활과 윤리"는 "9모", 2선택 "지구과학Ⅰ"은 "6모"일 수 있다.
+  const [examName1, setExamName1] = useState("");
+  const [examName2, setExamName2] = useState("");
   const [mathElective, setMathElective] = useState("");
   const [koreanElective, setKoreanElective] = useState("");
 
@@ -136,6 +140,8 @@ export default function GradeExamFlow() {
   function reset() {
     setStep("setup");
     setExamName("");
+    setExamName1("");
+    setExamName2("");
     setMathElective("");
     setKoreanElective("");
     setOmrFile(null);
@@ -198,6 +204,10 @@ export default function GradeExamFlow() {
           label: s.label ?? electiveLabelFor(s.slot),
           items: s.items,
           deductions: {},
+          // 탐구는 슬롯마다 설정 단계에서 따로 적은 이름을 그대로 심어 둔다
+          // — 아래에서 전부 `slot.examName ?? examName`(공통 이름)으로
+          // 읽으므로, 여기서 채워두면 국어·수학과 같은 코드로 처리된다.
+          examName: subject === "elective" ? (s.slot === 1 ? examName1 : s.slot === 2 ? examName2 : undefined) : undefined,
         })),
       );
       if (typeof json.chargedTokens === "number") {
@@ -267,7 +277,7 @@ export default function GradeExamFlow() {
             subject,
             elective_slot: subject === "elective" ? (slot.slot ?? null) : null,
             elective_label: slot.label ?? null,
-            exam_name: examName.trim() || null,
+            exam_name: (slot.examName ?? examName).trim() || null,
             total_questions: summary.totalQuestions,
             correct_count: summary.correctCount,
             wrong_numbers: summary.wrongNumbers,
@@ -403,15 +413,44 @@ export default function GradeExamFlow() {
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            시험 이름
-            <input
-              value={examName}
-              onChange={(e) => setExamName(e.target.value)}
-              placeholder="예: 2025학년도 9월 모의평가 — 선택 입력"
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
-            />
-          </label>
+          {subject === "elective" ? (
+            // 탐구는 1선택·2선택이 서로 다른 시험일 수 있다(예: 1선택은
+            // 9월 모의평가, 2선택은 6월 모의평가) — 이름 하나로는 못
+            // 담으므로 선택과목 select와 같은 자리에 나란히 둘을 둔다.
+            <div className="flex flex-col gap-1">
+              <p className="text-sm text-slate-700">시험 이름 (선택 입력)</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
+                  1선택
+                  <input
+                    value={examName1}
+                    onChange={(e) => setExamName1(e.target.value)}
+                    placeholder="예: 2025학년도 9월 모의평가"
+                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-ink focus:border-blue-500 focus:outline-none"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
+                  2선택
+                  <input
+                    value={examName2}
+                    onChange={(e) => setExamName2(e.target.value)}
+                    placeholder="예: 2025학년도 9월 모의평가"
+                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-ink focus:border-blue-500 focus:outline-none"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : (
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              시험 이름
+              <input
+                value={examName}
+                onChange={(e) => setExamName(e.target.value)}
+                placeholder="예: 2025학년도 9월 모의평가 — 선택 입력"
+                className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+          )}
 
           <label className="flex items-center gap-2 text-sm text-slate-700">
             시행일
@@ -448,11 +487,17 @@ export default function GradeExamFlow() {
           {subject === "elective" ? (
             <>
               <div className="rounded-lg border border-slate-200 p-3">
-                <p className="mb-2 text-sm font-medium text-slate-700">1선택 · {key1Label}</p>
+                <p className="mb-2 text-sm font-medium text-slate-700">
+                  1선택 · {key1Label}
+                  {examName1 && ` · ${examName1}`}
+                </p>
                 <FileField label="1선택 정답표" file={key1File} onChange={setKey1File} />
               </div>
               <div className="rounded-lg border border-slate-200 p-3">
-                <p className="mb-2 text-sm font-medium text-slate-700">2선택 · {key2Label}</p>
+                <p className="mb-2 text-sm font-medium text-slate-700">
+                  2선택 · {key2Label}
+                  {examName2 && ` · ${examName2}`}
+                </p>
                 <FileField label="2선택 정답표" file={key2File} onChange={setKey2File} />
               </div>
             </>
