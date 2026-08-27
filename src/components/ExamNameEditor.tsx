@@ -30,7 +30,14 @@ export default function ExamNameEditor({
    * 않게 하려는 것이다(사용자 요청).
    */
   categoryId?: string | null;
-  onSaved: (name: string) => void;
+  /**
+   * **선택.** 서버 컴포넌트(예: `/grades/[id]` 페이지)에서 이 컴포넌트를
+   * 쓸 때는 아예 넘기지 마세요 — 서버 컴포넌트는 함수를 클라이언트
+   * 컴포넌트 prop으로 내려줄 수 없어서("Event handlers cannot be passed
+   * to Client Component props" 런타임 에러가 난다) `() => {}`조차 안 된다.
+   * 클라이언트 컴포넌트(채점 완료 화면 등)에서만 실제 콜백을 넘기세요.
+   */
+  onSaved?: (name: string) => void;
 }) {
   const [name, setName] = useState(value);
   const [editing, setEditing] = useState(false);
@@ -61,7 +68,7 @@ export default function ExamNameEditor({
       }
       setName(next);
       setEditing(false);
-      onSaved(next);
+      onSaved?.(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "이름을 바꾸지 못했습니다.");
     } finally {
