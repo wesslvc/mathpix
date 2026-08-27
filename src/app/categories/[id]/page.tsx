@@ -48,6 +48,11 @@ type ProblemListRow = {
   problemNo: number | null;
   /** 미납 토큰. 0보다 크면 잠긴 문제다. */
   debt: number | null;
+  /** 이 문제가 어느 채점 기록에서 왔는지(exam_scores.id). 수동으로 추가한
+   * 문제나 이 기능 이전에 만든 문제는 없다. */
+  gradeId: string | null;
+  /** 이 문제의 배점. 정해두지 않았으면 null. */
+  points: number | null;
 };
 
 const PROBLEM_LIST_COLUMNS = [
@@ -67,6 +72,8 @@ const PROBLEM_LIST_COLUMNS = [
   "problemNo:box_range->number",
   // 미납으로 잠긴 문제. 결제 전에는 목록에서 가리고 PDF 에서도 뺀다.
   "debt:box_range->debt",
+  "gradeId:box_range->>gradeId",
+  "points:box_range->points",
 ].join(", ");
 
 /** 목록 행에서 조건 박스 값을 되살린다(옛 형태 셋을 모두 받는다). */
@@ -139,6 +146,8 @@ export default async function CategoryPage({
         boxEnd: (box.end as number | null) ?? null,
         boxNone: (box.none as boolean | null) ?? null,
         problemNo: (box.number as number | null) ?? null,
+        gradeId: (box.gradeId as string | null) ?? null,
+        points: (box.points as number | null) ?? null,
       };
     });
   }
@@ -196,6 +205,8 @@ export default async function CategoryPage({
         fontPt: readFontPt({ fontPt: p.fontPt }),
         number: readProblemNumber({ number: p.problemNo }),
         debt: typeof p.debt === "number" && p.debt > 0 ? p.debt : null,
+        gradeId: p.gradeId ?? null,
+        points: typeof p.points === "number" ? p.points : null,
       };
     })
     .filter((p): p is GalleryProblem => p !== null);
@@ -218,6 +229,32 @@ export default async function CategoryPage({
   const existingNumbers = galleryProblems
     .map((p) => p.number)
     .filter((n): n is number => n != null);
+
+  // 이 실모에 연결된 채점 기록들. exam_scores → categories 쪽 연결은
+  // LinkCategoryPicker로 이미 되지만, 반대 방향(실모 화면에서 "이 실모는
+  // 어느 채점과 연결돼 있나")을 보여줄 곳이 없었다 — 연동을 양쪽에서
+  // 확인할 수 있어야 "연동됐다"는 게 실감난다.
+  const { data: linkedGrades } = await supabase
+    .from("exam_scores")
+    .select("id, subject, exam_name, elective_label, score, taken_at")
+    .eq("category_id", id)
+    .order("taken_at", { ascending: false })
+    .returns<
+      Pick<
+        ExamScore,
+        "id" | "subject" | "exam_name" | "elective_label" | "score" | "taken_at"
+      >[]
+    >();
+  const uploadedCountByGrade = new Map<string, number>();
+  for (const p of galleryProblems) {
+    if (!p.gradeId) continue;
+    uploadedCountByGrade.set(p.gradeId, (uploadedCountByGrade.get(p.gradeId) ?? 0) + 1);
+  }
+  const SUBJECT_LABEL: Record<ExamScore["subject"], string> = {
+    korean: "국어",
+    math: "수학",
+    elective: "탐구",
+  };
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10">
@@ -252,6 +289,29 @@ export default async function CategoryPage({
         checkoutReady={isCheckoutReady()}
       />
 
+      {linkedGrades && linkedGrades.length > 0 && (
+        <div className="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-xs font-medium text-slate-500">
+            연동된 채점 기록
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {linkedGrades.map((g) => (
+              <Link
+                key={g.id}
+                href={`/grades/${g.id}`}
+                className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100"
+              >
+                {g.exam_name || `${SUBJECT_LABEL[g.subject]}${g.elective_label ? ` · ${g.elective_label}` : ""}`}
+                {g.score != null && <> · {g.score}점</>}
+                {uploadedCountByGrade.get(g.id) ? (
+                  <> · 오답 {uploadedCountByGrade.get(g.id)}개 연결</>
+                ) : null}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 작업 큐(FigureJobsProvider)와 진행 패널은 루트 레이아웃에 있다 —
           목록으로 돌아가도 작업이 계속 돌아야 하기 때문이다.
           자동채점에서 넘어온 경우(gradeId)는 번호부터 고르고 나서 사진을
@@ -260,6 +320,7 @@ export default async function CategoryPage({
         <GradeProblemUploader
           categoryId={category.id}
           canAdd={access.canRecognize}
+          gradeId={grade.id}
           wrongNumbers={grade.wrong_numbers}
           existingNumbers={existingNumbers}
           items={grade.items}

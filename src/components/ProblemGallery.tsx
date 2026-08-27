@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toPng } from "html-to-image";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -55,6 +56,8 @@ export type GalleryProblem = {
   fontPt: number;
   /** 손으로 정해 둔 문제 번호. null이면 본문에서 뽑거나 차례대로 매긴다. */
   number: number | null;
+  /** 이 문제의 배점. 정해두지 않았으면 null(정답표·통계에 안 쓴다). */
+  points: number | null;
   /**
    * 못 낸 토큰. 0보다 크면 **잠긴 문제**다.
    *
@@ -62,6 +65,12 @@ export type GalleryProblem = {
    * 결제 전에는 쓰지 못하게 막는다 — 여기서 가리고 PDF 에서도 뺀다.
    */
   debt?: number | null;
+  /**
+   * 이 문제가 어느 채점 기록(exam_scores.id)에서 왔는지. 자동채점의
+   * "틀린문제 오답 업로드하기"로 들어온 문제만 있고, 수동으로 추가했거나
+   * 이 기능 이전에 만든 문제는 null이다.
+   */
+  gradeId?: string | null;
 };
 
 /** 같은 폴더 안에 새 파일명을 만든다. (덮어쓰기 대신 새 오브젝트로 저장) */
@@ -185,6 +194,8 @@ export default function ProblemGallery({ problems }: Props) {
    * 비워 두면 예전처럼 본문 맨 앞에서 뽑거나 차례대로 1번부터 매긴다.
    */
   const [editNumber, setEditNumber] = useState("");
+  /** 이 문제의 배점. 빈 칸이면 "정하지 않음"이다. */
+  const [editPoints, setEditPoints] = useState("");
   // 저장돼 있던 그림들. 목록 조회에는 들어 있지 않아서(용량 때문에) 수정할
   // 문제 하나만 따로 가져온다.
   const [editFigures, setEditFigures] = useState<StoredFigure[]>([]);
@@ -445,6 +456,7 @@ export default function ProblemGallery({ problems }: Props) {
     // 글씨가 저 혼자 커졌다.
     setEditFontPt(problem.fontPt);
     setEditNumber(problem.number == null ? "" : String(problem.number));
+    setEditPoints(problem.points == null ? "" : String(problem.points));
     setEditError(null);
     setEditFigures([]);
     setMaybeLostFigures(false);
@@ -513,6 +525,11 @@ export default function ProblemGallery({ problems }: Props) {
             figures: toStoredFigures(cardFigures),
             // 빈 칸이면 "정하지 않음" — 본문에서 뽑거나 차례대로 매긴다.
             number: editNumber.trim() === "" ? null : Number(editNumber),
+            points: editPoints.trim() === "" ? null : Number(editPoints),
+            // 채점 기록에서 온 문제라면 그 연결을 계속 지킨다 — box_range를
+            // 통째로 새로 쓰므로 여기서 옮겨 담지 않으면 처음 수정하는
+            // 순간 어느 채점 기록에서 왔는지가 사라진다.
+            gradeId: editing.gradeId ?? undefined,
           },
         })
         .eq("id", editing.id);
@@ -735,8 +752,22 @@ export default function ProblemGallery({ problems }: Props) {
                     {problem.number}번
                   </span>
                 )}
+                {problem.points != null && (
+                  <span className="mr-1 text-slate-400">
+                    [{problem.points}점]
+                  </span>
+                )}
                 {preview(problem)}
               </span>
+              {problem.gradeId && (
+                <Link
+                  href={`/grades/${problem.gradeId}`}
+                  title="이 문제가 나온 채점 기록 보기"
+                  className="shrink-0 rounded border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-100"
+                >
+                  채점 연동
+                </Link>
+              )}
               {problem.answer.trim() !== "" && (
                 <span className="shrink-0 text-xs text-slate-400">
                   {formatAnswer(problem.answer, problem.answerType)}
@@ -876,6 +907,24 @@ export default function ProblemGallery({ problems }: Props) {
                     <span className="text-[11px] text-slate-400">
                       인쇄물에 찍히는 번호입니다. 비우면 본문에서 뽑거나
                       차례대로 매깁니다.
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <span className="shrink-0 text-xs font-medium text-slate-500">
+                      배점
+                    </span>
+                    <input
+                      value={editPoints}
+                      onChange={(e) =>
+                        setEditPoints(e.target.value.replace(/[^0-9]/g, ""))
+                      }
+                      inputMode="numeric"
+                      placeholder="비우면 없음"
+                      className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                    />
+                    <span className="text-[11px] text-slate-400">
+                      이 문제의 배점(점). 자동채점에서 못 읽었거나 나중에
+                      알게 됐을 때 여기서 적어두세요.
                     </span>
                   </label>
                   {editAnswer.trim() !== "" && (

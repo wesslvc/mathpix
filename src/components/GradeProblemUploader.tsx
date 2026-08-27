@@ -7,6 +7,8 @@ import type { GradedItemRow } from "@/lib/supabase/types";
 type Props = {
   categoryId: string;
   canAdd: boolean;
+  /** 이 채점 기록(exam_scores.id) — 새로 올리는 문제에 명시적으로 연결해 둔다. */
+  gradeId: string;
   /** 자동채점이 틀렸다고 한 번호 전부. */
   wrongNumbers: number[];
   /** 이 실모에 이미 저장된 문제들의 번호(box_range.number 또는 본문에서 뽑은 값). */
@@ -29,6 +31,7 @@ type Props = {
 export default function GradeProblemUploader({
   categoryId,
   canAdd,
+  gradeId,
   wrongNumbers,
   existingNumbers,
   items,
@@ -39,6 +42,10 @@ export default function GradeProblemUploader({
 
   const done = new Set(existingNumbers);
   const remaining = wrongNumbers.filter((n) => !done.has(n));
+  // 문항별 상세가 없는 옛 채점 기록(items 도입 전에 저장됨) — 정답 자동
+  // 매핑을 할 재료 자체가 없다. 조용히 빈 칸으로 두면 "연동이 안 된다"로
+  // 보이므로 이유를 알린다.
+  const noItems = !items || items.length === 0;
 
   if (activeNumber != null) {
     return (
@@ -50,6 +57,7 @@ export default function GradeProblemUploader({
         canAdd={canAdd}
         presetNumber={activeNumber}
         presetAnswer={items?.find((it) => it.no === activeNumber)?.correctAnswer}
+        gradeId={gradeId}
         onDone={() => setActiveNumber(null)}
       />
     );
@@ -60,6 +68,13 @@ export default function GradeProblemUploader({
       <p className="text-sm font-medium text-blue-900">
         채점 결과 틀린 문제: {wrongNumbers.join(", ")}
       </p>
+
+      {noItems && (
+        <p className="text-xs text-amber-700">
+          이 채점 기록은 문항별 정답을 따로 저장하지 않은 예전 것이라 정답
+          자동 매핑이 안 돼요 — 정답을 직접 입력해주세요.
+        </p>
+      )}
 
       {remaining.length > 0 ? (
         <>
