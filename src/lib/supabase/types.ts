@@ -7,6 +7,24 @@ export type Category = {
   score: number | null;
   exam_date: string | null;
   created_at: string;
+  /** 어느 폴더에 속하는지. null이면 "폴더 없음". */
+  folder_id: string | null;
+};
+
+/** 실모를 담아 정리하는 폴더(단순 1단계 — 폴더 안에 폴더는 없다). */
+export type Folder = {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+};
+
+/** 채점한 문항 하나(세부오답 보기·정답 자동 채우기에 쓴다). */
+export type GradedItemRow = {
+  no: number;
+  studentAnswer: string | null;
+  correctAnswer: string;
+  points?: number;
 };
 
 /** 자동채점 결과 한 건(탐구는 1선택/2선택이 각각 독립된 행이다). */
@@ -15,12 +33,22 @@ export type ExamScore = {
   user_id: string;
   category_id: string | null;
   subject: "korean" | "math" | "elective";
+  /**
+   * 탐구는 1선택/2선택 과목명(17과목 중 하나), 수학은 선택과목(미적분·
+   * 확률과 통계·기하), 국어는 선택과목(언어와 매체·화법과 작문).
+   */
   elective_slot: 1 | 2 | null;
   elective_label: string | null;
+  /** 사용자가 적은 시험 이름(예: "2025학년도 9월 모의평가"). */
+  exam_name: string | null;
   total_questions: number;
   correct_count: number;
   wrong_numbers: number[];
   score: number | null;
+  /** 1~9. 등급컷은 해마다 달라 자동 계산하지 않고 사용자가 직접 적는다. */
+  grade_level: number | null;
+  /** 문항별 상세. 옛 기록에는 없을 수 있다(그 전에는 요약만 저장했다). */
+  items: GradedItemRow[] | null;
   taken_at: string;
   created_at: string;
 };

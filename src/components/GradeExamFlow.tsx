@@ -10,6 +10,12 @@ import {
   type GradeSlot,
   type Subject,
 } from "@/lib/gradeSummary";
+import {
+  SOCIAL_ELECTIVES,
+  SCIENCE_ELECTIVES,
+  MATH_ELECTIVES,
+  KOREAN_ELECTIVES,
+} from "@/lib/examSubjects";
 import LinkCategoryPicker from "./LinkCategoryPicker";
 
 function todayString(): string {
@@ -39,19 +45,46 @@ type SlotDraft = {
   slot?: 1 | 2;
   label?: string;
   items: GradedItem[];
+  /**
+   * 탐구인데 정답표에 배점이 하나도 없을 때, 틀린 문항만 골라 배점(잃은
+   * 점수)을 적어 넣는다 — 20문항 전부에 배점을 적을 필요 없이 **틀린 것만**
+   * 적으면 50점에서 그만큼을 뺀 값이 점수가 된다. 문항 번호 → 배점.
+   */
+  deductions: Record<number, number>;
   /** 저장 뒤에만 채워진다. */
   examScoreId?: string;
   /** 실모에 연결하면 채워진다("틀린문제 오답 업로드하기"가 이걸로 이동한다). */
   categoryId?: string | null;
+  /** 1~9. 저장 뒤 화면에서 바로 고르면 즉시 반영된다. */
+  gradeLevel?: number | null;
 };
 
 type Step = "setup" | "uploading" | "review" | "saved";
+
+/**
+ * 배점이 하나도 없는 탐구 슬롯의 점수를 정한다. **정답률로 얼버무리지
+ * 않는다** — 틀린 문항의 배점을 적어 넣은 만큼 50점에서 빼서 실제 점수를
+ * 낸다. 하나도 안 적었으면(아직 모름) null — 이때만 화면이 정답률을 보인다.
+ */
+function deductionScore(
+  wrongNumbers: number[],
+  deductions: Record<number, number>,
+): number | null {
+  if (wrongNumbers.length === 0) return 50;
+  const entered = wrongNumbers.filter((no) => deductions[no] != null);
+  if (entered.length === 0) return null;
+  const lost = wrongNumbers.reduce((sum, no) => sum + (deductions[no] ?? 0), 0);
+  return 50 - lost;
+}
 
 export default function GradeExamFlow() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("setup");
   const [subject, setSubject] = useState<Subject>("korean");
   const [takenAt, setTakenAt] = useState(todayString());
+  const [examName, setExamName] = useState("");
+  const [mathElective, setMathElective] = useState("");
+  const [koreanElective, setKoreanElective] = useState("");
 
   const [omrFile, setOmrFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
@@ -72,6 +105,9 @@ export default function GradeExamFlow() {
 
   function reset() {
     setStep("setup");
+    setExamName("");
+    setMathElective("");
+    setKoreanElective("");
     setOmrFile(null);
     setKeyFile(null);
     setKey1File(null);
@@ -81,6 +117,16 @@ export default function GradeExamFlow() {
     setSlots([]);
     setError(null);
     setTokenNote(null);
+  }
+
+  /** 이 채점의 선택과목 라벨(탐구=1/2선택 과목명, 수학·국어=선택과목). */
+  function electiveLabelFor(slot: 1 | 2 | undefined): string | undefined {
+    if (subject === "elective") {
+      return slot === 1 ? key1Label || undefined : slot === 2 ? key2Label || undefined : undefined;
+    }
+    if (subject === "math") return mathElective || undefined;
+    if (subject === "korean") return koreanElective || undefined;
+    return undefined;
   }
 
   async function grade() {
@@ -95,8 +141,8 @@ export default function GradeExamFlow() {
       const omr = await prepareGradingImage(omrFile as File, budget);
       const keys: { slot?: 1 | 2; label?: string; image: string }[] = [];
       if (subject === "elective") {
-        keys.push({ slot: 1, label: key1Label.trim() || undefined, image: await prepareGradingImage(key1File as File, budget) });
-        keys.push({ slot: 2, label: key2Label.trim() || undefined, image: await prepareGradingImage(key2File as File, budget) });
+        keys.push({ slot: 1, label: key1Label || undefined, image: await prepareGradingImage(key1File as File, budget) });
+        keys.push({ slot: 2, label: key2Label || undefined, image: await prepareGradingImage(key2File as File, budget) });
       } else {
         keys.push({ image: await prepareGradingImage(keyFile as File, budget) });
       }
@@ -119,8 +165,9 @@ export default function GradeExamFlow() {
       setSlots(
         gotSlots.map((s) => ({
           slot: s.slot,
-          label: s.label ?? (s.slot === 1 ? key1Label.trim() || undefined : s.slot === 2 ? key2Label.trim() || undefined : undefined),
+          label: s.label ?? electiveLabelFor(s.slot),
           items: s.items,
+          deductions: {},
         })),
       );
       if (typeof json.chargedTokens === "number") {
@@ -149,6 +196,17 @@ export default function GradeExamFlow() {
     });
   }
 
+  function updateDeduction(slotIndex: number, no: number, points: number | undefined) {
+    setSlots((prev) => {
+      const next = [...prev];
+      const deductions = { ...next[slotIndex].deductions };
+      if (points === undefined) delete deductions[no];
+      else deductions[no] = points;
+      next[slotIndex] = { ...next[slotIndex], deductions };
+      return next;
+    });
+  }
+
   async function saveAll() {
     setBusyMessage("저장하는 중...");
     setError(null);
@@ -162,17 +220,29 @@ export default function GradeExamFlow() {
       const saved: SlotDraft[] = [];
       for (const slot of slots) {
         const summary = computeSummary(slot.items);
+        const finalScore =
+          subject === "elective" && summary.score === null
+            ? deductionScore(summary.wrongNumbers, slot.deductions)
+            : summary.score;
+        // 틀린 문항에 적어 넣은 배점을 items에도 남겨 둔다 — 세부오답
+        // 보기에서 "이 문항 배점"이 계속 보이게 하려는 것이다.
+        const itemsToSave = slot.items.map((it) =>
+          slot.deductions[it.no] != null ? { ...it, points: slot.deductions[it.no] } : it,
+        );
+
         const { data, error: insErr } = await supabase
           .from("exam_scores")
           .insert({
             user_id: user.id,
             subject,
             elective_slot: subject === "elective" ? (slot.slot ?? null) : null,
-            elective_label: subject === "elective" ? slot.label ?? null : null,
+            elective_label: slot.label ?? null,
+            exam_name: examName.trim() || null,
             total_questions: summary.totalQuestions,
             correct_count: summary.correctCount,
             wrong_numbers: summary.wrongNumbers,
-            score: summary.score,
+            score: finalScore,
+            items: itemsToSave,
             taken_at: takenAt,
           })
           .select("id")
@@ -187,6 +257,16 @@ export default function GradeExamFlow() {
     } finally {
       setBusyMessage(null);
     }
+  }
+
+  async function setGradeLevel(slotIndex: number, examScoreId: string, level: number | null) {
+    setSlots((prev) => {
+      const next = [...prev];
+      next[slotIndex] = { ...next[slotIndex], gradeLevel: level };
+      return next;
+    });
+    const supabase = createClient();
+    await supabase.from("exam_scores").update({ grade_level: level }).eq("id", examScoreId);
   }
 
   return (
@@ -217,6 +297,52 @@ export default function GradeExamFlow() {
             </div>
           </div>
 
+          {subject === "math" && (
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              선택과목
+              <select
+                value={mathElective}
+                onChange={(e) => setMathElective(e.target.value)}
+                className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">선택 안 함</option>
+                {MATH_ELECTIVES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {subject === "korean" && (
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              선택과목
+              <select
+                value={koreanElective}
+                onChange={(e) => setKoreanElective(e.target.value)}
+                className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">선택 안 함</option>
+                {KOREAN_ELECTIVES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            시험 이름
+            <input
+              value={examName}
+              onChange={(e) => setExamName(e.target.value)}
+              placeholder="예: 2025학년도 9월 모의평가 — 선택 입력"
+              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </label>
+
           <label className="flex items-center gap-2 text-sm text-slate-700">
             시행일
             <input
@@ -240,7 +366,9 @@ export default function GradeExamFlow() {
       {step === "uploading" && (
         <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4">
           <p className="text-sm text-slate-500">
-            {SUBJECT_LABEL[subject]} · {takenAt}
+            {SUBJECT_LABEL[subject]}
+            {electiveLabelFor(undefined) && ` · ${electiveLabelFor(undefined)}`}
+            {examName && ` · ${examName}`} · {takenAt}
           </p>
 
           <FileField label="OMR 카드" file={omrFile} onChange={setOmrFile} />
@@ -249,22 +377,12 @@ export default function GradeExamFlow() {
             <>
               <div className="rounded-lg border border-slate-200 p-3">
                 <p className="mb-2 text-sm font-medium text-slate-700">1선택</p>
-                <input
-                  value={key1Label}
-                  onChange={(e) => setKey1Label(e.target.value)}
-                  placeholder="과목명 (예: 생활과 윤리) — 선택 입력"
-                  className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                />
+                <ElectiveSelect value={key1Label} onChange={setKey1Label} />
                 <FileField label="1선택 정답표" file={key1File} onChange={setKey1File} />
               </div>
               <div className="rounded-lg border border-slate-200 p-3">
                 <p className="mb-2 text-sm font-medium text-slate-700">2선택</p>
-                <input
-                  value={key2Label}
-                  onChange={(e) => setKey2Label(e.target.value)}
-                  placeholder="과목명 (예: 사회·문화) — 선택 입력"
-                  className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                />
+                <ElectiveSelect value={key2Label} onChange={setKey2Label} />
                 <FileField label="2선택 정답표" file={key2File} onChange={setKey2File} />
               </div>
             </>
@@ -303,14 +421,23 @@ export default function GradeExamFlow() {
           </p>
           {slots.map((slot, si) => {
             const summary = computeSummary(slot.items);
+            const needsDeduction = subject === "elective" && summary.score === null;
+            const dScore = needsDeduction ? deductionScore(summary.wrongNumbers, slot.deductions) : null;
+            const missing = needsDeduction
+              ? summary.wrongNumbers.filter((no) => slot.deductions[no] == null)
+              : [];
             return (
               <div key={si} className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="mb-2 text-sm font-semibold text-ink">
                   {subject === "elective" ? `${slot.slot}선택${slot.label ? ` · ${slot.label}` : ""}` : SUBJECT_LABEL[subject]}
                   {" — "}
-                  {summary.score !== null
-                    ? scoreLabel(subject, summary.score)
-                    : `${summary.correctCount}/${summary.totalQuestions} 정답`}
+                  {needsDeduction
+                    ? dScore !== null
+                      ? scoreLabel(subject, dScore)
+                      : "배점을 입력해주세요"
+                    : summary.score !== null
+                      ? scoreLabel(subject, summary.score)
+                      : `${summary.correctCount}/${summary.totalQuestions} 정답`}
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[420px] text-xs">
@@ -370,6 +497,41 @@ export default function GradeExamFlow() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* 정답표에 배점이 하나도 없는 탐구 — 틀린 문항만 골라 배점을
+                    적으면 50점에서 그만큼을 뺀다. 정답률로 얼버무리지 않는다. */}
+                {needsDeduction && summary.wrongNumbers.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="mb-2 text-xs font-medium text-amber-900">
+                      정답표에 배점이 없어요. 틀린 문항의 배점을 입력하면 50점
+                      만점에서 계산해드려요.
+                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      {summary.wrongNumbers.map((no) => (
+                        <label key={no} className="flex items-center gap-1 text-xs text-amber-900">
+                          {no}번
+                          <input
+                            type="number"
+                            min={0}
+                            value={slot.deductions[no] ?? ""}
+                            onChange={(e) => {
+                              const n = Number(e.target.value);
+                              updateDeduction(si, no, e.target.value === "" || Number.isNaN(n) ? undefined : n);
+                            }}
+                            className="w-14 rounded border border-amber-300 px-1.5 py-0.5 focus:border-amber-500 focus:outline-none"
+                          />
+                          점
+                        </label>
+                      ))}
+                    </div>
+                    {missing.length > 0 && (
+                      <p className="mt-2 text-xs text-amber-700">
+                        {missing.length}개 문항 배점 미입력 — 지금 점수는
+                        입력한 것만 반영한 값이라 정확하지 않을 수 있어요.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -402,27 +564,56 @@ export default function GradeExamFlow() {
         <div className="flex flex-col gap-4">
           {slots.map((slot, si) => {
             const summary = computeSummary(slot.items);
+            const finalScore =
+              subject === "elective" && summary.score === null
+                ? deductionScore(summary.wrongNumbers, slot.deductions)
+                : summary.score;
             const title =
               subject === "elective"
                 ? `${slot.slot}선택${slot.label ? ` · ${slot.label}` : ""}`
-                : SUBJECT_LABEL[subject];
+                : `${SUBJECT_LABEL[subject]}${slot.label ? ` · ${slot.label}` : ""}`;
             return (
               <div key={si} className="rounded-xl border border-slate-200 bg-white p-4">
+                {examName && <p className="text-xs text-slate-400">{examName}</p>}
                 <p className="text-base font-semibold text-ink">{title}</p>
                 <p className="mt-1 text-sm text-slate-600">
-                  {summary.score !== null
-                    ? scoreLabel(subject, summary.score)
+                  {finalScore !== null
+                    ? scoreLabel(subject, finalScore)
                     : `${summary.correctCount}/${summary.totalQuestions} 정답`}
                   {summary.wrongNumbers.length > 0 && (
                     <> · 틀린 번호: {summary.wrongNumbers.join(", ")}</>
                   )}
                 </p>
 
+                <label className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                  등급
+                  <select
+                    value={slot.gradeLevel ?? ""}
+                    disabled={!slot.examScoreId}
+                    onChange={(e) =>
+                      slot.examScoreId &&
+                      void setGradeLevel(
+                        si,
+                        slot.examScoreId,
+                        e.target.value === "" ? null : Number(e.target.value),
+                      )
+                    }
+                    className="rounded border border-slate-300 px-2 py-0.5 text-xs focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="">미입력</option>
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) => (
+                      <option key={g} value={g}>
+                        {g}등급
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
                 {subject !== "korean" && slot.examScoreId && (
                   <div className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3">
                     <LinkCategoryPicker
                       examScoreId={slot.examScoreId}
-                      score={summary.score}
+                      score={finalScore}
                       suggestedSource={
                         subject === "elective" && slot.label
                           ? slot.label
@@ -459,16 +650,57 @@ export default function GradeExamFlow() {
             );
           })}
 
-          <button
-            type="button"
-            onClick={reset}
-            className="self-start rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
-          >
-            다른 시험 채점하기
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={reset}
+              className="self-start rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+            >
+              다른 시험 채점하기
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/grades")}
+              className="self-start rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+            >
+              채점 기록 보기
+            </button>
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+function ElectiveSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+    >
+      <option value="">과목 선택</option>
+      <optgroup label="사회탐구">
+        {SOCIAL_ELECTIVES.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label="과학탐구">
+        {SCIENCE_ELECTIVES.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </optgroup>
+    </select>
   );
 }
 
