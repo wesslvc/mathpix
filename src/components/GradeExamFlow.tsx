@@ -19,6 +19,7 @@ import {
 } from "@/lib/examSubjects";
 import LinkCategoryPicker from "./LinkCategoryPicker";
 import CommentBox from "./CommentBox";
+import ExamNameEditor from "./ExamNameEditor";
 
 function todayString(): string {
   const d = new Date();
@@ -67,6 +68,12 @@ type SlotDraft = {
   gradeLevel?: number | null;
   /** 국어 전용 — 시험지 전체에 대한 메모. */
   comment?: string;
+  /**
+   * 이 슬롯만의 시험 이름. 저장 뒤 화면에서 고치면 여기 반영된다 — 처음엔
+   * 설정 단계에서 적은 공통 examName을 보여주다가, 고치면 슬롯마다 다른
+   * 이름을 가질 수 있다(탐구 1선택·2선택을 각각 다르게 부르고 싶을 수 있다).
+   */
+  examName?: string;
 };
 
 type Step = "setup" | "uploading" | "review" | "saved";
@@ -601,7 +608,19 @@ export default function GradeExamFlow() {
                 : `${SUBJECT_LABEL[subject]}${slot.label ? ` · ${slot.label}` : ""}`;
             return (
               <div key={si} className="rounded-xl border border-slate-200 bg-white p-4">
-                {examName && <p className="text-xs text-slate-400">{examName}</p>}
+                {slot.examScoreId && (
+                  <ExamNameEditor
+                    examScoreId={slot.examScoreId}
+                    value={slot.examName ?? examName}
+                    onSaved={(name) =>
+                      setSlots((prev) => {
+                        const next = [...prev];
+                        next[si] = { ...next[si], examName: name };
+                        return next;
+                      })
+                    }
+                  />
+                )}
                 <p className="text-base font-semibold text-ink">{title}</p>
                 <p className="mt-1 text-sm text-slate-600">
                   {finalScore !== null
@@ -645,9 +664,10 @@ export default function GradeExamFlow() {
                       examScoreId={slot.examScoreId}
                       score={finalScore}
                       suggestedSource={
-                        subject === "elective" && slot.label
+                        (slot.examName ?? examName).trim() ||
+                        (subject === "elective" && slot.label
                           ? slot.label
-                          : `${SUBJECT_LABEL[subject]} ${takenAt}`
+                          : `${SUBJECT_LABEL[subject]} ${takenAt}`)
                       }
                       takenAt={takenAt}
                       onLinked={(categoryId) => {
