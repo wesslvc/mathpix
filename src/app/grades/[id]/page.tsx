@@ -80,7 +80,6 @@ export default async function GradeDetailPage({
             examScoreId={row.id}
             value={row.exam_name ?? ""}
             categoryId={row.category_id}
-            onSaved={() => {}}
           />
         </div>
         <h1 className="text-xl font-semibold text-ink">{title}</h1>
