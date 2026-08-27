@@ -24,6 +24,17 @@ const SUBJECT_LABEL: Record<Subject, string> = {
   elective: "탐구",
 };
 
+/**
+ * 탐구는 원점수 만점이 50점이다. 정답표가 배점을 다 못 읽어 합이 50에서
+ * 어긋나더라도(또는 사용자가 검토 화면에서 일부만 고쳐도) **만점 표기는
+ * 항상 50으로 고정**한다 — 실제 배점 합계를 다시 계산해 보여주는 게 아니라
+ * "이 과목의 만점이 몇 점인지"를 알려주는 라벨이다.
+ */
+function scoreLabel(subject: Subject, score: number | null): string {
+  if (score === null) return "";
+  return subject === "elective" ? `${score}/50점` : `${score}점`;
+}
+
 type SlotDraft = {
   slot?: 1 | 2;
   label?: string;
@@ -298,7 +309,7 @@ export default function GradeExamFlow() {
                   {subject === "elective" ? `${slot.slot}선택${slot.label ? ` · ${slot.label}` : ""}` : SUBJECT_LABEL[subject]}
                   {" — "}
                   {summary.score !== null
-                    ? `${summary.score}점`
+                    ? scoreLabel(subject, summary.score)
                     : `${summary.correctCount}/${summary.totalQuestions} 정답`}
                 </p>
                 <div className="overflow-x-auto">
@@ -400,7 +411,7 @@ export default function GradeExamFlow() {
                 <p className="text-base font-semibold text-ink">{title}</p>
                 <p className="mt-1 text-sm text-slate-600">
                   {summary.score !== null
-                    ? `${summary.score}점`
+                    ? scoreLabel(subject, summary.score)
                     : `${summary.correctCount}/${summary.totalQuestions} 정답`}
                   {summary.wrongNumbers.length > 0 && (
                     <> · 틀린 번호: {summary.wrongNumbers.join(", ")}</>
