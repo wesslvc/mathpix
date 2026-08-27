@@ -117,10 +117,19 @@ export default function GradeExamFlow() {
   const [slots, setSlots] = useState<SlotDraft[]>([]);
   const [tokenNote, setTokenNote] = useState<string | null>(null);
 
+  // 국어·수학은 선택과목에 따라 시험 자체가 다르다(미적분/확통/기하,
+  // 언매/화작) — 안 고르고 채점하면 정답표 매칭이 어긋날 수 있으니 반드시
+  // 골라야 다음으로 넘어가고, 채점도 시작할 수 있다. 탐구는 정답표 파일
+  // (key1File/key2File)을 고르는 시점에 과목명(ElectiveSelect)을 같이
+  // 고르게 돼 있어 이미 강제돼 있다.
+  const electivePicked =
+    subject === "math" ? Boolean(mathElective) : subject === "korean" ? Boolean(koreanElective) : true;
+
   const canGrade =
-    subject === "elective"
+    electivePicked &&
+    (subject === "elective"
       ? Boolean(omrFile && key1File && key2File)
-      : Boolean(omrFile && keyFile);
+      : Boolean(omrFile && keyFile));
 
   function reset() {
     setStep("setup");
@@ -317,39 +326,55 @@ export default function GradeExamFlow() {
           </div>
 
           {subject === "math" && (
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              선택과목
-              <select
-                value={mathElective}
-                onChange={(e) => setMathElective(e.target.value)}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
-              >
-                <option value="">선택 안 함</option>
-                {MATH_ELECTIVES.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="flex flex-col gap-1">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                선택과목 <span className="text-red-500">*</span>
+                <select
+                  value={mathElective}
+                  onChange={(e) => setMathElective(e.target.value)}
+                  className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">고르지 않음</option>
+                  {MATH_ELECTIVES.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!mathElective && (
+                <p className="text-xs text-amber-600">
+                  선택과목(미적분·확률과 통계·기하)에 따라 정답표가 다르니 꼭
+                  골라주세요 — 안 고르면 다음으로 넘어갈 수 없어요.
+                </p>
+              )}
+            </div>
           )}
 
           {subject === "korean" && (
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              선택과목
-              <select
-                value={koreanElective}
-                onChange={(e) => setKoreanElective(e.target.value)}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
-              >
-                <option value="">선택 안 함</option>
-                {KOREAN_ELECTIVES.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="flex flex-col gap-1">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                선택과목 <span className="text-red-500">*</span>
+                <select
+                  value={koreanElective}
+                  onChange={(e) => setKoreanElective(e.target.value)}
+                  className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">고르지 않음</option>
+                  {KOREAN_ELECTIVES.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!koreanElective && (
+                <p className="text-xs text-amber-600">
+                  선택과목(언어와 매체·화법과 작문)에 따라 정답표가 다르니 꼭
+                  골라주세요 — 안 고르면 다음으로 넘어갈 수 없어요.
+                </p>
+              )}
+            </div>
           )}
 
           <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -375,7 +400,9 @@ export default function GradeExamFlow() {
           <button
             type="button"
             onClick={() => setStep("uploading")}
-            className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            disabled={!electivePicked}
+            title={electivePicked ? undefined : "선택과목을 먼저 골라주세요"}
+            className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
             다음
           </button>
