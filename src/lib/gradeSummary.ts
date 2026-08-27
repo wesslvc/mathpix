@@ -28,6 +28,16 @@ export type GradeSlot = {
 };
 
 /**
+ * 이 과목의 원점수 만점. 국어·수학은 100점, 탐구는 과목당 50점 — 수능
+ * 원점수 체계를 그대로 따른다. 배점을 다 못 읽었을 때 "틀린 문항만 골라
+ * 배점 적기"의 기준점으로 쓰고(`deductionScore`), 점수를 보여줄 때도
+ * 분모로 붙인다(`scoreLabel`) — 어느 쪽으로 얻은 점수든 만점은 같다.
+ */
+export function examMaxScore(subject: Subject): number {
+  return subject === "elective" ? 50 : 100;
+}
+
+/**
  * 채점 결과를 요약한다. 배점이 하나라도 있으면 점수를 매기고, 하나도 없으면
  * `score`는 null이다(그때는 화면이 정답률과 틀린 번호로만 보여준다).
  */

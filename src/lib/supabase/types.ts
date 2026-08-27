@@ -49,6 +49,12 @@ export type ExamScore = {
   grade_level: number | null;
   /** 문항별 상세. 옛 기록에는 없을 수 있다(그 전에는 요약만 저장했다). */
   items: GradedItemRow[] | null;
+  /**
+   * 시험지 전체에 대한 메모. **국어에서만 쓴다** — 국어는 지문이 여러
+   * 문항에 걸쳐 있어 "문제 하나 사진"이라는 오답추가 단위와 안 맞아서,
+   * 문항별 오답 대신 시험 전체 코멘트를 남기게 했다.
+   */
+  comment: string | null;
   taken_at: string;
   created_at: string;
 };

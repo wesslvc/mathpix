@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { prepareGradingImage, gradingImageBudget } from "@/lib/gradeImagePrep";
 import {
   computeSummary,
+  examMaxScore,
   type GradedItem,
   type GradeSlot,
   type Subject,
@@ -17,6 +18,7 @@ import {
   KOREAN_ELECTIVES,
 } from "@/lib/examSubjects";
 import LinkCategoryPicker from "./LinkCategoryPicker";
+import CommentBox from "./CommentBox";
 
 function todayString(): string {
   const d = new Date();
@@ -31,14 +33,20 @@ const SUBJECT_LABEL: Record<Subject, string> = {
 };
 
 /**
- * 탐구는 원점수 만점이 50점이다. 정답표가 배점을 다 못 읽어 합이 50에서
- * 어긋나더라도(또는 사용자가 검토 화면에서 일부만 고쳐도) **만점 표기는
- * 항상 50으로 고정**한다 — 실제 배점 합계를 다시 계산해 보여주는 게 아니라
- * "이 과목의 만점이 몇 점인지"를 알려주는 라벨이다.
+ * 원점수 만점은 항상 분모로 붙인다(국어·수학 100, 탐구 50). 정답표가
+ * 배점을 다 못 읽어 합이 어긋나더라도 **만점 표기는 고정**한다 — 실제 배점
+ * 합계를 다시 계산해 보여주는 게 아니라 "이 과목의 만점이 몇 점인지"를
+ * 알려주는 라벨이다.
  */
 function scoreLabel(subject: Subject, score: number | null): string {
   if (score === null) return "";
-  return subject === "elective" ? `${score}/50점` : `${score}점`;
+  return `${score}/${examMaxScore(subject)}점`;
+}
+
+/** 배점 후보. 실제 수능·모의고사가 쓰는 값만 준다 — 아무 숫자나 타이핑하게
+ * 두면 "채점 끝나자마자 눌러서 바로 점수"라는 목적이 흐려진다. */
+function pointOptions(subject: Subject): number[] {
+  return subject === "math" ? [2, 3, 4] : [2, 3];
 }
 
 type SlotDraft = {
@@ -57,24 +65,28 @@ type SlotDraft = {
   categoryId?: string | null;
   /** 1~9. 저장 뒤 화면에서 바로 고르면 즉시 반영된다. */
   gradeLevel?: number | null;
+  /** 국어 전용 — 시험지 전체에 대한 메모. */
+  comment?: string;
 };
 
 type Step = "setup" | "uploading" | "review" | "saved";
 
 /**
- * 배점이 하나도 없는 탐구 슬롯의 점수를 정한다. **정답률로 얼버무리지
- * 않는다** — 틀린 문항의 배점을 적어 넣은 만큼 50점에서 빼서 실제 점수를
- * 낸다. 하나도 안 적었으면(아직 모름) null — 이때만 화면이 정답률을 보인다.
+ * 배점이 하나도 없는 슬롯의 점수를 정한다. **정답률로 얼버무리지 않는다**
+ * — 틀린 문항의 배점을 적어 넣은 만큼 만점(`maxScore`)에서 빼서 실제
+ * 점수를 낸다. 하나도 안 적었으면(아직 모름) null — 이때만 화면이 정답률을
+ * 보인다.
  */
 function deductionScore(
   wrongNumbers: number[],
   deductions: Record<number, number>,
+  maxScore: number,
 ): number | null {
-  if (wrongNumbers.length === 0) return 50;
+  if (wrongNumbers.length === 0) return maxScore;
   const entered = wrongNumbers.filter((no) => deductions[no] != null);
   if (entered.length === 0) return null;
   const lost = wrongNumbers.reduce((sum, no) => sum + (deductions[no] ?? 0), 0);
-  return 50 - lost;
+  return maxScore - lost;
 }
 
 export default function GradeExamFlow() {
@@ -221,8 +233,8 @@ export default function GradeExamFlow() {
       for (const slot of slots) {
         const summary = computeSummary(slot.items);
         const finalScore =
-          subject === "elective" && summary.score === null
-            ? deductionScore(summary.wrongNumbers, slot.deductions)
+          summary.score === null
+            ? deductionScore(summary.wrongNumbers, slot.deductions, examMaxScore(subject))
             : summary.score;
         // 틀린 문항에 적어 넣은 배점을 items에도 남겨 둔다 — 세부오답
         // 보기에서 "이 문항 배점"이 계속 보이게 하려는 것이다.
@@ -421,8 +433,11 @@ export default function GradeExamFlow() {
           </p>
           {slots.map((slot, si) => {
             const summary = computeSummary(slot.items);
-            const needsDeduction = subject === "elective" && summary.score === null;
-            const dScore = needsDeduction ? deductionScore(summary.wrongNumbers, slot.deductions) : null;
+            const needsDeduction = summary.score === null;
+            const maxScore = examMaxScore(subject);
+            const dScore = needsDeduction
+              ? deductionScore(summary.wrongNumbers, slot.deductions, maxScore)
+              : null;
             const missing = needsDeduction
               ? summary.wrongNumbers.filter((no) => slot.deductions[no] == null)
               : [];
@@ -498,30 +513,42 @@ export default function GradeExamFlow() {
                   </table>
                 </div>
 
-                {/* 정답표에 배점이 하나도 없는 탐구 — 틀린 문항만 골라 배점을
-                    적으면 50점에서 그만큼을 뺀다. 정답률로 얼버무리지 않는다. */}
+                {/* 정답표에 배점이 하나도 없을 때 — 틀린 문항만 골라 배점을
+                    고르면 만점에서 그만큼을 뺀다. 정답률로 얼버무리지 않는다.
+                    타이핑 대신 버튼으로 고르게 한 것은 "채점 끝나자마자 눌러서
+                    바로 점수가 나오게" 하려는 것 — 실제 시험 배점은 국어·탐구
+                    2·3점, 수학 2·3·4점 몇 가지뿐이라 버튼이면 충분하다. */}
                 {needsDeduction && summary.wrongNumbers.length > 0 && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
                     <p className="mb-2 text-xs font-medium text-amber-900">
-                      정답표에 배점이 없어요. 틀린 문항의 배점을 입력하면 50점
+                      정답표에 배점이 없어요. 틀린 문항의 배점을 고르면 {maxScore}점
                       만점에서 계산해드려요.
                     </p>
-                    <div className="flex flex-wrap gap-3">
+                    <div className="flex flex-col gap-1.5">
                       {summary.wrongNumbers.map((no) => (
-                        <label key={no} className="flex items-center gap-1 text-xs text-amber-900">
-                          {no}번
-                          <input
-                            type="number"
-                            min={0}
-                            value={slot.deductions[no] ?? ""}
-                            onChange={(e) => {
-                              const n = Number(e.target.value);
-                              updateDeduction(si, no, e.target.value === "" || Number.isNaN(n) ? undefined : n);
-                            }}
-                            className="w-14 rounded border border-amber-300 px-1.5 py-0.5 focus:border-amber-500 focus:outline-none"
-                          />
-                          점
-                        </label>
+                        <div key={no} className="flex items-center gap-2 text-xs text-amber-900">
+                          <span className="w-10 shrink-0">{no}번</span>
+                          <div className="flex gap-1">
+                            {pointOptions(subject).map((p) => {
+                              const active = slot.deductions[no] === p;
+                              return (
+                                <button
+                                  key={p}
+                                  type="button"
+                                  aria-pressed={active}
+                                  onClick={() => updateDeduction(si, no, active ? undefined : p)}
+                                  className={`rounded border px-2 py-0.5 transition-colors ${
+                                    active
+                                      ? "border-amber-600 bg-amber-600 text-white"
+                                      : "border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
+                                  }`}
+                                >
+                                  {p}점
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       ))}
                     </div>
                     {missing.length > 0 && (
@@ -565,8 +592,8 @@ export default function GradeExamFlow() {
           {slots.map((slot, si) => {
             const summary = computeSummary(slot.items);
             const finalScore =
-              subject === "elective" && summary.score === null
-                ? deductionScore(summary.wrongNumbers, slot.deductions)
+              summary.score === null
+                ? deductionScore(summary.wrongNumbers, slot.deductions, examMaxScore(subject))
                 : summary.score;
             const title =
               subject === "elective"
@@ -609,7 +636,10 @@ export default function GradeExamFlow() {
                   </select>
                 </label>
 
-                {subject !== "korean" && slot.examScoreId && (
+                {/* 실모 연결은 모든 과목에서 보여준다 — 만점을 받아 틀린
+                    문제가 없어도(국어는 애초에 오답추가가 없어도) 적어도
+                    이름은 붙여 저장할 수 있어야 한다는 요청이다. */}
+                {slot.examScoreId && (
                   <div className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3">
                     <LinkCategoryPicker
                       examScoreId={slot.examScoreId}
@@ -628,7 +658,23 @@ export default function GradeExamFlow() {
                         });
                       }}
                     />
-                    {summary.wrongNumbers.length === 0 ? (
+
+                    {subject === "korean" ? (
+                      // 국어는 문항 단위 오답추가가 없다(지문이 여러 문항에
+                      // 걸쳐 있어 "문제 하나 사진"이라는 단위와 안 맞는다).
+                      // 대신 시험지 전체에 대한 메모를 남긴다.
+                      <CommentBox
+                        examScoreId={slot.examScoreId}
+                        value={slot.comment ?? ""}
+                        onSaved={(comment) =>
+                          setSlots((prev) => {
+                            const next = [...prev];
+                            next[si] = { ...next[si], comment };
+                            return next;
+                          })
+                        }
+                      />
+                    ) : summary.wrongNumbers.length === 0 ? (
                       <p className="text-xs text-slate-400">틀린 문제가 없어 오답 업로드가 필요 없어요.</p>
                     ) : (
                       <button
