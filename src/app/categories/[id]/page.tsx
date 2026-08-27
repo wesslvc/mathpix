@@ -18,7 +18,7 @@ import { readProblemNumber } from "@/lib/problemNumber";
 import { thumbPathFor } from "@/lib/cardThumb";
 import type { BoxOverride } from "@/lib/renderMathText";
 import type { ExamScore } from "@/lib/supabase/types";
-import WrongNumberChecklist from "@/components/WrongNumberChecklist";
+import GradeProblemUploader from "@/components/GradeProblemUploader";
 
 /**
  * 목록 조회에서 실제로 받아오는 모양.
@@ -252,16 +252,20 @@ export default async function CategoryPage({
         checkoutReady={isCheckoutReady()}
       />
 
-      {grade && (
-        <WrongNumberChecklist
+      {/* 작업 큐(FigureJobsProvider)와 진행 패널은 루트 레이아웃에 있다 —
+          목록으로 돌아가도 작업이 계속 돌아야 하기 때문이다.
+          자동채점에서 넘어온 경우(gradeId)는 번호부터 고르고 나서 사진을
+          올리게 한다 — GradeProblemUploader 가 그 순서를 강제한다. */}
+      {grade ? (
+        <GradeProblemUploader
+          categoryId={category.id}
+          canAdd={access.canRecognize}
           wrongNumbers={grade.wrong_numbers}
           existingNumbers={existingNumbers}
         />
+      ) : (
+        <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
       )}
-
-      {/* 작업 큐(FigureJobsProvider)와 진행 패널은 루트 레이아웃에 있다 —
-          목록으로 돌아가도 작업이 계속 돌아야 하기 때문이다. */}
-      <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
 
       <ProblemGallery problems={galleryProblems} />
     </main>
