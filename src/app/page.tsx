@@ -58,7 +58,21 @@ export default async function DashboardPage() {
             실모(출처)별로 오답을 모아두고, 나중에 한 번에 PDF로 인쇄하세요.
           </p>
         </div>
-        <LogoutButton />
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/grade"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+          >
+            자동채점
+          </Link>
+          <Link
+            href="/profile"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+          >
+            내 프로필
+          </Link>
+          <LogoutButton />
+        </div>
       </header>
 
       <BillingStatus

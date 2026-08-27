@@ -9,6 +9,22 @@ export type Category = {
   created_at: string;
 };
 
+/** 자동채점 결과 한 건(탐구는 1선택/2선택이 각각 독립된 행이다). */
+export type ExamScore = {
+  id: string;
+  user_id: string;
+  category_id: string | null;
+  subject: "korean" | "math" | "elective";
+  elective_slot: 1 | 2 | null;
+  elective_label: string | null;
+  total_questions: number;
+  correct_count: number;
+  wrong_numbers: number[];
+  score: number | null;
+  taken_at: string;
+  created_at: string;
+};
+
 export type Problem = {
   id: string;
   category_id: string;
