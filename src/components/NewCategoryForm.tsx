@@ -10,7 +10,13 @@ function todayString(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-export default function NewCategoryForm() {
+export default function NewCategoryForm({
+  folderId = null,
+}: {
+  /** 지금 폴더 안을 보고 있으면 그 폴더로 바로 넣는다(파일탐색기에서 폴더
+   * 안에서 새로 만들면 그 폴더에 생기는 것과 같다). */
+  folderId?: string | null;
+}) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [source, setSource] = useState("");
@@ -54,6 +60,7 @@ export default function NewCategoryForm() {
           is_exam: isExam,
           score: parsedScore,
           exam_date: examDate || null,
+          folder_id: folderId,
         })
         .select("id")
         .single();
