@@ -4,6 +4,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import type { ExamScore } from "@/lib/supabase/types";
 import GradeDetailActions from "@/components/GradeDetailActions";
+import ExamNameEditor from "@/components/ExamNameEditor";
 
 const SUBJECT_LABEL: Record<ExamScore["subject"], string> = {
   korean: "국어",
@@ -73,7 +74,9 @@ export default async function GradeDetailPage({
         >
           ← 채점 기록
         </Link>
-        {row.exam_name && <p className="mt-2 text-sm text-slate-400">{row.exam_name}</p>}
+        <div className="mt-2">
+          <ExamNameEditor examScoreId={row.id} value={row.exam_name ?? ""} onSaved={() => {}} />
+        </div>
         <h1 className="text-xl font-semibold text-ink">{title}</h1>
         <p className="text-sm text-slate-500">
           {row.taken_at} · {scoreText}

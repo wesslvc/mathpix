@@ -1,5 +1,38 @@
 import type { ExamScore } from "./supabase/types";
 
+/** 과목별로 묶는 데 필요한 최소한의 필드. 채점 기록 목록(GradeHistoryRow)도
+ * 같은 모양이라 그대로 받을 수 있다 — 묶는 기준을 두 곳에 따로 두면
+ * 반드시 어긋난다. */
+export type SubjectGroupable = Pick<
+  ExamScore,
+  "subject" | "elective_label" | "elective_slot"
+>;
+
+/** 과목(+탐구 과목명) 묶음 키. "elective:생활과 윤리"처럼 탐구는 과목명까지 갈라 묶는다. */
+export function subjectGroupKey(row: SubjectGroupable): string {
+  return row.subject === "elective"
+    ? `elective:${row.elective_label ?? row.elective_slot ?? "?"}`
+    : row.subject;
+}
+
+/** 화면에 보여줄 과목 이름. */
+export function subjectGroupLabel(row: SubjectGroupable): string {
+  return row.subject === "korean"
+    ? "국어"
+    : row.subject === "math"
+      ? "수학"
+      : `탐구 · ${row.elective_label ?? `${row.elective_slot ?? ""}선택`}`;
+}
+
+/** 국어 → 수학 → 탐구 순, 탐구는 과목명 가나다 순. */
+export function compareSubjectGroups(
+  a: { key: string; label: string },
+  b: { key: string; label: string },
+): number {
+  const order = (k: string) => (k === "korean" ? 0 : k === "math" ? 1 : 2);
+  return order(a.key) - order(b.key) || a.label.localeCompare(b.label, "ko");
+}
+
 export type TrendPoint = {
   takenAt: string;
   /** 배점이 있으면 점수, 없으면 정답률(%). 그래프는 항상 0~100 하나의 축으로 그린다. */
@@ -21,16 +54,8 @@ export function buildTrendSeries(rows: ExamScore[]): TrendSeries[] {
   const groups = new Map<string, TrendSeries>();
 
   for (const row of rows) {
-    const key =
-      row.subject === "elective"
-        ? `elective:${row.elective_label ?? row.elective_slot ?? "?"}`
-        : row.subject;
-    const label =
-      row.subject === "korean"
-        ? "국어"
-        : row.subject === "math"
-          ? "수학"
-          : `탐구 · ${row.elective_label ?? `${row.elective_slot ?? ""}선택`}`;
+    const key = subjectGroupKey(row);
+    const label = subjectGroupLabel(row);
 
     const value =
       row.score ?? Math.round((row.correct_count / row.total_questions) * 100);
@@ -49,9 +74,5 @@ export function buildTrendSeries(rows: ExamScore[]): TrendSeries[] {
     series.points.sort((a, b) => a.takenAt.localeCompare(b.takenAt));
   }
 
-  // 국어 → 수학 → 탐구 순, 탐구는 과목명 알파벳(가나다) 순.
-  const order = (k: string) => (k === "korean" ? 0 : k === "math" ? 1 : 2);
-  return [...groups.values()].sort(
-    (a, b) => order(a.key) - order(b.key) || a.label.localeCompare(b.label, "ko"),
-  );
+  return [...groups.values()].sort(compareSubjectGroups);
 }
