@@ -117,13 +117,15 @@ export default function GradeExamFlow() {
   const [slots, setSlots] = useState<SlotDraft[]>([]);
   const [tokenNote, setTokenNote] = useState<string | null>(null);
 
-  // 국어·수학은 선택과목에 따라 시험 자체가 다르다(미적분/확통/기하,
-  // 언매/화작) — 안 고르고 채점하면 정답표 매칭이 어긋날 수 있으니 반드시
-  // 골라야 다음으로 넘어가고, 채점도 시작할 수 있다. 탐구는 정답표 파일
-  // (key1File/key2File)을 고르는 시점에 과목명(ElectiveSelect)을 같이
-  // 고르게 돼 있어 이미 강제돼 있다.
+  // 국어·수학·탐구 전부 선택과목에 따라 시험 자체가 다르다(미적분/확통/기하,
+  // 언매/화작, 탐구 17과목) — 안 고르고 채점하면 정답표 매칭이 어긋날 수
+  // 있으니 반드시 골라야 다음으로 넘어가고, 채점도 시작할 수 있다.
   const electivePicked =
-    subject === "math" ? Boolean(mathElective) : subject === "korean" ? Boolean(koreanElective) : true;
+    subject === "math"
+      ? Boolean(mathElective)
+      : subject === "korean"
+        ? Boolean(koreanElective)
+        : Boolean(key1Label && key2Label);
 
   const canGrade =
     electivePicked &&
@@ -377,6 +379,30 @@ export default function GradeExamFlow() {
             </div>
           )}
 
+          {subject === "elective" && (
+            <div className="flex flex-col gap-1">
+              <p className="text-sm text-slate-700">
+                선택과목 <span className="text-red-500">*</span>
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">1선택</p>
+                  <ElectiveSelect value={key1Label} onChange={setKey1Label} />
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">2선택</p>
+                  <ElectiveSelect value={key2Label} onChange={setKey2Label} />
+                </div>
+              </div>
+              {!(key1Label && key2Label) && (
+                <p className="text-xs text-amber-600">
+                  1선택·2선택 과목을 17과목 중에서 각각 골라주세요 — 안 고르면
+                  다음으로 넘어갈 수 없어요.
+                </p>
+              )}
+            </div>
+          )}
+
           <label className="flex items-center gap-2 text-sm text-slate-700">
             시험 이름
             <input
@@ -422,13 +448,11 @@ export default function GradeExamFlow() {
           {subject === "elective" ? (
             <>
               <div className="rounded-lg border border-slate-200 p-3">
-                <p className="mb-2 text-sm font-medium text-slate-700">1선택</p>
-                <ElectiveSelect value={key1Label} onChange={setKey1Label} />
+                <p className="mb-2 text-sm font-medium text-slate-700">1선택 · {key1Label}</p>
                 <FileField label="1선택 정답표" file={key1File} onChange={setKey1File} />
               </div>
               <div className="rounded-lg border border-slate-200 p-3">
-                <p className="mb-2 text-sm font-medium text-slate-700">2선택</p>
-                <ElectiveSelect value={key2Label} onChange={setKey2Label} />
+                <p className="mb-2 text-sm font-medium text-slate-700">2선택 · {key2Label}</p>
                 <FileField label="2선택 정답표" file={key2File} onChange={setKey2File} />
               </div>
             </>
