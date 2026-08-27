@@ -895,6 +895,12 @@ export default function ResultStage({
 
       {onSaveToCategory && (
         <div className="flex flex-col gap-2">
+          {initialAnswer && (
+            <p className="text-[11px] text-emerald-600">
+              채점 정답표에서 자동으로 채웠어요 — 고치고 싶으면 아래에서
+              바꿔도 됩니다.
+            </p>
+          )}
           <AnswerInput
             answer={answer}
             answerType={answerType}

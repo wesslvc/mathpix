@@ -33,6 +33,7 @@ export default function AddProblemFlow({
   canAdd = true,
   presetNumber = null,
   presetAnswer,
+  gradeId = null,
   onDone,
 }: {
   categoryId: string;
@@ -54,6 +55,14 @@ export default function AddProblemFlow({
    * 다시 옮겨 적을 필요가 없다. 고치는 것은 자유롭다.
    */
   presetAnswer?: string;
+  /**
+   * **자동채점에서 넘어온 경우에만 쓴다.** 이 문제가 어느 채점 기록
+   * (`exam_scores.id`)에서 왔는지 `box_range.gradeId`에 심어 둔다 — 문제
+   * 번호만으로는 같은 실모에 여러 번 채점한 경우 어느 시험에서 온 문제인지
+   * 구분할 수 없다. 실모↔채점 기록을 양쪽에서 확인할 수 있게 하는
+   * 명시적인 연결이다.
+   */
+  gradeId?: string | null;
   /** 이 번호의 작업이 끝났다(저장 완료 또는 취소) — 번호 선택 화면으로 돌아간다. */
   onDone?: () => void;
 }) {
@@ -309,9 +318,12 @@ export default function AddProblemFlow({
       answer_type: answerType,
       // 박스 범위·글자 크기·그림이 한 값에 들어 있다(storedFigures.ts 참고).
       // 번호가 미리 정해져 있으면(자동채점 연동) 여기서 심는다 — 사용자가
-      // 따로 "문제 번호" 칸에 적을 필요가 없다.
+      // 따로 "문제 번호" 칸에 적을 필요가 없다. gradeId도 함께 심어 어느
+      // 채점 기록에서 온 문제인지 명시적으로 남긴다.
       box_range:
-        presetNumber != null ? { ...boxRange, number: presetNumber } : boxRange,
+        presetNumber != null
+          ? { ...boxRange, number: presetNumber, gradeId: gradeId ?? undefined }
+          : boxRange,
     };
 
     // 이미 저장한 문제를 또 저장하는 건 "고쳐서 다시 저장"이다. 새 행을 만들면
