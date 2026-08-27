@@ -9,7 +9,12 @@ import BillingStatus from "@/components/BillingStatus";
 import Logo from "@/components/Logo";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ folder?: string }>;
+}) {
+  const { folder: currentFolderId } = await searchParams;
   if (!isSupabaseConfigured()) {
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
@@ -93,9 +98,13 @@ export default async function DashboardPage() {
         checkoutReady={isCheckoutReady()}
       />
 
-      <NewCategoryForm />
+      <NewCategoryForm folderId={currentFolderId ?? null} />
 
-      <CategoryList categories={categories ?? []} folders={folders ?? []} />
+      <CategoryList
+        categories={categories ?? []}
+        folders={folders ?? []}
+        currentFolderId={currentFolderId ?? null}
+      />
     </main>
   );
 }
