@@ -7,6 +7,7 @@ import { buildTrendSeries } from "@/lib/scoreTrend";
 import BillingStatus from "@/components/BillingStatus";
 import ScoreTrendChart from "@/components/ScoreTrendChart";
 import Logo from "@/components/Logo";
+import GradeHistoryList from "@/components/GradeHistoryList";
 
 export default async function ProfilePage() {
   if (!isSupabaseConfigured()) {
@@ -45,6 +46,10 @@ export default async function ProfilePage() {
     .returns<ExamScore[]>();
 
   const series = buildTrendSeries(scores ?? []);
+  // 추세 그래프는 시간순(오름차순)이 필요하고, 기록 목록은 최근 것부터
+  // 보이는 게 자연스럽다 — 같은 쿼리 결과를 뒤집어 재사용한다(왕복을
+  // 늘리지 않는다).
+  const historyRows = [...(scores ?? [])].reverse();
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
@@ -87,6 +92,14 @@ export default async function ProfilePage() {
             ))}
           </div>
         )}
+      </section>
+
+      {/* 추세(요약)와 기록(개별 시행 검색·상세)을 같은 화면에서 볼 수 있게
+          합쳤다 — 예전엔 /grades 와 /profile 로 나뉘어 있어 추세를 보다가
+          특정 시험 하나를 찾으려면 화면을 오가야 했다. */}
+      <section className="flex flex-col gap-4">
+        <h2 className="text-base font-semibold text-ink">채점 기록</h2>
+        <GradeHistoryList rows={historyRows} />
       </section>
     </main>
   );

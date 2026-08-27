@@ -76,17 +76,13 @@ export default async function DashboardPage({
           >
             자동채점
           </Link>
-          <Link
-            href="/grades"
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
-          >
-            채점 기록
-          </Link>
+          {/* 채점 기록(개별 시행 검색)과 성적 추세를 한 화면(/profile)으로
+              합쳤다 — 예전엔 두 링크로 나뉘어 있었다. */}
           <Link
             href="/profile"
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
           >
-            내 프로필
+            채점 기록·추세
           </Link>
           <LogoutButton />
         </div>
