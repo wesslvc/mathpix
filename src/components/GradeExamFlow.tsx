@@ -706,7 +706,7 @@ export default function GradeExamFlow() {
             </button>
             <button
               type="button"
-              onClick={() => router.push("/grades")}
+              onClick={() => router.push("/profile")}
               className="self-start rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
             >
               채점 기록 보기

@@ -68,7 +68,7 @@ export default async function GradeDetailPage({
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-4 py-10">
       <header>
         <Link
-          href="/grades"
+          href="/profile"
           className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline"
         >
           ← 채점 기록

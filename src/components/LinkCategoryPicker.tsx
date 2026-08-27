@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { categoryLabel, type Category } from "@/lib/supabase/types";
+import { categoryLabel, type Category, type Folder } from "@/lib/supabase/types";
+
+const NO_FOLDER = "__none__";
 
 type Props = {
   /** 연결할 채점 기록. */
@@ -36,9 +38,13 @@ export default function LinkCategoryPicker({
   onLinked,
 }: Props) {
   const [categories, setCategories] = useState<Category[] | null>(null);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [creating, setCreating] = useState(false);
   const [newSource, setNewSource] = useState(suggestedSource);
+  // 새로 만들 실모를 넣을 폴더. 기본은 "폴더 없음" — 폴더는 정리용
+  // 선택사항일 뿐, 없어도 실모 생성·연결에는 아무 지장이 없다.
+  const [newFolderId, setNewFolderId] = useState<string>(NO_FOLDER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [linkedTo, setLinkedTo] = useState<string | null>(null);
@@ -47,12 +53,22 @@ export default function LinkCategoryPicker({
     let cancelled = false;
     (async () => {
       const supabase = createClient();
-      const { data } = await supabase
-        .from("categories")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .returns<Category[]>();
-      if (!cancelled) setCategories(data ?? []);
+      const [{ data: cats }, { data: fols }] = await Promise.all([
+        supabase
+          .from("categories")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .returns<Category[]>(),
+        supabase
+          .from("folders")
+          .select("*")
+          .order("created_at", { ascending: true })
+          .returns<Folder[]>(),
+      ]);
+      if (!cancelled) {
+        setCategories(cats ?? []);
+        setFolders(fols ?? []);
+      }
     })();
     return () => {
       cancelled = true;
@@ -105,6 +121,7 @@ export default function LinkCategoryPicker({
           is_exam: true,
           score,
           exam_date: takenAt,
+          folder_id: newFolderId === NO_FOLDER ? null : newFolderId,
         })
         .select("id")
         .single();
@@ -183,6 +200,20 @@ export default function LinkCategoryPicker({
             placeholder="출처 (예: 2025학년도 6월 모의평가)"
             className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none"
           />
+          <select
+            value={newFolderId}
+            onChange={(e) => setNewFolderId(e.target.value)}
+            disabled={busy}
+            title="정리할 폴더(선택, 없어도 됩니다)"
+            className="rounded border border-slate-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none"
+          >
+            <option value={NO_FOLDER}>폴더 없음</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>
+                📁 {f.name}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             disabled={busy || !newSource.trim()}
