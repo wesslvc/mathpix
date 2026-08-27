@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import AddProblemFlow from "./AddProblemFlow";
+import type { GradedItemRow } from "@/lib/supabase/types";
 
 type Props = {
   categoryId: string;
@@ -10,6 +11,11 @@ type Props = {
   wrongNumbers: number[];
   /** 이 실모에 이미 저장된 문제들의 번호(box_range.number 또는 본문에서 뽑은 값). */
   existingNumbers: number[];
+  /**
+   * 채점 때 읽어 둔 문항별 정답. 번호를 고르면 그 문항의 정답을 정답 칸에
+   * 미리 채워 준다("정답표 자동 매핑") — 옛 채점 기록에는 없을 수 있다.
+   */
+  items?: GradedItemRow[] | null;
 };
 
 /**
@@ -25,6 +31,7 @@ export default function GradeProblemUploader({
   canAdd,
   wrongNumbers,
   existingNumbers,
+  items,
 }: Props) {
   const [activeNumber, setActiveNumber] = useState<number | null>(null);
   const [addingCustom, setAddingCustom] = useState(false);
@@ -42,6 +49,7 @@ export default function GradeProblemUploader({
         categoryId={categoryId}
         canAdd={canAdd}
         presetNumber={activeNumber}
+        presetAnswer={items?.find((it) => it.no === activeNumber)?.correctAnswer}
         onDone={() => setActiveNumber(null)}
       />
     );

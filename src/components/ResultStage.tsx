@@ -86,6 +86,12 @@ type Props = {
    */
   pendingWholeJob?: { id: string; crop: string } | null;
   onWholeJobQueued?: () => void;
+  /**
+   * 정답 칸의 시작값. **자동채점에서 넘어온 경우에만 쓴다** — 채점할 때 이미
+   * 읽어 둔 그 문항의 정답을 그대로 채워 준다(`GradeProblemUploader`). 사용자가
+   * 고치면 그 값이 저장되므로 강제로 못 바꾸게 잠그지는 않는다.
+   */
+  initialAnswer?: string;
 };
 
 /**
@@ -123,6 +129,7 @@ export default function ResultStage({
   initialFigures,
   pendingWholeJob,
   onWholeJobQueued,
+  initialAnswer,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [fontPt, setFontPt] = useState(DEFAULT_FONT_PT);
@@ -137,9 +144,12 @@ export default function ResultStage({
   const [savedId, setSavedId] = useState<string | null>(null);
   // 마지막 저장 이후 바뀐 게 있는지. 있으면 다시 저장할 거리가 있다는 뜻.
   const [dirty, setDirty] = useState(false);
-  const [answer, setAnswer] = useState("");
-  // 객관식이면 정답표에 "1" 대신 "①"로 표기한다.
-  const [answerType, setAnswerType] = useState<AnswerType>("choice");
+  const [answer, setAnswer] = useState(initialAnswer ?? "");
+  // 객관식이면 정답표에 "1" 대신 "①"로 표기한다. 채점에서 넘어온 정답이
+  // 숫자 하나뿐이면 객관식으로, 아니면(서술형 등) 주관식으로 짐작한다.
+  const [answerType, setAnswerType] = useState<AnswerType>(
+    initialAnswer && !/^\d+$/.test(initialAnswer) ? "short" : "choice",
+  );
   // 조건 박스 범위. undefined면 자동 감지에 맡긴다.
   const [boxOverride, setBoxOverride] = useState<BoxOverride | undefined>(undefined);
   const [showBoxEditor, setShowBoxEditor] = useState(false);

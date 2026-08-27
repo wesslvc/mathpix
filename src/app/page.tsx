@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import type { Category } from "@/lib/supabase/types";
+import type { Category, Folder } from "@/lib/supabase/types";
 import NewCategoryForm from "@/components/NewCategoryForm";
 import LogoutButton from "@/components/LogoutButton";
 import CategoryList from "@/components/CategoryList";
@@ -47,6 +47,12 @@ export default async function DashboardPage() {
     .order("created_at", { ascending: false })
     .returns<Category[]>();
 
+  const { data: folders } = await supabase
+    .from("folders")
+    .select("*")
+    .order("created_at", { ascending: true })
+    .returns<Folder[]>();
+
   const access = await getAccessState(supabase);
 
   return (
@@ -66,6 +72,12 @@ export default async function DashboardPage() {
             자동채점
           </Link>
           <Link
+            href="/grades"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+          >
+            채점 기록
+          </Link>
+          <Link
             href="/profile"
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
           >
@@ -83,7 +95,7 @@ export default async function DashboardPage() {
 
       <NewCategoryForm />
 
-      <CategoryList categories={categories ?? []} />
+      <CategoryList categories={categories ?? []} folders={folders ?? []} />
     </main>
   );
 }

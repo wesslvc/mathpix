@@ -32,6 +32,7 @@ export default function AddProblemFlow({
   categoryId,
   canAdd = true,
   presetNumber = null,
+  presetAnswer,
   onDone,
 }: {
   categoryId: string;
@@ -47,6 +48,12 @@ export default function AddProblemFlow({
    * 정하라는 요청이 이 순서다.)
    */
   presetNumber?: number | null;
+  /**
+   * **자동채점에서 넘어온 경우에만 쓴다.** 채점할 때 이미 읽어 둔 이
+   * 문항의 정답을 정답 칸에 미리 채워 준다 — 사용자가 정답표를 보고
+   * 다시 옮겨 적을 필요가 없다. 고치는 것은 자유롭다.
+   */
+  presetAnswer?: string;
   /** 이 번호의 작업이 끝났다(저장 완료 또는 취소) — 번호 선택 화면으로 돌아간다. */
   onDone?: () => void;
 }) {
@@ -467,6 +474,7 @@ export default function AddProblemFlow({
           initialFigures={initialFigures}
           pendingWholeJob={pendingWholeJob}
           onWholeJobQueued={() => setPendingWholeJob(null)}
+          initialAnswer={presetAnswer}
         />
         </div>
       )}

@@ -262,6 +262,7 @@ export default async function CategoryPage({
           canAdd={access.canRecognize}
           wrongNumbers={grade.wrong_numbers}
           existingNumbers={existingNumbers}
+          items={grade.items}
         />
       ) : (
         <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
