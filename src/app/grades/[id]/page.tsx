@@ -91,6 +91,8 @@ export default async function GradeDetailPage({
           takenAt={row.taken_at}
           wrongCount={row.wrong_numbers.length}
           showUpload={row.subject !== "korean"}
+          isKorean={row.subject === "korean"}
+          comment={row.comment}
         />
       </div>
 

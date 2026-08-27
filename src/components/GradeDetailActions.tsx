@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import LinkCategoryPicker from "./LinkCategoryPicker";
+import CommentBox from "./CommentBox";
 
 type Props = {
   examScoreId: string;
@@ -15,6 +16,9 @@ type Props = {
   wrongCount: number;
   /** 국어는 이 버튼 자체를 안 보여준다(오답추가 단위와 안 맞는다). */
   showUpload: boolean;
+  /** 국어에서만 쓰는 시험지 전체 메모. */
+  isKorean: boolean;
+  comment: string | null;
 };
 
 /** 채점 기록 상세의 조작부: 등급 고르기 · 실모 연결 · 오답 업로드 이동. */
@@ -27,6 +31,8 @@ export default function GradeDetailActions({
   takenAt,
   wrongCount,
   showUpload,
+  isKorean,
+  comment,
 }: Props) {
   const router = useRouter();
   const [categoryId, setCategoryId] = useState(initialCategoryId);
@@ -56,20 +62,28 @@ export default function GradeDetailActions({
         </select>
       </label>
 
-      {showUpload && (
-        <div className="flex flex-col gap-2 border-t border-slate-100 pt-3">
-          {categoryId ? (
-            <p className="text-xs text-emerald-600">실모에 연결됨</p>
-          ) : (
-            <LinkCategoryPicker
-              examScoreId={examScoreId}
-              score={score}
-              suggestedSource={suggestedSource}
-              takenAt={takenAt}
-              onLinked={setCategoryId}
-            />
-          )}
-          {wrongCount > 0 ? (
+      {/* 실모 연결은 항상 보여준다 — 만점을 받았거나(오답 업로드가 필요
+          없거나) 국어라서(오답추가 자체가 없어도) 적어도 이름은 붙여
+          저장할 수 있어야 한다. */}
+      <div className="flex flex-col gap-2 border-t border-slate-100 pt-3">
+        {categoryId ? (
+          <p className="text-xs text-emerald-600">실모에 연결됨</p>
+        ) : (
+          <LinkCategoryPicker
+            examScoreId={examScoreId}
+            score={score}
+            suggestedSource={suggestedSource}
+            takenAt={takenAt}
+            onLinked={setCategoryId}
+          />
+        )}
+
+        {isKorean && (
+          <CommentBox examScoreId={examScoreId} value={comment ?? ""} onSaved={() => {}} />
+        )}
+
+        {showUpload &&
+          (wrongCount > 0 ? (
             <button
               type="button"
               disabled={!categoryId}
@@ -81,9 +95,8 @@ export default function GradeDetailActions({
             </button>
           ) : (
             <p className="text-xs text-slate-400">틀린 문제가 없어 오답 업로드가 필요 없어요.</p>
-          )}
-        </div>
-      )}
+          ))}
+      </div>
     </div>
   );
 }
