@@ -15,6 +15,7 @@ import { uploadThumb } from "@/lib/cardThumb";
 import { enhanceContrast } from "@/lib/autoContrast";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import BatchSplitPanel from "./BatchSplitPanel";
+import BulkMappedImportPanel from "./BulkMappedImportPanel";
 
 /**
  * "통째로 AI로 다시 그리기"로 만든 문제 이미지의 배치.
@@ -390,6 +391,11 @@ export default function AddProblemFlow({
           figureCost={tokenStatus?.figureCost ?? null}
         />
       )}
+
+      {/* 이미 깔끔하게 잘려 있는 사진 여러 장 + 정답 CSV(학원가 "연계교재
+          선별" 자료가 흔히 이 모양)를 한 번에 매칭해서 올린다. 크롭·인식이
+          필요 없으니 토큰도 안 든다. */}
+      {stage === "idle" && canAdd && <BulkMappedImportPanel categoryId={categoryId} />}
 
       {stage === "idle" && !canAdd && (
         <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
