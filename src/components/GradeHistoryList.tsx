@@ -7,6 +7,7 @@ import {
   subjectGroupKey,
   subjectGroupLabel,
 } from "@/lib/scoreTrend";
+import { normalizeElectiveLabel } from "@/lib/examSubjects";
 
 export type GradeHistoryRow = {
   id: string;
@@ -29,7 +30,8 @@ const SUBJECT_LABEL: Record<GradeHistoryRow["subject"], string> = {
 function subjectTitle(row: GradeHistoryRow): string {
   const base = SUBJECT_LABEL[row.subject];
   const slot = row.subject === "elective" && row.elective_slot ? `${row.elective_slot}선택 · ` : "";
-  return `${slot}${base}${row.elective_label ? ` · ${row.elective_label}` : ""}`;
+  const label = row.elective_label ? normalizeElectiveLabel(row.elective_label) : null;
+  return `${slot}${base}${label ? ` · ${label}` : ""}`;
 }
 
 /** 사용자가 붙인 이름이 있으면 그게 곧 제목이다 — 없으면 예전처럼
