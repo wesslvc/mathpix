@@ -33,6 +33,26 @@ export const ELECTIVE_SUBJECTS: readonly string[] = [
   ...SCIENCE_ELECTIVES,
 ];
 
+/**
+ * 자동채점 초기 버전은 탐구 과목명을 자유 입력으로 받았다(17과목 select는
+ * 나중에 붙였다) — 그때 저장된 옛 기록에는 "지구과학1"처럼 로마 숫자
+ * (Ⅰ·Ⅱ) 대신 아라비아 숫자로 적힌 과목명이 남아 있을 수 있다. 성적
+ * 추세·목록 묶기(과목별 보기)가 과목명을 그대로 키로 쓰기 때문에, 표기가
+ * 다르면 같은 과목인데 다른 범주로 갈린다 — "지구과학1"과 "지구과학Ⅰ"이
+ * 서로 다른 그래프 선·그룹으로 보이는 식이다.
+ *
+ * 옛 데이터를 고쳐 쓰는 대신(마이그레이션 필요) 묶는 시점에 정규화한다 —
+ * 끝자리 1·2를 로마 숫자로 바꿔봐서 17과목 목록에 있으면 그걸 쓰고,
+ * 없으면(사회탐구처럼 원래 숫자가 없는 과목) 원래 값 그대로 둔다.
+ */
+export function normalizeElectiveLabel(label: string): string {
+  const trimmed = label.trim();
+  const m = trimmed.match(/^(.+?)([12])$/);
+  if (!m) return trimmed;
+  const candidate = `${m[1]}${m[2] === "1" ? "Ⅰ" : "Ⅱ"}`;
+  return ELECTIVE_SUBJECTS.includes(candidate) ? candidate : trimmed;
+}
+
 /** 수학 선택과목(공통 22문항 + 이 중 택1의 8문항). */
 export const MATH_ELECTIVES = ["미적분", "확률과 통계", "기하"] as const;
 

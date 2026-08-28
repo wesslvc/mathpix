@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ExamScore } from "@/lib/supabase/types";
 import GradeDetailActions from "@/components/GradeDetailActions";
 import ExamNameEditor from "@/components/ExamNameEditor";
+import { normalizeElectiveLabel } from "@/lib/examSubjects";
 
 const SUBJECT_LABEL: Record<ExamScore["subject"], string> = {
   korean: "국어",
@@ -57,7 +58,7 @@ export default async function GradeDetailPage({
   const title =
     (row.subject === "elective" && row.elective_slot ? `${row.elective_slot}선택 · ` : "") +
     SUBJECT_LABEL[row.subject] +
-    (row.elective_label ? ` · ${row.elective_label}` : "");
+    (row.elective_label ? ` · ${normalizeElectiveLabel(row.elective_label)}` : "");
   const scoreText =
     row.score === null
       ? "점수 없음"

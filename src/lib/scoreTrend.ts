@@ -1,4 +1,5 @@
 import type { ExamScore } from "./supabase/types";
+import { normalizeElectiveLabel } from "./examSubjects";
 
 /** 과목별로 묶는 데 필요한 최소한의 필드. 채점 기록 목록(GradeHistoryRow)도
  * 같은 모양이라 그대로 받을 수 있다 — 묶는 기준을 두 곳에 따로 두면
@@ -8,10 +9,16 @@ export type SubjectGroupable = Pick<
   "subject" | "elective_label" | "elective_slot"
 >;
 
+/** "지구과학1"처럼 옛 자유 입력 표기가 섞여 있어도 같은 과목이면 같은
+ * 값으로 맞춘다(normalizeElectiveLabel 참고). */
+function electiveLabelOf(row: SubjectGroupable): string | undefined {
+  return row.elective_label ? normalizeElectiveLabel(row.elective_label) : undefined;
+}
+
 /** 과목(+탐구 과목명) 묶음 키. "elective:생활과 윤리"처럼 탐구는 과목명까지 갈라 묶는다. */
 export function subjectGroupKey(row: SubjectGroupable): string {
   return row.subject === "elective"
-    ? `elective:${row.elective_label ?? row.elective_slot ?? "?"}`
+    ? `elective:${electiveLabelOf(row) ?? row.elective_slot ?? "?"}`
     : row.subject;
 }
 
@@ -21,7 +28,7 @@ export function subjectGroupLabel(row: SubjectGroupable): string {
     ? "국어"
     : row.subject === "math"
       ? "수학"
-      : `탐구 · ${row.elective_label ?? `${row.elective_slot ?? ""}선택`}`;
+      : `탐구 · ${electiveLabelOf(row) ?? `${row.elective_slot ?? ""}선택`}`;
 }
 
 /** 국어 → 수학 → 탐구 순, 탐구는 과목명 가나다 순. */
