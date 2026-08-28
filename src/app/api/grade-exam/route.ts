@@ -153,7 +153,9 @@ export async function POST(req: NextRequest) {
     });
 
     // 금액은 무제한 계정에만 보여준다(막는 자리는 서버 — 화면 숨김은 우회 가능).
-    const usage = unlimited ? result.usage : undefined;
+    // estKrw는 이미 계산해 뒀으니(정산에 썼다) 그대로 얹는다 — 단가를
+    // 몰라 estKrw가 undefined면 화면도 그냥 토큰 수만 보여준다.
+    const usage = unlimited && result.usage ? { ...result.usage, estKrw } : undefined;
 
     return NextResponse.json({ slots, usage, chargedTokens, model: result.model });
   } catch (err) {
