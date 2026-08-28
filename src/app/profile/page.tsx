@@ -84,12 +84,8 @@ export default async function ProfilePage() {
             쌓입니다.
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {series.map((s) => (
-              <div key={s.key} className="rounded-xl border border-slate-200 bg-white p-4">
-                <ScoreTrendChart series={s} />
-              </div>
-            ))}
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <ScoreTrendChart series={series} />
           </div>
         )}
       </section>
