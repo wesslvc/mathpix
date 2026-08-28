@@ -44,10 +44,17 @@ export async function POST(req: NextRequest) {
   if (!omr) {
     return NextResponse.json({ error: "OMR 카드 사진이 필요합니다." }, { status: 400 });
   }
-  const expectedKeys = subject === "elective" ? 2 : 1;
-  if (keys.length !== expectedKeys) {
+  // 탐구는 1과목만(정답표 1장) 채점하는 경우도 있다 — 2장을 강제하면 그
+  // 흐름 자체가 막힌다.
+  const validKeyCount = subject === "elective" ? keys.length === 1 || keys.length === 2 : keys.length === 1;
+  if (!validKeyCount) {
     return NextResponse.json(
-      { error: `정답표 사진이 ${expectedKeys}장 필요합니다.` },
+      {
+        error:
+          subject === "elective"
+            ? "정답표 사진이 1장(한 과목) 또는 2장(1선택+2선택) 필요합니다."
+            : "정답표 사진이 1장 필요합니다.",
+      },
       { status: 400 },
     );
   }
