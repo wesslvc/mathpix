@@ -108,6 +108,9 @@ export default function GradeExamFlow() {
   const [examName2, setExamName2] = useState("");
   const [mathElective, setMathElective] = useState("");
   const [koreanElective, setKoreanElective] = useState("");
+  // 실제 수능은 늘 두 과목이지만, 한 과목만 풀어보는 연습(자체 제작
+  // 워크시트 등)도 흔하다 — 그때 2선택을 강제로 채우게 하면 쓸 수 없다.
+  const [tamguSingle, setTamguSingle] = useState(false);
 
   const [omrFile, setOmrFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
@@ -129,12 +132,16 @@ export default function GradeExamFlow() {
       ? Boolean(mathElective)
       : subject === "korean"
         ? Boolean(koreanElective)
-        : Boolean(key1Label && key2Label);
+        : tamguSingle
+          ? Boolean(key1Label)
+          : Boolean(key1Label && key2Label);
 
   const canGrade =
     electivePicked &&
     (subject === "elective"
-      ? Boolean(omrFile && key1File && key2File)
+      ? tamguSingle
+        ? Boolean(omrFile && key1File)
+        : Boolean(omrFile && key1File && key2File)
       : Boolean(omrFile && keyFile));
 
   function reset() {
@@ -144,6 +151,7 @@ export default function GradeExamFlow() {
     setExamName2("");
     setMathElective("");
     setKoreanElective("");
+    setTamguSingle(false);
     setOmrFile(null);
     setKeyFile(null);
     setKey1File(null);
@@ -153,6 +161,18 @@ export default function GradeExamFlow() {
     setSlots([]);
     setError(null);
     setTokenNote(null);
+  }
+
+  /**
+   * 결과·저장 화면에 보여줄 슬롯 제목. 탐구를 한 과목만 채점하면
+   * slot이 없다("1선택"이라 부를 게 없다) — 그때는 "탐구"만 쓴다.
+   */
+  function slotTitle(slot: SlotDraft): string {
+    if (subject !== "elective") {
+      return `${SUBJECT_LABEL[subject]}${slot.label ? ` · ${slot.label}` : ""}`;
+    }
+    const prefix = slot.slot ? `${slot.slot}선택` : "탐구";
+    return `${prefix}${slot.label ? ` · ${slot.label}` : ""}`;
   }
 
   /** 이 채점의 선택과목 라벨(탐구=1/2선택 과목명, 수학·국어=선택과목). */
@@ -171,14 +191,22 @@ export default function GradeExamFlow() {
     setError(null);
     setBusyMessage("사진을 준비하는 중...");
     try {
-      const imageCount = subject === "elective" ? 3 : 2;
+      const imageCount = subject === "elective" ? (tamguSingle ? 2 : 3) : 2;
       const budget = gradingImageBudget(imageCount);
 
       const omr = await prepareGradingImage(omrFile as File, budget);
       const keys: { slot?: 1 | 2; label?: string; image: string }[] = [];
       if (subject === "elective") {
-        keys.push({ slot: 1, label: key1Label || undefined, image: await prepareGradingImage(key1File as File, budget) });
-        keys.push({ slot: 2, label: key2Label || undefined, image: await prepareGradingImage(key2File as File, budget) });
+        keys.push({
+          // 한 과목만 채점할 때는 "1선택"이라는 구분 자체가 없다 — slot을
+          // 아예 안 매겨서 저장 때도 elective_slot이 null로 남게 한다.
+          slot: tamguSingle ? undefined : 1,
+          label: key1Label || undefined,
+          image: await prepareGradingImage(key1File as File, budget),
+        });
+        if (!tamguSingle) {
+          keys.push({ slot: 2, label: key2Label || undefined, image: await prepareGradingImage(key2File as File, budget) });
+        }
       } else {
         keys.push({ image: await prepareGradingImage(keyFile as File, budget) });
       }
@@ -207,7 +235,15 @@ export default function GradeExamFlow() {
           // 탐구는 슬롯마다 설정 단계에서 따로 적은 이름을 그대로 심어 둔다
           // — 아래에서 전부 `slot.examName ?? examName`(공통 이름)으로
           // 읽으므로, 여기서 채워두면 국어·수학과 같은 코드로 처리된다.
-          examName: subject === "elective" ? (s.slot === 1 ? examName1 : s.slot === 2 ? examName2 : undefined) : undefined,
+          examName: subject === "elective"
+            ? tamguSingle
+              ? examName1
+              : s.slot === 1
+                ? examName1
+                : s.slot === 2
+                  ? examName2
+                  : undefined
+            : undefined,
         })),
       );
       if (typeof json.chargedTokens === "number") {
@@ -390,56 +426,102 @@ export default function GradeExamFlow() {
           )}
 
           {subject === "elective" && (
-            <div className="flex flex-col gap-1">
-              <p className="text-sm text-slate-700">
-                선택과목 <span className="text-red-500">*</span>
-              </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <p className="mb-1 text-xs font-medium text-slate-500">1선택</p>
-                  <ElectiveSelect value={key1Label} onChange={setKey1Label} />
-                </div>
-                <div>
-                  <p className="mb-1 text-xs font-medium text-slate-500">2선택</p>
-                  <ElectiveSelect value={key2Label} onChange={setKey2Label} />
+            <div className="flex flex-col gap-3">
+              {/* 실제 수능은 1선택+2선택 둘 다지만, 한 과목만 풀어본
+                  연습(자체 제작 워크시트 등)도 있다 — 그때 2선택을
+                  강제로 채우게 하면 못 쓴다. */}
+              <div>
+                <p className="mb-1 text-sm font-medium text-slate-700">몇 과목</p>
+                <div className="flex gap-1.5">
+                  {([
+                    { value: false, label: "1선택+2선택" },
+                    { value: true, label: "1과목만" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={String(opt.value)}
+                      type="button"
+                      aria-pressed={tamguSingle === opt.value}
+                      onClick={() => setTamguSingle(opt.value)}
+                      className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                        tamguSingle === opt.value
+                          ? "border-blue-600 bg-blue-600 text-white"
+                          : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-              {!(key1Label && key2Label) && (
-                <p className="text-xs text-amber-600">
-                  1선택·2선택 과목을 17과목 중에서 각각 골라주세요 — 안 고르면
-                  다음으로 넘어갈 수 없어요.
+
+              <div className="flex flex-col gap-1">
+                <p className="text-sm text-slate-700">
+                  선택과목 <span className="text-red-500">*</span>
                 </p>
-              )}
+                {tamguSingle ? (
+                  <ElectiveSelect value={key1Label} onChange={setKey1Label} />
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-slate-500">1선택</p>
+                      <ElectiveSelect value={key1Label} onChange={setKey1Label} />
+                    </div>
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-slate-500">2선택</p>
+                      <ElectiveSelect value={key2Label} onChange={setKey2Label} />
+                    </div>
+                  </div>
+                )}
+                {!electivePicked && (
+                  <p className="text-xs text-amber-600">
+                    {tamguSingle
+                      ? "과목을 17과목 중에서 골라주세요 — 안 고르면 다음으로 넘어갈 수 없어요."
+                      : "1선택·2선택 과목을 17과목 중에서 각각 골라주세요 — 안 고르면 다음으로 넘어갈 수 없어요."}
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
           {subject === "elective" ? (
-            // 탐구는 1선택·2선택이 서로 다른 시험일 수 있다(예: 1선택은
-            // 9월 모의평가, 2선택은 6월 모의평가) — 이름 하나로는 못
-            // 담으므로 선택과목 select와 같은 자리에 나란히 둘을 둔다.
-            <div className="flex flex-col gap-1">
-              <p className="text-sm text-slate-700">시험 이름 (선택 입력)</p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="flex flex-col gap-1 text-xs text-slate-500">
-                  1선택
-                  <input
-                    value={examName1}
-                    onChange={(e) => setExamName1(e.target.value)}
-                    placeholder="예: 2025학년도 9월 모의평가"
-                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-ink focus:border-blue-500 focus:outline-none"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-xs text-slate-500">
-                  2선택
-                  <input
-                    value={examName2}
-                    onChange={(e) => setExamName2(e.target.value)}
-                    placeholder="예: 2025학년도 9월 모의평가"
-                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-ink focus:border-blue-500 focus:outline-none"
-                  />
-                </label>
+            tamguSingle ? (
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                시험 이름
+                <input
+                  value={examName1}
+                  onChange={(e) => setExamName1(e.target.value)}
+                  placeholder="예: 2025학년도 9월 모의평가 — 선택 입력"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+                />
+              </label>
+            ) : (
+              // 탐구는 1선택·2선택이 서로 다른 시험일 수 있다(예: 1선택은
+              // 9월 모의평가, 2선택은 6월 모의평가) — 이름 하나로는 못
+              // 담으므로 선택과목 select와 같은 자리에 나란히 둘을 둔다.
+              <div className="flex flex-col gap-1">
+                <p className="text-sm text-slate-700">시험 이름 (선택 입력)</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-xs text-slate-500">
+                    1선택
+                    <input
+                      value={examName1}
+                      onChange={(e) => setExamName1(e.target.value)}
+                      placeholder="예: 2025학년도 9월 모의평가"
+                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-ink focus:border-blue-500 focus:outline-none"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-slate-500">
+                    2선택
+                    <input
+                      value={examName2}
+                      onChange={(e) => setExamName2(e.target.value)}
+                      placeholder="예: 2025학년도 9월 모의평가"
+                      className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-ink focus:border-blue-500 focus:outline-none"
+                    />
+                  </label>
+                </div>
               </div>
-            </div>
+            )
           ) : (
             <label className="flex items-center gap-2 text-sm text-slate-700">
               시험 이름
@@ -485,22 +567,32 @@ export default function GradeExamFlow() {
           <FileField label="OMR 카드" file={omrFile} onChange={setOmrFile} />
 
           {subject === "elective" ? (
-            <>
+            tamguSingle ? (
               <div className="rounded-lg border border-slate-200 p-3">
                 <p className="mb-2 text-sm font-medium text-slate-700">
-                  1선택 · {key1Label}
+                  {key1Label}
                   {examName1 && ` · ${examName1}`}
                 </p>
-                <FileField label="1선택 정답표" file={key1File} onChange={setKey1File} />
+                <FileField label="정답표" file={key1File} onChange={setKey1File} />
               </div>
-              <div className="rounded-lg border border-slate-200 p-3">
-                <p className="mb-2 text-sm font-medium text-slate-700">
-                  2선택 · {key2Label}
-                  {examName2 && ` · ${examName2}`}
-                </p>
-                <FileField label="2선택 정답표" file={key2File} onChange={setKey2File} />
-              </div>
-            </>
+            ) : (
+              <>
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <p className="mb-2 text-sm font-medium text-slate-700">
+                    1선택 · {key1Label}
+                    {examName1 && ` · ${examName1}`}
+                  </p>
+                  <FileField label="1선택 정답표" file={key1File} onChange={setKey1File} />
+                </div>
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <p className="mb-2 text-sm font-medium text-slate-700">
+                    2선택 · {key2Label}
+                    {examName2 && ` · ${examName2}`}
+                  </p>
+                  <FileField label="2선택 정답표" file={key2File} onChange={setKey2File} />
+                </div>
+              </>
+            )
           ) : (
             <FileField label="정답표" file={keyFile} onChange={setKeyFile} />
           )}
@@ -547,7 +639,7 @@ export default function GradeExamFlow() {
             return (
               <div key={si} className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="mb-2 text-sm font-semibold text-ink">
-                  {subject === "elective" ? `${slot.slot}선택${slot.label ? ` · ${slot.label}` : ""}` : SUBJECT_LABEL[subject]}
+                  {slotTitle(slot)}
                   {" — "}
                   {needsDeduction
                     ? dScore !== null
@@ -698,10 +790,7 @@ export default function GradeExamFlow() {
               summary.score === null
                 ? deductionScore(summary.wrongNumbers, slot.deductions, examMaxScore(subject))
                 : summary.score;
-            const title =
-              subject === "elective"
-                ? `${slot.slot}선택${slot.label ? ` · ${slot.label}` : ""}`
-                : `${SUBJECT_LABEL[subject]}${slot.label ? ` · ${slot.label}` : ""}`;
+            const title = slotTitle(slot);
             return (
               <div key={si} className="rounded-xl border border-slate-200 bg-white p-4">
                 {slot.examScoreId && (

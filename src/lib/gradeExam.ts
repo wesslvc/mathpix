@@ -30,7 +30,7 @@ export class GradeError extends Error {
   }
 }
 
-function subjectPrompt(subject: Subject): string {
+function subjectPrompt(subject: Subject, keyCount: number): string {
   // 공통 지시는 짧게 유지한다 — 매 채점 호출마다 입력 토큰으로 나가므로,
   // 특정 과목에만 해당하는 설명(예: 수학의 격자형 표기)은 여기 넣지 않고
   // 그 과목 분기에만 붙인다.
@@ -41,7 +41,11 @@ function subjectPrompt(subject: Subject): string {
 - 학생 답은 실제로 마킹(칠하거나 표시)된 것만 읽으세요. 정답표를 보고 지어내지 마세요.
 - 설명은 쓰지 말고 JSON만 답하세요.`;
 
-  if (subject === "elective") {
+  // 탐구는 보통 1선택+2선택 두 과목을 같이 보지만, 한 과목만 풀어본
+  // 연습(자체 제작 워크시트 등)도 있다 — 그때는 정답표 사진이 1장뿐이고
+  // OMR에 구역을 나눌 것도 없다. keyCount로 갈라서, 1장이면 국어·수학과
+  // 같은 "사진 두 장, slot 없음" 구조를 그대로 쓴다(아래로 흘러간다).
+  if (subject === "elective" && keyCount === 2) {
     return `당신은 한국 고등학교 탐구영역 시험을 채점하는 도우미입니다.
 사진은 세 장입니다.
 1) OMR 카드 — 1선택 과목과 2선택 과목의 마킹이 한 장에 함께 있습니다(보통 각 20문항이고, 위아래 또는 좌우로 구역이 나뉘어 있습니다).
@@ -53,6 +57,11 @@ OMR에서 1선택 과목 구역과 2선택 과목 구역의 마킹을 각각 구
 ${common}
 - slot 1의 items 개수는 1선택 정답표의 문항 수와, slot 2는 2선택 정답표의 문항 수와 같아야 합니다.`;
   }
+
+  const intro =
+    subject === "elective"
+      ? "당신은 한국 고등학교 탐구영역 시험을 채점하는 도우미입니다."
+      : "당신은 한국 고등학교 시험(내신·모의고사·수능)의 답안을 채점하는 도우미입니다.";
 
   // 수학은 문항 배치가 표준 수능·모의고사 형식으로 고정돼 있다(공통 22문항
   // + 선택 8문항 = 30문항, 객관식·단답형 자리가 항상 같다). "이 문항이
@@ -73,7 +82,7 @@ ${common}
 `
       : "";
 
-  return `당신은 한국 고등학교 시험(내신·모의고사·수능)의 답안을 채점하는 도우미입니다.
+  return `${intro}
 사진은 두 장입니다.
 1) OMR 카드 — 학생이 마킹(또는 적은) 답입니다.
 2) 정답표 — 문항별 정답이고, 배점(점수) 칸이 있을 수도 있습니다.
@@ -183,7 +192,9 @@ export async function gradeWithVision(
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
   const model = OPENAI_DETECT_MODEL;
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
-  const prompt = subjectPrompt(subject);
+  // images[0]은 OMR, 나머지가 정답표다 — 탐구가 정답표 1장(한 과목만)인지
+  // 2장(1선택+2선택)인지로 프롬프트가 갈린다.
+  const prompt = subjectPrompt(subject, images.length - 1);
 
   let res = await fetch(OPENAI_RESPONSES, {
     method: "POST",
