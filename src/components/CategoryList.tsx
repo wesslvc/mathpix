@@ -25,11 +25,16 @@ export default function CategoryList({
   categories,
   folders,
   currentFolderId,
+  maxScoreByCategory = {},
 }: {
   categories: Category[];
   folders: Folder[];
   currentFolderId: string | null;
+  /** 실모 id → 원점수 만점(탐구 50 / 그 밖 100). 없으면 100. */
+  maxScoreByCategory?: Record<string, number>;
 }) {
+  /** 이 실모의 만점. 연결된 채점이 없으면 예전처럼 100. */
+  const maxOf = (id: string) => maxScoreByCategory[id] ?? 100;
   const router = useRouter();
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
 
@@ -116,7 +121,7 @@ export default function CategoryList({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return null; // null = 검색 안 함
-    return categories.filter((c) => categoryLabel(c).toLowerCase().includes(q));
+    return categories.filter((c) => categoryLabel(c, maxOf(c.id)).toLowerCase().includes(q));
   }, [categories, search]);
 
   function folderNameOf(id: string | null): string | null {
@@ -137,7 +142,7 @@ export default function CategoryList({
         />
         <Link href={`/categories/${category.id}`} className="min-w-0 flex-1">
           <p className="truncate font-semibold text-ink">
-            {categoryLabel(category)}
+            {categoryLabel(category, maxOf(category.id))}
             {category.is_exam && (
               <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
                 실모
@@ -165,7 +170,7 @@ export default function CategoryList({
               </option>
             ))}
           </select>
-          <DeleteCategoryButton categoryId={category.id} label={categoryLabel(category)} />
+          <DeleteCategoryButton categoryId={category.id} label={categoryLabel(category, maxOf(category.id))} />
           <Link href={`/categories/${category.id}`} className="text-sm text-blue-600">
             열기 →
           </Link>

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import type { Category, Folder } from "@/lib/supabase/types";
+import { examMaxScore, type Subject } from "@/lib/gradeSummary";
 import NewCategoryForm from "@/components/NewCategoryForm";
 import LogoutButton from "@/components/LogoutButton";
 import CategoryList from "@/components/CategoryList";
@@ -58,6 +59,19 @@ export default async function DashboardPage({
     .order("created_at", { ascending: true })
     .returns<Folder[]>();
 
+  // 실모 라벨의 만점(탐구 50 / 그 밖 100)은 연결된 채점 기록의 과목에서
+  // 온다 — categories 자체에는 과목이 없다. 없으면 100으로 두면 예전 표기
+  // 그대로다.
+  const { data: linked } = await supabase
+    .from("exam_scores")
+    .select("category_id, subject")
+    .not("category_id", "is", null)
+    .returns<{ category_id: string; subject: Subject }[]>();
+  const maxScoreByCategory: Record<string, number> = {};
+  for (const row of linked ?? []) {
+    maxScoreByCategory[row.category_id] = examMaxScore(row.subject);
+  }
+
   const access = await getAccessState(supabase);
 
   return (
@@ -97,6 +111,7 @@ export default async function DashboardPage({
       <NewCategoryForm folderId={currentFolderId ?? null} />
 
       <CategoryList
+          maxScoreByCategory={maxScoreByCategory}
         categories={categories ?? []}
         folders={folders ?? []}
         currentFolderId={currentFolderId ?? null}
