@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { isHeicFile } from "@/lib/cropImage";
-import { prepareGradingImage, gradingImageBudget } from "@/lib/gradeImagePrep";
+import { isHeicFile, readAsDataUrl } from "@/lib/cropImage";
+import { prepareGradingImage, gradingImageBudget, type PickedImage } from "@/lib/gradeImagePrep";
 import {
   computeSummary,
   examMaxScore,
@@ -121,11 +121,14 @@ export default function GradeExamFlow() {
   // 마킹 격자를 찾는 OMR 인식과는 다른 프롬프트가 필요하다.
   const [formalExam, setFormalExam] = useState(false);
 
-  const [omrFile, setOmrFile] = useState<File | null>(null);
-  const [keyFile, setKeyFile] = useState<File | null>(null);
-  const [key1File, setKey1File] = useState<File | null>(null);
+  // 사진은 **고르는 그 자리에서** 바이트까지 읽어 둔다(PickedImage) —
+  // 안드로이드에서 갤러리로 고른 파일은 접근 권한이 시간이 지나면 풀려서,
+  // "채점하기"를 누를 때 읽으면 실패하는 일이 있다.
+  const [omrFile, setOmrFile] = useState<PickedImage | null>(null);
+  const [keyFile, setKeyFile] = useState<PickedImage | null>(null);
+  const [key1File, setKey1File] = useState<PickedImage | null>(null);
   const [key1Label, setKey1Label] = useState("");
-  const [key2File, setKey2File] = useState<File | null>(null);
+  const [key2File, setKey2File] = useState<PickedImage | null>(null);
   const [key2Label, setKey2Label] = useState("");
 
   const [busyMessage, setBusyMessage] = useState<string | null>(null);
@@ -236,24 +239,13 @@ export default function GradeExamFlow() {
     setError(null);
     setBusyMessage("사진을 준비하는 중...");
     try {
-      // 아이폰 카메라 기본 포맷(HEIC)은 브라우저가 못 연다. 미리 걸러내지
-      // 않으면 loadImage가 실패하고 그 자리에서 "채점에 실패했습니다"라는
-      // 뜻 없는 문구만 뜬다 — 사진 업로드(ImageUploader)·지면 통째로
-      // 넣기(BatchSplitPanel)에는 이미 있는 안내를 여기도 넣는다.
-      const filesToCheck = [omrFile, keyFile, key1File, key2File].filter(
-        (f): f is File => f != null,
-      );
-      const heicFile = filesToCheck.find(isHeicFile);
-      if (heicFile) {
-        throw new Error(
-          "HEIC/HEIF 형식은 브라우저에서 열 수 없습니다. 아이폰 설정 > 카메라 > 포맷을 '호환 우선'으로 바꾼 뒤 다시 찍거나, JPG로 바꿔서 올려주세요.",
-        );
-      }
-
+      // HEIC 걸러내기와 파일 읽기는 **사진을 고를 때** 이미 끝났다(FileField).
+      // 여기 남아 있던 검사는 그때로 옮겼다 — 실패를 그 자리에서 알려주는
+      // 편이 낫고, 여기서는 이미 읽어 둔 바이트만 쓰므로 다시 읽을 일이 없다.
       const imageCount = subject === "elective" ? (tamguSingle ? 2 : 3) : 2;
       const budget = gradingImageBudget(imageCount);
 
-      const omr = await prepareGradingImage(omrFile as File, budget);
+      const omr = await prepareGradingImage(omrFile as PickedImage, budget);
       const keys: { slot?: 1 | 2; label?: string; image: string }[] = [];
       if (subject === "elective") {
         keys.push({
@@ -261,13 +253,13 @@ export default function GradeExamFlow() {
           // 아예 안 매겨서 저장 때도 elective_slot이 null로 남게 한다.
           slot: tamguSingle ? undefined : 1,
           label: key1Label || undefined,
-          image: await prepareGradingImage(key1File as File, budget),
+          image: await prepareGradingImage(key1File as PickedImage, budget),
         });
         if (!tamguSingle) {
-          keys.push({ slot: 2, label: key2Label || undefined, image: await prepareGradingImage(key2File as File, budget) });
+          keys.push({ slot: 2, label: key2Label || undefined, image: await prepareGradingImage(key2File as PickedImage, budget) });
         }
       } else {
-        keys.push({ image: await prepareGradingImage(keyFile as File, budget) });
+        keys.push({ image: await prepareGradingImage(keyFile as PickedImage, budget) });
       }
 
       setBusyMessage("채점하는 중... (최대 1~2분)");
@@ -1058,25 +1050,65 @@ export function ElectiveSelect({
   );
 }
 
+/**
+ * 사진을 고르면 **그 자리에서 바이트까지 읽어 둔다.**
+ *
+ * 예전에는 File 객체만 들고 있다가 "채점하기"를 누를 때 읽었는데, 안드로이드에서
+ * 갤러리로 고른 파일은 `content://` 라 시간이 지나면 접근 권한이 풀린다 —
+ * 과목·이름을 채우는 동안 못 읽는 파일이 되어 "파일을 읽지 못했습니다"로
+ * 막혔다(될 때도 있고 안 될 때도 있던 이유다). 고르자마자 읽으면 그 순간이
+ * 권한이 가장 확실한 때이고, 실패하더라도 **그 자리에서** 알 수 있다.
+ */
 function FileField({
   label,
   file,
   onChange,
 }: {
   label: string;
-  file: File | null;
-  onChange: (f: File | null) => void;
+  file: PickedImage | null;
+  onChange: (f: PickedImage | null) => void;
 }) {
+  const [reading, setReading] = useState(false);
+  const [readError, setReadError] = useState<string | null>(null);
+
   return (
     <label className="flex flex-col gap-1 text-sm text-slate-700">
       {label}
       <input
         type="file"
         accept="image/*"
-        onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          setReadError(null);
+          if (!f) {
+            onChange(null);
+            return;
+          }
+          if (isHeicFile(f)) {
+            onChange(null);
+            setReadError(
+              "HEIC/HEIF 형식은 브라우저에서 열 수 없어요. 아이폰 설정 > 카메라 > 포맷을 '호환 우선'으로 바꾼 뒤 다시 찍거나, JPG로 바꿔서 올려주세요.",
+            );
+            return;
+          }
+          setReading(true);
+          try {
+            const dataUrl = await readAsDataUrl(f);
+            onChange({ name: f.name, dataUrl, file: f });
+          } catch {
+            onChange(null);
+            setReadError(
+              `"${f.name}" 사진을 읽지 못했어요. 갤러리 대신 "내 파일"(다운로드 폴더)에서 고르거나, 사진을 한 번 캡처해서 올려주세요.`,
+            );
+          } finally {
+            setReading(false);
+          }
+        }}
         className="text-sm"
       />
-      {file && <span className="text-xs text-slate-400">{file.name}</span>}
+      {reading && <span className="text-xs text-slate-400">사진 읽는 중...</span>}
+      {file && !reading && <span className="text-xs text-slate-400">{file.name}</span>}
+      {readError && <span className="text-xs text-red-600">{readError}</span>}
     </label>
   );
 }

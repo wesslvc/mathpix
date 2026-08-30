@@ -1,4 +1,4 @@
-import { cropImageToDataUrl, loadDrawableFromFile, readAsDataUrl } from "./cropImage";
+import { cropImageToDataUrl, loadDrawableFromFile, loadImage } from "./cropImage";
 import { enhanceContrast } from "./autoContrast";
 import { DETECT_INPUT_DIM, MAX_UPLOAD_CHARS } from "./figureImage";
 
@@ -13,20 +13,41 @@ import { DETECT_INPUT_DIM, MAX_UPLOAD_CHARS } from "./figureImage";
  * 한 장 기준 상한(`MAX_UPLOAD_CHARS`)을 그대로 여러 장에 쓰면 요청이 통째로
  * 실패한다.
  */
+/**
+ * 고르는 순간 **바이트까지 읽어 둔** 사진.
+ *
+ * 안드로이드에서는 갤러리로 고른 파일이 `content://` 로 넘어오는데, 그 접근
+ * 권한이 시간이 지나면 풀린다 — 사진을 고른 뒤 과목·이름을 채우고 "채점하기"를
+ * 누를 때쯤이면 이미 못 읽는 파일이 되어 있는 일이 있다(그래서 될 때도 있고
+ * 안 될 때도 있었다). 그래서 **고르는 그 자리에서** data URL 로 읽어 두고,
+ * 그 뒤로는 이 값만 쓴다.
+ *
+ * `file` 도 함께 들고 있는 것은 큰 사진을 디코딩하면서 줄이는
+ * `createImageBitmap` 이 Blob 을 받기 때문이다 — 그쪽이 실패해도 `dataUrl`
+ * 이 있으니 보낼 것은 언제나 있다.
+ */
+export type PickedImage = { name: string; dataUrl: string; file?: File };
+
 export async function prepareGradingImage(
-  file: File,
+  pic: PickedImage,
   budgetChars: number,
 ): Promise<string> {
-  if (file.size === 0) {
-    throw new Error(
-      `"${file.name}" 사진이 비어 있습니다(0바이트). 클라우드에만 있는 사진일 수 있어요 — 갤러리에서 기기에 내려받은 뒤 다시 골라주세요.`,
-    );
-  }
+  const file = pic.file;
 
   // ① 브라우저가 사진을 열 수 있으면 줄여서 보낸다. 가장 좋은 길이다 —
   //    크기를 우리가 정하니 예산 안에 확실히 들어간다.
   try {
-    const img = await loadDrawableFromFile(file);
+    const img = file
+      ? await loadDrawableFromFile(file)
+      : await (async () => {
+          const el = await loadImage(pic.dataUrl);
+          return {
+            src: el as CanvasImageSource,
+            width: el.naturalWidth,
+            height: el.naturalHeight,
+            close: () => {},
+          };
+        })();
     try {
       const whole = { x: 0, y: 0, width: img.width, height: img.height };
       let last = "";
@@ -59,12 +80,14 @@ export async function prepareGradingImage(
     //    대신 크기를 줄일 수 없으니 예산을 넘으면 그때는 알려줘야 한다.
   }
 
-  const raw = await readAsDataUrl(file);
-  if (raw.length <= budgetChars) return raw;
+  // **여기서 파일을 다시 읽지 않는다.** 고를 때 이미 읽어 둔 바이트를 쓴다 —
+  // 다시 읽으면 그 사이 접근 권한이 풀린 안드로이드 파일에서 실패한다
+  // (실제로 "파일을 읽지 못했습니다"로 채점이 막혔다).
+  if (pic.dataUrl.length <= budgetChars) return pic.dataUrl;
 
-  const mb = (file.size / (1024 * 1024)).toFixed(1);
+  const mb = ((pic.dataUrl.length * 3) / 4 / (1024 * 1024)).toFixed(1);
   throw new Error(
-    `"${file.name}" 사진을 이 브라우저에서 열지 못했고, 원본을 그대로 보내기엔 너무 큽니다 (${mb}MB, ${file.type || "형식 불명"}). ` +
+    `"${pic.name}" 사진을 이 브라우저에서 열지 못했고, 원본을 그대로 보내기엔 너무 큽니다 (약 ${mb}MB). ` +
       `카메라 설정에서 해상도를 낮춰 다시 찍거나, 사진을 편집·캡처해서 더 작게 만든 뒤 올려주세요.`,
   );
 }
