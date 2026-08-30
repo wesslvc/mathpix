@@ -19,6 +19,7 @@ import { thumbPathFor } from "@/lib/cardThumb";
 import type { BoxOverride } from "@/lib/renderMathText";
 import type { ExamScore } from "@/lib/supabase/types";
 import { SUBJECT_LABEL } from "@/lib/examSubjects";
+import { examMaxScore } from "@/lib/gradeSummary";
 import GradeProblemUploader from "@/components/GradeProblemUploader";
 
 /**
@@ -282,7 +283,11 @@ export default async function CategoryPage({
           <CategoryTitleEditor
             id={category.id}
             source={category.source}
-            label={categoryLabel(category)}
+            label={categoryLabel(
+              category,
+              // 만점은 연결된 채점의 과목에서 온다(탐구 50). 없으면 100.
+              linkedGrades?.[0] ? examMaxScore(linkedGrades[0].subject) : 100,
+            )}
             examDate={category.exam_date}
           />
           <p className="text-sm text-slate-500">

@@ -86,13 +86,20 @@ export type Problem = {
 
 /**
  * 출처 표기 문자열을 만든다.
- * 실모(is_exam)이고 점수가 있으면 "강모2회(96)"처럼 뒤에 점수를 붙인다.
+ * 실모(is_exam)이고 점수가 있으면 "강모2회(96/100)"처럼 뒤에 점수를 붙인다.
+ *
+ * **만점을 100으로 못박으면 안 된다** — 탐구는 원점수 만점이 50점이라
+ * "36/100"처럼 절반짜리로 보인다(사용자 신고). categories 자체에는 과목이
+ * 없으므로, 연결된 채점 기록(exam_scores.subject)에서 구한 만점을 넘겨
+ * 준다(`examMaxScore`). 연결된 채점이 없으면 알 길이 없으니 100으로 둔다 —
+ * 예전과 같은 표기라 회귀가 없다.
  */
 export function categoryLabel(
   category: Pick<Category, "source" | "is_exam" | "score">,
+  maxScore = 100,
 ): string {
   if (category.is_exam && category.score != null) {
-    return `${category.source}(${category.score}/100)`;
+    return `${category.source}(${category.score}/${maxScore})`;
   }
   return category.source;
 }
