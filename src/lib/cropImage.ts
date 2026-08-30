@@ -10,7 +10,10 @@ const JPEG_QUALITY = 0.9;
  * 긴 변을 MAX_DIMENSION 이하로 축소하고 JPEG로 압축해 전송 크기를 줄인다.
  */
 export function cropImageToDataUrl(
-  image: HTMLImageElement,
+  // `<img>` 뿐 아니라 `ImageBitmap` 도 받는다(큰 사진은 그쪽으로 연다 —
+  // loadDrawableFromFile 참고). 이 함수는 크기를 rect 로만 받으므로 둘의
+  // 차이가 없다.
+  image: CanvasImageSource,
   rect: CropRect,
   /**
    * 가로·세로를 따로 제한하고 싶을 때.
@@ -99,8 +102,14 @@ export async function fileToDataUrl(file: File): Promise<string> {
   }
 }
 
-/** 파일의 바이트를 실제로 읽어 data URL로 만든다(objectURL 과 다른 경로다). */
-function readAsDataUrl(file: File): Promise<string> {
+/**
+ * 파일의 바이트를 실제로 읽어 data URL로 만든다(objectURL 과 다른 경로다).
+ *
+ * **디코딩을 하지 않는다** — 그냥 바이트를 base64 로 옮길 뿐이다. 그래서
+ * 브라우저가 그 형식을 못 그리더라도 이건 성공한다. 사진을 화면에 못 여는
+ * 기기에서도 모델에는 보낼 수 있는 이유다(`prepareGradingImage` 참고).
+ */
+export function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
@@ -110,26 +119,91 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
+/** 캔버스에 그릴 수 있는 이미지와 그 크기. `<img>` 든 `ImageBitmap` 이든 같이 다룬다. */
+export type Drawable = {
+  src: CanvasImageSource;
+  width: number;
+  height: number;
+  /** ImageBitmap 은 다 쓰면 닫아야 메모리가 바로 풀린다. */
+  close: () => void;
+};
+
 /**
- * 사용자가 고른 사진 파일을 **여러 방법으로** 열어 본다.
+ * 이 크기를 넘는 사진은 **디코딩하면서 바로 줄인다**.
  *
- * `URL.createObjectURL` + `<img>` 한 가지만 쓰면 안드로이드에서 자주 실패한다 —
- * 갤러리·구글포토에서 고른 사진이 기기에 실제로 내려받아져 있지 않거나
- * (`content://` 로만 존재) 확장자만 `.jpg` 이고 속은 다른 형식인 경우가 있다.
- * 그때는 `FileReader` 가 바이트를 직접 읽어 오면 열리는 일이 많아서 한 번 더
- * 시도한다. 둘 다 실패하면 **어느 파일이 왜 안 됐는지**(이름·크기·형식)를
+ * 갤럭시 카메라는 5천만~2억 화소로 찍는다(예: 200MP = 16320×12240). 그런
+ * 사진을 `<img>` 로 열면 **원본 픽셀을 전부 메모리에 펴야 해서** 모바일
+ * 크롬이 디코딩 자체를 포기한다(200MP면 RGBA 로 약 800MB다). 그때
+ * `img.onerror` 가 떠서, 멀쩡한 JPG 인데도 "이미지를 불러오지 못했습니다"가
+ * 됐다 — 실제로 사용자가 갤럭시 카메라 사진으로 여기서 막혔다.
+ *
+ * `createImageBitmap` 에 `resizeWidth` 를 주면 JPEG 디코더가 **줄인 크기로
+ * 곧바로 디코딩**하므로 원본 크기의 메모리가 아예 필요 없다. 어차피
+ * `DETECT_INPUT_DIM`(3000) 이하로 줄여 보낼 것이라 화질 손해도 없다.
+ */
+const DECODE_MAX_DIM = 3000;
+
+/**
+ * 사용자가 고른 사진 파일을 **여러 방법으로** 열어 본다. 하나라도 되면 그걸 쓴다.
+ *
+ * `URL.createObjectURL` + `<img>` 한 가지만 쓰면 안드로이드에서 자주 실패한다:
+ * ① **사진이 너무 크다**(갤럭시 카메라 원본) — 위 `DECODE_MAX_DIM` 설명 참고.
+ * ② 갤러리·구글포토에서 고른 사진이 기기에 실제로 내려받아져 있지 않다
+ *    (`content://` 로만 존재).
+ * ③ 확장자만 `.jpg` 이고 속은 다른 형식이다.
+ *
+ * 그래서 ①에 강한 `createImageBitmap`(디코딩하면서 축소)을 먼저 쓰고,
+ * 안 되면 예전 방식(`<img>`), 그래도 안 되면 ②에 강한 `FileReader` 순으로
+ * 내려간다. 전부 실패하면 **어느 파일이 왜 안 됐는지**(이름·크기·형식)를
  * 담아 던진다 — 예전에는 "채점에 실패했습니다"만 떠서 원인을 알 수 없었다.
  */
-export async function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+export async function loadDrawableFromFile(file: File): Promise<Drawable> {
   if (file.size === 0) {
     throw new Error(
       `"${file.name}" 사진이 비어 있습니다(0바이트). 클라우드에만 있는 사진일 수 있어요 — 갤러리에서 기기에 내려받은 뒤 다시 골라주세요.`,
     );
   }
 
+  const asBitmap = (bmp: ImageBitmap): Drawable => ({
+    src: bmp,
+    width: bmp.width,
+    height: bmp.height,
+    close: () => bmp.close(),
+  });
+  const asImg = (img: HTMLImageElement): Drawable => ({
+    src: img,
+    width: img.naturalWidth,
+    height: img.naturalHeight,
+    close: () => {},
+  });
+
+  // imageOrientation 을 명시해야 세로로 찍은 사진이 눕지 않는다 — 누우면
+  // OMR 을 통째로 못 읽는다.
+  if (typeof createImageBitmap === "function") {
+    try {
+      // 먼저 원본 그대로. 작은 사진을 괜히 늘리지 않기 위해서다.
+      return asBitmap(await createImageBitmap(file, { imageOrientation: "from-image" }));
+    } catch {
+      // 원본 크기로는 못 열었다 = 너무 큰 사진이다(갤럭시 카메라 원본 등).
+    }
+    try {
+      // 디코딩하면서 바로 줄인다. resizeWidth 하나만 주면 세로는 비율에
+      // 맞춰 따라온다.
+      return asBitmap(
+        await createImageBitmap(file, {
+          imageOrientation: "from-image",
+          resizeWidth: DECODE_MAX_DIM,
+          resizeQuality: "high",
+        }),
+      );
+    } catch {
+      // 다음 방법으로.
+    }
+  }
+
   const objectUrl = URL.createObjectURL(file);
   try {
-    return await loadImage(objectUrl);
+    return asImg(await loadImage(objectUrl));
   } catch {
     // 아래 FileReader 로 한 번 더 시도한다.
   } finally {
@@ -137,7 +211,7 @@ export async function loadImageFromFile(file: File): Promise<HTMLImageElement> {
   }
 
   try {
-    return await loadImage(await readAsDataUrl(file));
+    return asImg(await loadImage(await readAsDataUrl(file)));
   } catch {
     const kb = Math.max(1, Math.round(file.size / 1024));
     throw new Error(
