@@ -235,17 +235,35 @@ export default async function CategoryPage({
   // LinkCategoryPicker로 이미 되지만, 반대 방향(실모 화면에서 "이 실모는
   // 어느 채점과 연결돼 있나")을 보여줄 곳이 없었다 — 연동을 양쪽에서
   // 확인할 수 있어야 "연동됐다"는 게 실감난다.
+  //
+  // **wrong_numbers·items 까지 가져온다.** 예전에는 이름·점수만 가져와서
+  // 링크만 보여줬고, 오답 업로더는 `?gradeId=` 를 달고 채점 화면에서 넘어온
+  // 경우에만 떴다 — 폴더를 거쳐 실모로 바로 들어오면 연동이 통째로 사라져서
+  // 번호도, 정답 자동 매핑도 없었다(사용자 신고). 이제 연결된 채점이 있으면
+  // 어디로 들어오든 기본으로 뜬다.
   const { data: linkedGrades } = await supabase
     .from("exam_scores")
-    .select("id, subject, exam_name, elective_label, score, taken_at")
+    .select("id, subject, exam_name, elective_label, score, taken_at, wrong_numbers, items")
     .eq("category_id", id)
     .order("taken_at", { ascending: false })
     .returns<
       Pick<
         ExamScore,
-        "id" | "subject" | "exam_name" | "elective_label" | "score" | "taken_at"
+        | "id"
+        | "subject"
+        | "exam_name"
+        | "elective_label"
+        | "score"
+        | "taken_at"
+        | "wrong_numbers"
+        | "items"
       >[]
     >();
+
+  // `?gradeId=` 로 들어왔으면 그 채점 하나에 집중하고(채점 화면에서 "틀린문제
+  // 오답 업로드하기"로 넘어온 흐름), 아니면 연결된 채점을 전부 보여준다.
+  // 탐구는 1선택·2선택이 각각 독립된 행이라 한 실모에 둘이 붙을 수 있다.
+  const uploaderGrades = grade ? [grade] : (linkedGrades ?? []);
   const uploadedCountByGrade = new Map<string, number>();
   for (const p of galleryProblems) {
     if (!p.gradeId) continue;
@@ -265,6 +283,7 @@ export default async function CategoryPage({
             id={category.id}
             source={category.source}
             label={categoryLabel(category)}
+            examDate={category.exam_date}
           />
           <p className="text-sm text-slate-500">
             문제 {problems?.length ?? 0}개 저장됨
@@ -311,18 +330,24 @@ export default async function CategoryPage({
           목록으로 돌아가도 작업이 계속 돌아야 하기 때문이다.
           자동채점에서 넘어온 경우(gradeId)는 번호부터 고르고 나서 사진을
           올리게 한다 — GradeProblemUploader 가 그 순서를 강제한다. */}
-      {grade ? (
+      {uploaderGrades.map((g) => (
         <GradeProblemUploader
+          key={g.id}
           categoryId={category.id}
           canAdd={access.canRecognize}
-          gradeId={grade.id}
-          wrongNumbers={grade.wrong_numbers}
+          gradeId={g.id}
+          title={
+            g.exam_name ||
+            `${SUBJECT_LABEL[g.subject]}${g.elective_label ? ` · ${g.elective_label}` : ""}`
+          }
+          wrongNumbers={g.wrong_numbers}
           existingNumbers={existingNumbers}
-          items={grade.items}
+          items={g.items}
         />
-      ) : (
-        <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
-      )}
+      ))}
+
+      {/* 채점과 무관하게 그냥 오답을 추가하는 길은 늘 열어 둔다. */}
+      <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
 
       <ProblemGallery problems={galleryProblems} />
     </main>
