@@ -3,11 +3,21 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import type { ExamScore } from "@/lib/supabase/types";
+import type { Subject } from "@/lib/gradeSummary";
 import { buildTrendSeries } from "@/lib/scoreTrend";
 import BillingStatus from "@/components/BillingStatus";
 import ScoreTrendChart from "@/components/ScoreTrendChart";
 import Logo from "@/components/Logo";
 import GradeHistoryList from "@/components/GradeHistoryList";
+import GradingPrefsForm, { type GradingPrefsValue } from "@/components/GradingPrefsForm";
+
+const VALID_SUBJECTS: readonly Subject[] = ["korean", "math", "english", "elective"];
+
+function asSubject(v: unknown): Subject | null {
+  return typeof v === "string" && (VALID_SUBJECTS as readonly string[]).includes(v)
+    ? (v as Subject)
+    : null;
+}
 
 export default async function ProfilePage() {
   if (!isSupabaseConfigured()) {
@@ -45,6 +55,20 @@ export default async function ProfilePage() {
     .order("taken_at", { ascending: true })
     .returns<ExamScore[]>();
 
+  const { data: prefs } = await supabase
+    .from("grading_prefs")
+    .select("subject, math_elective, korean_elective, tamgu_single, elective1_label, elective2_label")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const gradingPrefs: GradingPrefsValue = {
+    subject: asSubject(prefs?.subject),
+    mathElective: prefs?.math_elective ?? "",
+    koreanElective: prefs?.korean_elective ?? "",
+    tamguSingle: prefs?.tamgu_single ?? false,
+    elective1Label: prefs?.elective1_label ?? "",
+    elective2Label: prefs?.elective2_label ?? "",
+  };
+
   const series = buildTrendSeries(scores ?? []);
   // 추세 그래프는 시간순(오름차순)이 필요하고, 기록 목록은 최근 것부터
   // 보이는 게 자연스럽다 — 같은 쿼리 결과를 뒤집어 재사용한다(왕복을
@@ -69,6 +93,8 @@ export default async function ProfilePage() {
         unlimited={access.unlimited}
         checkoutReady={isCheckoutReady()}
       />
+
+      <GradingPrefsForm initial={gradingPrefs} />
 
       <section className="flex flex-col gap-4">
         <div className="flex items-center justify-between">

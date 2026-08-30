@@ -32,7 +32,7 @@ export type ExamScore = {
   id: string;
   user_id: string;
   category_id: string | null;
-  subject: "korean" | "math" | "elective";
+  subject: "korean" | "math" | "english" | "elective";
   /**
    * 탐구는 1선택/2선택 과목명(17과목 중 하나), 수학은 선택과목(미적분·
    * 확률과 통계·기하), 국어는 선택과목(언어와 매체·화법과 작문).

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { prepareGradingImage, gradingImageBudget } from "@/lib/gradeImagePrep";
@@ -16,6 +16,7 @@ import {
   SCIENCE_ELECTIVES,
   MATH_ELECTIVES,
   KOREAN_ELECTIVES,
+  SUBJECT_LABEL,
 } from "@/lib/examSubjects";
 import LinkCategoryPicker from "./LinkCategoryPicker";
 import CommentBox from "./CommentBox";
@@ -27,11 +28,7 @@ function todayString(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-const SUBJECT_LABEL: Record<Subject, string> = {
-  korean: "국어",
-  math: "수학",
-  elective: "탐구",
-};
+const VALID_SUBJECTS: readonly Subject[] = ["korean", "math", "english", "elective"];
 
 /**
  * 원점수 만점은 항상 분모로 붙인다(국어·수학 100, 탐구 50). 정답표가
@@ -111,6 +108,10 @@ export default function GradeExamFlow() {
   // 실제 수능은 늘 두 과목이지만, 한 과목만 풀어보는 연습(자체 제작
   // 워크시트 등)도 흔하다 — 그때 2선택을 강제로 채우게 하면 쓸 수 없다.
   const [tamguSingle, setTamguSingle] = useState(false);
+  // 수능·모의고사 당일처럼 실제 OMR 카드를 학생이 가져올 수 없는 "정식시험"은
+  // 대신 시험지 여백 등에 문항 번호별로 손으로 적어 둔 가채점표로 채점한다 —
+  // 마킹 격자를 찾는 OMR 인식과는 다른 프롬프트가 필요하다.
+  const [formalExam, setFormalExam] = useState(false);
 
   const [omrFile, setOmrFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
@@ -124,17 +125,52 @@ export default function GradeExamFlow() {
   const [slots, setSlots] = useState<SlotDraft[]>([]);
   const [tokenNote, setTokenNote] = useState<string | null>(null);
 
+  // 프로필에서 기본 과목을 미리 정해 뒀으면 여기서 자동으로 선택된다 —
+  // 시험마다 매번 같은 과목(자신의 선택과목)을 새로 고르는 게 번거롭다는
+  // 요청이다. 값이 있을 때만 덮어쓰고, 이미 사용자가 화면에서 손댔더라도
+  // 마운트 시 한 번만 적용되므로 어긋나지 않는다.
+  useEffect(() => {
+    (async () => {
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data } = await supabase
+          .from("grading_prefs")
+          .select("subject, math_elective, korean_elective, tamgu_single, elective1_label, elective2_label")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (!data) return;
+        if (VALID_SUBJECTS.includes(data.subject as Subject)) setSubject(data.subject as Subject);
+        if (data.math_elective) setMathElective(data.math_elective);
+        if (data.korean_elective) setKoreanElective(data.korean_elective);
+        if (typeof data.tamgu_single === "boolean") setTamguSingle(data.tamgu_single);
+        if (data.elective1_label) setKey1Label(data.elective1_label);
+        if (data.elective2_label) setKey2Label(data.elective2_label);
+      } catch {
+        // 기본값을 못 불러와도 그냥 빈 화면으로 시작하면 그만이다(예전과
+        // 같은 동작) — 이것 때문에 채점 화면 진입 자체를 막을 이유가 없다.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 국어·수학·탐구 전부 선택과목에 따라 시험 자체가 다르다(미적분/확통/기하,
   // 언매/화작, 탐구 17과목) — 안 고르고 채점하면 정답표 매칭이 어긋날 수
-  // 있으니 반드시 골라야 다음으로 넘어가고, 채점도 시작할 수 있다.
+  // 있으니 반드시 골라야 다음으로 넘어가고, 채점도 시작할 수 있다. 영어는
+  // 선택과목이 없어 항상 통과한다.
   const electivePicked =
     subject === "math"
       ? Boolean(mathElective)
       : subject === "korean"
         ? Boolean(koreanElective)
-        : tamguSingle
-          ? Boolean(key1Label)
-          : Boolean(key1Label && key2Label);
+        : subject === "english"
+          ? true
+          : tamguSingle
+            ? Boolean(key1Label)
+            : Boolean(key1Label && key2Label);
 
   const canGrade =
     electivePicked &&
@@ -152,6 +188,7 @@ export default function GradeExamFlow() {
     setMathElective("");
     setKoreanElective("");
     setTamguSingle(false);
+    setFormalExam(false);
     setOmrFile(null);
     setKeyFile(null);
     setKey1File(null);
@@ -215,7 +252,7 @@ export default function GradeExamFlow() {
       const res = await fetch("/api/grade-exam", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, omr, keys }),
+        body: JSON.stringify({ subject, omr, keys, method: formalExam ? "handwritten" : "omr" }),
       });
       const json: {
         slots?: GradeSlot[];
@@ -544,6 +581,24 @@ export default function GradeExamFlow() {
             />
           </label>
 
+          {/* 수능·모의고사 당일처럼 실제 OMR 카드를 학생이 가져올 수 없는
+              "정식시험"은 대신 시험지 여백 등에 손으로 적어 둔 가채점표로
+              채점한다 — 마킹 격자를 찾는 것과는 다른 인식 방식이 필요하다. */}
+          <label className="flex items-start gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={formalExam}
+              onChange={(e) => setFormalExam(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              정식시험 (OMR 카드를 못 가져와서 가채점표로 채점)
+              <span className="block text-xs text-slate-400">
+                체크하면 마킹된 OMR 대신, 손으로 문항 번호 옆에 적은 답을 읽어요.
+              </span>
+            </span>
+          </label>
+
           <button
             type="button"
             onClick={() => setStep("uploading")}
@@ -564,7 +619,7 @@ export default function GradeExamFlow() {
             {examName && ` · ${examName}`} · {takenAt}
           </p>
 
-          <FileField label="OMR 카드" file={omrFile} onChange={setOmrFile} />
+          <FileField label={formalExam ? "가채점표" : "OMR 카드"} file={omrFile} onChange={setOmrFile} />
 
           {subject === "elective" ? (
             tamguSingle ? (
@@ -931,7 +986,8 @@ export default function GradeExamFlow() {
   );
 }
 
-function ElectiveSelect({
+/** 프로필의 기본 과목 설정(GradingPrefsForm)도 같은 17과목 select를 쓴다. */
+export function ElectiveSelect({
   value,
   onChange,
 }: {

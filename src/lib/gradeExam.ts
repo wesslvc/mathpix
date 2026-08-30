@@ -30,7 +30,12 @@ export class GradeError extends Error {
   }
 }
 
-function subjectPrompt(subject: Subject, keyCount: number): string {
+/** OMR(마킹) 대신 손으로 쓴 답을 읽는 방식. "정식시험"(수능 당일 등)은 실제
+ *  OMR 카드를 학생이 가져올 수 없어서, 시험지 여백 등에 문항 번호별로 답을
+ *  적어 둔 가채점표로 채점해야 한다. */
+export type GradingMethod = "omr" | "handwritten";
+
+function subjectPrompt(subject: Subject, keyCount: number, method: GradingMethod): string {
   // 공통 지시는 짧게 유지한다 — 매 채점 호출마다 입력 토큰으로 나가므로,
   // 특정 과목에만 해당하는 설명(예: 수학의 격자형 표기)은 여기 넣지 않고
   // 그 과목 분기에만 붙인다.
@@ -41,6 +46,14 @@ function subjectPrompt(subject: Subject, keyCount: number): string {
 - 학생 답은 실제로 마킹(칠하거나 표시)된 것만 읽으세요. 정답표를 보고 지어내지 마세요.
 - 설명은 쓰지 말고 JSON만 답하세요.`;
 
+  // 가채점표(손글씨)에는 OMR의 마킹 규칙(격자·원 마킹)이 아예 없다 — 문항
+  // 번호 옆에 적힌 숫자를 그대로 읽으면 된다. 지우고 다시 쓴 흔적(취소선 등)
+  // 처리만 따로 알려 준다.
+  const sheetLabel =
+    method === "handwritten"
+      ? "가채점표 — 학생이 문항 번호 옆에 손으로 쓴 답입니다. 마킹된 원을 찾지 말고 손글씨 숫자·문자를 그대로 읽으세요. 한 문항에 여러 개를 썼다가 지운 흔적(취소선 등)이 있으면 지워지지 않은 것을 답으로 보세요. 아무것도 안 쓴 문항은 무마킹(null)입니다."
+      : "OMR 카드 — 학생이 마킹(또는 적은) 답입니다.";
+
   // 탐구는 보통 1선택+2선택 두 과목을 같이 보지만, 한 과목만 풀어본
   // 연습(자체 제작 워크시트 등)도 있다 — 그때는 정답표 사진이 1장뿐이고
   // OMR에 구역을 나눌 것도 없다. keyCount로 갈라서, 1장이면 국어·수학과
@@ -48,11 +61,11 @@ function subjectPrompt(subject: Subject, keyCount: number): string {
   if (subject === "elective" && keyCount === 2) {
     return `당신은 한국 고등학교 탐구영역 시험을 채점하는 도우미입니다.
 사진은 세 장입니다.
-1) OMR 카드 — 1선택 과목과 2선택 과목의 마킹이 한 장에 함께 있습니다(보통 각 20문항이고, 위아래 또는 좌우로 구역이 나뉘어 있습니다).
+1) ${sheetLabel} 1선택 과목과 2선택 과목의 답이 한 장에 함께 있습니다(보통 각 20문항이고, 위아래 또는 좌우로 구역이 나뉘어 있습니다).
 2) 1선택 과목 정답표
 3) 2선택 과목 정답표
 
-OMR에서 1선택 과목 구역과 2선택 과목 구역의 마킹을 각각 구분해서 읽고, 다음 JSON으로만 답하세요:
+1) 사진에서 1선택 과목 구역과 2선택 과목 구역을 각각 구분해서 읽고, 다음 JSON으로만 답하세요:
 {"slots":[{"slot":1,"items":[...]},{"slot":2,"items":[...]}]}
 ${common}
 - slot 1의 items 개수는 1선택 정답표의 문항 수와, slot 2는 2선택 정답표의 문항 수와 같아야 합니다.`;
@@ -69,8 +82,13 @@ ${common}
   // 두 가지로 섞여 있어) 헷갈려했다(사용자가 실제로 신고했다) — 번호로
   // 못박아 주면 그 판단 자체가 필요 없어지고, 판단 과정을 설명하던 문장도
   // 줄어 프롬프트가 짧아진다(토큰 절감).
+  //
+  // **가채점표(손글씨)에는 이 격자 규칙이 없다** — 학생이 그냥 답 숫자를
+  // 그대로 적으므로 객관식·단답형 구분 없이 "적힌 숫자를 읽으라"는 공통
+  // 지시만으로 충분하고, 여기서 격자 규칙을 얹으면 오히려 없는 격자를
+  // 찾으려다 헷갈린다.
   const mathNote =
-    subject === "math"
+    subject === "math" && method === "omr"
       ? `
 이 시험은 표준 수능·모의고사 형식입니다(문항이 이보다 적으면 있는 범위까지만 적용하세요):
 - 1~15번·23~28번은 객관식(①~⑤)입니다. 문항 번호가 가로 헤더로 먼저 나오고 그 아래 세로줄에 ①~⑤가
@@ -84,7 +102,7 @@ ${common}
 
   return `${intro}
 사진은 두 장입니다.
-1) OMR 카드 — 학생이 마킹(또는 적은) 답입니다.
+1) ${sheetLabel}
 2) 정답표 — 문항별 정답이고, 배점(점수) 칸이 있을 수도 있습니다.
 ${mathNote}
 문항 번호 순서대로 읽어 다음 JSON으로만 답하세요:
@@ -186,15 +204,16 @@ function parseSlots(text: string): GradeSlot[] {
 export async function gradeWithVision(
   subject: Subject,
   images: string[],
+  method: GradingMethod = "omr",
   signal?: AbortSignal,
 ): Promise<{ slots: GradeSlot[]; usage?: GradeUsage; model: string }> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
   const model = OPENAI_DETECT_MODEL;
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
-  // images[0]은 OMR, 나머지가 정답표다 — 탐구가 정답표 1장(한 과목만)인지
-  // 2장(1선택+2선택)인지로 프롬프트가 갈린다.
-  const prompt = subjectPrompt(subject, images.length - 1);
+  // images[0]은 OMR(또는 가채점표), 나머지가 정답표다 — 탐구가 정답표
+  // 1장(한 과목만)인지 2장(1선택+2선택)인지로 프롬프트가 갈린다.
+  const prompt = subjectPrompt(subject, images.length - 1, method);
 
   let res = await fetch(OPENAI_RESPONSES, {
     method: "POST",
