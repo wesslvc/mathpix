@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { isHeicFile } from "@/lib/cropImage";
 import { prepareGradingImage, gradingImageBudget } from "@/lib/gradeImagePrep";
 import {
   computeSummary,
@@ -228,6 +229,20 @@ export default function GradeExamFlow() {
     setError(null);
     setBusyMessage("사진을 준비하는 중...");
     try {
+      // 아이폰 카메라 기본 포맷(HEIC)은 브라우저가 못 연다. 미리 걸러내지
+      // 않으면 loadImage가 실패하고 그 자리에서 "채점에 실패했습니다"라는
+      // 뜻 없는 문구만 뜬다 — 사진 업로드(ImageUploader)·지면 통째로
+      // 넣기(BatchSplitPanel)에는 이미 있는 안내를 여기도 넣는다.
+      const filesToCheck = [omrFile, keyFile, key1File, key2File].filter(
+        (f): f is File => f != null,
+      );
+      const heicFile = filesToCheck.find(isHeicFile);
+      if (heicFile) {
+        throw new Error(
+          "HEIC/HEIF 형식은 브라우저에서 열 수 없습니다. 아이폰 설정 > 카메라 > 포맷을 '호환 우선'으로 바꾼 뒤 다시 찍거나, JPG로 바꿔서 올려주세요.",
+        );
+      }
+
       const imageCount = subject === "elective" ? (tamguSingle ? 2 : 3) : 2;
       const budget = gradingImageBudget(imageCount);
 
