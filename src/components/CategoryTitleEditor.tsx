@@ -18,23 +18,31 @@ export default function CategoryTitleEditor({
   id,
   source,
   label,
+  examDate,
 }: {
   id: string;
   /** 고칠 값(출처). 화면에 보이는 `label` 과 다를 수 있다(점수가 붙는다). */
   source: string;
   label: string;
+  /** 시행일(YYYY-MM-DD). PDF 머리말에 쓰인다 — 잘못 넣으면 고칠 길이 없었다. */
+  examDate: string | null;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(source);
+  const [dateDraft, setDateDraft] = useState(examDate ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function save() {
     const next = draft.trim();
-    if (!next || next === source) {
+    const nextDate = dateDraft.trim() || null;
+    const titleChanged = Boolean(next) && next !== source;
+    const dateChanged = nextDate !== (examDate ?? null);
+    if (!titleChanged && !dateChanged) {
       setEditing(false);
       setDraft(source);
+      setDateDraft(examDate ?? "");
       return;
     }
     setBusy(true);
@@ -43,13 +51,24 @@ export default function CategoryTitleEditor({
       const supabase = createClient();
       const { error: err } = await supabase
         .from("categories")
-        .update({ source: next })
+        .update({
+          ...(titleChanged ? { source: next } : {}),
+          ...(dateChanged ? { exam_date: nextDate } : {}),
+        })
         .eq("id", id);
       if (err) throw err;
       // 이 실모에 연결된 채점 기록의 시험 이름도 자동으로 맞춘다 — 실모
       // 제목만 바꾸고 연결된 시험 이름은 그대로 두면 같은 시험을 가리키는
-      // 두 이름이 서로 달라진다(사용자 요청).
-      await supabase.from("exam_scores").update({ exam_name: next }).eq("category_id", id);
+      // 두 이름이 서로 달라진다(사용자 요청). 시행일도 같은 이유로 맞춘다.
+      if (titleChanged || dateChanged) {
+        await supabase
+          .from("exam_scores")
+          .update({
+            ...(titleChanged ? { exam_name: next } : {}),
+            ...(dateChanged && nextDate ? { taken_at: nextDate } : {}),
+          })
+          .eq("category_id", id);
+      }
       setEditing(false);
       router.refresh();
     } catch (err) {
@@ -61,17 +80,19 @@ export default function CategoryTitleEditor({
 
   if (!editing) {
     return (
-      <div className="mt-1 flex items-center gap-2">
+      <div className="mt-1 flex flex-wrap items-center gap-2">
         <h1 className="text-2xl font-bold text-ink">{label}</h1>
+        {examDate && <span className="text-sm text-slate-500">{examDate}</span>}
         <button
           type="button"
           onClick={() => {
             setDraft(source);
+            setDateDraft(examDate ?? "");
             setEditing(true);
           }}
           className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100"
         >
-          제목 수정
+          제목·날짜 수정
         </button>
       </div>
     );
@@ -94,6 +115,21 @@ export default function CategoryTitleEditor({
           autoFocus
           className="w-64 max-w-full rounded-lg border border-slate-300 px-3 py-1.5 text-lg font-bold text-ink focus:border-blue-500 focus:outline-none disabled:opacity-50"
         />
+        <input
+          type="date"
+          value={dateDraft}
+          onChange={(e) => setDateDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+            if (e.key === "Escape") {
+              setDateDraft(examDate ?? "");
+              setEditing(false);
+            }
+          }}
+          disabled={busy}
+          aria-label="시행일"
+          className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-ink focus:border-blue-500 focus:outline-none disabled:opacity-50"
+        />
         <button
           type="button"
           onClick={() => void save()}
@@ -106,6 +142,7 @@ export default function CategoryTitleEditor({
           type="button"
           onClick={() => {
             setDraft(source);
+            setDateDraft(examDate ?? "");
             setEditing(false);
           }}
           disabled={busy}
