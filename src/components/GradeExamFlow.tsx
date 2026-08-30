@@ -22,6 +22,7 @@ import {
 import LinkCategoryPicker from "./LinkCategoryPicker";
 import CommentBox from "./CommentBox";
 import ExamNameEditor from "./ExamNameEditor";
+import ExamDateEditor from "./ExamDateEditor";
 
 function todayString(): string {
   const d = new Date();
@@ -72,6 +73,12 @@ type SlotDraft = {
    * 보여주다가 저장 뒤 화면에서 고치면 그때부터 슬롯마다 값이 갈린다.
    */
   examName?: string;
+  /**
+   * 이 슬롯만의 응시일. 저장 뒤 화면에서 고치면 그 슬롯 행만 바뀌므로
+   * (탐구는 1·2선택이 독립된 행이다) 공통 takenAt 과 따로 들고 있어야
+   * 화면과 DB 가 어긋나지 않는다.
+   */
+  takenAt?: string;
 };
 
 type Step = "setup" | "uploading" | "review" | "saved";
@@ -864,18 +871,35 @@ export default function GradeExamFlow() {
             return (
               <div key={si} className="rounded-xl border border-slate-200 bg-white p-4">
                 {slot.examScoreId && (
-                  <ExamNameEditor
-                    examScoreId={slot.examScoreId}
-                    value={slot.examName ?? examName}
-                    categoryId={slot.categoryId ?? null}
-                    onSaved={(name) =>
-                      setSlots((prev) => {
-                        const next = [...prev];
-                        next[si] = { ...next[si], examName: name };
-                        return next;
-                      })
-                    }
-                  />
+                  <div className="flex flex-col gap-0.5">
+                    <ExamNameEditor
+                      examScoreId={slot.examScoreId}
+                      value={slot.examName ?? examName}
+                      categoryId={slot.categoryId ?? null}
+                      onSaved={(name) =>
+                        setSlots((prev) => {
+                          const next = [...prev];
+                          next[si] = { ...next[si], examName: name };
+                          return next;
+                        })
+                      }
+                    />
+                    {/* 채점할 때 고른 시행일이 실제 응시일과 다를 수 있다
+                        (기본값이 "오늘"이라 며칠 지나 채점하면 어긋난다).
+                        추세 그래프의 가로축이라 여기서 바로 고칠 수 있게 한다. */}
+                    <ExamDateEditor
+                      examScoreId={slot.examScoreId}
+                      value={slot.takenAt ?? takenAt}
+                      categoryId={slot.categoryId ?? null}
+                      onSaved={(date) =>
+                        setSlots((prev) => {
+                          const next = [...prev];
+                          next[si] = { ...next[si], takenAt: date };
+                          return next;
+                        })
+                      }
+                    />
+                  </div>
                 )}
                 <p className="text-base font-semibold text-ink">{title}</p>
                 <p className="mt-1 text-sm text-slate-600">

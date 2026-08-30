@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ExamScore } from "@/lib/supabase/types";
 import GradeDetailActions from "@/components/GradeDetailActions";
 import ExamNameEditor from "@/components/ExamNameEditor";
+import ExamDateEditor from "@/components/ExamDateEditor";
 import { normalizeElectiveLabel, SUBJECT_LABEL } from "@/lib/examSubjects";
 
 export default async function GradeDetailPage({
@@ -79,9 +80,19 @@ export default async function GradeDetailPage({
         </div>
         <h1 className="text-xl font-semibold text-ink">{title}</h1>
         <p className="text-sm text-slate-500">
-          {row.taken_at} · {scoreText}
+          {scoreText}
           {row.wrong_numbers.length > 0 && ` · 틀린 번호: ${row.wrong_numbers.join(", ")}`}
         </p>
+        {/* 응시일은 성적 추세 그래프의 가로축이라 틀리면 점이 엉뚱한 데
+            찍힌다 — 저장 뒤에도 고칠 수 있어야 한다. */}
+        <div className="mt-1">
+          <ExamDateEditor
+            key={row.taken_at}
+            examScoreId={row.id}
+            value={row.taken_at}
+            categoryId={row.category_id}
+          />
+        </div>
       </header>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4">
