@@ -99,6 +99,54 @@ export async function fileToDataUrl(file: File): Promise<string> {
   }
 }
 
+/** 파일의 바이트를 실제로 읽어 data URL로 만든다(objectURL 과 다른 경로다). */
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () =>
+      reject(new Error(`"${file.name}" 파일을 읽지 못했습니다.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * 사용자가 고른 사진 파일을 **여러 방법으로** 열어 본다.
+ *
+ * `URL.createObjectURL` + `<img>` 한 가지만 쓰면 안드로이드에서 자주 실패한다 —
+ * 갤러리·구글포토에서 고른 사진이 기기에 실제로 내려받아져 있지 않거나
+ * (`content://` 로만 존재) 확장자만 `.jpg` 이고 속은 다른 형식인 경우가 있다.
+ * 그때는 `FileReader` 가 바이트를 직접 읽어 오면 열리는 일이 많아서 한 번 더
+ * 시도한다. 둘 다 실패하면 **어느 파일이 왜 안 됐는지**(이름·크기·형식)를
+ * 담아 던진다 — 예전에는 "채점에 실패했습니다"만 떠서 원인을 알 수 없었다.
+ */
+export async function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+  if (file.size === 0) {
+    throw new Error(
+      `"${file.name}" 사진이 비어 있습니다(0바이트). 클라우드에만 있는 사진일 수 있어요 — 갤러리에서 기기에 내려받은 뒤 다시 골라주세요.`,
+    );
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    return await loadImage(objectUrl);
+  } catch {
+    // 아래 FileReader 로 한 번 더 시도한다.
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  try {
+    return await loadImage(await readAsDataUrl(file));
+  } catch {
+    const kb = Math.max(1, Math.round(file.size / 1024));
+    throw new Error(
+      `"${file.name}" 사진을 열지 못했습니다 (${kb}kB, ${file.type || "형식 불명"}). ` +
+        `확장자만 .jpg 이고 실제로는 다른 형식(HEIC 등)일 수 있어요 — 사진을 캡처해서 올리거나 갤러리에서 다시 저장한 뒤 올려주세요.`,
+    );
+  }
+}
+
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
