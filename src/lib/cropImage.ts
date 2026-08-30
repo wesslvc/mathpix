@@ -103,7 +103,12 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = reject;
+    // onerror의 인자는 Error가 아니라 원시 Event다. 그대로 reject에 넘기면
+    // 이 실패가 `err instanceof Error` 로 걸러지는 모든 catch 블록에서
+    // 조용히 일반 문구("~에 실패했습니다")로 뭉개진다 — 실제로 가채점
+    // 화면에서 HEIC 사진을 골랐을 때 "채점에 실패했습니다"만 뜨고 이유를
+    // 알 수 없었다. Error로 감싸 항상 사람이 읽을 문구가 나오게 한다.
+    img.onerror = () => reject(new Error("이미지를 불러오지 못했습니다."));
     img.src = src;
   });
 }
