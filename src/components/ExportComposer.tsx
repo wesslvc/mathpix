@@ -22,7 +22,30 @@ export type ComposerProblem = {
   /** 사용자가 손으로 정해 둔 번호. 있으면 무조건 이걸 쓴다. */
   manualNumber: number | null;
   answer: string;
+  /**
+   * 채점 기록이 연동된 문제에서 **내가 고른 답**. 틀린 문제면 이게 곧
+   * "왜 틀렸는지"라, 정답표에 정답과 나란히 찍어 주면 다시 풀 때
+   * 무엇을 잘못 골랐는지 바로 보인다. 연동이 없으면 undefined.
+   */
+  studentAnswer?: string;
 };
+
+/**
+ * 정답표 한 칸에 찍을 글자. 채점이 연동돼 **내가 고른 답**을 아는 문제는
+ * "④ (내답 ②)" 처럼 함께 적는다 — 맞힌 문제(고른 답 = 정답)는 굳이 두 번
+ * 적지 않는다.
+ */
+export function answerCell(
+  problem: Pick<ComposerProblem, "answer" | "studentAnswer">,
+  showPicked: boolean,
+): string {
+  const answer = (problem.answer ?? "").trim();
+  const picked = (problem.studentAnswer ?? "").trim();
+  if (!showPicked || !picked || picked === answer) return answer;
+  // 정답이 비어 있으면(정답을 안 적어 둔 문제) 정답표에서 빠지는 게 기존
+  // 동작이라, 내 답만 있다고 새로 끼워 넣지는 않는다.
+  return answer ? `${answer} (내답 ${picked})` : "";
+}
 
 type Props = {
   multi: boolean;
@@ -243,6 +266,13 @@ export default function ExportComposer({
   const [perPage, setPerPage] = useState<PerPage>(1);
   /** 어떤 종이에 뽑을지. 평가원 양식은 한글 파일로 나간다(글꼴 때문에). */
   const [layout, setLayout] = useState<"a4" | "kice">("a4");
+  /**
+   * 정답표에 **내가 고른 답**도 같이 찍을지. 채점이 연동된 문제가 하나라도
+   * 있을 때만 뜻이 있으므로 그때만 보여준다(기본 켜짐 — 오답프린트라
+   * 무엇을 잘못 골랐는지가 핵심이다).
+   */
+  const [showPicked, setShowPicked] = useState(true);
+  const hasPicked = problems.some((p) => (p.studentAnswer ?? "").trim() !== "");
 
   function move(index: number, dir: -1 | 1) {
     const j = index + dir;
@@ -442,7 +472,7 @@ export default function ExportComposer({
       const answerRows = order
         .map((problem, i) => ({
           label: `${numberFor(problem, i)}번`,
-          answer: (problem.answer ?? "").trim(),
+          answer: answerCell(problem, showPicked),
         }))
         .filter((row) => row.answer !== "");
 
@@ -579,6 +609,19 @@ export default function ExportComposer({
         </div>
       </div>
 
+      {/* 채점이 연동된 문제가 있을 때만 뜻이 있다. 양식(A4·평가원)과 무관하게
+          정답표 내용이 같아야 하므로 토글도 공통 자리에 둔다. */}
+      {hasPicked && (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={showPicked}
+            onChange={(e) => setShowPicked(e.target.checked)}
+          />
+          정답표에 내가 고른 답도 같이 찍기 (예: ④ (내답 ②))
+        </label>
+      )}
+
       {layout === "kice" ? (
         <KiceExportPanel
           title={title}
@@ -587,7 +630,7 @@ export default function ExportComposer({
             imageUrl: problem.imageUrl,
             label: labelFor(problem, index),
             answerLabel: `${numberFor(problem, index)}번`,
-            answer: problem.answer ?? "",
+            answer: answerCell(problem, showPicked),
           }))}
         />
       ) : (

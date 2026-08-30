@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { categoryLabel, type Category } from "@/lib/supabase/types";
+import { categoryLabel, type Category, type ExamScore } from "@/lib/supabase/types";
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { formatAnswer, toAnswerType } from "@/lib/answer";
 import ExportComposer, {
@@ -33,6 +33,8 @@ const EXPORT_COLUMNS = [
   "created_at",
   "problemNo:box_range->number",
   "debt:box_range->debt",
+  // 어느 채점 기록에서 온 문제인지 — 정답표에 "내가 고른 답"을 같이 찍는 데 쓴다.
+  "gradeId:box_range->>gradeId",
 ].join(", ");
 
 type ExportRow = {
@@ -47,6 +49,7 @@ type ExportRow = {
   created_at: string;
   problemNo: number | null;
   debt: number | null;
+  gradeId: string | null;
 };
 
 export default async function ExportPage({
@@ -139,6 +142,30 @@ export default async function ExportPage({
       return a.created_at.localeCompare(b.created_at);
     });
 
+  // 채점 기록이 연동된 문제는 **내가 무엇을 골라서 틀렸는지**도 정답표에
+  // 같이 찍는다. 학생답은 exam_scores.items 에 문항 번호별로 들어 있다.
+  const { data: gradeRows } = await supabase
+    .from("exam_scores")
+    .select("id, category_id, items")
+    .in("category_id", idList)
+    .returns<Pick<ExamScore, "id" | "category_id" | "items">[]>();
+
+  // 문제 → 학생답을 찾는 표. 채점 기록 id 로 맞추는 게 정확하지만(한 실모에
+  // 여러 번 채점했을 수 있다), 옛 문제에는 gradeId 가 없으므로 실모+번호로도
+  // 찾을 수 있게 둘 다 만들어 둔다.
+  const studentByGradeNo = new Map<string, string>();
+  const studentByCategoryNo = new Map<string, string>();
+  for (const g of gradeRows ?? []) {
+    for (const item of g.items ?? []) {
+      const picked = (item.studentAnswer ?? "").trim();
+      if (!picked) continue;
+      studentByGradeNo.set(`${g.id}:${item.no}`, picked);
+      // 같은 번호가 여러 채점에 있으면 먼저 만난 것을 둔다(더 알 방법이 없다).
+      const catKey = `${g.category_id}:${item.no}`;
+      if (!studentByCategoryNo.has(catKey)) studentByCategoryNo.set(catKey, picked);
+    }
+  }
+
   const paths = ordered.map((p) => p.image_path);
   const signedUrlByPath = new Map<string, string>();
   if (paths.length > 0) {
@@ -151,7 +178,7 @@ export default async function ExportPage({
   }
 
   const composerProblems: ComposerProblem[] = ordered
-    .map((p) => {
+    .map((p): ComposerProblem | null => {
       const imageUrl = signedUrlByPath.get(p.image_path);
       if (!imageUrl) return null;
       const cat = categoryById.get(p.category_id);
@@ -168,6 +195,19 @@ export default async function ExportPage({
         // 객관식이면 "1" -> "①"로 바꿔 정답표에 찍는다. 저장은 원문 그대로이고
         // 변환은 표시할 때만 한다(유형을 바꾸면 되돌아가야 하므로).
         answer: formatAnswer(p.answer, toAnswerType(p.answer_type)),
+        // 내가 고른 답(틀린 문제면 이게 곧 "왜 틀렸는지"다). 정답과 같은
+        // 방식으로 원숫자로 바꿔 찍는다.
+        studentAnswer: (() => {
+          const no = readProblemNumber({ number: p.problemNo }) ??
+            parseProblemNumber(p.text_content || p.latex || "");
+          if (no == null) return undefined;
+          const picked =
+            (p.gradeId ? studentByGradeNo.get(`${p.gradeId}:${no}`) : undefined) ??
+            studentByCategoryNo.get(`${p.category_id}:${no}`);
+          return picked
+            ? formatAnswer(picked, toAnswerType(p.answer_type))
+            : undefined;
+        })(),
       };
     })
     .filter((p): p is ComposerProblem => p !== null);
