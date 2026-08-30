@@ -7,11 +7,11 @@ import {
   subjectGroupKey,
   subjectGroupLabel,
 } from "@/lib/scoreTrend";
-import { normalizeElectiveLabel } from "@/lib/examSubjects";
+import { normalizeElectiveLabel, SUBJECT_LABEL } from "@/lib/examSubjects";
 
 export type GradeHistoryRow = {
   id: string;
-  subject: "korean" | "math" | "elective";
+  subject: "korean" | "math" | "english" | "elective";
   elective_slot: 1 | 2 | null;
   elective_label: string | null;
   exam_name: string | null;
@@ -19,12 +19,6 @@ export type GradeHistoryRow = {
   score: number | null;
   grade_level: number | null;
   wrong_numbers: number[];
-};
-
-const SUBJECT_LABEL: Record<GradeHistoryRow["subject"], string> = {
-  korean: "국어",
-  math: "수학",
-  elective: "탐구",
 };
 
 function subjectTitle(row: GradeHistoryRow): string {

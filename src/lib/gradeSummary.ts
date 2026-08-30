@@ -8,7 +8,7 @@
  * 반드시 어긋난다.
  */
 
-export type Subject = "korean" | "math" | "elective";
+export type Subject = "korean" | "math" | "english" | "elective";
 
 /** 채점 대상 문항 하나. */
 export type GradedItem = {

@@ -28,15 +28,17 @@ export function subjectGroupLabel(row: SubjectGroupable): string {
     ? "국어"
     : row.subject === "math"
       ? "수학"
-      : `탐구 · ${electiveLabelOf(row) ?? `${row.elective_slot ?? ""}선택`}`;
+      : row.subject === "english"
+        ? "영어"
+        : `탐구 · ${electiveLabelOf(row) ?? `${row.elective_slot ?? ""}선택`}`;
 }
 
-/** 국어 → 수학 → 탐구 순, 탐구는 과목명 가나다 순. */
+/** 국어 → 수학 → 영어 → 탐구 순, 탐구는 과목명 가나다 순. */
 export function compareSubjectGroups(
   a: { key: string; label: string },
   b: { key: string; label: string },
 ): number {
-  const order = (k: string) => (k === "korean" ? 0 : k === "math" ? 1 : 2);
+  const order = (k: string) => (k === "korean" ? 0 : k === "math" ? 1 : k === "english" ? 2 : 3);
   return order(a.key) - order(b.key) || a.label.localeCompare(b.label, "ko");
 }
 

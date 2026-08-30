@@ -5,13 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ExamScore } from "@/lib/supabase/types";
 import GradeDetailActions from "@/components/GradeDetailActions";
 import ExamNameEditor from "@/components/ExamNameEditor";
-import { normalizeElectiveLabel } from "@/lib/examSubjects";
-
-const SUBJECT_LABEL: Record<ExamScore["subject"], string> = {
-  korean: "국어",
-  math: "수학",
-  elective: "탐구",
-};
+import { normalizeElectiveLabel, SUBJECT_LABEL } from "@/lib/examSubjects";
 
 export default async function GradeDetailPage({
   params,

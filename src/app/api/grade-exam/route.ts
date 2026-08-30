@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GradeError, gradeWithVision, type Subject } from "@/lib/gradeExam";
+import { GradeError, gradeWithVision, type GradingMethod, type Subject } from "@/lib/gradeExam";
 import {
   GRADING_TOKEN_DEPOSIT,
   gradingEstKrw,
@@ -25,7 +25,12 @@ export const maxDuration = 90;
  * (`gradingTokenCharge`, `src/lib/tokens.ts` 참고).
  */
 export async function POST(req: NextRequest) {
-  let body: { subject?: string; omr?: string; keys?: { slot?: number; label?: string; image?: string }[] };
+  let body: {
+    subject?: string;
+    omr?: string;
+    keys?: { slot?: number; label?: string; image?: string }[];
+    method?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -33,7 +38,10 @@ export async function POST(req: NextRequest) {
   }
 
   const subject: Subject =
-    body.subject === "math" || body.subject === "elective" ? body.subject : "korean";
+    body.subject === "math" || body.subject === "elective" || body.subject === "english"
+      ? body.subject
+      : "korean";
+  const method: GradingMethod = body.method === "handwritten" ? "handwritten" : "omr";
   const omr = typeof body.omr === "string" ? body.omr : null;
   const keys = Array.isArray(body.keys)
     ? body.keys.filter((k): k is { slot?: number; label?: string; image: string } =>
@@ -42,7 +50,10 @@ export async function POST(req: NextRequest) {
     : [];
 
   if (!omr) {
-    return NextResponse.json({ error: "OMR 카드 사진이 필요합니다." }, { status: 400 });
+    return NextResponse.json(
+      { error: method === "handwritten" ? "가채점표 사진이 필요합니다." : "OMR 카드 사진이 필요합니다." },
+      { status: 400 },
+    );
   }
   // 탐구는 1과목만(정답표 1장) 채점하는 경우도 있다 — 2장을 강제하면 그
   // 흐름 자체가 막힌다.
@@ -140,6 +151,7 @@ export async function POST(req: NextRequest) {
     const result = await gradeWithVision(
       subject,
       [omr, ...keys.map((k) => k.image)],
+      method,
       deadline.signal,
     );
 

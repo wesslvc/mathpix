@@ -18,6 +18,7 @@ import { readProblemNumber } from "@/lib/problemNumber";
 import { thumbPathFor } from "@/lib/cardThumb";
 import type { BoxOverride } from "@/lib/renderMathText";
 import type { ExamScore } from "@/lib/supabase/types";
+import { SUBJECT_LABEL } from "@/lib/examSubjects";
 import GradeProblemUploader from "@/components/GradeProblemUploader";
 
 /**
@@ -250,12 +251,6 @@ export default async function CategoryPage({
     if (!p.gradeId) continue;
     uploadedCountByGrade.set(p.gradeId, (uploadedCountByGrade.get(p.gradeId) ?? 0) + 1);
   }
-  const SUBJECT_LABEL: Record<ExamScore["subject"], string> = {
-    korean: "국어",
-    math: "수학",
-    elective: "탐구",
-  };
-
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10">
       <header className="flex items-start justify-between gap-4">

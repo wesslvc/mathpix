@@ -4,6 +4,16 @@
  * 것을 막는다.
  */
 
+import type { Subject } from "./gradeSummary";
+
+/** 자동채점 화면과 프로필의 기본 과목 설정이 같은 이름을 써야 한다. */
+export const SUBJECT_LABEL: Record<Subject, string> = {
+  korean: "국어",
+  math: "수학",
+  english: "영어",
+  elective: "탐구",
+};
+
 /** 사회탐구 9 + 과학탐구 8 = 17. 수능 탐구영역 과목 전체. */
 export const SOCIAL_ELECTIVES = [
   "생활과 윤리",
