@@ -70,6 +70,9 @@ export default async function ProfilePage() {
   };
 
   const series = buildTrendSeries(scores ?? []);
+  // 등급 추세는 등급을 적어 둔 시험만 모인다 — 하나도 없으면 화면이 토글
+  // 자체를 감춘다. 순수 함수라 여기서 두 벌 만들어 내려보내면 된다.
+  const gradeSeries = buildTrendSeries(scores ?? [], "grade");
   // 추세 그래프는 시간순(오름차순)이 필요하고, 기록 목록은 최근 것부터
   // 보이는 게 자연스럽다 — 같은 쿼리 결과를 뒤집어 재사용한다(왕복을
   // 늘리지 않는다).
@@ -111,7 +114,7 @@ export default async function ProfilePage() {
           </p>
         ) : (
           <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <ScoreTrendChart series={series} />
+            <ScoreTrendChart series={series} gradeSeries={gradeSeries} />
           </div>
         )}
       </section>

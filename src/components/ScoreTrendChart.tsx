@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { TrendSeries } from "@/lib/scoreTrend";
+import type { TrendMetric, TrendSeries } from "@/lib/scoreTrend";
 
 const WIDTH = 720;
 const HEIGHT = 260;
@@ -13,8 +13,14 @@ const PAD_BOTTOM = 26;
 /** 과목마다 다른 색. 탐구가 여러 과목으로 갈리면 순서대로 돌려 쓴다. */
 const PALETTE = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#dc2626", "#0891b2", "#65a30d", "#db2777"];
 
-function pointLabel(hasScore: boolean, value: number): string {
+function pointLabel(metric: TrendMetric, hasScore: boolean, value: number): string {
+  if (metric === "grade") return `${value}등급`;
   return hasScore ? `${value}점` : `${value}%`;
+}
+
+/** 눈금으로 그을 값들. 등급은 1·3·5·7·9. */
+function gridValues(metric: TrendMetric): number[] {
+  return metric === "grade" ? [1, 3, 5, 7, 9] : [0, 50, 100];
 }
 
 /**
@@ -34,16 +40,27 @@ function pointLabel(hasScore: boolean, value: number): string {
  * **새 차트 라이브러리를 넣지 않는다** — 선 몇 개 겹쳐 그리는 정도에
  * npm 의존성을 하나 더 들일 이유가 없다.
  */
-export default function ScoreTrendChart({ series }: { series: TrendSeries[] }) {
+export default function ScoreTrendChart({
+  series,
+  gradeSeries = [],
+}: {
+  series: TrendSeries[];
+  /** 등급으로 본 추세. 등급을 하나도 안 적었으면 비어 있고, 그때는 토글을 감춘다. */
+  gradeSeries?: TrendSeries[];
+}) {
   const [active, setActive] = useState<string | null>(null);
+  const [metric, setMetric] = useState<TrendMetric>("score");
+  const hasGrade = gradeSeries.length > 0;
+  // 등급을 볼 수 있을 때만 등급 보기로 간다(토글을 감춰도 상태는 남을 수 있다).
+  const shown = metric === "grade" && hasGrade ? gradeSeries : series;
 
   const dates = useMemo(() => {
     const set = new Set<string>();
-    for (const s of series) for (const p of s.points) set.add(p.takenAt);
+    for (const s of shown) for (const p of s.points) set.add(p.takenAt);
     return [...set].sort();
-  }, [series]);
+  }, [shown]);
 
-  if (series.length === 0 || dates.length === 0) return null;
+  if (shown.length === 0 || dates.length === 0) return null;
 
   const innerW = WIDTH - PAD_LEFT - PAD_RIGHT;
   const innerH = HEIGHT - PAD_TOP - PAD_BOTTOM;
@@ -52,19 +69,50 @@ export default function ScoreTrendChart({ series }: { series: TrendSeries[] }) {
     const i = dates.indexOf(date);
     return dates.length === 1 ? PAD_LEFT + innerW / 2 : PAD_LEFT + (innerW * i) / (dates.length - 1);
   };
-  const yOf = (value: number) => PAD_TOP + innerH * (1 - Math.max(0, Math.min(100, value)) / 100);
+  // **등급은 축이 뒤집힌다** — 1등급이 위, 9등급이 아래다. 점수와 같은
+  // 방향으로 그리면 성적이 오를수록 선이 내려가 정반대로 읽힌다.
+  const yOf = (value: number) =>
+    metric === "grade" && hasGrade
+      ? PAD_TOP + (innerH * (Math.max(1, Math.min(9, value)) - 1)) / 8
+      : PAD_TOP + innerH * (1 - Math.max(0, Math.min(100, value)) / 100);
 
-  const colored = series.map((s, i) => ({ ...s, color: PALETTE[i % PALETTE.length] }));
+  const colored = shown.map((s, i) => ({ ...s, color: PALETTE[i % PALETTE.length] }));
 
   return (
     <div>
+      {/* 점수/등급 보기 전환. 등급을 하나도 안 적었으면 볼 게 없어 감춘다. */}
+      {hasGrade && (
+        <div className="mb-2 flex gap-1">
+          {(
+            [
+              { v: "score", label: "점수" },
+              { v: "grade", label: "등급" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.v}
+              type="button"
+              aria-pressed={metric === opt.v}
+              onClick={() => setMetric(opt.v)}
+              className={`rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+                metric === opt.v
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         className="w-full"
         role="img"
         aria-label="성적 추세"
       >
-        {[0, 50, 100].map((g) => (
+        {gridValues(metric === "grade" && hasGrade ? "grade" : "score").map((g) => (
           <g key={g}>
             <line
               x1={PAD_LEFT}
@@ -100,7 +148,7 @@ export default function ScoreTrendChart({ series }: { series: TrendSeries[] }) {
                   stroke={s.color}
                   strokeWidth={1.5}
                 >
-                  <title>{`${s.label} · ${p.takenAt} · ${pointLabel(p.hasScore, p.value)}`}</title>
+                  <title>{`${s.label} · ${p.takenAt} · ${pointLabel(metric, p.hasScore, p.value)}`}</title>
                 </circle>
               ))}
               {/* 마지막 점 값 — 점수가 그래프 안에서 바로 눈에 들어오게. */}
@@ -112,7 +160,7 @@ export default function ScoreTrendChart({ series }: { series: TrendSeries[] }) {
                 fill={s.color}
                 opacity={isDimmed ? 0.5 : 1}
               >
-                {pointLabel(last.hasScore, last.value)}
+                {pointLabel(metric, last.hasScore, last.value)}
               </text>
             </g>
           );
@@ -163,7 +211,7 @@ export default function ScoreTrendChart({ series }: { series: TrendSeries[] }) {
                 style={{ backgroundColor: s.color }}
               />
               <span className="font-medium text-ink">{s.label}</span>
-              <span className="text-slate-400">{pointLabel(last.hasScore, last.value)}</span>
+              <span className="text-slate-400">{pointLabel(metric, last.hasScore, last.value)}</span>
               {last.wrongCount > 0 && (
                 <span className="text-slate-400">· 오답 {last.wrongCount}개</span>
               )}

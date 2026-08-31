@@ -44,12 +44,25 @@ export function compareSubjectGroups(
 
 export type TrendPoint = {
   takenAt: string;
-  /** 배점이 있으면 점수, 없으면 정답률(%). 그래프는 항상 0~100 하나의 축으로 그린다. */
+  /**
+   * 점수 보기: 배점이 있으면 점수, 없으면 정답률(%) — 0~100 한 축이다.
+   * 등급 보기: 1~9 등급. 축이 뒤집힌다(1등급이 위) — 그리는 쪽 몫이다.
+   */
   value: number;
   /** 배점이 있는 값인지 — 없으면(정답률로 대신한 값) 점을 다르게 그린다. */
   hasScore: boolean;
   wrongCount: number;
 };
+
+/**
+ * 추세를 무엇으로 볼지.
+ *
+ * 점수는 과목마다 만점이 달라(국·수·영 100, 탐구 50) 과목끼리 견주기
+ * 어렵지만, **등급은 과목이 달라도 같은 1~9 척도**라 한 화면에서 바로
+ * 비교된다. 대신 등급은 사용자가 직접 적어 넣는 값이라(등급컷은 해마다
+ * 달라 계산할 수 없다) 안 적은 시험은 그래프에 점이 없다.
+ */
+export type TrendMetric = "score" | "grade";
 
 export type TrendSeries = {
   key: string;
@@ -59,21 +72,34 @@ export type TrendSeries = {
 };
 
 /** 과목(+ 탐구 과목명)별로 나눠 시간순 추세를 만든다. */
-export function buildTrendSeries(rows: ExamScore[]): TrendSeries[] {
+export function buildTrendSeries(
+  rows: ExamScore[],
+  metric: TrendMetric = "score",
+): TrendSeries[] {
   const groups = new Map<string, TrendSeries>();
 
   for (const row of rows) {
+    // 등급은 적어 둔 시험에만 있다 — 없는 것을 0 같은 값으로 채우면
+    // 그래프가 바닥을 찍어 실제로 등급이 떨어진 것처럼 보인다. 아예 뺀다.
+    if (metric === "grade" && row.grade_level == null) continue;
+
     const key = subjectGroupKey(row);
     const label = subjectGroupLabel(row);
 
     const value =
-      row.score ?? Math.round((row.correct_count / row.total_questions) * 100);
+      metric === "grade"
+        ? (row.grade_level as number)
+        : (row.score ??
+          (row.total_questions > 0
+            ? Math.round((row.correct_count / row.total_questions) * 100)
+            : 0));
 
     const series = groups.get(key) ?? { key, label, points: [] };
     series.points.push({
       takenAt: row.taken_at,
       value,
-      hasScore: row.score !== null,
+      // 등급은 "배점이 있어 얻은 값"이라는 구분 자체가 없다 — 전부 채운 점.
+      hasScore: metric === "grade" ? true : row.score !== null,
       wrongCount: row.wrong_numbers.length,
     });
     groups.set(key, series);
