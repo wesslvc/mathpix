@@ -10,6 +10,15 @@ const PAD_RIGHT = 40;
 const PAD_TOP = 16;
 const PAD_BOTTOM = 26;
 
+/**
+ * 겹친 선을 가르는 파선 무늬. 첫 번째는 실선(undefined)이라 여기 없다 —
+ * 색이 같은 자리에 겹쳐도 무늬가 다르면 둘 다 보인다.
+ */
+const DASHES = ["5 3", "2 3", "8 3 2 3", "10 4", "1 3", "4 2 1 2", "6 2"];
+
+/** 값 글자끼리 최소한 이만큼은 떨어뜨린다(px). */
+const LABEL_MIN_GAP = 12;
+
 /** 과목마다 다른 색. 탐구가 여러 과목으로 갈리면 순서대로 돌려 쓴다. */
 const PALETTE = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#dc2626", "#0891b2", "#65a30d", "#db2777"];
 
@@ -78,6 +87,60 @@ export default function ScoreTrendChart({
 
   const colored = shown.map((s, i) => ({ ...s, color: PALETTE[i % PALETTE.length] }));
 
+  // ── 겹치는 과목을 보이게 ────────────────────────────────────────────
+  // 등급 보기는 값이 1~9뿐이라 과목이 같은 등급이면 점·선·글자가 **완전히**
+  // 같은 자리에 온다 — 그러면 맨 나중에 그린 하나만 보이고 나머지는 사라진
+  // 것처럼 된다. 자리를 옮겨 속이지 않고(그러면 값이 틀리게 읽힌다) 겹치는
+  // 것들만 골라 **점은 동심원, 선은 파선**으로 구분한다.
+  const posKey = (x: number, y: number) => `${Math.round(x)},${Math.round(y)}`;
+  const atSpot = new Map<string, string[]>();
+  for (const s of colored) {
+    for (const p of s.points) {
+      const k = posKey(xOf(p.takenAt), yOf(p.value));
+      const arr = atSpot.get(k) ?? [];
+      if (!arr.includes(s.key)) arr.push(s.key);
+      atSpot.set(k, arr);
+    }
+  }
+  const overlapped = new Set<string>();
+  for (const keys of atSpot.values()) {
+    if (keys.length > 1) for (const k of keys) overlapped.add(k);
+  }
+  // 겹치는 과목에만 파선을 준다 — 안 겹치는 선까지 파선이면 공연히 어수선하다.
+  const dashOrder = colored.filter((s) => overlapped.has(s.key)).map((s) => s.key);
+  const dashOf = (key: string): string | undefined => {
+    const i = dashOrder.indexOf(key);
+    return i <= 0 ? undefined : DASHES[i % DASHES.length];
+  };
+  /** 이 자리에서 몇 번째로 겹친 점인가(0이면 안 겹침). */
+  const ringOf = (key: string, x: number, y: number) => {
+    const arr = atSpot.get(posKey(x, y));
+    return arr && arr.length > 1 ? arr.indexOf(key) : 0;
+  };
+
+  // 마지막 점 옆의 값 글자도 같은 이유로 겹친다. 자리를 조금씩 밀어
+  // 세로로 떨어뜨린다(가장 위부터 차례로 최소 간격을 확보한다).
+  const labelY = new Map<string, number>();
+  {
+    const byX = new Map<number, { key: string; y: number }[]>();
+    for (const s of colored) {
+      const last = s.points[s.points.length - 1];
+      const x = Math.round(xOf(last.takenAt));
+      const arr = byX.get(x) ?? [];
+      arr.push({ key: s.key, y: yOf(last.value) });
+      byX.set(x, arr);
+    }
+    for (const arr of byX.values()) {
+      arr.sort((a, b) => a.y - b.y);
+      let prev = -Infinity;
+      for (const it of arr) {
+        const y = Math.max(it.y, prev + LABEL_MIN_GAP);
+        labelY.set(it.key, y);
+        prev = y;
+      }
+    }
+  }
+
   return (
     <div>
       {/* 점수/등급 보기 전환. 등급을 하나도 안 적었으면 볼 게 없어 감춘다. */}
@@ -137,24 +200,35 @@ export default function ScoreTrendChart({
           const last = s.points[s.points.length - 1];
           return (
             <g key={s.key} opacity={isDimmed ? 0.18 : 1} style={{ transition: "opacity 150ms" }}>
-              <path d={path} fill="none" stroke={s.color} strokeWidth={isActive ? 3 : 2} />
-              {s.points.map((p, i) => (
+              <path
+                d={path}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={isActive ? 3 : 2}
+                strokeDasharray={dashOf(s.key)}
+              />
+              {s.points.map((p, i) => {
+                // 같은 자리에 겹친 점은 바깥쪽으로 한 겹씩 키워 동심원으로
+                // 보이게 한다(속을 비워야 안쪽 점이 가려지지 않는다).
+                const ring = ringOf(s.key, xOf(p.takenAt), yOf(p.value));
+                return (
                 <circle
                   key={i}
                   cx={xOf(p.takenAt)}
                   cy={yOf(p.value)}
-                  r={isActive ? 4.5 : 3.5}
-                  fill={p.hasScore ? s.color : "#ffffff"}
+                  r={(isActive ? 4.5 : 3.5) + ring * 2.6}
+                  fill={ring > 0 ? "none" : p.hasScore ? s.color : "#ffffff"}
                   stroke={s.color}
                   strokeWidth={1.5}
                 >
                   <title>{`${s.label} · ${p.takenAt} · ${pointLabel(metric, p.hasScore, p.value)}`}</title>
                 </circle>
-              ))}
+                );
+              })}
               {/* 마지막 점 값 — 점수가 그래프 안에서 바로 눈에 들어오게. */}
               <text
                 x={xOf(last.takenAt) + 7}
-                y={yOf(last.value) + 3.5}
+                y={(labelY.get(s.key) ?? yOf(last.value)) + 3.5}
                 fontSize={11}
                 fontWeight={700}
                 fill={s.color}
