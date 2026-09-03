@@ -146,6 +146,8 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
   /** 어떤 모델이 영역을 잡았는지. 모델을 바꿔 가며 견줄 때 필요하다. */
   const [usedModel, setUsedModel] = useState<string | null>(null);
   const { enqueue } = useFigureJobs();
+  /** "그대로 넣기" 뒤에 번호가 몇 개 인식됐는지 알려 주는 한 줄. */
+  const [numberNote, setNumberNote] = useState<string | null>(null);
 
   /** 그리는 중인 네모. 손을 뗄 때 boxes 로 옮긴다. */
   const [draft, setDraft] = useState<Box | null>(null);
@@ -528,7 +530,9 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
   async function saveAsIs() {
     if (pieces.length === 0) return;
     setError(null);
+    setNumberNote(null);
     let done = 0;
+    let numbered = 0;
     for (const piece of pieces) {
       setBusy(`문제를 넣는 중... (${done + 1}/${pieces.length})`);
       try {
@@ -545,6 +549,7 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
           figures: [figure],
         });
         const number = await readNumberWithMathpix(piece.crop);
+        if (number != null) numbered += 1;
         await onSave({
           pngDataUrl,
           text: "",
@@ -571,6 +576,13 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
     }
     setBusy(null);
     if (done > 0) {
+      // **번호가 몇 개 붙었는지 알려 준다.** 조용히 넘어가면 목록에서
+      // 1번부터 새로 매겨진 걸 보고서야 알게 되고, 그때는 이미 늦다.
+      setNumberNote(
+        numbered === done
+          ? `${done}개를 넣고 번호도 전부 인식했어요.`
+          : `${done}개를 넣었어요. 번호는 ${numbered}개만 인식돼서 나머지는 "수정"에서 직접 적어야 해요.`,
+      );
       setPieces([]);
       setPageImage(null);
       setPageFile(null);
@@ -788,6 +800,7 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
           {usedModel} 로 {pieces.length}개를 잡았습니다
         </p>
       )}
+      {numberNote && <p className="text-sm text-emerald-700">{numberNote}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {pieces.length > 0 && (
