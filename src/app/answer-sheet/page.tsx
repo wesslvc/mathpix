@@ -40,6 +40,7 @@ export default function AnswerSheetPage() {
   const [text, setText] = useState(SAMPLE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const subjects = KICE_SUBJECTS[area];
 
@@ -67,6 +68,8 @@ export default function AnswerSheetPage() {
   async function make() {
     setBusy(true);
     setError(null);
+    setWarnings([]);
+    const warns: string[] = [];
     try {
       const key = frameKeyFor(area);
       const [all, fonts] = await Promise.all([loadKiceFrames(), loadKiceFonts()]);
@@ -91,7 +94,9 @@ export default function AnswerSheetPage() {
         pagePattern: [1],
         answers: rows,
         answerPage: { no, total: Math.max(no, Number(pageTotal) || no) },
+        onWarn: (m) => warns.push(m),
       });
+      setWarnings(warns);
 
       const blob = new Blob([bytes.slice().buffer], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
@@ -210,6 +215,13 @@ export default function AnswerSheetPage() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {warnings.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {warnings.map((w) => (
+            <p key={w}>{w}</p>
+          ))}
+        </div>
+      )}
 
       <button
         type="button"

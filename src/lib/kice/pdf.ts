@@ -278,6 +278,12 @@ export type KiceSpec = {
    * 이므로, 쪽번호를 2 이상으로 주어 본문 틀(even/odd)을 쓰게 한다.
    */
   answerPage?: { no: number; total: number };
+  /**
+   * 그리다 생긴 문제를 알린다(글꼴에 없는 글자 등). 던지지 않는 이유는
+   * **나머지는 멀쩡히 나오기 때문**이다 — PDF 는 주되 무엇이 어긋났는지
+   * 화면에 적어 준다.
+   */
+  onWarn?: (message: string) => void;
 };
 
 export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
@@ -299,6 +305,55 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       fontCache.set(key, font);
     }
     return font;
+  };
+
+  /**
+   * **글꼴에 없는 글자를 ⊠ 로 찍지 않는다.**
+   *
+   * 버킷에 올려 둔 글꼴은 **미리 잘라 둔 것**(pyftsubset)이라 모든 한글이
+   * 들어 있지 않다. 그래서 틀에 새 글자가 생기면 그 자리가 통째로 네모로
+   * 찍힌다 — 국어 틀을 만들자 머리말이 `국⊠ 영역` 이 되었다(신그래픽체에
+   * '국' 은 과목명 "한국지리" 때문에 들어 있었지만 '어' 는 어디에도 쓰이지
+   * 않아 빠져 있었다).
+   *
+   * 그리기 직전에 글꼴이 그 글자를 가졌는지 보고, 없으면 **가진 글꼴로
+   * 갈아탄다**(서체는 달라지지만 네모보다 낫다). 아무 글꼴에도 없으면 그
+   * 글자를 빼고 그린 뒤 무엇이 없었는지 알린다 — 조용히 네모를 찍으면
+   * 왜 깨졌는지 알 길이 없다.
+   */
+  const coverage = new Map<string, Set<number>>();
+  const coverageOf = async (name: string) => {
+    const key = spec.fonts[name] ? name : fallback;
+    let set = coverage.get(key);
+    if (!set) {
+      set = new Set((await fontFor(key)).getCharacterSet());
+      coverage.set(key, set);
+    }
+    return set;
+  };
+
+  const missing = new Set<string>();
+  const swappedFont = new Set<string>();
+
+  /** 이 글자를 실제로 그릴 수 있는 글꼴과, 그릴 수 있는 글자만 남긴 문자열. */
+  const fontForText = async (name: string, text: string) => {
+    const chars = [...text].filter((c) => c.trim());
+    const covers = async (n: string) => {
+      const set = await coverageOf(n);
+      return chars.every((c) => set.has(c.codePointAt(0)!));
+    };
+    if (chars.length === 0 || (await covers(name))) {
+      return { font: await fontFor(name), text };
+    }
+    for (const other of Object.keys(spec.fonts)) {
+      if (other === name || !(await covers(other))) continue;
+      swappedFont.add(text);
+      return { font: await fontFor(other), text };
+    }
+    const set = await coverageOf(name);
+    const keep = (c: string) => !c.trim() || set.has(c.codePointAt(0)!);
+    for (const c of chars) if (!keep(c)) missing.add(c);
+    return { font: await fontFor(name), text: [...text].filter(keep).join("") };
   };
 
   const imageCache = new Map<string, PDFImage>();
@@ -327,7 +382,10 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       // 하지 않는데, 원본이 전각 공백(U+3000)을 쓰는 자리가 있어서 그대로
       // 그리면 글꼴에 없는 글자라 **네모(⊠)가 찍힌다**(머리말에서 실제로 났다).
       if (!text || !text.trim()) return;
-      const font = await fontFor(o.font);
+      const picked = await fontForText(o.font, text);
+      const font = picked.font;
+      text = picked.text;
+      if (!text.trim()) return;
       const sx = o.sx ?? 1;
       const x =
         at.alignRight === undefined
@@ -473,20 +531,24 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   const answers = (spec.answers ?? []).filter((a) => a.answer.trim() !== "");
   // 정답표도 한 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
   const total = pages.length + (answers.length > 0 ? 1 : 0);
-  const labelFont = await fontFor(LABEL_FONT);
 
   for (let n = 0; n < pages.length; n++) {
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
     await drawFrame(page, frameFor(spec.frames, n + 1), { pageNo: n + 1, total });
     for (const it of pages[n].items) {
       if (it.label) {
-        page.drawText(it.label, {
-          x: it.x,
-          y: flip(it.y - LABEL_GAP),
-          size: LABEL_SIZE,
-          font: labelFont,
-          color: rgb(0.35, 0.35, 0.35),
-        });
+        // 출처 표기는 사용자가 적은 실모 제목이라 글꼴에 없는 글자가 섞일 수
+        // 있다(잘라 둔 글꼴이다). 틀 글자와 같은 길을 태운다.
+        const label = await fontForText(LABEL_FONT, it.label);
+        if (label.text.trim()) {
+          page.drawText(label.text, {
+            x: it.x,
+            y: flip(it.y - LABEL_GAP),
+            size: LABEL_SIZE,
+            font: label.font,
+            color: rgb(0.35, 0.35, 0.35),
+          });
+        }
       }
       page.drawImage(it.img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
     }
@@ -510,7 +572,21 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     };
     await drawFrame(page, bare, { pageNo, total: shownTotal });
     // 본문 위아래 끝은 **원래 틀**에서 잰다(구분선을 뺀 틀에는 아래 끝이 없다).
-    await drawAnswers(page, frame, answers, fontFor, flip);
+    await drawAnswers(page, frame, answers, fontForText, flip);
+  }
+
+  if (spec.onWarn && (missing.size > 0 || swappedFont.size > 0)) {
+    if (swappedFont.size > 0) {
+      spec.onWarn(
+        `글꼴에 없는 글자가 있어 다른 서체로 그렸습니다: ${[...swappedFont].join(", ")}`,
+      );
+    }
+    if (missing.size > 0) {
+      spec.onWarn(
+        `어느 글꼴에도 없어 빼고 그린 글자: ${[...missing].join(" ")} ` +
+          `— scripts/upload-kice-fonts.mjs 로 글자표를 넓혀 다시 올려야 합니다.`,
+      );
+    }
   }
 
   return pdf.save();
@@ -533,10 +609,12 @@ async function drawAnswers(
   page: PDFPage,
   frame: Frame,
   rows: { label: string; answer: string }[],
-  fontFor: (name: string) => Promise<PDFFont>,
+  // 정답표 글자는 사용자가 적은 것이라(정답에 한글이 들어가는 단답형도 있다)
+  // 잘라 둔 글꼴에 없는 글자가 섞일 수 있다. 틀 글자와 같은 길을 태운다.
+  fontForText: (name: string, text: string) => Promise<{ font: PDFFont; text: string }>,
   flip: (y: number) => number,
 ) {
-  const font = await fontFor(ANSWER_FONT);
+  const font = await fontForText(ANSWER_FONT, "").then((r) => r.font);
   const bounds = frameBounds(frame);
   const left = LAYOUT.marginLeft;
   const width = LAYOUT.columnWidth * 2 + LAYOUT.columnGap;
@@ -574,13 +652,15 @@ async function drawAnswers(
       thickness: 0.5,
       color: rgb(0, 0, 0),
     });
-  const cell = (text: string, x: number, w: number, y: number, size = 12) => {
+  const cell = async (text: string, x: number, w: number, y: number, size = 12) => {
     if (!text) return;
-    page.drawText(text, {
-      x: x + (w - font.widthOfTextAtSize(text, size)) / 2,
+    const picked = await fontForText(ANSWER_FONT, text);
+    if (!picked.text.trim()) return;
+    page.drawText(picked.text, {
+      x: x + (w - picked.font.widthOfTextAtSize(picked.text, size)) / 2,
       y: flip(y + ANSWER_ROW / 2 + size * 0.36),
       size,
-      font,
+      font: picked.font,
       color: rgb(0, 0, 0),
     });
   };
@@ -598,15 +678,15 @@ async function drawAnswers(
     line(x + groupW, top, x + groupW, top + height);
     line(x + numW, top, x + numW, top + height);
 
-    cell("번호", x, numW, top);
-    cell("정답", x + numW, groupW - numW, top);
+    await cell("번호", x, numW, top);
+    await cell("정답", x + numW, groupW - numW, top);
     line(x, top + ANSWER_ROW, x + groupW, top + ANSWER_ROW);
 
     for (let r = 0; r < count; r++) {
       const row = rows[g * perGroup + r];
       const y = top + (r + 1) * ANSWER_ROW;
-      cell(row.label, x, numW, y);
-      cell(row.answer, x + numW, groupW - numW, y);
+      await cell(row.label, x, numW, y);
+      await cell(row.answer, x + numW, groupW - numW, y);
       line(x, y + ANSWER_ROW, x + groupW, y + ANSWER_ROW);
     }
   }
