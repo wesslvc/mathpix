@@ -98,6 +98,13 @@ export default async function DashboardPage({
           >
             채점 기록·추세
           </Link>
+          {/* 문제를 앱에 넣지 않고 답지만 양식대로 뽑고 싶을 때 쓴다. */}
+          <Link
+            href="/answer-sheet"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
+          >
+            정답표 생성기
+          </Link>
           <LogoutButton />
         </div>
       </header>

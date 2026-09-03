@@ -269,6 +269,15 @@ export type KiceSpec = {
    * 풀고 나서 맞춰 볼 답이 없으면 쓸모가 반이다. 그래서 맨 뒤에 한 쪽 붙인다.
    */
   answers?: { label: string; answer: string }[];
+  /**
+   * 정답표 쪽의 쪽번호를 **직접 정한다**(정답표 생성기 전용).
+   *
+   * 보통은 문제 쪽 뒤에 붙으므로 쪽번호가 저절로 정해진다. 그런데 문제 없이
+   * 정답표만 뽑으면 그게 1쪽이 되어 **표지 틀** 위에 그려진다 — 제목 표와
+   * 성명 칸이 함께 나온다. 정답표만 따로 뽑을 때 원하는 것은 본문 쪽 모양
+   * 이므로, 쪽번호를 2 이상으로 주어 본문 틀(even/odd)을 쓰게 한다.
+   */
+  answerPage?: { no: number; total: number };
 };
 
 export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
@@ -484,7 +493,10 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   }
 
   if (answers.length > 0) {
-    const pageNo = total;
+    // 정답표만 따로 뽑을 때만 쪽번호를 직접 받는다(그때는 자동값이 1이라
+    // 표지 틀에 그려진다). 문제와 함께 내보낼 때는 예전 그대로다.
+    const pageNo = spec.answerPage?.no ?? total;
+    const shownTotal = spec.answerPage?.total ?? total;
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
     const frame = frameFor(spec.frames, pageNo);
     // 정답표 쪽에는 **단 구분선을 긋지 않는다.** 표를 세로로 관통해 버린다.
@@ -496,7 +508,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
           !(i.k === "line" && Math.abs(i.x1 - i.x2) < 0.5 && Math.abs(i.y2 - i.y1) > 300),
       ),
     };
-    await drawFrame(page, bare, { pageNo, total });
+    await drawFrame(page, bare, { pageNo, total: shownTotal });
     // 본문 위아래 끝은 **원래 틀**에서 잰다(구분선을 뺀 틀에는 아래 끝이 없다).
     await drawAnswers(page, frame, answers, fontFor, flip);
   }
