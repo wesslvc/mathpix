@@ -14,13 +14,14 @@ import CategoryTitleEditor from "@/components/CategoryTitleEditor";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
-import { readProblemNumber } from "@/lib/problemNumber";
+import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { thumbPathFor } from "@/lib/cardThumb";
 import type { BoxOverride } from "@/lib/renderMathText";
 import type { ExamScore } from "@/lib/supabase/types";
 import { SUBJECT_LABEL } from "@/lib/examSubjects";
 import { examMaxScore } from "@/lib/gradeSummary";
 import GradeProblemUploader from "@/components/GradeProblemUploader";
+import AnswerKeyPanel from "@/components/AnswerKeyPanel";
 
 /**
  * 목록 조회에서 실제로 받아오는 모양.
@@ -353,6 +354,21 @@ export default async function CategoryPage({
 
       {/* 채점과 무관하게 그냥 오답을 추가하는 길은 늘 열어 둔다. */}
       <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
+
+      {/* 답지 한 장으로 정답을 한꺼번에 붙인다. 문제가 있어야 붙일 데가
+          있으므로 하나도 없으면 감춘다. */}
+      {galleryProblems.length > 0 && (
+        <AnswerKeyPanel
+          categoryId={category.id}
+          categoryName={category.source}
+          // 번호는 손으로 정한 값이 우선이고, 없으면 본문 맨 앞에서 뽑는다
+          // (내보내기 화면과 같은 규칙 — 여기만 다르면 붙는 문제가 달라진다).
+          problems={galleryProblems.map((p) => ({
+            id: p.id,
+            number: p.number ?? parseProblemNumber(p.text),
+          }))}
+        />
+      )}
 
       <ProblemGallery problems={galleryProblems} />
     </main>

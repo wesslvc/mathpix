@@ -196,24 +196,27 @@ function parseSlots(text: string): GradeSlot[] {
 }
 
 /**
- * OMR·정답표 사진을 모델에 보내 채점한다.
+ * 사진 여러 장 + 프롬프트를 모델에 보내 **JSON 글자**를 받아 온다.
  *
- * `images` 순서가 곧 프롬프트가 말하는 "1) OMR, 2) 정답표..." 순서다 —
- * 어긋나면 모델이 엉뚱한 사진을 정답표로 읽는다.
+ * 채점(`gradeWithVision`)과 답지 읽기(`readAnswerKeyWithVision`)가 같은 길을
+ * 쓴다 — 모델 이름·Responses↔Chat 폴백·404 안내·usage 읽기가 전부 같은데
+ * 두 벌로 두면 한쪽만 고치는 일이 반드시 생긴다. 다른 것은 프롬프트와
+ * 결과를 어떻게 해석하느냐뿐이다.
+ *
+ * **Responses API 로 먼저 부르고 안 되면 Chat Completions 로 내려간다.**
+ * 요즘 모델은 Responses 만 받는 경우가 있다. 이건 **같은 모델을 다른 길로**
+ * 부르는 것이라, 고른 적 없는 모델로 갈아타는 것과는 다른 이야기다.
  */
-export async function gradeWithVision(
-  subject: Subject,
+async function callVision(
+  prompt: string,
   images: string[],
-  method: GradingMethod = "omr",
+  what: string,
   signal?: AbortSignal,
-): Promise<{ slots: GradeSlot[]; usage?: GradeUsage; model: string }> {
+): Promise<{ text: string; usage?: GradeUsage; model: string }> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
   const model = OPENAI_DETECT_MODEL;
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
-  // images[0]은 OMR(또는 가채점표), 나머지가 정답표다 — 탐구가 정답표
-  // 1장(한 과목만)인지 2장(1선택+2선택)인지로 프롬프트가 갈린다.
-  const prompt = subjectPrompt(subject, images.length - 1, method);
 
   let res = await fetch(OPENAI_RESPONSES, {
     method: "POST",
@@ -271,7 +274,7 @@ export async function gradeWithVision(
     throw new GradeError(
       res.status === 404
         ? `모델 "${model}"을 찾을 수 없습니다. OPENAI_DETECT_MODEL 로 바꿔 주세요.${extra}`
-        : `채점에 실패했습니다 (${model}, HTTP ${res.status}).${extra}`,
+        : `${what}에 실패했습니다 (${model}, HTTP ${res.status}).${extra}`,
       res.status,
     );
   }
@@ -296,5 +299,83 @@ export async function gradeWithVision(
       }
     : undefined;
 
+  return { text, usage, model };
+}
+
+/**
+ * OMR·정답표 사진을 모델에 보내 채점한다.
+ *
+ * `images` 순서가 곧 프롬프트가 말하는 "1) OMR, 2) 정답표..." 순서다 —
+ * 어긋나면 모델이 엉뚱한 사진을 정답표로 읽는다.
+ */
+export async function gradeWithVision(
+  subject: Subject,
+  images: string[],
+  method: GradingMethod = "omr",
+  signal?: AbortSignal,
+): Promise<{ slots: GradeSlot[]; usage?: GradeUsage; model: string }> {
+  // images[0]은 OMR(또는 가채점표), 나머지가 정답표다 — 탐구가 정답표
+  // 1장(한 과목만)인지 2장(1선택+2선택)인지로 프롬프트가 갈린다.
+  const prompt = subjectPrompt(subject, images.length - 1, method);
+  const { text, usage, model } = await callVision(prompt, images, "채점", signal);
   return { slots: parseSlots(text), usage, model };
+}
+
+/** 답지 한 문항. 배점은 답지에 있을 때만 채운다(없는 것을 지어내지 않는다). */
+export type AnswerKeyItem = { no: number; answer: string; points?: number };
+
+const ANSWER_KEY_PROMPT = `당신은 한국 고등학교 시험의 **정답표(답지)** 사진을 읽어 데이터로 옮기는 도우미입니다.
+사진에 있는 문항을 하나도 빠뜨리지 말고 다음 JSON으로만 답하세요:
+{"items":[{"no": 문항번호(정수), "answer": "정답(문자열)", "points": 배점(정수)}]}
+- 정답이 원숫자(①~⑤)면 숫자만 적으세요(① → "1").
+- 단답형은 적힌 그대로 적으세요(분수·소수·문자 포함).
+- **배점 칸이 없으면 points 키를 아예 넣지 마세요.** 일부만 있는 것처럼 지어내지 마세요.
+- 사진이 여러 장이면 전부 합쳐서 한 배열로 주세요. 같은 번호가 두 번 나오면 한 번만 넣으세요.
+- 표가 여러 단으로 나뉘어 있으면 단을 따라 번호 순서대로 읽으세요.
+- 설명은 쓰지 말고 JSON만 답하세요.`;
+
+/** 답지 사진에서 문항별 정답(+배점)을 읽는다. */
+export async function readAnswerKeyWithVision(
+  images: string[],
+  signal?: AbortSignal,
+): Promise<{ items: AnswerKeyItem[]; usage?: GradeUsage; model: string }> {
+  const { text, usage, model } = await callVision(ANSWER_KEY_PROMPT, images, "답지 인식", signal);
+  return { items: parseAnswerKey(text), usage, model };
+}
+
+function parseAnswerKey(text: string): AnswerKeyItem[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const a = text.indexOf("{");
+    const b = text.lastIndexOf("}");
+    if (a === -1 || b <= a) throw new GradeError("답지를 읽지 못했습니다.", 502);
+    try {
+      parsed = JSON.parse(text.slice(a, b + 1));
+    } catch {
+      throw new GradeError("답지를 읽지 못했습니다.", 502);
+    }
+  }
+  const raw = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { items?: unknown })?.items)
+      ? ((parsed as { items: unknown[] }).items)
+      : [];
+
+  const out: AnswerKeyItem[] = [];
+  const seen = new Set<number>();
+  for (const row of raw) {
+    const it = row as Record<string, unknown>;
+    const no = Number(it?.no);
+    if (!Number.isFinite(no) || seen.has(no)) continue;
+    const answer = String(it?.answer ?? "").trim();
+    if (!answer) continue;
+    const points = Number(it?.points);
+    seen.add(no);
+    out.push({ no, answer, ...(Number.isFinite(points) && points > 0 ? { points } : {}) });
+  }
+  if (out.length === 0) throw new GradeError("답지에서 정답을 하나도 읽지 못했습니다.", 502);
+  out.sort((a, b) => a.no - b.no);
+  return out;
 }
