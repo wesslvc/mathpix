@@ -22,6 +22,7 @@ import { SUBJECT_LABEL } from "@/lib/examSubjects";
 import { examMaxScore } from "@/lib/gradeSummary";
 import GradeProblemUploader from "@/components/GradeProblemUploader";
 import AnswerKeyPanel from "@/components/AnswerKeyPanel";
+import ProblemNumberScanner from "@/components/ProblemNumberScanner";
 
 /**
  * 목록 조회에서 실제로 받아오는 모양.
@@ -354,6 +355,14 @@ export default async function CategoryPage({
 
       {/* 채점과 무관하게 그냥 오답을 추가하는 길은 늘 열어 둔다. */}
       <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
+
+      {/* 번호가 없는 문제에 번호를 한꺼번에 붙인다. 번호가 없으면 목록·PDF
+          에서 저장된 차례대로 1번부터 매겨져 실제 시험지와 어긋난다. */}
+      <ProblemNumberScanner
+        targets={galleryProblems
+          .filter((p) => (p.number ?? parseProblemNumber(p.text)) == null)
+          .map((p) => ({ id: p.id, imageUrl: p.imageUrl, text: p.text }))}
+      />
 
       {/* 답지 한 장으로 정답을 한꺼번에 붙인다. 문제가 있어야 붙일 데가
           있으므로 하나도 없으면 감춘다. */}
