@@ -18,6 +18,7 @@ import type { DiagramLayout } from "@/lib/diagramLayout";
 import type { DetectedProblem } from "@/lib/detectProblems";
 import { mergeChosen, type ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
+import { parseProblemNumber } from "@/lib/problemNumber";
 import { useFigureJobs } from "./FigureJobsProvider";
 
 /**
@@ -97,6 +98,31 @@ type Props = {
   /** 문제 하나를 다시 그리는 데 드는 토큰. 서버가 알려준 값을 그대로 쓴다. */
   figureCost?: number | null;
 };
+
+/**
+ * 크롭 한 장을 Mathpix 에 보내 **문제 번호만** 얻는다.
+ *
+ * 본문 전체를 쓰지 않는 이유: 통째로 넣는 문제는 그림 한 장이 곧 카드라
+ * 본문을 저장하면 안 된다(본문이 있으면 "수정" 화면이 본문으로 카드를 다시
+ * 그려 그림이 사라진다 — storedFigures.ts 주석 참고). 번호만 뽑아 쓴다.
+ *
+ * **실패해도 던지지 않는다.** 번호가 없을 뿐 저장은 되어야 한다.
+ */
+async function readNumberWithMathpix(crop: string): Promise<number | null> {
+  try {
+    const res = await fetch("/api/mathpix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // 인식에 보낼 때만 대비를 올린다(화면에 남는 원본은 그대로 둔다).
+      body: JSON.stringify({ image: await enhanceContrast(crop) }),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { text?: string; latex?: string };
+    return parseProblemNumber(json.text || json.latex || "");
+  } catch {
+    return null;
+  }
+}
 
 export default function BatchSplitPanel({ onSave, unlimited = false, figureCost }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -487,6 +513,73 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
   }
 
   /**
+   * 잘린 것을 **그대로** 문제로 저장한다(AI 생성 없음).
+   *
+   * 지면을 잘라 넣는 자료는 이미 인쇄물이라 다시 그릴 이유가 없는 경우가
+   * 많다 — 그럴 때 문제당 50토큰짜리 생성을 강제할 이유가 없다. 크롭한
+   * 그림 한 장이 곧 카드다(`initialFigures` 와 같은 모양).
+   *
+   * **번호만 Mathpix 로 읽어 붙인다.** 통째로 넣은 문제는 본문이 비어 있어
+   * (`isImageOnly`) 본문에서 번호를 뽑을 수가 없다 — 그러면 목록·PDF 에서
+   * 번호가 없어 차례대로 1번부터 매겨진다. 인식 한 번은 1토큰이라 생성(50)에
+   * 비하면 거의 공짜고, 원래 시험지의 번호를 그대로 살릴 수 있다.
+   * 못 읽어도 그냥 넘어간다 — 번호가 없을 뿐 저장은 성공해야 한다.
+   */
+  async function saveAsIs() {
+    if (pieces.length === 0) return;
+    setError(null);
+    let done = 0;
+    for (const piece of pieces) {
+      setBusy(`문제를 넣는 중... (${done + 1}/${pieces.length})`);
+      try {
+        const figure: CardFigure = {
+          id: piece.id,
+          markup: await rasterToSvg(piece.crop),
+          layout: WHOLE_PROBLEM_LAYOUT,
+          position: 0,
+        };
+        const pngDataUrl = await renderCardOffscreen({
+          text: "",
+          boxOverride: undefined,
+          fontSizePx: ptToPx(DEFAULT_FONT_PT),
+          figures: [figure],
+        });
+        const number = await readNumberWithMathpix(piece.crop);
+        await onSave({
+          pngDataUrl,
+          text: "",
+          answer: "",
+          answerType: "choice",
+          boxRange: {
+            ranges: null,
+            fontPt: DEFAULT_FONT_PT,
+            figures: toStoredFigures([figure]),
+            // 못 읽었으면 아예 넣지 않는다(null 을 넣으면 "손으로 지정한
+            // 번호 없음"과 같은 뜻이라 어차피 같지만, 키를 비워 두는 편이
+            // 저장된 값을 볼 때 덜 헷갈린다).
+            ...(number != null ? { number } : {}),
+          },
+        });
+        done += 1;
+      } catch (err) {
+        setError(
+          `${done + 1}번째 문제에서 멈췄습니다: ` +
+            (err instanceof Error ? err.message : "알 수 없는 오류"),
+        );
+        break;
+      }
+    }
+    setBusy(null);
+    if (done > 0) {
+      setPieces([]);
+      setPageImage(null);
+      setPageFile(null);
+      setBoxes([]);
+      setPicked(new Set());
+    }
+  }
+
+  /**
    * 잘린 것들을 문제로 저장하고 다시 그리기 큐에 넣는다.
    *
    * 저장을 **먼저** 한다. 그래야 행 id를 큐에 함께 넘길 수 있고, 브라우저를
@@ -662,6 +755,17 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
             >
               고른 것 합치기 ({picked.size}개)
+            </button>
+          )}
+          {pieces.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void saveAsIs()}
+              disabled={busy !== null}
+              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+              title="AI로 다시 그리지 않고 잘린 그림 그대로 저장합니다. 문제 번호만 인식해서 붙입니다."
+            >
+              그대로 넣기 ({pieces.length}개)
             </button>
           )}
           {pieces.length > 0 && (
