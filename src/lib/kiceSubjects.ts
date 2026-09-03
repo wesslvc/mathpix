@@ -6,8 +6,26 @@ import type { KiceArea } from "./kice/frames";
  * 수학과 국어는 틀이 따로다(교시 딱지와 영역명이 틀에 박혀 있다). 사회탐구와
  * 과학탐구는 같은 틀을 쓰고 영역 이름과 괄호 안 과목명만 바뀐다 — 원본이
  * 사회·문화라서 `사회탐구`/`사회·문화` 를 찾아 갈아끼운다.
+ *
+ * **영어는 여기 없다.** 틀은 있지만(`frames.json` 의 `english`) 표지 교시
+ * 딱지가 제2교시 그대로다 — 영어는 제3교시인데 오려낸 그림이 없다. 표지를
+ * 그리지 않는 정답표 생성기(`ANSWER_SHEET_AREAS`)에서만 쓴다.
  */
 export const KICE_AREAS: KiceArea[] = ["국어", "수학", "사회탐구", "과학탐구"];
+
+/**
+ * 정답표 생성기(`/answer-sheet`)에서 고를 수 있는 영역.
+ *
+ * 정답표는 **본문 쪽 틀**에 그려진다(표지가 아니다). 그 쪽에는 교시 딱지가
+ * 없고 머리말의 영역명뿐이라, 표지 딱지가 없는 영어도 여기서는 정확하다.
+ */
+export const ANSWER_SHEET_AREAS: KiceArea[] = [
+  "국어",
+  "수학",
+  "영어",
+  "사회탐구",
+  "과학탐구",
+];
 
 export const KICE_SUBJECTS: Record<KiceArea, string[]> = {
   사회탐구: [
@@ -35,4 +53,5 @@ export const KICE_SUBJECTS: Record<KiceArea, string[]> = {
   수학: [],
   // 국어도 마찬가지다. 선택과목(화작·언매)은 문제지 표지에 적히지 않는다.
   국어: [],
+  영어: [],
 };

@@ -60,13 +60,18 @@ export type Frame = {
 };
 
 export type FrameSet = { first: Frame; even: Frame; odd: Frame };
-export type KiceFrames = { tamgu: FrameSet; math: FrameSet; korean: FrameSet };
+export type KiceFrames = {
+  tamgu: FrameSet;
+  math: FrameSet;
+  korean: FrameSet;
+  english: FrameSet;
+};
 
 /**
  * 탐구(사회·과학)는 틀 하나를 같이 쓰고 영역·과목명만 갈아끼운다.
- * 수학·국어는 각자 틀이 있다(교시 딱지와 영역명이 틀에 박혀 있다).
+ * 수학·국어·영어는 각자 틀이 있다(교시 딱지와 영역명이 틀에 박혀 있다).
  */
-export type KiceArea = "사회탐구" | "과학탐구" | "수학" | "국어";
+export type KiceArea = "사회탐구" | "과학탐구" | "수학" | "국어" | "영어";
 
 /**
  * 국어 틀은 **수학 틀에서 만들었다**(`scripts/kice/make-korean-frame.mjs`).
@@ -74,9 +79,21 @@ export type KiceArea = "사회탐구" | "과학탐구" | "수학" | "국어";
  * 판형·단 구성이 같고 다른 것은 영역명(수학→국어)과 교시 딱지(제2교시→
  * 제1교시)뿐이라 그대로 옮겨 쓸 수 있다. 그래서 수학과 마찬가지로 표지에
  * 성명·수험번호 칸이 없다 — 원본을 구하면 그때 다시 뽑을 것.
+ *
+ * 영어 틀도 같은 방법으로 만들었다(`make-english-frame.mjs`). 다만 **표지의
+ * 교시 딱지가 제2교시 그대로다** — 영어는 제3교시인데 실제 문제지에서 오려낸
+ * 그림이 없다. 그래서 영어는 문제지 내보내기(`KICE_AREAS`)에 넣지 않고
+ * 정답표 생성기에서만 쓴다. 정답표는 본문 쪽 틀에 그려지고 그 쪽에는 교시
+ * 딱지가 아예 없어서 이 한계에 걸리지 않는다.
  */
 export const frameKeyFor = (area: KiceArea): keyof KiceFrames =>
-  area === "수학" ? "math" : area === "국어" ? "korean" : "tamgu";
+  area === "수학"
+    ? "math"
+    : area === "국어"
+      ? "korean"
+      : area === "영어"
+        ? "english"
+        : "tamgu";
 
 let cached: Promise<KiceFrames> | null = null;
 
