@@ -60,13 +60,23 @@ export type Frame = {
 };
 
 export type FrameSet = { first: Frame; even: Frame; odd: Frame };
-export type KiceFrames = { tamgu: FrameSet; math: FrameSet };
+export type KiceFrames = { tamgu: FrameSet; math: FrameSet; korean: FrameSet };
 
-/** 탐구(사회·과학)는 틀 하나를 같이 쓰고 영역·과목명만 갈아끼운다. */
-export type KiceArea = "사회탐구" | "과학탐구" | "수학";
+/**
+ * 탐구(사회·과학)는 틀 하나를 같이 쓰고 영역·과목명만 갈아끼운다.
+ * 수학·국어는 각자 틀이 있다(교시 딱지와 영역명이 틀에 박혀 있다).
+ */
+export type KiceArea = "사회탐구" | "과학탐구" | "수학" | "국어";
 
+/**
+ * 국어 틀은 **수학 틀에서 만들었다**(`scripts/kice/make-korean-frame.mjs`).
+ * 국어 문제지 hwpx 원본이 없어서 rhwp 로 뽑을 수가 없었는데, 수학과 국어는
+ * 판형·단 구성이 같고 다른 것은 영역명(수학→국어)과 교시 딱지(제2교시→
+ * 제1교시)뿐이라 그대로 옮겨 쓸 수 있다. 그래서 수학과 마찬가지로 표지에
+ * 성명·수험번호 칸이 없다 — 원본을 구하면 그때 다시 뽑을 것.
+ */
 export const frameKeyFor = (area: KiceArea): keyof KiceFrames =>
-  area === "수학" ? "math" : "tamgu";
+  area === "수학" ? "math" : area === "국어" ? "korean" : "tamgu";
 
 let cached: Promise<KiceFrames> | null = null;
 
