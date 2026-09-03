@@ -228,6 +228,9 @@ function fitColumn(items: Shot[], x: number, top: number, bottom: number): Place
  */
 function layoutPages(images: Shot[], frames: FrameSet, pattern: number[]) {
   const pages: { items: Placed[] }[] = [];
+  // 문제가 하나도 없으면 쪽도 없다. `do...while` 이라 빈 쪽 하나가 생기는데,
+  // 정답표만 뽑을 때(문제 없이) 그 빈 쪽이 표지 자리를 차지해 버린다.
+  if (images.length === 0) return pages;
   let at = 0;
   do {
     const b = frameBounds(frameFor(frames, pages.length + 1));
