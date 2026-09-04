@@ -14,6 +14,8 @@
  * (`problemBoxes.ts`·`gradeSummary.ts` 와 같은 이유).
  */
 
+import { readRichBlocks, type RichBlock } from "./kice/richText";
+
 export type KoreanRole = "passage" | "question";
 
 export type KoreanMeta = {
@@ -27,6 +29,14 @@ export type KoreanMeta = {
   title?: string;
   /** 세트 안에서의 차례(문제끼리). 없으면 저장된 차례를 따른다. */
   index?: number;
+  /**
+   * **지문 행에만 있다.** terra 가 구조화해 읽은 지문 글자(문단·상자·굵게·
+   * 밑줄). 있으면 내보내기가 사진 대신 이걸로 평가원 글꼴 조판을 한다
+   * (`pdf.ts` 의 `passageText`). 없으면(옛 데이터, 인식 실패, "원본 그대로
+   * 넣기") 예전처럼 오려낸 사진을 쓴다 — 그래서 이 필드는 있어도 그만
+   * 없어도 그만이어야 한다.
+   */
+  blocks?: RichBlock[];
 };
 
 /** `box_range` 에서 국어 메타를 읽는다. 모양이 안 맞으면 없는 것으로 본다. */
@@ -38,14 +48,22 @@ export function readKoreanMeta(value: unknown): KoreanMeta | null {
       ? (value as { korean?: unknown }).korean
       : value;
   if (!raw || typeof raw !== "object") return null;
-  const o = raw as { setId?: unknown; role?: unknown; title?: unknown; index?: unknown };
+  const o = raw as {
+    setId?: unknown;
+    role?: unknown;
+    title?: unknown;
+    index?: unknown;
+    blocks?: unknown;
+  };
   if (typeof o.setId !== "string" || !o.setId) return null;
   if (o.role !== "passage" && o.role !== "question") return null;
+  const blocks = o.role === "passage" ? readRichBlocks(o.blocks) : [];
   return {
     setId: o.setId,
     role: o.role,
     title: typeof o.title === "string" && o.title.trim() ? o.title : undefined,
     index: typeof o.index === "number" && Number.isFinite(o.index) ? o.index : undefined,
+    ...(blocks.length > 0 ? { blocks } : {}),
   };
 }
 
