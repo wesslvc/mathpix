@@ -1065,6 +1065,21 @@ NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
 **미리 잘라서(pyftsubset) 올릴 것** — 원본은 한 벌에 수 MB라 다섯 벌을 받는
 데만 한참 걸린다. KS X 1001 한글 2350자 + 라틴/기호면 다섯 벌 합쳐 2MB 아래다.
 
+**컴퓨터가 없으면 `/admin/kice-fonts` 로 올린다.** 원본 TTF를 그대로 골라
+올리면 서버가 `subset-font`(harfbuzz WASM, `src/lib/kice/fontSubset.ts`)로
+대신 잘라 준다 — 휴대폰 브라우저만으로 끝난다. 무제한 계정(`entitlements.
+unlimited`)만 쓸 수 있다(`requireFontAdmin`). 큰 원본은 조각내 올린다
+(`/api/admin/kice-font/chunk` → `/api/admin/kice-font/finish`, Vercel 요청
+본문 4.5MB 제한 때문에 `BulkMappedImportPanel`과 같은 방식). **(한)신중명조는
+완성형 한글 전체**(U+AC00~D7A3)를 남기고, 나머지 넷은 `frames.json`에 박힌
+글자 + 우리가 갈아 끼우는 글자만 남긴다(안 그러면 pyftsubset 쪽과 달리
+파일이 다시 몇 MB로 불어난다). 자른 뒤 실제로 그 글자가 있는지 다시
+확인해 없는 글자를 알려 준다 — 원본에 애초에 없으면 우리가 만들 수 없다.
+harfbuzz WASM을 웹팩이 읽게 하려고 `next.config.mjs`에 `asyncWebAssembly`를
+켰다(서버 전용 라우트에서만 쓰여 브라우저 번들에는 안 실린다 — `fontSubset.ts`를
+클라이언트 컴포넌트가 직접 가져오면 그 번들이 깨진다, 그래서 이름 목록은
+`fonts.ts`에 따로 뒀다).
+
 **잘라 낸 글자는 네모(⊠)로 찍히는데 오류는 나지 않는다.** 국어 틀을 만들었더니
 머리말이 `국⊠ 영역` 으로 나왔다 — 신그래픽체에 '국' 은 과목명 "한국지리"
 때문에 들어 있었지만 **'어' 는 어디에도 쓰이지 않아 빠져 있었다.** 틀에 새
