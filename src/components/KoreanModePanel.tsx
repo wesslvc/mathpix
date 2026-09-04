@@ -19,6 +19,7 @@ import type { DiagramLayout } from "@/lib/diagramLayout";
 import type { DetectedKoreanRegion } from "@/lib/detectProblems";
 import type { ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
+import { makeZoomTiles } from "@/lib/passageTiles";
 import { useFigureJobs } from "./FigureJobsProvider";
 import BoxEditor, { type EditBox } from "./BoxEditor";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
@@ -461,16 +462,28 @@ export default function KoreanModePanel({
    */
   async function readPassageBlocks(crop: string) {
     setBusy("지문을 글자로 옮기는 중... (평가원 글꼴로 조판됩니다)");
+    // 밑줄·네모 표시·ㄱㄴㄷ 표지는 통째로 보낸 한 장에서는 글자 높이가
+    // 20~30px 라 잘 안 보인다. 위에서 아래로 겹치게 자른 **확대본**을 함께
+    // 보내 같은 자리를 몇 배 크게 보게 한다(사용자 요청).
+    const tiles = await makeZoomTiles(crop);
     // makeTitle 이 이미 Mathpix 로 읽어 둔 것을 재사용한다 — 여기서 다시
     // 부르면 Mathpix 요청이 한 번 더 나가 토큰이 헛되이 든다. 없으면
     // "건너뜀"이라 예전(참고 없이 사진만 보고 읽기)과 같다.
     const reference = passageOcrRef.current ?? "";
-    setPassageStatus({ mathpix: reference ? "ok" : "skipped", terra: "running" });
+    setPassageStatus({
+      mathpix: reference ? "ok" : "skipped",
+      terra: "running",
+      tiles: tiles.length,
+    });
     try {
       const res = await fetch("/api/korean-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await enhanceContrast(crop), reference }),
+        body: JSON.stringify({
+          image: await enhanceContrast(crop),
+          reference,
+          tiles,
+        }),
       });
       const json = (await res.json()) as {
         blocks?: unknown;
@@ -484,6 +497,7 @@ export default function KoreanModePanel({
       setPassageStatus({
         mathpix: reference ? "ok" : "skipped",
         terra: "done",
+        tiles: tiles.length,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
       });
