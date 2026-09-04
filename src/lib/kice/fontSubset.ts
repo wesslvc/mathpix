@@ -1,5 +1,6 @@
 import subsetFont from "subset-font";
 import fontkit from "@pdf-lib/fontkit";
+import { PDFDocument } from "pdf-lib";
 import { KICE_FONT_FILES } from "./fonts";
 import frames from "../../../public/kice/frames.json";
 
@@ -18,6 +19,31 @@ import frames from "../../../public/kice/frames.json";
  * 우리가 갈아 끼우는 글자만 있으면 되므로 좁게 자른다 — 그러지 않으면
  * pyftsubset 쪽과 달리 파일이 다시 몇 MB로 불어난다.
  */
+
+/**
+ * **subset-font(harfbuzz WASM)가 마지막 몇 글리프를 깨뜨린다.** 완성형 한글
+ * 전체(11172자)처럼 큰 연속 범위를 통째로 자르면, 원본 글꼴에서 글리프 ID가
+ * 가장 큰 글자 몇 개(이 글꼴에서는 힞힟힠힡힢힣 — 한글 음절의 맨 끝 6자)의
+ * `glyf`/`loca` 항목이 잘려 나간다. `hasGlyphForCodePoint`(cmap 조회)는 이걸
+ * 못 잡는다 — cmap 매핑 자체는 멀쩡하고 **그 글리프의 윤곽 데이터만** 깨져
+ * 있어서, PDF 에서 그 글자를 그리거나(`widthOfTextAtSize`) 문서를
+ * 저장할 때(`PDFDocument.save()`)만 "Trying to access beyond buffer length"
+ * 로 터진다. 실제로 이 버그 때문에 사용자의 PDF 생성이 통째로 실패했다 —
+ * 이 여섯 글자가 실제로 쓰였는지와 무관하게, `(한)신중명조`가 물려 있는 PDF
+ * 는 무엇을 쓰든 저장 자체가 안 됐다(subset:false 로 통째로 넣으므로
+ * pdf-lib 가 저장할 때 글자 전부를 훑는다).
+ *
+ * **고치는 법**: 우리가 실제로 쓰는 범위 **뒤에** 이 글꼴이 확실히 갖고 있는
+ * 여분의 한자를 덧붙인다. harfbuzz 의 출력 글리프 순서는 우리가 적어 보낸
+ * 문자열 순서가 아니라 **원본 글꼴의 글리프 ID 순서**를 따르므로(한글 음절
+ * 뒤에 라틴·자모·원문자를 적어 보내도 깨지는 건 여전히 한글 마지막 글자였다),
+ * 덧붙인 한자가 원본에서 한글 음절보다 더 높은 글리프 ID를 가지면 깨지는
+ * 자리가 그 한자 쪽으로 밀려나 우리가 쓰는 글자는 전부 무사해진다. 실제로
+ * 재현해 확인했다 — 여유 없이 자르면 6자가 깨지고 `save()` 가 던지지만,
+ * 한자 30자를 붙이면 필요한 11422자가 전부 멀쩡하고 `save()` 도 성공한다.
+ * `subsetKiceFont` 의 구조 검증(아래)이 이걸 다시 놓치지 않게 잡아 준다.
+ */
+const HANGUL_PADDING = "一二三四五六七八九十百千萬億東西南北中上下左右大小年月日時分秒";
 
 /** 완성형 한글 전체(U+AC00~D7A3) + 라틴/기호 + 자모·원문자. */
 function fullHangulText(): string {
@@ -65,10 +91,19 @@ function textFromFrames(): string {
   return [...seen].join("");
 }
 
-/** 이 글꼴 이름에 대해 얼마나 넓게 남길지 정한다. */
+/** 이 글꼴 이름에 실제로 **필요한** 글자(검증도 이 값 기준으로 한다). */
 function textFor(fontName: string): string {
   if (fontName === "(한)신중명조") return fullHangulText();
   return textFromFrames() + (FRAME_EXTRA[fontName] ?? "") + "0123456789";
+}
+
+/**
+ * `textFor()` 에 더해 subset-font 에 **실제로 보낼** 여분의 미끼 글자.
+ * 필요해서가 아니라 위 `HANGUL_PADDING` 설명대로 마지막 글리프가 깨지는
+ * 자리를 밀어내려는 것이다 — 검증은 이 글자들을 보지 않는다(없어도 상관없다).
+ */
+function paddingFor(fontName: string): string {
+  return fontName === "(한)신중명조" ? HANGUL_PADDING : "";
 }
 
 export type SubsetResult = {
@@ -79,24 +114,32 @@ export type SubsetResult = {
 /**
  * 원본 TTF를 필요한 글자만 남기고 자른다.
  *
- * **자른 뒤 실제로 그 글자가 있는지 다시 확인한다** — 원본에 애초에 없는
- * 글자는 잘라내도 여전히 없다. 잘라 낸 글자는 PDF에서 조용히 네모(⊠)로
- * 찍히므로, 여기서 미리 알려 준다(`pdf.ts`의 `fontForText`와 같은 걱정).
+ * **자른 뒤 실제로 그 글자를 쓸 수 있는지 다시 확인한다.** 두 가지를 본다 —
+ * ① 원본에 애초에 없는 글자(cmap 조회, `hasGlyphForCodePoint`), ② **cmap엔
+ * 있지만 글리프 데이터가 깨진 글자**. ②를 빠뜨리면 안 된다 — 실제로 겪은
+ * 사고다: `(한)신중명조`를 완성형 한글 전체로 자르자 harfbuzz 가 마지막
+ * 여섯 글자(힞힟힠힡힢힣)의 `glyf`/`loca` 항목을 깨뜨렸는데, cmap 매핑은
+ * 멀쩡해서 `hasGlyphForCodePoint`는 통과했다. 그 글꼴이 물린 PDF는 그
+ * 여섯 글자를 실제로 쓰든 안 쓰든 **`PDFDocument.save()` 단계에서 무조건
+ * "Trying to access beyond buffer length"로 죽었다**(subset:false 로 통째로
+ * 넣으므로 저장할 때 pdf-lib 가 글자 전부를 훑는다). 그래서 여기서
+ * pdf-lib 로 실제 embed 하고 `widthOfTextAtSize` 를 글자마다 불러 본다 —
+ * 그게 저장 때 밟는 것과 같은 길이라 이 검사를 통과하면 실제로도 안전하다.
  */
 export async function subsetKiceFont(
   fontName: string,
   original: Buffer,
 ): Promise<SubsetResult> {
   const text = textFor(fontName);
-  const bytes = await subsetFont(original, text, {
+  const bytes = await subsetFont(original, text + paddingFor(fontName), {
     targetFormat: "sfnt",
     noHinting: true,
   });
 
   const missing: string[] = [];
+  const need = new Set(text);
   try {
     const font = fontkit.create(bytes);
-    const need = new Set(text);
     for (const ch of need) {
       if (!ch.trim()) continue;
       if (!font.hasGlyphForCodePoint(ch.codePointAt(0)!)) missing.push(ch);
@@ -104,6 +147,36 @@ export async function subsetKiceFont(
   } catch {
     // 확인만 실패한 것이지 자르기 자체는 됐다 — 결과는 그대로 돌려준다.
   }
+
+  // ② 구조 검증: cmap엔 있지만 글리프 윤곽이 깨진 글자. pdf.ts 가 실제로
+  // 타는 길(embed → widthOfTextAtSize → save)을 그대로 밟아 본다.
+  try {
+    const doc = await PDFDocument.create();
+    doc.registerFontkit(fontkit);
+    const pdfFont = await doc.embedFont(bytes, { subset: false });
+    for (const ch of need) {
+      if (!ch.trim() || missing.includes(ch)) continue;
+      try {
+        pdfFont.widthOfTextAtSize(ch, 10);
+      } catch {
+        missing.push(ch);
+      }
+    }
+    // 실제로 문서를 저장해 봐야 확신할 수 있다 — save() 는 embed 된 글꼴을
+    // 통째로 훑으므로, 위 글자별 검사를 다 통과했어도 다른 곳(우리가 안 쓰는
+    // 글자)이 깨져 있으면 여기서 드러난다. 그때는 "missing" 으로 못 짚어
+    // 주지만("어느 글자"가 아니니) 최소한 조용히 깨진 파일을 올리지는 않는다.
+    await doc.save();
+  } catch (err) {
+    // 이 글꼴 전체가 pdf-lib 로 저장이 안 된다 — 실제로 겪은 사고와 같은
+    // 증상이므로 조용히 넘기지 않고 던진다. 원인은 파악할 수 없어도(어느
+    // 글자인지 특정 못 함) 깨진 파일을 그대로 올리는 것보다 낫다.
+    throw new Error(
+      `자른 글꼴을 PDF 에 실제로 넣어 저장하는 데 실패했습니다(구조 검증) — ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   return { bytes, missing };
 }
 
