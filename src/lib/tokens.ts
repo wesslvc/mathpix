@@ -102,36 +102,89 @@ const USD_TO_KRW = (() => {
 })();
 
 /**
- * 입력 토큰 100만 개당 단가(달러). OpenAI가 공표한 요금표 값을 그대로
- * 넣는다 — gpt-image-2 때와 같은 원칙("청구액에서 역산하지 말 것")이라,
- * 공표된 숫자가 아니면 비워 둔다. 설정 안 하면 실사용량 정산을 안 한다.
+ * 입력 토큰 100만 개당 단가(달러). 아래 `GRADING_PRICES` 에 없는 모델에만
+ * 쓰는 **폴백**이다 — 새 모델을 붙일 때 재배포 없이 값을 넣을 수 있게 둔다.
  */
 const GRADING_PRICE_INPUT_PER_MTOK_USD = (() => {
   const raw = Number(process.env.GRADING_PRICE_INPUT_PER_MTOK_USD);
   return Number.isFinite(raw) && raw > 0 ? raw : null;
 })();
 
-/** 출력 토큰 100만 개당 단가(달러). */
+/** 출력 토큰 100만 개당 단가(달러). 위와 같이 폴백이다. */
 const GRADING_PRICE_OUTPUT_PER_MTOK_USD = (() => {
   const raw = Number(process.env.GRADING_PRICE_OUTPUT_PER_MTOK_USD);
   return Number.isFinite(raw) && raw > 0 ? raw : null;
 })();
 
+type ModelPrice = {
+  /** 입력 100만 토큰당 달러. */
+  input: number;
+  /** 캐시된 입력 100만 토큰당 달러. 모르면 비워 둔다(정가로 친다). */
+  cachedInput?: number;
+  /** 출력 100만 토큰당 달러. */
+  output: number;
+};
+
 /**
- * 채점 1회의 원가(원)를 추정한다. **단가를 모르면 `undefined`** — 그러면
- * `gradingTokenCharge`가 폴백(보증금 그대로)으로 처리한다.
+ * **모델마다 단가가 다르다.** 하나로 뭉뚱그리면 안 된다.
+ *
+ * 예전에는 환경변수 한 쌍(`GRADING_PRICE_*`)을 모든 vision 호출에 똑같이
+ * 썼는데, 실제로는 **열 배까지 차이가 난다** — luna 는 입력 $0.20·출력
+ * $1.20 인데 terra 는 입력 $2.00·출력 $12.00 이다. 한 쌍으로 두고 terra
+ * 값을 넣으면 채점·제목 짓기·답지 읽기(전부 luna)가 열 배로 과다 청구되고,
+ * luna 값을 넣으면 지문 인식(terra)에서 우리가 열 배를 밑진다.
+ *
+ * **공표된 요금표를 그대로 적는다** — gpt-image-2 때 정한 원칙과 같다
+ * ("청구액에서 역산하지 말 것"). 모르는 모델은 여기 넣지 않고, 그때는
+ * 위 환경변수 폴백이 없으면 `undefined` 를 돌려줘 보증금 고정으로 간다.
  */
-export function gradingEstKrw(usage: {
-  inputTokens: number;
-  outputTokens: number;
-}): number | undefined {
-  if (GRADING_PRICE_INPUT_PER_MTOK_USD === null || GRADING_PRICE_OUTPUT_PER_MTOK_USD === null) {
-    return undefined;
+const GRADING_PRICES: Record<string, ModelPrice> = {
+  // 사용자가 알려 준 값. cachedInput 은 안 알려 줘서 비워 둔다 — 정가로
+  // 치므로 적게 잡는 쪽으로는 틀리지 않는다.
+  "gpt-5.6-luna": { input: 0.2, output: 1.2 },
+  // 지문 인식(`/api/korean-text`). 캐시 입력 단가까지 알려 준 값이다.
+  "gpt-5.6-terra": { input: 2.0, cachedInput: 0.2, output: 12.0 },
+};
+
+function priceFor(model?: string): ModelPrice | null {
+  const known = model ? GRADING_PRICES[model] : undefined;
+  if (known) return known;
+  if (
+    GRADING_PRICE_INPUT_PER_MTOK_USD !== null &&
+    GRADING_PRICE_OUTPUT_PER_MTOK_USD !== null
+  ) {
+    return {
+      input: GRADING_PRICE_INPUT_PER_MTOK_USD,
+      output: GRADING_PRICE_OUTPUT_PER_MTOK_USD,
+    };
   }
+  return null;
+}
+
+/**
+ * vision 호출 1회의 원가(원)를 추정한다. **단가를 모르면 `undefined`** —
+ * 그러면 `gradingTokenCharge`가 폴백(보증금 그대로)으로 처리한다.
+ *
+ * `model` 을 꼭 넘겨라. 안 넘기면 환경변수 폴백뿐이라 모델별 차이가 사라진다.
+ */
+export function gradingEstKrw(
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    /** 그중 캐시로 처리된 입력 토큰(있으면 훨씬 싸다). */
+    cachedInputTokens?: number;
+  },
+  model?: string,
+): number | undefined {
+  const price = priceFor(model);
+  if (!price) return undefined;
+  // OpenAI 의 `input_tokens` 는 캐시된 것을 **포함한** 값이라 빼서 나눈다.
+  const cached = Math.min(Math.max(usage.cachedInputTokens ?? 0, 0), usage.inputTokens);
+  const fresh = usage.inputTokens - cached;
+  // 캐시 단가를 모르면 정가로 친다 — 적게 잡아 밑지는 쪽으로는 안 틀린다.
+  const cachedRate = price.cachedInput ?? price.input;
   const estUsd =
-    (usage.inputTokens * GRADING_PRICE_INPUT_PER_MTOK_USD +
-      usage.outputTokens * GRADING_PRICE_OUTPUT_PER_MTOK_USD) /
-    1e6;
+    (fresh * price.input + cached * cachedRate + usage.outputTokens * price.output) / 1e6;
   return estUsd * USD_TO_KRW;
 }
 

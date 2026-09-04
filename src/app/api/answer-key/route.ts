@@ -106,7 +106,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await readAnswerKeyWithVision(images, deadline.signal);
-    const estKrw = result.usage ? gradingEstKrw(result.usage) : undefined;
+    // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
+    const estKrw = result.usage ? gradingEstKrw(result.usage, result.model) : undefined;
     const chargedTokens = await settle(estKrw);
 
     // 금액은 무제한 계정에만 보여준다(막는 자리는 서버 — 화면 숨김은 우회 가능).

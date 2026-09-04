@@ -155,7 +155,8 @@ export async function POST(req: NextRequest) {
       deadline.signal,
     );
 
-    const estKrw = result.usage ? gradingEstKrw(result.usage) : undefined;
+    // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
+    const estKrw = result.usage ? gradingEstKrw(result.usage, result.model) : undefined;
     const chargedTokens = await settle(estKrw);
 
     // 슬롯에 사용자가 적어 준 과목명(elective_label)을 그대로 이어 붙인다.

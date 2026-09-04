@@ -88,7 +88,8 @@ export async function POST(req: NextRequest) {
   const timer = setTimeout(() => deadline.abort(), (maxDuration - 10) * 1000);
   try {
     const { result, usage, model } = await readKoreanTitle(text, deadline.signal);
-    const estKrw = usage ? gradingEstKrw(usage) : undefined;
+    // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
+    const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
     const chargedTokens = await billing.settle(estKrw);
 
     // 지문 인식(`/api/korean-text`)과 **같은 모양으로** 찍는다. 사용자가

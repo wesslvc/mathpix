@@ -10,8 +10,19 @@ export const dynamic = "force-dynamic";
 // 지문 한 편을 통째로 옮겨 적는 일이라 채점보다 출력이 길다.
 export const maxDuration = 180;
 
-/** 이 일에 걸어 두는 보증금. 끝나면 실사용량으로 정산한다. */
-const DEPOSIT = 5;
+/**
+ * 이 일에 걸어 두는 보증금. 끝나면 실사용량으로 정산한다.
+ *
+ * **5에서 30으로 올렸다.** terra 단가를 알게 되니(입력 $2.00 / 출력 $12.00 per
+ * 1M) 지문 한 편의 원가가 **약 70원**이고, 마진을 붙인 실제 차감이 **35토큰**
+ * (=105원)이다. 보증금이 5면 정산 때 30토큰을 더 받아야 하는데, **잔액이
+ * 5토큰뿐인 사람은 그 추가 차감이 실패해 사실상 공짜로 가져간다**(그때는
+ * 경고만 찍고 결과는 준다 — 이미 만든 것을 버릴 이유가 없어서다).
+ * 보증금을 원가 근처에 두면 애초에 시작하지 못한다.
+ *
+ * 실제보다 많이 잡혀도 손해가 아니다 — 정산에서 남는 만큼 돌려준다.
+ */
+const DEPOSIT = 30;
 
 /**
  * 국어 지문 사진을 **구조화된 글자**로 옮긴다.
@@ -89,7 +100,8 @@ export async function POST(req: NextRequest) {
       reference,
       deadline.signal,
     );
-    const estKrw = usage ? gradingEstKrw(usage) : undefined;
+    // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
+    const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
     const chargedTokens = await billing.settle(estKrw);
 
     /**
