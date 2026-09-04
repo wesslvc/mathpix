@@ -513,6 +513,33 @@ export default function FigureJobsProvider({
     (j) => j.status === "pending" || j.status === "running",
   ).length;
 
+  /**
+   * **작업이 도는 중에 탭을 닫거나 새로고침하려 하면 되묻는다.**
+   *
+   * 큐는 브라우저 안에서 돈다. 그래서 새로고침하면 **대기 중이던 작업이
+   * 통째로 사라지고**, 돌던 작업도 fetch 가 끊긴다. 문제 전체 그리기
+   * (`mode: "problem"`)는 서버가 결과를 직접 저장하므로 그래도 남지만
+   * (`persistWholeProblem`), **그림 하나 모드와 지문 인식은 그 보험이 없다** —
+   * 토큰은 이미 서버에서 차감된 뒤라 돈만 나가고 아무것도 안 남는다.
+   * 사용자 신고: "생성할 때 새로고침하면 AI 날아가고 브라우저 창 나가면
+   * 중간에 중단됨."
+   *
+   * 브라우저는 안내 문구를 우리 마음대로 못 바꾸지만(자체 문구를 쓴다),
+   * **되묻는 창이 뜨는 것만으로 실수로 날리는 것은 막힌다.** 작업이 없을
+   * 때는 아무 방해도 하지 않는다.
+   */
+  useEffect(() => {
+    if (activeCount === 0) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // 옛 브라우저를 위해 returnValue 도 채운다(문구는 무시된다).
+      e.returnValue = "";
+      return "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [activeCount]);
+
   return (
     <FigureJobsContext.Provider
       value={{
