@@ -12,6 +12,13 @@
 export type PassageStatus = {
   mathpix: "running" | "ok" | "failed" | "skipped";
   terra: "pending" | "running" | "done" | "error";
+  /**
+   * 확대해서 보라고 함께 보낸 조각 수(`passageTiles.ts`). 0이면 통째로 한 장만
+   * 보냈다는 뜻이다 — 짧은 지문이라 나눠도 이득이 없는 경우다. 이걸 보여 주는
+   * 이유는 그림 생성의 `ocr` 표시와 같다: **글자 정확도를 좌우하는 단계인데
+   * 조용히 넘어가면 왜 잘 읽혔는지/왜 틀렸는지 알 수 없다.**
+   */
+  tiles?: number;
   /** 일반 계정에 보여줄 토큰 수(terra 호출, 실사용량 정산). */
   chargedTokens?: number;
   /** 무제한 계정에만 보여줄 원화 추정치(막는 자리는 서버다). */
@@ -65,6 +72,7 @@ export function PassageProgress({
         }
       >
         terra: {TERRA_LABEL[status.terra]}
+        {status.tiles ? ` · 확대 ${status.tiles}조각으로 꼼꼼히 보는 중` : ""}
       </p>
       {status.terra === "done" &&
         (unlimited && typeof status.costKrw === "number" ? (
