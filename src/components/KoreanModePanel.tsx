@@ -17,8 +17,8 @@ import type { DiagramLayout } from "@/lib/diagramLayout";
 import type { DetectedKoreanRegion } from "@/lib/detectProblems";
 import type { ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
-import { parseProblemNumber } from "@/lib/problemNumber";
 import { useFigureJobs } from "./FigureJobsProvider";
+import BoxEditor, { type EditBox } from "./BoxEditor";
 
 /**
  * **국어 모드** — 지문 한 편과 그에 딸린 문항들을 한 세트로 넣는다.
@@ -28,34 +28,35 @@ import { useFigureJobs } from "./FigureJobsProvider";
  * 넘겨 가며 풀어야 한다. 그래서 같은 `setId` 로 묶어 두고(`koreanSet.ts`),
  * 내보낼 때 **짝수 쪽 지문 · 홀수 쪽 문제**로 펼침면에 나란히 놓는다.
  *
- * 하는 일이 네 가지다:
- *  0. Mathpix 로 지면을 읽고 그 글자를 LUNA 에 보내 **제목**을 짓는다
- *     (독서는 주제, 복합지문은 `(복합) 주제1 + 주제2`, 문학은 저자·작품명).
- *     제목은 첫 장 목차에 그대로 적힌다.
- *  1. **지문 영역**을 찾아 잘라 낸다.
- *  2. **문제 영역**을 찾아 잘라 내고 같은 세트로 묶는다.
- *  3. 잘린 것들을 저장하고(원본 그대로) 원하면 AI 재생성 큐에 넣는다.
+ * **지문과 문제를 따로따로 잡는다**(사용자 요청). 한 화면에서 한꺼번에
+ * 받으면 자리를 고칠 수가 없다 — 모델이 지문 아래를 조금 잘라 먹거나 선지
+ * 한 줄을 놓치는 일이 흔한데, 그때 지우고 다시 하는 수밖에 없었다. 지금은
+ * 단계마다 네모를 **끌어서 옮기고 크기를 고칠 수 있다**(`BoxEditor`).
  *
- * **영역 찾기는 한 번의 호출로 지문과 문제를 함께** 받는다(`mode: "korean"`).
- * 나누면 그만큼 돈이 더 든다.
+ *   ① 지문 자리 잡기 → ② 문제 자리 잡기 → ③ 제목 확인하고 저장
  *
- * **지문 없는 문항**은 체크 하나로 세트를 만들지 않고 보통 문제로 넣는다 —
+ * **자동으로 찾기는 시작점일 뿐이다.** 눌러도 되고 안 눌러도 된다 — 손으로만
+ * 그려도 되므로 무제한 계정이 아니어도 국어 모드를 쓸 수 있다.
+ * 자동 호출은 **한 번뿐이고 그 결과를 두 단계가 나눠 쓴다**(지문/문제를 따로
+ * 부르면 그만큼 돈이 더 든다).
+ *
+ * **지문 없는 문항**은 체크 하나로 지문 단계를 건너뛰고 세트를 만들지 않는다 —
  * 어휘·문법 단독 문항처럼 지문이 없는 것이 실제로 있다.
  */
 
 /** 통째로 그린 문제 이미지의 배치(다른 패널과 같은 값). */
 const WHOLE_PROBLEM_LAYOUT: DiagramLayout = { scale: 100, offsetX: 0, offsetY: 0 };
 
-/** 자동으로 찾은 영역을 자를 때 사방으로 더 주는 여유(지면 크기 대비 비율). */
+/**
+ * 자동으로 찾은 자리를 자를 때 사방으로 더 주는 여유(지면 크기 대비 비율).
+ * **손으로 고친 자리에는 주지 않는다** — 사용자가 정한 자리를 우리가 몰래
+ * 넓히면 보이는 것과 잘리는 것이 달라진다.
+ */
 const PAD = 0.004;
 
-type Piece = {
-  id: string;
-  kind: "passage" | "question";
-  crop: string;
-  box: ProblemBox;
-  no: number | null;
-};
+type Step = "pick" | "passage" | "questions" | "review";
+
+type Piece = { id: string; kind: "passage" | "question"; crop: string };
 
 type Props = {
   /** 문제 하나를 저장하고 그 행 id를 돌려준다(AddProblemFlow가 준다). */
@@ -72,29 +73,46 @@ type Props = {
   onDone?: () => void;
 };
 
-export default function KoreanModePanel({ onSave, unlimited = false, figureCost, onDone }: Props) {
+export default function KoreanModePanel({
+  onSave,
+  unlimited = false,
+  figureCost,
+  onDone,
+}: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const { enqueue } = useFigureJobs();
 
-  /** 고른 사진. 자르는 재료는 원본(`pageFile`)이고 화면에 띄우는 건 축소본이다. */
+  const [step, setStep] = useState<Step>("pick");
+  /** 원본 파일(자르는 재료)과 화면에 띄우는 축소본. */
   const [pageFile, setPageFile] = useState<File | null>(null);
   const [pageImage, setPageImage] = useState<string | null>(null);
+
+  const [passageBox, setPassageBox] = useState<EditBox[]>([]);
+  const [questionBoxes, setQuestionBoxes] = useState<EditBox[]>([]);
+  /** 자동으로 찾은 결과. 한 번만 부르고 두 단계가 나눠 쓴다. */
+  const [detected, setDetected] = useState<DetectedKoreanRegion[] | null>(null);
+  /** 자동으로 찾은 자리를 사람이 안 건드렸으면 여유(PAD)를 준다. */
+  const autoIdsRef = useRef<Set<string>>(new Set());
 
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [title, setTitle] = useState("");
   const [titleNote, setTitleNote] = useState<string | null>(null);
-  /** 지문 없는 문항 묶음이면 세트를 만들지 않는다. */
   const [noPassage, setNoPassage] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   function reset() {
+    setStep("pick");
+    setPageImage(null);
+    setPageFile(null);
+    setPassageBox([]);
+    setQuestionBoxes([]);
+    setDetected(null);
+    autoIdsRef.current = new Set();
     setPieces([]);
     setTitle("");
     setTitleNote(null);
-    setPageImage(null);
-    setPageFile(null);
     setError(null);
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -102,9 +120,6 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
   async function pickFile(file: File | null) {
     setError(null);
     setNote(null);
-    setPieces([]);
-    setTitle("");
-    setTitleNote(null);
     if (!file) return;
     if (isHeicFile(file)) {
       setError("HEIC 사진은 아직 읽지 못합니다. JPG/PNG로 저장해 다시 올려주세요.");
@@ -113,6 +128,11 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
     setPageFile(file);
     try {
       setPageImage(await fileToDataUrl(file));
+      setPassageBox([]);
+      setQuestionBoxes([]);
+      setDetected(null);
+      autoIdsRef.current = new Set();
+      setStep(noPassage ? "questions" : "passage");
     } catch (err) {
       setError(err instanceof Error ? err.message : "사진을 읽지 못했습니다.");
     }
@@ -159,7 +179,110 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
     return enhanced.length <= MAX_UPLOAD_CHARS ? enhanced : last;
   }
 
-  /** 0단계 — 지문 글자를 읽어 제목을 짓는다. 실패해도 진행을 막지 않는다. */
+  /**
+   * 자동으로 찾아 네모를 채워 준다. **한 번만 부르고 결과를 들고 있는다** —
+   * 지문 단계와 문제 단계가 같은 결과를 나눠 쓴다(따로 부르면 값이 두 배다).
+   */
+  async function autoFill(kind: "passage" | "question") {
+    setError(null);
+    let found = detected;
+    if (!found) {
+      setBusy("사진을 여는 중...");
+      let source: { img: HTMLImageElement; revoke: () => void };
+      try {
+        source = await openSource();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "사진을 열지 못했습니다.");
+        setBusy(null);
+        return;
+      }
+      try {
+        setBusy("지문·문제 자리를 찾는 중...");
+        const res = await fetch("/api/detect-problems", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: await detectImage(source.img), mode: "korean" }),
+        });
+        const json = (await res.json()) as { regions?: DetectedKoreanRegion[]; error?: string };
+        if (!res.ok) throw new Error(json.error ?? "자리 인식에 실패했습니다.");
+        found = json.regions ?? [];
+        setDetected(found);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "자리 인식에 실패했습니다.");
+        return;
+      } finally {
+        source.revoke();
+        setBusy(null);
+      }
+    }
+
+    const take = found.filter((r) => r.kind === kind);
+    if (take.length === 0) {
+      setError(
+        kind === "passage"
+          ? "지문을 찾지 못했어요. 손으로 네모를 그려주세요."
+          : "문제를 찾지 못했어요. 손으로 네모를 그려주세요.",
+      );
+      return;
+    }
+    // 읽는 차례로 늘어놓는다 — 모델이 순서를 지키지 않는 경우가 있는데,
+    // 잡은 차례가 곧 문제 차례다.
+    const sorted = [...take].sort((a, b) => {
+      const col = (r: DetectedKoreanRegion) => (r.box.x + r.box.w / 2 < 0.5 ? 0 : 1);
+      return col(a) - col(b) || a.box.y - b.box.y;
+    });
+    const boxes = sorted.map((r) => ({ id: crypto.randomUUID(), ...r.box }));
+    for (const b of boxes) autoIdsRef.current.add(b.id);
+    if (kind === "passage") setPassageBox(boxes.slice(0, 1));
+    else setQuestionBoxes(boxes);
+  }
+
+  /** 정해진 자리대로 잘라 미리보기를 만들고 제목을 짓는다. */
+  async function cutAll() {
+    setError(null);
+    setBusy("사진을 여는 중...");
+    let source: { img: HTMLImageElement; revoke: () => void };
+    try {
+      source = await openSource();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "사진을 열지 못했습니다.");
+      setBusy(null);
+      return;
+    }
+    try {
+      setBusy("자르는 중...");
+      // 손으로 고친 자리에는 여유를 주지 않는다(사용자가 정한 자리다).
+      const pad = (b: EditBox) => (autoIdsRef.current.has(b.id) ? PAD : 0);
+      const cut: Piece[] = [];
+      if (!noPassage && passageBox[0]) {
+        cut.push({
+          id: crypto.randomUUID(),
+          kind: "passage",
+          crop: cutBox(source.img, passageBox[0], pad(passageBox[0])),
+        });
+      }
+      for (const b of questionBoxes) {
+        cut.push({
+          id: crypto.randomUUID(),
+          kind: "question",
+          crop: cutBox(source.img, b, pad(b)),
+        });
+      }
+      setPieces(cut);
+      setStep("review");
+      const passage = cut.find((p) => p.kind === "passage");
+      if (passage) void makeTitle(passage.crop);
+    } catch (err) {
+      setError(
+        "사진을 자르지 못했습니다: " + (err instanceof Error ? err.message : "알 수 없는 오류"),
+      );
+    } finally {
+      source.revoke();
+      setBusy(null);
+    }
+  }
+
+  /** Mathpix 로 지문을 읽고 그 **글자만** 보내 제목을 짓는다. */
   async function makeTitle(passageCrop: string) {
     setTitleNote("제목을 짓는 중...");
     try {
@@ -181,79 +304,13 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
       const json = (await res.json()) as { title?: string; kind?: string; error?: string };
       if (!res.ok || !json.title) throw new Error(json.error ?? "제목을 짓지 못했습니다.");
       setTitle(json.title);
-      setTitleNote(`${json.kind ?? ""} 지문으로 보고 제목을 지었어요. 고쳐도 됩니다.`);
+      setTitleNote(`${json.kind ?? ""} 지문으로 보고 지었어요. 고쳐도 됩니다.`);
     } catch (err) {
       // 제목이 없어도 넣을 수는 있어야 한다. 사용자가 직접 적으면 된다.
       setTitleNote(
         (err instanceof Error ? err.message : "제목을 짓지 못했습니다.") +
-          " 제목은 직접 적어주세요.",
+          " 직접 적어주세요.",
       );
-    }
-  }
-
-  /** 1·2단계 — 지문과 문제 영역을 한 번에 찾아 자른다. */
-  async function detect() {
-    if (!pageImage) return;
-    setError(null);
-    setNote(null);
-    setBusy("사진을 여는 중...");
-
-    let source: { img: HTMLImageElement; revoke: () => void };
-    try {
-      source = await openSource();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "사진을 열지 못했습니다.");
-      setBusy(null);
-      return;
-    }
-
-    try {
-      // 영역 찾기와 자르기의 오류를 갈라 놓는다 — 한 덩어리로 감싸면 자르다
-      // 난 오류까지 "인식 실패"로 보여서 어디가 잘못됐는지 알 수 없다.
-      let found: DetectedKoreanRegion[];
-      try {
-        setBusy("지문과 문제 영역을 찾는 중...");
-        const res = await fetch("/api/detect-problems", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: await detectImage(source.img), mode: "korean" }),
-        });
-        const json = (await res.json()) as { regions?: DetectedKoreanRegion[]; error?: string };
-        if (!res.ok) throw new Error(json.error ?? "영역 인식에 실패했습니다.");
-        found = json.regions ?? [];
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "영역 인식에 실패했습니다.");
-        return;
-      }
-
-      setBusy(`${found.length}개를 자르는 중...`);
-      // 읽는 차례로 정렬한다 — 모델이 순서를 지키지 않는 경우가 있는데,
-      // 자른 차례가 곧 문제 차례다. 지문을 늘 앞에 둔다.
-      const sorted = [...found].sort((a, b) => {
-        if (a.kind !== b.kind) return a.kind === "passage" ? -1 : 1;
-        const col = (r: DetectedKoreanRegion) => (r.box.x + r.box.w / 2 < 0.5 ? 0 : 1);
-        return col(a) - col(b) || a.box.y - b.box.y;
-      });
-      const cut: Piece[] = sorted.map((r) => ({
-        id: crypto.randomUUID(),
-        kind: r.kind,
-        crop: cutBox(source.img, r.box, PAD),
-        box: r.box,
-        no: r.no,
-      }));
-      setPieces(cut);
-
-      const passage = cut.find((p) => p.kind === "passage");
-      if (passage && !noPassage) void makeTitle(passage.crop);
-      else if (!passage) setTitleNote("지문을 찾지 못했어요. 지문 없는 문항이면 아래를 체크하세요.");
-    } catch (err) {
-      setError(
-        "영역은 찾았는데 사진을 자르지 못했습니다: " +
-          (err instanceof Error ? err.message : "알 수 없는 오류"),
-      );
-    } finally {
-      source.revoke();
-      setBusy(null);
     }
   }
 
@@ -275,7 +332,7 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
   }
 
   /**
-   * 3단계 — 저장한다. `regenerate` 면 AI 재생성 큐에도 넣는다.
+   * 저장한다. `regenerate` 면 AI 재생성 큐에도 넣는다.
    *
    * **저장을 먼저 한다.** 그래야 행 id 를 큐에 함께 넘길 수 있고, 브라우저를
    * 닫아도 서버가 결과를 그 행에 직접 저장한다(`persistWholeProblem`).
@@ -296,7 +353,11 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
         const korean = noPassage
           ? undefined
           : piece.kind === "passage"
-            ? { setId, role: "passage" as const, ...(title.trim() ? { title: title.trim() } : {}) }
+            ? {
+                setId,
+                role: "passage" as const,
+                ...(title.trim() ? { title: title.trim() } : {}),
+              }
             : { setId, role: "question" as const, index: qIndex };
         if (!noPassage && piece.kind === "question") qIndex += 1;
 
@@ -309,16 +370,15 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
             ranges: null,
             fontPt: DEFAULT_FONT_PT,
             figures: toStoredFigures([figure]),
-            ...(piece.no != null ? { number: piece.no } : {}),
             ...(korean ? { korean } : {}),
-          } as StoredBoxRange,
+          },
         });
 
         if (regenerate) {
           enqueue({
             id: piece.id,
             problemKey: `korean:${problemId}`,
-            label: piece.kind === "passage" ? "지문" : `${piece.no ?? done + 1}번 문제`,
+            label: piece.kind === "passage" ? "지문" : `${done}번째 문제`,
             crop: piece.crop,
             mode: "problem",
             problemId,
@@ -346,73 +406,125 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
     }
   }
 
-  const passages = pieces.filter((p) => p.kind === "passage").length;
-  const questions = pieces.length - passages;
+  const stepLabel: Record<Step, string> = {
+    pick: "사진 고르기",
+    passage: "① 지문 자리 잡기",
+    questions: "② 문제 자리 잡기",
+    review: "③ 확인하고 넣기",
+  };
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
       <div>
-        <h3 className="text-sm font-semibold text-slate-700">국어 모드 (지문 + 문항 세트)</h3>
+        <h3 className="text-sm font-semibold text-slate-700">
+          국어 모드 (지문 + 문항 세트)
+          {step !== "pick" && (
+            <span className="ml-2 text-xs font-normal text-slate-400">{stepLabel[step]}</span>
+          )}
+        </h3>
         <p className="mt-1 text-xs text-slate-400">
-          지문 한 편과 거기 딸린 문항들을 한 번에 넣습니다. 인쇄할 때 짝수 쪽에
-          지문, 홀수 쪽에 그 문제들이 나란히 놓입니다.
+          지문과 문제를 <b>따로</b> 잡습니다. 네모를 끌어 옮기거나 모서리를
+          잡아 크기를 고칠 수 있어요. 인쇄하면 짝수 쪽에 지문, 홀수 쪽에 그
+          문제들이 나란히 놓입니다.
         </p>
       </div>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        onChange={(e) => void pickFile(e.target.files?.[0] ?? null)}
-        className="text-sm"
-      />
-
-      <label className="flex items-center gap-2 text-sm text-slate-700">
-        <input
-          type="checkbox"
-          checked={noPassage}
-          onChange={(e) => setNoPassage(e.target.checked)}
-          className="h-4 w-4"
-        />
-        지문 없는 문항
-        <span className="text-xs text-slate-400">
-          어휘·문법 단독 문항처럼 지문이 없으면 켜세요. 세트를 만들지 않고 보통
-          문제로 넣습니다.
-        </span>
-      </label>
-
-      {pageImage && pieces.length === 0 && (
-        <div className="flex flex-col gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={pageImage}
-            alt="지면"
-            className="max-h-80 w-full rounded border border-slate-200 object-contain"
+      {step === "pick" && (
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => void pickFile(e.target.files?.[0] ?? null)}
+            className="text-sm"
           />
-          <button
-            type="button"
-            onClick={() => void detect()}
-            disabled={busy !== null}
-            className="self-start rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
-            {busy ?? "지문·문제 영역 찾기"}
-          </button>
-          {!unlimited && (
-            <p className="text-xs text-amber-700">
-              자동 영역 찾기는 무제한 계정에서만 쓸 수 있습니다. 그 전에는 지면
-              통째로 넣기에서 손으로 네모를 그려 넣어주세요.
-            </p>
-          )}
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={noPassage}
+              onChange={(e) => setNoPassage(e.target.checked)}
+              className="h-4 w-4"
+            />
+            지문 없는 문항
+            <span className="text-xs text-slate-400">
+              어휘·문법 단독 문항처럼 지문이 없으면 켜세요. 지문 단계를 건너뛰고
+              보통 문제로 넣습니다.
+            </span>
+          </label>
+        </>
+      )}
+
+      {(step === "passage" || step === "questions") && pageImage && (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-slate-600">
+            {step === "passage"
+              ? "지문 전체를 감싸는 네모 하나를 그리세요. 안내 줄([1~3] 다음 글을 읽고…)부터 출전 표기까지 넣으면 좋습니다."
+              : "문항마다 네모를 하나씩 그리세요. 번호부터 선지 마지막 줄까지 넣으세요. 그린 차례가 곧 문제 차례입니다."}
+          </p>
+
+          <BoxEditor
+            image={pageImage}
+            boxes={step === "passage" ? passageBox : questionBoxes}
+            onChange={step === "passage" ? setPassageBox : setQuestionBoxes}
+            single={step === "passage"}
+            color={step === "passage" ? "#059669" : "#2563eb"}
+            labelOf={
+              step === "passage" ? () => "지문" : (i) => `${i + 1}번째`
+            }
+          />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void autoFill(step === "passage" ? "passage" : "question")}
+              disabled={busy !== null}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {busy ?? "자동으로 찾기"}
+            </button>
+            <span className="text-xs text-slate-400">
+              {step === "passage"
+                ? `${passageBox.length}개`
+                : `${questionBoxes.length}개`}
+              {" · "}
+              자동으로 찾은 뒤 손으로 고쳐도 됩니다.
+              {!unlimited && " (자동 찾기는 무제한 계정 전용)"}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => (step === "passage" ? setStep("pick") : setStep(noPassage ? "pick" : "passage"))}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              ← 뒤로
+            </button>
+            {step === "passage" ? (
+              <button
+                type="button"
+                onClick={() => setStep("questions")}
+                disabled={passageBox.length === 0}
+                className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                다음: 문제 자리 잡기
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void cutAll()}
+                disabled={questionBoxes.length === 0 || busy !== null}
+                className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {busy ?? "다음: 확인하기"}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {pieces.length > 0 && (
+      {step === "review" && (
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-slate-600">
-            지문 {passages}개 · 문제 {questions}개를 찾았어요. 잘못 잡힌 것은
-            지우고, 지문/문제가 뒤바뀐 것은 눌러서 바꾸세요.
-          </p>
-
           {!noPassage && (
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               지문 제목 (첫 장 목차에 적힙니다)
@@ -427,44 +539,33 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
           )}
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {pieces.map((p) => (
+            {pieces.map((p, i) => (
               <div
                 key={p.id}
-                className={`relative rounded border p-1 ${
-                  p.kind === "passage" ? "border-emerald-400 bg-emerald-50" : "border-slate-200"
+                className={`rounded border p-1 ${
+                  p.kind === "passage"
+                    ? "border-emerald-400 bg-emerald-50"
+                    : "border-slate-200"
                 }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.crop} alt="" className="h-32 w-full object-contain" />
-                <div className="mt-1 flex items-center justify-between gap-1">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPieces((prev) =>
-                        prev.map((q) =>
-                          q.id === p.id
-                            ? { ...q, kind: q.kind === "passage" ? "question" : "passage" }
-                            : q,
-                        ),
-                      )
-                    }
-                    className="rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-600 hover:bg-slate-100"
-                  >
-                    {p.kind === "passage" ? "지문" : `문제${p.no ? ` ${p.no}` : ""}`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPieces((prev) => prev.filter((q) => q.id !== p.id))}
-                    className="rounded px-1 text-xs text-slate-400 hover:text-red-600"
-                  >
-                    ×
-                  </button>
-                </div>
+                <p className="mt-1 text-center text-xs text-slate-500">
+                  {p.kind === "passage" ? "지문" : `${i + (noPassage ? 1 : 0)}번째 문제`}
+                </p>
               </div>
             ))}
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setStep("questions")}
+              disabled={busy !== null}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              ← 자리 고치기
+            </button>
             <button
               type="button"
               onClick={() => void save(false)}
@@ -480,8 +581,7 @@ export default function KoreanModePanel({ onSave, unlimited = false, figureCost,
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {busy ?? "모두 AI로 다시 그리기"}
-              {typeof figureCost === "number" &&
-                ` (약 ${figureCost * pieces.length}토큰)`}
+              {typeof figureCost === "number" && ` (약 ${figureCost * pieces.length}토큰)`}
             </button>
           </div>
         </div>
