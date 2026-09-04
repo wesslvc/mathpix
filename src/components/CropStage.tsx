@@ -13,7 +13,7 @@ type Props = {
    * mode가 "problem"이면 인식(Mathpix) 대신 문제 전체를 이미지로 다시 그린다.
    * 탐구처럼 표·지도·그림이 뒤섞인 문제는 그 편이 원본에 가깝다.
    */
-  onConfirm: (croppedDataUrl: string, mode: "ocr" | "problem") => void;
+  onConfirm: (croppedDataUrl: string, mode: "ocr" | "problem" | "asis") => void;
   /** 문제 전체 다시 그리기에 드는 토큰. 못 불러왔으면 표시하지 않는다. */
   problemTokenCost?: number | null;
   onCancel: () => void;
@@ -56,7 +56,7 @@ export default function CropStage({
     setAutoDetected(true);
   }
 
-  function handleConfirm(mode: "ocr" | "problem") {
+  function handleConfirm(mode: "ocr" | "problem" | "asis") {
     const img = imgRef.current;
     if (!img || !crop || !crop.width || !crop.height) return;
 
@@ -127,6 +127,17 @@ export default function CropStage({
         {/* 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다
             통째로 다시 그리는 편이 원본에 가깝다. 대신 결과가 이미지라 나중에
             본문을 고칠 수 없으므로, 기본은 여전히 인식이다. */}
+        {/* 이미 깨끗한 인쇄물이면 다시 그릴 이유가 없다. 지면 통째로 넣기에만
+            있던 길인데, 문제 한 장을 넣을 때도 똑같이 필요하다는 요청이 있었다.
+            인식도 생성도 하지 않으므로 여기서 드는 것은 번호를 읽는 1토큰뿐이다. */}
+        <button
+          type="button"
+          onClick={() => handleConfirm("asis")}
+          disabled={!crop?.width || !crop?.height}
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          원본 그대로 넣기
+        </button>
         <button
           type="button"
           onClick={() => handleConfirm("problem")}

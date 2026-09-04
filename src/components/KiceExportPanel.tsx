@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { buildKicePdf } from "@/lib/kice/pdf";
+import { buildKicePdf, type KiceSpec } from "@/lib/kice/pdf";
 import {
   frameKeyFor,
   loadFrameImages,
@@ -11,6 +11,7 @@ import {
 import { loadKiceFonts } from "@/lib/kice/fonts";
 import { stripCardBorder } from "@/lib/kice/stripBorder";
 import { KICE_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
+import { groupKoreanSets, tocLine, type KoreanMeta } from "@/lib/koreanSet";
 
 /**
  * 평가원 문제지 양식으로 내보내기.
@@ -31,6 +32,8 @@ import { KICE_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
  * 넣을지 정하는 것이고, 한 쪽이 두 단이라 쪽당 개수는 그 두 배가 된다.
  */
 const LAYOUTS = [
+  // 국어는 지문과 문제를 펼침면에 나란히 놓는다(아래 `koreanPlan` 참고).
+  { key: "korean", label: "국어 기본 (짝수 지문·홀수 문제)", pattern: [1] },
   { key: "tamgu", label: "탐구 기본 (4·6·6·4)", pattern: [4, 6, 6, 4] },
   // 한 쪽에 하나만. 왼쪽 단에 문제, 오른쪽 단은 통째로 풀이 공간이 된다.
   { key: "p1", label: "한 쪽에 1개", pattern: [1] },
@@ -40,12 +43,33 @@ const LAYOUTS = [
   { key: "c4", label: "한 단에 4개", pattern: [8] },
 ] as const;
 
+type LayoutKey = (typeof LAYOUTS)[number]["key"];
+
+/**
+ * 영역마다의 **기본 배치**(사용자가 정한 것).
+ *
+ * 과목마다 문제 길이가 달라서 하나로 맞출 수가 없다 — 수학은 한 문제가
+ * 길어 쪽을 통째로 쓰고, 탐구·영어는 한 단에 하나가 맞고, 국어는 지문이
+ * 따로 있어 아예 다른 규칙이 필요하다. 고를 수는 여전히 있다.
+ */
+const DEFAULT_LAYOUT: Record<KiceArea, LayoutKey> = {
+  국어: "korean",
+  수학: "p1",
+  영어: "c1",
+  사회탐구: "c1",
+  과학탐구: "c1",
+};
+
 export type KiceItem = {
   id: string;
   imageUrl: string;
   label: string;
   answerLabel: string;
   answer: string;
+  /** 목차에 적을 출처(실모 이름). 국어 배치에서만 쓴다. */
+  source?: string;
+  /** 국어 지문·문제 묶음. 국어 모드로 넣은 것에만 있다. */
+  korean?: KoreanMeta | null;
 };
 
 type Props = {
@@ -62,13 +86,19 @@ async function loadPng(url: string): Promise<Uint8Array> {
 }
 
 export default function KiceExportPanel({ title, items }: Props) {
-  const [area, setArea] = useState<KiceArea>("사회탐구");
-  const [subject, setSubject] = useState<string>(KICE_SUBJECTS["사회탐구"][0]);
+  // 국어 세트로 넣은 문제가 있으면 국어로 뽑으려는 것이 분명하다.
+  const hasKorean = items.some((it) => it.korean);
+  const [area, setArea] = useState<KiceArea>(hasKorean ? "국어" : "사회탐구");
+  const [subject, setSubject] = useState<string>(
+    KICE_SUBJECTS[hasKorean ? "국어" : "사회탐구"][0] ?? "",
+  );
   // 기본은 **표시하지 않음** — 실제 문제지에는 없는 글자다.
   const [showSource, setShowSource] = useState(false);
   /** 맨 뒤에 정답표를 붙일지. 오답프린트라 기본은 켜짐이다. */
   const [showAnswers, setShowAnswers] = useState(true);
-  const [layoutKey, setLayoutKey] = useState<(typeof LAYOUTS)[number]["key"]>("tamgu");
+  const [layoutKey, setLayoutKey] = useState<LayoutKey>(
+    DEFAULT_LAYOUT[hasKorean ? "국어" : "사회탐구"],
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,6 +107,51 @@ export default function KiceExportPanel({ title, items }: Props) {
   function pickArea(next: KiceArea) {
     setArea(next);
     setSubject(KICE_SUBJECTS[next][0] ?? "");
+    // 영역을 바꾸면 그 영역의 기본 배치로 따라간다 — 국어에서 탐구로 갔는데
+    // 지문/문제 배치가 그대로 남아 있으면 첫 장이 통째로 목차가 된다.
+    setLayoutKey(DEFAULT_LAYOUT[next]);
+  }
+
+  /**
+   * 국어 배치 계획. **첫 장은 목차, 그다음부터 짝수 쪽 지문 · 홀수 쪽 문제**다.
+   *
+   * 여기서 짜는 이유는 목차에 쪽 번호가 그대로 적히기 때문이다 — 목차를
+   * 만드는 쪽과 쪽을 짜는 쪽이 다르면 반드시 어긋난다.
+   *
+   * 지문 없는 문항(국어 모드를 안 거친 것)은 세트 뒤에 이어 붙인다. 지문
+   * 쪽을 차지할 이유가 없어서 보통 배치처럼 한 쪽에 둘씩 넣는다.
+   */
+  function buildKoreanPlan() {
+    const index = new Map(items.map((it, i) => [it.id, i] as const));
+    const { sets, loose } = groupKoreanSets(items, (it) => it.korean ?? null);
+
+    const pages: NonNullable<KiceSpec["koreanPlan"]>["pages"] = [{ kind: "toc" }];
+    const toc: string[] = [];
+
+    for (const set of sets) {
+      const from = pages.length + 1; // 지금 넣을 쪽의 번호(1부터)
+      if (set.passage) {
+        pages.push({ kind: "passage", index: index.get(set.passage.id)! });
+      }
+      if (set.questions.length > 0) {
+        pages.push({
+          kind: "questions",
+          indexes: set.questions.map((q) => index.get(q.id)!),
+        });
+      }
+      const to = pages.length;
+      const source = set.passage?.source ?? set.questions[0]?.source ?? "";
+      toc.push(tocLine(from, to, source, set.title || "지문"));
+    }
+
+    for (let i = 0; i < loose.length; i += 2) {
+      pages.push({
+        kind: "questions",
+        indexes: loose.slice(i, i + 2).map((q) => index.get(q.id)!),
+      });
+    }
+
+    return { toc, pages };
   }
 
   async function generate() {
@@ -109,9 +184,11 @@ export default function KiceExportPanel({ title, items }: Props) {
           label: showSource ? items[i].label : "",
         })),
         pagePattern: [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
+        koreanPlan: layoutKey === "korean" ? buildKoreanPlan() : undefined,
         answers: showAnswers
           ? items.map((item) => ({ label: item.answerLabel, answer: item.answer }))
           : [],
+        onWarn: (m) => console.warn("[kice]", m),
       });
 
       const blob = new Blob([bytes.slice().buffer], { type: "application/pdf" });

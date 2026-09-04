@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { categoryLabel, type Category, type ExamScore } from "@/lib/supabase/types";
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { formatAnswer, toAnswerType } from "@/lib/answer";
+import { readKoreanMeta } from "@/lib/koreanSet";
 import ExportComposer, {
   type ComposerProblem,
 } from "@/components/ExportComposer";
@@ -35,6 +36,8 @@ const EXPORT_COLUMNS = [
   "debt:box_range->debt",
   // 어느 채점 기록에서 온 문제인지 — 정답표에 "내가 고른 답"을 같이 찍는 데 쓴다.
   "gradeId:box_range->>gradeId",
+  // 국어 지문·문제 묶음. 그림이 든 box_range 를 통째로 받지 않으려고 이 키만 뽑는다.
+  "korean:box_range->korean",
 ].join(", ");
 
 type ExportRow = {
@@ -50,6 +53,7 @@ type ExportRow = {
   problemNo: number | null;
   debt: number | null;
   gradeId: string | null;
+  korean: unknown;
 };
 
 export default async function ExportPage({
@@ -192,6 +196,8 @@ export default async function ExportPage({
         // 손으로 정해 둔 번호가 있으면 그게 우선이다(통째로 그린 문제는 본문이
         // 없어서 뽑을 것도 없다).
         manualNumber: readProblemNumber({ number: p.problemNo }),
+        // 국어 지문·문제 묶음(국어 모드로 넣은 것에만 있다).
+        korean: readKoreanMeta(p.korean),
         // 객관식이면 "1" -> "①"로 바꿔 정답표에 찍는다. 저장은 원문 그대로이고
         // 변환은 표시할 때만 한다(유형을 바꾸면 되돌아가야 하므로).
         answer: formatAnswer(p.answer, toAnswerType(p.answer_type)),
