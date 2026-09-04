@@ -25,7 +25,7 @@ const DEPOSIT = 5;
  * 잘하는 것을 겹쳐 쓴다(문제 전체 다시 그리기에서 쓰던 방식과 같다).
  */
 export async function POST(req: NextRequest) {
-  let body: { image?: unknown; reference?: unknown; tiles?: unknown };
+  let body: { image?: unknown; reference?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -36,19 +36,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "지문 사진이 필요합니다." }, { status: 400 });
   }
   const reference = typeof body.reference === "string" ? body.reference.slice(0, 12000) : "";
-  /**
-   * 확대 조각(`passageTiles.ts`). **개수를 여기서 막는다** — 조각 하나가 곧
-   * 입력 그림 토큰이라, 화면이 실수로(또는 누가 손대서) 스무 장을 보내면
-   * 그만큼 요금이 나간다. 화면 말을 믿지 않고 서버에서 자른다.
-   */
-  const tiles = Array.isArray(body.tiles)
-    ? body.tiles
-        .filter(
-          (t): t is string =>
-            typeof t === "string" && t.startsWith("data:image/"),
-        )
-        .slice(0, 6)
-    : [];
 
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
@@ -101,7 +88,6 @@ export async function POST(req: NextRequest) {
       image,
       reference,
       deadline.signal,
-      tiles,
     );
     const estKrw = usage ? gradingEstKrw(usage) : undefined;
     const chargedTokens = await billing.settle(estKrw);
@@ -123,10 +109,11 @@ export async function POST(req: NextRequest) {
      */
     console.info(
       `[korean-text] usage model=${model} 참고글=${reference.length}자 ` +
-        `확대조각=${tiles.length}장 ` +
         `in=${usage?.inputTokens ?? "?"} out=${usage?.outputTokens ?? "?"} ` +
         `est=${estKrw != null ? `${Math.round(estKrw)}원` : "단가미설정"} ` +
-        `차감=${chargedTokens}토큰`,
+        // 무제한 계정은 차감 자체가 없어 null 이 온다 — 그대로 찍으면
+        // "차감=null토큰" 이라 마치 실패한 것처럼 보인다.
+        `차감=${chargedTokens == null ? "없음(무제한)" : `${chargedTokens}토큰`}`,
     );
     return NextResponse.json({
       blocks,
