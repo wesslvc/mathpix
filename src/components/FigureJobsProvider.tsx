@@ -270,7 +270,7 @@ export default function FigureJobsProvider({
 
       const { data: row } = await supabase
         .from("problems")
-        .select("image_path, category_id")
+        .select("image_path, box_range, category_id")
         .eq("id", snap.problemId)
         .maybeSingle();
       if (!row) return;
@@ -289,9 +289,40 @@ export default function FigureJobsProvider({
       // 갱신된 문제만 목록에서 원본을 받게 된다.
       await uploadThumb(supabase, newPath, blob);
 
+      // **합쳐진 PNG(image_path)만 갱신하면 안 된다.** 수정 화면은 이
+      // image_path 를 안 쓰고 box_range.figures 의 markup 으로 카드를 다시
+      // 조립한다(끌어 옮기고 다시 오려낼 수 있어야 하므로). 여기서
+      // box_range 를 안 고치면 PDF·목록은 AI 결과가 맞게 보이는데 수정
+      // 화면만 원본으로 되돌아가 있고, 그 상태로 아무거나 고쳐 저장하는
+      // 순간 그 원본으로 다시 렌더링한 PNG 가 image_path 까지 덮어써서
+      // **방금 만든 AI 결과가 영영 사라진다** — 실제로 이렇게 났다(새로고침·
+      // 다른 기기에서도 계속 원본으로 보이고, PDF 만 정상이었다).
+      // persistWholeProblem(/api/figure/route.ts)의 병합 방식과 같다.
+      const box = (row.box_range ?? {}) as Record<string, unknown>;
+      const existingFigures = Array.isArray(box.figures)
+        ? (box.figures as Record<string, unknown>[])
+        : [];
+      const nextFigures = existingFigures.map((f) =>
+        f.id === job.id
+          ? {
+              ...f,
+              ...(typeof f.origin === "string" || typeof f.markup !== "string"
+                ? {}
+                : { origin: f.markup }),
+              markup: svg,
+              ai: true,
+            }
+          : f,
+      );
+
       const { error: dbErr } = await supabase
         .from("problems")
-        .update({ image_path: newPath })
+        .update({
+          image_path: newPath,
+          ...(existingFigures.some((f) => f.id === job.id)
+            ? { box_range: { ...box, figures: nextFigures } }
+            : {}),
+        })
         .eq("id", snap.problemId);
       if (dbErr) {
         await supabase.storage
