@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ImageUploader from "@/components/ImageUploader";
 import CropStage from "@/components/CropStage";
@@ -13,6 +13,7 @@ import type { TokenStatus } from "@/app/api/tokens/route";
 import { rasterToSvg } from "@/lib/figureImage";
 import { uploadThumb } from "@/lib/cardThumb";
 import { enhanceContrast } from "@/lib/autoContrast";
+import { parseProblemNumber } from "@/lib/problemNumber";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import BatchSplitPanel from "./BatchSplitPanel";
 import BulkMappedImportPanel from "./BulkMappedImportPanel";
@@ -93,6 +94,15 @@ export default function AddProblemFlow({
   } | null>(null);
   /** 크롭 화면에 "통째로 다시 그리기" 비용을 표시하려고 읽어둔다. */
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
+  /**
+   * "원본 그대로 넣기"에서 뒤늦게 읽어 온 문제 번호와, 이미 저장된 행의 id.
+   *
+   * **state 가 아니라 ref 인 이유**: 저장은 `ResultStage` 가 부르는데 그때
+   * 최신 값이어야 한다. state 로 두면 저장 함수가 예전 렌더의 값을 붙들고
+   * 있어 번호가 빠진 채로 저장된다.
+   */
+  const autoNumberRef = useRef<number | null>(null);
+  const savedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,10 +179,14 @@ export default function AddProblemFlow({
 
   async function handleCropConfirm(
     croppedDataUrl: string,
-    mode: "ocr" | "problem",
+    mode: "ocr" | "problem" | "asis",
   ) {
     if (mode === "problem") {
       await recognizeAsWholeImage(croppedDataUrl);
+      return;
+    }
+    if (mode === "asis") {
+      await insertAsIs(croppedDataUrl);
       return;
     }
     setStage("loading");
@@ -237,6 +251,67 @@ export default function AddProblemFlow({
     } catch (err) {
       setError(err instanceof Error ? err.message : "알 수 없는 오류");
       setStage("crop");
+    }
+  }
+
+  /**
+   * **원본 그대로 넣기.** 인식도 생성도 하지 않고 오려낸 그림 한 장을 그대로
+   * 문제로 삼는다.
+   *
+   * 지면 통째로 넣기에만 있던 길인데 문제 한 장을 넣을 때도 필요하다는
+   * 요청이 있었다 — 이미 깨끗한 인쇄물이면 다시 그릴 이유가 없고, 글자로
+   * 옮기면 오히려 표·그림이 무너진다. 저장 모양은 "통째로 다시 그리기"와
+   * 똑같아서(`initialFigures`) 수정·PDF 가 전부 기존 길을 그대로 탄다.
+   *
+   * **번호만 뒤에서 읽는다**(1토큰). 본문이 없으면 번호를 뽑을 데가 없어
+   * 목록·PDF 가 저장된 차례대로 1번부터 매겨 실제 시험지와 어긋난다.
+   * 기다리지는 않는다 — 늦게 도착하면 이미 저장된 행에 따로 붙인다.
+   */
+  async function insertAsIs(croppedDataUrl: string) {
+    setError(null);
+    try {
+      const id = crypto.randomUUID();
+      setInitialFigures([
+        { id, svg: await rasterToSvg(croppedDataUrl), layout: WHOLE_PROBLEM_LAYOUT },
+      ]);
+      // 본문은 비워 둔다. 본문이 있으면 "수정" 화면이 본문으로 카드를 다시
+      // 그려 그림이 사라진다(storedFigures.ts 주석 참고).
+      setResult({ mock: false, latex: "", text: "", confidence: null, diagrams: [] });
+      setRecognizedSourceImage(croppedDataUrl);
+      setStage("result");
+      if (presetNumber == null) void readNumberInBackground(croppedDataUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "알 수 없는 오류");
+      setStage("crop");
+    }
+  }
+
+  /**
+   * 번호만 읽어 둔다. 아직 저장 전이면 저장할 때 함께 심고, 이미 저장됐으면
+   * 그 행에 따로 붙인다(`set_problem_numbers` — box_range 를 통째로 내려받지
+   * 않고 서버에서 합친다).
+   */
+  async function readNumberInBackground(crop: string) {
+    try {
+      const res = await fetch("/api/mathpix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: await enhanceContrast(crop) }),
+      });
+      if (!res.ok) return;
+      const json = (await res.json()) as { text?: string; latex?: string };
+      const n = parseProblemNumber(json.text || json.latex || "");
+      if (n == null) return;
+      autoNumberRef.current = n;
+      const saved = savedIdRef.current;
+      if (!saved) return;
+      await createClient().rpc("set_problem_numbers", {
+        p_updates: [{ id: saved, number: n }],
+      });
+      router.refresh();
+    } catch {
+      // 번호를 못 읽어도 저장은 되어야 한다. "수정"에서 적거나 나중에
+      // "전체 번호 인식"으로 붙일 수 있다.
     }
   }
 
@@ -321,10 +396,14 @@ export default function AddProblemFlow({
       // 번호가 미리 정해져 있으면(자동채점 연동) 여기서 심는다 — 사용자가
       // 따로 "문제 번호" 칸에 적을 필요가 없다. gradeId도 함께 심어 어느
       // 채점 기록에서 온 문제인지 명시적으로 남긴다.
+      // "원본 그대로 넣기"에서 읽어 둔 번호가 있으면 그것도 심는다(본문이
+      // 없어 번호를 뽑을 데가 없는 문제다). 손으로 정한 번호가 늘 우선한다.
       box_range:
         presetNumber != null
           ? { ...boxRange, number: presetNumber, gradeId: gradeId ?? undefined }
-          : boxRange,
+          : autoNumberRef.current != null
+            ? { ...boxRange, number: autoNumberRef.current }
+            : boxRange,
     };
 
     // 이미 저장한 문제를 또 저장하는 건 "고쳐서 다시 저장"이다. 새 행을 만들면
@@ -339,6 +418,7 @@ export default function AddProblemFlow({
         throw updateError;
       }
       router.refresh();
+      savedIdRef.current = problemId;
       return problemId;
     }
 
@@ -360,6 +440,7 @@ export default function AddProblemFlow({
     }
 
     router.refresh();
+    savedIdRef.current = inserted.id as string;
     return inserted.id as string;
   }
 

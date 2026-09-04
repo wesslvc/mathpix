@@ -227,27 +227,69 @@ function fitColumn(items: Shot[], x: number, top: number, bottom: number): Place
  * 아래에 전체 쪽수가 찍히는데, 그 값은 마지막 쪽까지 짜 봐야 안다.
  */
 function layoutPages(images: Shot[], frames: FrameSet, pattern: number[]) {
-  const pages: { items: Placed[] }[] = [];
   // 문제가 하나도 없으면 쪽도 없다. `do...while` 이라 빈 쪽 하나가 생기는데,
   // 정답표만 뽑을 때(문제 없이) 그 빈 쪽이 표지 자리를 차지해 버린다.
-  if (images.length === 0) return pages;
+  if (images.length === 0) return [];
+  const groups: Shot[][] = [];
   let at = 0;
   do {
-    const b = frameBounds(frameFor(frames, pages.length + 1));
-    const top = b.headerBottom + LAYOUT.gap;
-    const want = pattern[pages.length % pattern.length];
-    const take = images.slice(at, at + want);
+    const want = pattern[groups.length % pattern.length];
+    groups.push(images.slice(at, at + want));
     at += want;
-    // 왼쪽 단부터 채운다. 홀수면 왼쪽이 하나 더 갖는다.
-    const half = Math.ceil(take.length / 2);
-    pages.push({
-      items: [
-        ...fitColumn(take.slice(0, half), columnX(0), top, b.contentBottom),
-        ...fitColumn(take.slice(half), columnX(1), top, b.contentBottom),
-      ],
-    });
   } while (at < images.length);
-  return pages;
+  return layoutGroups(groups, frames);
+}
+
+/** 쪽마다 무엇을 넣을지 이미 정해졌을 때, 그것들을 단에 앉힌다. */
+function layoutGroups(groups: Shot[][], frames: FrameSet, firstPage = 1) {
+  return groups.map((take, n) => layoutOnePage(take, frames, firstPage + n));
+}
+
+/**
+ * 한 쪽을 짠다. **쪽 번호를 받아야 한다** — 표지 틀과 본문 틀은 머리말
+ * 아래 가로줄 높이가 다르다(168.65 vs 99.2). 0번째 쪽으로 가정하면 본문
+ * 쪽인데도 표지 기준으로 짜여 위가 통째로 빈다.
+ */
+function layoutOnePage(take: Shot[], frames: FrameSet, pageNo: number) {
+  const b = frameBounds(frameFor(frames, pageNo));
+  const top = b.headerBottom + LAYOUT.gap;
+  // 왼쪽 단부터 채운다. 홀수면 왼쪽이 하나 더 갖는다.
+  const half = Math.ceil(take.length / 2);
+  return {
+    items: [
+      ...fitColumn(take.slice(0, half), columnX(0), top, b.contentBottom),
+      ...fitColumn(take.slice(half), columnX(1), top, b.contentBottom),
+    ],
+  };
+}
+
+/**
+ * 지문 한 장을 **쪽 전체**에 앉힌다(단으로 나누지 않는다).
+ *
+ * 국어 지문은 세로로 길어 한 단에 넣으면 옆이 통째로 빈다. 쪽 전체를 쓰게
+ * 두면 비율에 따라 알아서 자리를 잡는다 — 세로로 긴 지문은 결국 한 단 폭쯤
+ * 이 되고, 넓은 지문은 두 단을 다 쓴다. 가운데로 모은다.
+ */
+function layoutPassage(shot: Shot, frames: FrameSet, pageNo: number): { items: Placed[] } {
+  const b = frameBounds(frameFor(frames, pageNo));
+  const top = b.headerBottom + LAYOUT.gap;
+  const availW = LAYOUT.columnWidth * 2 + LAYOUT.columnGap;
+  const availH = b.contentBottom - top;
+  const k = Math.min(availW / shot.img.width, availH / shot.img.height);
+  const w = shot.img.width * k;
+  const h = shot.img.height * k;
+  return {
+    items: [
+      {
+        img: shot.img,
+        label: shot.label,
+        x: LAYOUT.marginLeft + (availW - w) / 2,
+        y: top,
+        w,
+        h,
+      },
+    ],
+  };
 }
 
 export type KiceSpec = {
@@ -262,6 +304,26 @@ export type KiceSpec = {
   problems: { png: Uint8Array; label?: string }[];
   /** 쪽마다 넣을 문제 수. 쪽 순서대로 읽고 모자라면 되풀이한다(예: `[4,6,6,4]`). */
   pagePattern: number[];
+  /**
+   * **국어 배치.** 있으면 `pagePattern` 대신 이 계획대로 쪽을 짠다.
+   *
+   * 국어는 지문 하나에 문항 여러 개가 딸려서, 흘려 넣으면 지문과 문제가 다른
+   * 쪽으로 갈라져 책을 앞뒤로 넘겨야 한다. 그래서 **짝수 쪽에 지문, 홀수 쪽에
+   * 그 문제들**을 놓아 펼쳤을 때 나란히 보이게 한다(사용자 요청).
+   * 첫 장은 표지 틀이고 본문 자리가 비어 있어서 거기에 목차를 적는다.
+   *
+   * 계획을 여기서 짜지 않고 받는 이유는, 쪽 번호가 목차에 그대로 적히기
+   * 때문이다 — 목차를 만드는 쪽과 쪽을 짜는 쪽이 다르면 반드시 어긋난다.
+   */
+  koreanPlan?: {
+    /** 첫 장에 적을 줄들(예: `2~3p, 이감 5-6, 이중차분법`). */
+    toc: string[];
+    pages: (
+      | { kind: "toc" }
+      | { kind: "passage"; index: number }
+      | { kind: "questions"; indexes: number[] }
+    )[];
+  };
   /**
    * 마지막에 붙일 **정답표**. 비어 있으면 붙이지 않는다.
    *
@@ -527,7 +589,21 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   }
 
   const pattern = spec.pagePattern.filter((n) => n > 0);
-  const pages = layoutPages(images, spec.frames, pattern.length ? pattern : [4]);
+  const plan = spec.koreanPlan;
+  // 국어는 쪽마다 무엇이 들어갈지 이미 정해져 있다(짝수 지문 / 홀수 문제).
+  const pages = plan
+    ? plan.pages.map((p, n) =>
+        p.kind === "toc"
+          ? { items: [] as Placed[] }
+          : p.kind === "passage"
+            ? layoutPassage(images[p.index], spec.frames, n + 1)
+            : layoutOnePage(
+                p.indexes.map((i) => images[i]),
+                spec.frames,
+                n + 1,
+              ),
+      )
+    : layoutPages(images, spec.frames, pattern.length ? pattern : [4]);
   const answers = (spec.answers ?? []).filter((a) => a.answer.trim() !== "");
   // 정답표도 한 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
   const total = pages.length + (answers.length > 0 ? 1 : 0);
@@ -551,6 +627,9 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
         }
       }
       page.drawImage(it.img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
+    }
+    if (plan?.pages[n]?.kind === "toc") {
+      await drawToc(page, frameFor(spec.frames, n + 1), plan.toc, fontForText, flip);
     }
   }
 
@@ -590,6 +669,60 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   }
 
   return pdf.save();
+}
+
+/**
+ * 첫 장 빈 단에 목차를 적는다(국어 전용).
+ *
+ * 표지 틀은 제목 표 아래가 통째로 비어 있다. 국어는 세트마다 두 쪽을 쓰므로
+ * "몇 쪽에 무슨 지문이 있는지"가 없으면 두꺼운 묶음에서 찾을 수가 없다.
+ * 실제 문제지에는 없는 쪽이지만, 이건 문제지가 아니라 오답프린트다.
+ *
+ * 줄이 많으면 두 단으로 나눈다 — 한 단에 다 몰면 오른쪽이 통째로 빈다.
+ */
+async function drawToc(
+  page: PDFPage,
+  frame: Frame,
+  lines: string[],
+  fontForText: (name: string, text: string) => Promise<{ font: PDFFont; text: string }>,
+  flip: (y: number) => number,
+) {
+  if (lines.length === 0) return;
+  const bounds = frameBounds(frame);
+  const title = "차 례";
+  const titleSize = 18;
+  const size = 11;
+  const rowH = size * 1.9;
+  let y = bounds.headerBottom + LAYOUT.gap + titleSize;
+
+  const head = await fontForText(ANSWER_FONT, title);
+  if (head.text.trim()) {
+    page.drawText(head.text, {
+      x: LAYOUT.marginLeft,
+      y: flip(y),
+      size: titleSize,
+      font: head.font,
+      color: rgb(0, 0, 0),
+    });
+  }
+  y += LAYOUT.gap + size;
+
+  // 한 단에 몇 줄이 들어가는지 보고, 넘치면 오른쪽 단으로 넘긴다.
+  const perColumn = Math.max(1, Math.floor((bounds.contentBottom - y) / rowH));
+  for (let i = 0; i < lines.length; i++) {
+    const col = Math.floor(i / perColumn);
+    // 단이 둘뿐이라 그 이상은 그리지 않는다(세트가 그만큼 많은 경우는 없다).
+    if (col > 1) break;
+    const picked = await fontForText(ANSWER_FONT, lines[i]);
+    if (!picked.text.trim()) continue;
+    page.drawText(picked.text, {
+      x: columnX(col),
+      y: flip(y + (i % perColumn) * rowH),
+      size,
+      font: picked.font,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+  }
 }
 
 /** 정답표 한 칸의 높이. 글자 12pt 가 넉넉히 들어간다. */
