@@ -18,6 +18,8 @@ import {
 } from "@/lib/storedFigures";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { KoreanMeta } from "@/lib/koreanSet";
+import { readRichBlocks, type RichBlock } from "@/lib/kice/richText";
+import { enhanceContrast } from "@/lib/autoContrast";
 import FontSizeControl from "./FontSizeControl";
 import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import BoxRangeEditor from "./BoxRangeEditor";
@@ -215,6 +217,16 @@ export default function ProblemGallery({ problems }: Props) {
   const [maybeLostFigures, setMaybeLostFigures] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  /**
+   * 국어 지문의 재인식 결과. `undefined`면 저장돼 있던 값을 그대로 쓴다.
+   * 재인식에 성공하면 여기 담기고, **저장을 눌러야** DB에 반영된다(이
+   * 모달의 다른 수정과 같은 규칙 — 여기서 바로 써 버리면 "저장" 없이도
+   * 값이 바뀌는 유일한 예외가 되어 헷갈린다).
+   */
+  const [editKoreanBlocks, setEditKoreanBlocks] = useState<RichBlock[] | undefined>(
+    undefined,
+  );
+  const [passageBusy, setPassageBusy] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   /**
    * 오려내기 창을 무엇 때문에 열었는가.
@@ -240,6 +252,15 @@ export default function ProblemGallery({ problems }: Props) {
    * 그림 한 장이 곧 문제라, 본문 수정·조건 박스는 다룰 대상이 없다.
    */
   const isImageOnly = (editing?.text ?? "").trim() === "";
+  /**
+   * 국어 지문인가. 지문도 본문 글자가 없어 `isImageOnly` 지만, "AI로 통째로
+   * 다시 그리기"로 만든 이미지 문제와는 완전히 다른 물건이다 — 그림이
+   * 아니라 **평가원 글꼴로 조판된 글자**가 진짜 내용이다. 이 둘을
+   * 구분하지 않으면 지문에 "AI로 다시 그리기"(그림 재생성, 유료 50토큰)를
+   * 눌러 버리는 사고가 난다(실제로 그랬다 — 지문을 다시 열었더니 진짜로
+   * 그림 생성이 돌고 있었다).
+   */
+  const isPassage = editing?.korean?.role === "passage";
   const cardFigures = useMemo(
     () => restoreCardFigures(editFigures, blocks),
     [editFigures, blocks],
@@ -311,6 +332,39 @@ export default function ProblemGallery({ problems }: Props) {
       // 정산이 모자랐을 때 **어느 문제를 잠글지** 서버가 알아야 한다.
       problemId: editing?.id ?? null,
     });
+  }
+
+  /**
+   * 저장된 국어 지문을 다시 읽는다(`KoreanModePanel.readPassageBlocks` 와
+   * 같은 API, `/api/korean-text`). **이미지 재생성이 아니다** — 그림을
+   * 그리는 게 아니라 terra 가 글자를 다시 읽어 구조화된 블록을 돌려주고,
+   * 그걸로 평가원 글꼴 조판을 다시 만든다(5토큰).
+   *
+   * `KoreanModePanel` 과 달리 여기서는 Mathpix 참고 글을 새로 만들지
+   * 않는다(이미 한 번 인식된 걸 고치는 자리라 매번 Mathpix 를 다시 부르면
+   * 배가 든다) — 없어도 동작한다(사진만 보고 읽는 예전 경로와 같다).
+   */
+  async function reReadPassage(crop: string) {
+    setPassageBusy(true);
+    setEditError(null);
+    try {
+      const res = await fetch("/api/korean-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: await enhanceContrast(crop) }),
+      });
+      const json = (await res.json()) as { blocks?: unknown; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
+      const blocks = readRichBlocks(json.blocks);
+      if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
+      setEditKoreanBlocks(blocks);
+    } catch (err) {
+      setEditError(
+        err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.",
+      );
+    } finally {
+      setPassageBusy(false);
+    }
   }
 
   /**
@@ -466,6 +520,7 @@ export default function ProblemGallery({ problems }: Props) {
     setEditError(null);
     setEditFigures([]);
     setMaybeLostFigures(false);
+    setEditKoreanBlocks(undefined);
     void loadFigures(problem.id);
   }
 
@@ -536,6 +591,17 @@ export default function ProblemGallery({ problems }: Props) {
             // 통째로 새로 쓰므로 여기서 옮겨 담지 않으면 처음 수정하는
             // 순간 어느 채점 기록에서 왔는지가 사라진다.
             gradeId: editing.gradeId ?? undefined,
+            // 국어 지문 세트 정보도 같은 이유로 옮겨 담아야 한다 — 안 그러면
+            // 이 모달에서 아무거나 한 번 고쳐 저장하는 순간 이 행이 어느
+            // 지문 세트에 속했는지(role·title·blocks)가 통째로 사라진다
+            // (실제로 그랬다 — box_range 에 korean 키가 아예 없었다).
+            // 재인식(`reReadPassage`)에 성공했으면 새 blocks 로 갈아 끼운다.
+            korean: editing.korean
+              ? {
+                  ...editing.korean,
+                  ...(editKoreanBlocks ? { blocks: editKoreanBlocks } : {}),
+                }
+              : undefined,
           },
         })
         .eq("id", editing.id);
@@ -859,12 +925,21 @@ export default function ProblemGallery({ problems }: Props) {
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="flex flex-col gap-4">
                 {isImageOnly ? (
-                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
-                    이 문제는 AI가 통째로 다시 그린 <strong>이미지</strong>
-                    입니다. 글자를 따로 들고 있지 않아 본문 수정·조건 박스는
-                    쓰지 않습니다. 그림의 크기·위치는 오른쪽 미리보기에서 조절할
-                    수 있어요.
-                  </p>
+                  isPassage ? (
+                    <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
+                      이 행은 <strong>국어 지문</strong>입니다. 본문은 평가원
+                      글꼴로 따로 조판되므로 본문 수정·조건 박스는 쓰지
+                      않습니다. 인식이 잘못됐으면 아래 &ldquo;다시
+                      인식하기&rdquo;로 사진에서 새로 읽을 수 있어요.
+                    </p>
+                  ) : (
+                    <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
+                      이 문제는 AI가 통째로 다시 그린 <strong>이미지</strong>
+                      입니다. 글자를 따로 들고 있지 않아 본문 수정·조건 박스는
+                      쓰지 않습니다. 그림의 크기·위치는 오른쪽 미리보기에서 조절할
+                      수 있어요.
+                    </p>
+                  )
                 ) : (
                   <TextEditTabs value={editText} onChange={setEditText} />
                 )}
@@ -1033,7 +1108,27 @@ export default function ProblemGallery({ problems }: Props) {
                           onRowChange={(row) => updateFigure(f.id, { row })}
                         />
                         {/* 표는 본문에서 만들어지는 것이라 오려내거나 다시 그릴 대상이 아니다. */}
-                        {f.kind !== "table" && raster && (
+                        {f.kind !== "table" && raster && isPassage && (
+                          // 지문은 그림이 아니라 글자다 — "AI로 다시 그리기"
+                          // (이미지 재생성, 유료 50토큰)를 쓰면 안 된다. 대신
+                          // 같은 사진을 다시 인식(`reReadPassage`, 5토큰)한다.
+                          <div className="flex flex-wrap items-center gap-1.5 pl-1">
+                            <button
+                              type="button"
+                              onClick={() => reReadPassage(f.origin ?? raster)}
+                              disabled={passageBusy}
+                              className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                            >
+                              {passageBusy ? "글을 옮겨 적는 중..." : "다시 인식하기"}
+                            </button>
+                            <span className="text-[11px] text-slate-400">
+                              {editKoreanBlocks
+                                ? "다시 인식했습니다 — 저장을 눌러야 반영됩니다."
+                                : "사진에서 글자를 다시 읽어 조판을 새로 만듭니다."}
+                            </span>
+                          </div>
+                        )}
+                        {f.kind !== "table" && raster && !isPassage && (
                           <div className="flex flex-wrap items-center gap-1.5 pl-1">
                             <button
                               type="button"
