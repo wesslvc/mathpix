@@ -140,10 +140,19 @@ export default function KiceExportPanel({ title, items }: Props) {
       const from = pages.length + 1; // 지금 넣을 쪽의 번호(1부터)
       if (set.passage) {
         const at = index.get(set.passage.id)!;
-        // 좌단만으로 충분하면 좌단에 몰아넣고, 넘치면 우단으로 이어 흘린다.
-        // 자를 자리는 줄과 줄 사이 빈 띠에서 고른다(글자 줄이 반으로 잘리면 안 된다).
-        const splitAt = await passageSplitAt(pngs[at], KOREAN_COLUMN_HEIGHT);
-        pages.push({ kind: "passage", index: at, ...(splitAt ? { splitAt } : {}) });
+        // **글자로 옮겨져 있으면 그걸로 조판한다** — 사진보다 또렷하고 단을
+        // 따라 흐르고 평가원 서체와 맞는다(`pdf.ts`의 `passageText`). 옛
+        // 데이터나 "원본 그대로 넣기"로 들어와 글자가 없으면(`blocks`가
+        // 비어 있으면) 예전처럼 사진을 두 단에 나눠 흘린다.
+        const blocks = set.passage.korean?.blocks;
+        if (blocks && blocks.length > 0) {
+          pages.push({ kind: "passageText", blocks });
+        } else {
+          // 좌단만으로 충분하면 좌단에 몰아넣고, 넘치면 우단으로 이어 흘린다.
+          // 자를 자리는 줄과 줄 사이 빈 띠에서 고른다(글자 줄이 반으로 잘리면 안 된다).
+          const splitAt = await passageSplitAt(pngs[at], KOREAN_COLUMN_HEIGHT);
+          pages.push({ kind: "passage", index: at, ...(splitAt ? { splitAt } : {}) });
+        }
       }
       if (set.questions.length > 0) {
         pages.push({

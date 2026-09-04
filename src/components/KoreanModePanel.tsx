@@ -12,6 +12,7 @@ import {
 } from "@/lib/figureImage";
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import { toStoredFigures, type StoredBoxRange } from "@/lib/storedFigures";
+import { readRichBlocks } from "@/lib/kice/richText";
 import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
@@ -111,6 +112,12 @@ export default function KoreanModePanel({
   const [titling, setTitling] = useState(false);
   /** 제목을 지을 재료(지문 크롭). 다시 짓기 버튼이 쓴다. */
   const passageCropRef = useRef<string | null>(null);
+  /**
+   * `makeTitle` 이 Mathpix 로 읽어 둔 지문 글자. 제목 짓기와 지문 구조화
+   * 인식(`readKoreanRichText`)이 **같은 참고 글**을 쓴다 — 다시 부르면
+   * Mathpix 요청이 한 번 더 나가 토큰이 헛되이 든다.
+   */
+  const passageOcrRef = useRef<string | null>(null);
   const [noPassage, setNoPassage] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -398,6 +405,7 @@ export default function KoreanModePanel({
       if (!ocr.ok) throw new Error(read.error ?? "지문을 읽지 못했습니다.");
       const text = (read.text || read.latex || "").trim();
       if (text.length < 20) throw new Error("지문 글자가 거의 인식되지 않았습니다.");
+      passageOcrRef.current = text;
 
       const res = await fetch("/api/korean-title", {
         method: "POST",
@@ -436,10 +444,53 @@ export default function KoreanModePanel({
   }
 
   /**
-   * 저장한다. `regenerate` 면 AI 재생성 큐에도 넣는다.
+   * 지문을 **평가원 글꼴로 조판할 구조화된 글자**로 옮긴다(terra).
+   *
+   * **지문은 그림이 아니다.** 문제(선지·자료가 섞인 그림)와 달리 지문은
+   * 표도 그림도 거의 없는 순수한 글이라, 이미지 생성 모델로 "다시 그리면"
+   * 확대 시 흐려지고 평가원 서체와도 어긋난다. 그래서 지문만은 `enqueue`
+   * (이미지 생성 큐)에 넣지 않고 `/api/korean-text` 로 구조(문단·상자·
+   * 굵게·밑줄)를 읽어 `korean.blocks` 에 저장한다 — 내보내기가 그 값으로
+   * 직접 조판한다(`pdf.ts` 의 `passageText`).
+   *
+   * 실패하면 `undefined` 를 돌려준다 — 그때는 예전처럼 오려낸 사진으로
+   * 저장된다(아무것도 못 하는 것보다 낫다).
+   */
+  async function readPassageBlocks(crop: string) {
+    setBusy("지문을 글자로 옮기는 중... (평가원 글꼴로 조판됩니다)");
+    try {
+      const res = await fetch("/api/korean-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: await enhanceContrast(crop),
+          // makeTitle 이 이미 Mathpix 로 읽어 둔 것을 재사용한다 — 없으면
+          // 빈 문자열이라 예전(참고 없이 사진만 보고 읽기)과 같다.
+          reference: passageOcrRef.current ?? "",
+        }),
+      });
+      const json = (await res.json()) as { blocks?: unknown; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
+      const blocks = readRichBlocks(json.blocks);
+      if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
+      return blocks;
+    } catch (err) {
+      setError(
+        (err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.") +
+          " 이 지문은 사진으로 대신 저장했어요.",
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * 저장한다. `regenerate` 면 **문제**는 AI 재생성 큐에 넣고, **지문**은
+   * 위 `readPassageBlocks` 로 글자를 옮긴다 — 갈래가 다르다(사진 재생성 vs
+   * 글자 인식).
    *
    * **저장을 먼저 한다.** 그래야 행 id 를 큐에 함께 넘길 수 있고, 브라우저를
-   * 닫아도 서버가 결과를 그 행에 직접 저장한다(`persistWholeProblem`).
+   * 닫아도 서버가 결과를 그 행에 직접 저장한다(`persistWholeProblem`,
+   * 문제 쪽에만 해당 — 지문은 큐를 타지 않으므로 이 걱정이 없다).
    */
   async function save(regenerate: boolean) {
     if (pieces.length === 0) return;
@@ -449,11 +500,20 @@ export default function KoreanModePanel({
     const setId = crypto.randomUUID();
     let done = 0;
     let qIndex = 0;
+    let textified = false;
 
     for (const piece of pieces) {
       setBusy(`넣는 중... (${done + 1}/${pieces.length})`);
       try {
         const { figure, pngDataUrl } = await toCard(piece);
+
+        const blocks =
+          regenerate && !noPassage && piece.kind === "passage"
+            ? await readPassageBlocks(piece.crop)
+            : undefined;
+        if (blocks) textified = true;
+        setBusy(`넣는 중... (${done + 1}/${pieces.length})`);
+
         const korean = noPassage
           ? undefined
           : piece.kind === "passage"
@@ -461,6 +521,7 @@ export default function KoreanModePanel({
                 setId,
                 role: "passage" as const,
                 ...(title.trim() ? { title: title.trim() } : {}),
+                ...(blocks ? { blocks } : {}),
               }
             : { setId, role: "question" as const, index: qIndex };
         // 지문 없는 문항이어도 세어 둔다 — 아래 진행 패널 이름표에 쓴다.
@@ -479,11 +540,14 @@ export default function KoreanModePanel({
           },
         });
 
-        if (regenerate) {
+        // 지문은 위에서 이미 처리했다(글자 옮기기, 성공이든 실패든). 큐에는
+        // **문제만** 넣는다 — 지문을 여기 넣으면 이미지 생성 모델로 다시
+        // 그리게 되는데, 그건 지문에 쓸 방법이 아니다.
+        if (regenerate && piece.kind === "question") {
           enqueue({
             id: piece.id,
             problemKey: `korean:${problemId}`,
-            label: piece.kind === "passage" ? "지문" : `${qIndex}번째 문제`,
+            label: `${qIndex}번째 문제`,
             crop: piece.crop,
             mode: "problem",
             // 국어는 글자뿐이라 Mathpix 가 읽은 것을 더 앞세운다.
@@ -505,7 +569,7 @@ export default function KoreanModePanel({
     if (done > 0) {
       setNote(
         regenerate
-          ? `${done}개를 넣고 AI 재생성 큐에 올렸어요. 진행 상황은 화면 구석에서 볼 수 있어요.`
+          ? `${done}개를 넣었어요.${textified ? " 지문은 글자로 옮겨 평가원 글꼴로 조판됩니다." : ""} 문제는 AI 재생성 큐에 올렸어요 — 진행 상황은 화면 구석에서 볼 수 있어요.`
           : `${done}개를 원본 그대로 넣었어요.`,
       );
       reset();
