@@ -42,42 +42,31 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
  */
 export const DETECT_MODEL = process.env.GEMINI_DETECT_MODEL ?? "gemini-flash-latest";
 
-const PROMPT = `This image is a page from a Korean high-school workbook / mock exam.
-Find the region of **each individual question**.
+const PROMPT = `task: page from Korean HS workbook/mock exam. find region of EACH individual question.
 
-A question's region must contain everything that belongs to it:
-- from the question number (e.g. 12.)
-- through the stem, condition boxes, <보기>, tables / graphs / maps,
-- to the last line of the choices (①②③④⑤).
+question region must contain everything belonging to it:
+- from question number (e.g. 12.)
+- through stem, condition boxes, <보기>, tables/graphs/maps
+- to last line of choices (①②③④⑤)
 
-Crop **tight**:
-- Hug the outer edge of the content (top of the highest glyph, bottom of the lowest, and the
-  leftmost/rightmost extents). Leave no empty margin.
-- Leave only enough that no glyph is clipped. Do not be generous.
-- Exclude blank lines between questions, the gutter between columns, and the page margin.
-- One region per question, non-overlapping.
-- **Never split one question into several pieces.** The stem, condition box, data and choices
-  are parts of one question, not separate things. Within a single column take the whole thing
-  as **one** region. The only case that is split is the cross-column case below.
-- If the page has two columns, order left column top-to-bottom first, then the right column.
-- Exclude running heads, page numbers, adverts and solutions.
+crop TIGHT:
+- hug outer content edge (top of highest glyph, bottom of lowest, left/right extents). no empty margin
+- leave only enough that no glyph is clipped, don't be generous
+- exclude: blank lines between questions, column gutter, page margin
+- 1 region per question, non-overlapping
+- NEVER split 1 question into pieces: stem+condition box+data+choices = parts of 1 question. within single column = ONE region. only cross-column case (below) splits
+- 2-column page -> order: left column top-to-bottom first, then right column
+- exclude: running heads, page numbers, ads, solutions
 
-Do not miss **questions that continue across columns**. This matters most:
-- A new question **always starts with a question number** (e.g. "12.").
-- So if a block starts **without a number** — with plain text or with a choice marker
-  (①②③④⑤) — it is not a new question, it is the **rest of the previous one**.
-- In particular, if the top of the right column starts without a number, the last question of
-  the left column continues there.
-- In that case take **each piece as its own region**, but put the **same question number** in
-  \`no\` for both (use the leading piece's number even if the trailing piece shows none), so we
-  can stitch them into one question.
-- Crop the continuation piece tight as well — the two pieces must join as if they were never
-  separated.
+don't miss questions continuing across columns (matters most):
+- new question ALWAYS starts with question number (e.g. "12.")
+- block starting WITHOUT number (plain text or choice marker ①②③④⑤) = NOT new question, = rest of previous one
+- right-column top starting without number -> left column's last question continues there
+- in that case: each piece = own region, but SAME question number in \`no\` for both (use leading piece's number even if trailing piece shows none) -> lets us stitch into one question
+- crop continuation piece tight too -> pieces must join as if never separated
 
-Answer with a JSON array only. Each item is
-{"box_2d": [ymin, xmin, ymax, xmax], "no": "12"}
-where coordinates are normalised to 0-1000 and \`no\` is the question number (digits only).
-Leave \`no\` empty if unknown. Write no explanation.`;
+answer: JSON array only. each item = {"box_2d": [ymin, xmin, ymax, xmax], "no": "12"}
+coords normalised 0-1000. \`no\` = question number (digits only), empty if unknown. no explanation.`;
 
 type GeminiBox = { box_2d?: unknown; no?: unknown; label?: unknown };
 
@@ -306,33 +295,29 @@ async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[
  * 같은 문제를 알아본다"는 규칙에 기대는 것인데, 지문에는 번호가 없어서 그
  * 규칙이 통째로 어긋난다.
  */
-const KOREAN_PROMPT = `This image is a page from a Korean SAT (수능) **국어 영역** paper.
-Find both the **passage** regions and the **question** regions.
+const KOREAN_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find PASSAGE regions AND QUESTION regions.
 
 passage:
-- The whole body of text that several questions share (non-fiction passage, literary work,
-  including any 보기 material).
-- If there is a lead-in line such as "[1~3] 다음 글을 읽고 물음에 답하시오.", start **from that line**.
-- If several texts are grouped as (가)(나), take them **together as one** region.
-- For literature, include the trailing attribution (- 작자, 「작품명」).
-- Do not include the questions (stem / choices) printed under the passage.
+- whole text body shared by several questions (non-fiction/literary work, incl. any 보기 material)
+- lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." -> start FROM that line
+- several texts grouped as (가)(나) -> take TOGETHER as one region
+- literature -> include trailing attribution (- 작자, 「작품명」)
+- exclude questions (stem/choices) printed under passage
 
 question:
-- Take **one item at a time**, from its number (e.g. 12.) to the last line of the choices (①②③④⑤).
-- The stem, the <보기> box and the choices are parts of one item. Do not split them.
-- Put which passage the item belongs to in \`set\` (the passage carries the same \`set\`).
-  Number the passages 1, 2, 3 … from the top. Use 0 if it belongs to no passage.
+- one item at a time: from its number (e.g. 12.) to last line of choices (①②③④⑤)
+- stem + <보기> box + choices = parts of one item, don't split
+- \`set\` = which passage item belongs to (passage carries same \`set\`). number passages 1,2,3... from top. 0 = no passage
 
-Both:
-- Hug the outer edge of the content. Exclude empty margin, the gutter, running heads and page numbers.
-- Regions must not overlap.
-- If the page has two columns, order left column top-to-bottom first, then the right column.
-- **If a passage continues across columns, take one region per piece** and give them the same \`set\`.
+both:
+- hug outer content edge. exclude empty margin, gutter, running heads, page numbers
+- regions must not overlap
+- 2-column page -> order: left column top-to-bottom first, then right column
+- passage continuing across columns -> one region per piece, same \`set\`
 
-Answer with JSON only:
+answer: JSON only:
 {"regions":[{"box_2d":[ymin,xmin,ymax,xmax],"kind":"passage"|"question","set":1,"no":"12"}]}
-Coordinates are normalised to 0-1000. \`no\` is the item number (digits only), empty for a passage.
-Write no explanation.`;
+coords normalised 0-1000. \`no\` = item number (digits only), empty for passage. no explanation.`;
 
 export type DetectedKoreanRegion = {
   kind: "passage" | "question";
@@ -440,7 +425,7 @@ async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[
   if (!key) throw new DetectError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
   const model = OPENAI_DETECT_MODEL;
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
-  const text = `${PROMPT}\n\n답은 {"problems": [...]} 꼴의 JSON 객체로 주세요.`;
+  const text = `${PROMPT}\n\nanswer as JSON object: {"problems": [...]}`;
 
   // **먼저 Responses API 로 부른다.** 요즘 모델은 이쪽만 받는 경우가 있다.
   // 안 받으면 Chat Completions 로 내려간다 — 이건 **같은 모델을 다른 길로**

@@ -296,16 +296,12 @@ const workingVariant = new Map<string, number>();
  * 지우고 끝내면 안 된다는 것도 못박는다 — 손글씨에 덮인 인쇄 내용은 그 아래에
  * 있던 대로 되살려야 한다. 안 그러면 지운 자리가 빈칸으로 남는다.
  */
-const ERASE_HANDWRITING = `Remove every handwritten mark. Do this first:
-- Erase ALL pen/pencil/highlighter marks: notes, working, calculations, underlines,
-  circles, stars, arrows, checks, hatching, erasures, grading marks.
-- **Black ballpoint is handwriting too.** Do not judge by colour. It is handwritten if
-  stroke width varies, size/slant is uneven, the letterform differs from the printed
-  type, or it spills outside the ruled area.
-- Do not leave it faint or smudged. Restore that area to **clean white paper** and
-  redraw only the printed content that was hidden underneath.
-- Keep printed underlines and bold text (uniform thickness, aligned with the type).
-- Also remove fold creases, stains, shadows, scan streaks, fingers and skew.`;
+const ERASE_HANDWRITING = `erase_handwriting[FIRST STEP]:
+- remove ALL pen/pencil/highlighter marks: notes,working,calc,underline,circle,star,arrow,check,hatching,erasure,grading-mark
+- black ballpoint = handwriting too. ignore colour. detect via: uneven stroke width/slant, letterform≠printed type, spills outside ruled area
+- no faint/smudged residue -> restore clean white paper, redraw only printed content hidden underneath
+- keep: printed underline+bold (uniform thickness, aligned w/ type)
+- also remove: fold creases, stains, shadows, scan streaks, fingers, skew`;
 
 /**
  * 원문자(㉠ ① ⓐ)를 그리는 법. 두 프롬프트가 똑같이 쓴다.
@@ -319,14 +315,10 @@ const ERASE_HANDWRITING = `Remove every handwritten mark. Do this first:
  * 사회탐구·국어에서 `밑줄 친 ㉠에 대한 설명으로…` 처럼 원문자가 곧 문제의
  * 지시 대상인 경우가 흔해서, 안쪽 글자가 하나 바뀌면 문제가 성립하지 않는다.
  */
-const CIRCLED_CHARS = `Circled characters (㉠㉡㉢㉣㉤, ①②③④⑤, ⓐⓑⓒ) are **one glyph inside a circle**:
-- Do not draw them from memory as a single shape. Draw a thin circle, then place the
-  character centred inside it. The circle must be round, and the inner character must
-  not touch it.
-- Never swap the inner character. ㉠㉡㉢㉣㉤㉥㉦ are ㄱㄴㄷㄹㅁㅂㅅ in order;
-  ①②③④⑤ are 1 2 3 4 5.
-- A circled character referenced in the body (e.g. "밑줄 친 ㉠") and the one printed in
-  the figure must be **the same character**. If they differ the question is broken.`;
+const CIRCLED_CHARS = `circled_chars (㉠㉡㉢㉣㉤, ①②③④⑤, ⓐⓑⓒ) = 1 glyph inside circle:
+- don't draw from memory as single shape -> draw thin round circle + centred inner char, not touching
+- never swap inner char: ㉠㉡㉢㉣㉤㉥㉦=ㄱㄴㄷㄹㅁㅂㅅ (in order); ①②③④⑤=1 2 3 4 5
+- body reference (e.g. "밑줄 친 ㉠") and figure's printed char must be the SAME char -> mismatch breaks question`;
 
 /**
  * 그림 재구성 프롬프트. **하나뿐이다.**
@@ -336,50 +328,39 @@ const CIRCLED_CHARS = `Circled characters (㉠㉡㉢㉣㉤, ①②③④⑤, ⓐ
  * 대신 각 항목을 "…라면"으로 조건부로 적었다 — 삼각형에 지층 순서 지시는,
  * 세포 모식도에 교점 좌표 지시는 모델이 알아서 건너뛴다.
  */
-const PROMPT = `This image is a figure from a Korean high-school workbook (math / science / social studies).
-Redraw it as closely to the original as possible, clean and sharp, so the question can be solved.
+const PROMPT = `task: redraw figure from Korean HS workbook (math/science/social-studies) as close to original as possible, clean+sharp, solvable.
 
 ${ERASE_HANDWRITING}
 
-For any figure, always:
-- Keep every element that is in the original. Do not drop anything and do not invent anything.
-- Copy all text (Korean labels, symbols, numbers, units) **exactly** as printed. Do not
-  reword or translate, and do not invent glyphs you cannot read.
+always:
+- keep every original element, drop nothing, invent nothing
+- copy all text (labels,symbols,numbers,units) EXACTLY as printed. no reword/translate/invented glyphs
 - ${CIRCLED_CHARS.replace(/\n/g, "\n  ")}
-- Preserve counts exactly (ticks, layers, particles, cells, dots, arrows).
-- Keep the small marks: tick marks and their numbers, units, legends, arrowheads, the
-  dashed/solid distinction, angle arcs, right-angle marks, equal-length hatches, decimal points.
+- preserve exact counts (ticks,layers,particles,cells,dots,arrows)
+- keep small marks: tick+numbers, units, legend, arrowhead, dashed/solid distinction, angle arc, right-angle mark, equal-length hatch, decimal point
 
-Colour and contrast (this will be printed and solved on paper):
-- Anything distinguished **only** by colour (map regions, graph series, strata, areas) must
-  also differ in **lightness or pattern**, so it still reads in black and white. Make the
-  tones clearly different or overlay hatching / dots.
-- This does not mean removing colour. Keep the original colours and add the tonal difference.
-- If there is a legend, match the legend swatch to the mark in the figure exactly.
-- Do not place similar pale greys or pastels next to each other. Draw crisp boundaries.
+colour/contrast (will be printed+solved on paper):
+- colour-only distinctions (map regions,graph series,strata,areas) need added lightness/pattern diff too -> must still read in b&w
+- keep original colours, ADD tonal diff (don't remove colour)
+- legend swatch must exactly match figure's mark
+- no adjacent similar pale-grey/pastel colours -> draw crisp boundaries
 
-If it is a geometric figure or graph (circles, triangles, coordinate planes):
-- The most important thing is **where lines meet**. Put each intersection at the same place
-  as the original and make both lines pass exactly through it — never near it or grazing it.
-- A tangent line or tangent circle must touch at exactly one point, neither cutting in nor
-  standing off.
-- Match the original for axis crossings, maxima/minima, and vertices.
-- Where several lines meet at one point, they must all meet at exactly the same place; a
-  point stated to be on a segment must lie on that segment.
-- Keep axes, the origin O, tick numbers, asymptotes and shaded regions as in the original.
-- Put point labels (A, B, P, O …) right next to their point, without overlapping.
+if geometric/graph (circles,triangles,coord planes):
+- priority: intersections at exact original position, both lines pass exactly through (never near/grazing)
+- tangent line/circle touches at exactly 1 point (not cutting in, not standing off)
+- match axis crossings, maxima/minima, vertices
+- multi-line junctions all meet at exact same point; point-on-segment stays on segment
+- keep axes, origin O, tick numbers, asymptotes, shaded regions as original
+- point labels (A,B,P,O...) beside their point, no overlap
 
-If it is an apparatus / schematic / cross-section (experiment setups, cells, strata, circuits):
-- Preserve the spatial relations exactly: what is above/below/inside/outside/left/right of
-  what (stratum order, organelles, circuit order, atmospheric layers).
-- Preserve arrow directions exactly. Reversing one makes it a different diagram.
-- Whatever is connected by a line or tube must connect to the same thing as in the original.
+if apparatus/schematic/cross-section (experiment setup,cell,strata,circuit):
+- preserve spatial relations exactly: above/below/inside/outside/left/right (stratum order, organelles, circuit order, atmospheric layers)
+- preserve arrow directions exactly (reversed = different diagram)
+- line/tube connections must match original endpoints exactly
 
-If colour is not carrying meaning, render it as black lines on a white background.
+colour not meaningful -> render as black lines on white background.
 
-The result must look like a workbook illustration: white background, crisp lines. Do not
-add photographic shading or drop shadows (the "tonal difference for distinction" above is
-the one exception — that must be there).`;
+result = workbook-illustration look: white bg, crisp lines. no photo shading/drop shadow (exception: tonal-diff-for-distinction above, that one is required).`;
 
 /**
  * **문제 전체**를 다시 그릴 때 쓰는 프롬프트.
@@ -389,50 +370,36 @@ the one exception — that must be there).`;
  * 바뀌어도 답이 뒤집히고, 사용자가 나중에 고칠 방법도 없다(결과가 이미지라
  * 본문 수정이 안 된다). 그래서 "그대로 옮겨 적기"를 반복해 못박는다.
  */
-const WHOLE_PROBLEM_PROMPT = `This image is **one complete question** from a Korean high-school workbook.
-Render it as a clean printed page. Change nothing about the content.
+const WHOLE_PROBLEM_PROMPT = `task: this image = ONE COMPLETE QUESTION from Korean HS workbook. render as clean printed page. change NOTHING about content.
 
 ${ERASE_HANDWRITING}
 
-Next in importance — the text:
-- Copy every character **exactly** as printed. Do not change, polish, summarise or translate
-  a single character.
-- Phrases like "옳은 것" vs "옳지 않은 것", "있는 대로" vs "하나만" flip the answer. Leave
-  them exactly as they are.
-- Numbers, units, symbols, years, place names and personal names must match exactly.
-- If a character is hard to read, do not invent one — follow the original strokes as closely
-  as you can.
+text (2nd priority):
+- copy every character EXACTLY as printed. no change/polish/summarise/translate, not even 1 char
+- "옳은 것" vs "옳지 않은 것", "있는 대로" vs "하나만" flip the answer -> leave exactly as-is
+- numbers,units,symbols,years,place names,personal names must match exactly
+- hard-to-read char -> do NOT invent, follow original strokes as closely as possible
 
 ${CIRCLED_CHARS}
 
-Structure, unchanged:
-- Keep the question number, the stem, condition boxes, tables, data, <보기>, and the choices
-  (①②③④⑤) in the same order and arrangement. Do not drop or add anything.
-- Keep tables to the same number of rows and columns with the same cell contents, and draw
-  crisp borders.
-- Keep figures, maps, graphs and schematics with the same spatial relations, arrow directions
-  and counts.
-- Keep any surrounding box.
+structure (unchanged):
+- keep question number, stem, condition boxes, tables, data, <보기>, choices (①②③④⑤) in same order/arrangement. drop/add nothing
+- tables: same row/col count, same cell contents, crisp borders
+- figures/maps/graphs/schematics: same spatial relations, arrow directions, counts
+- keep any surrounding box
 
-Down to the details:
-- Do not drop the small marks: tick marks and their numbers, axis names, units, legends,
-  arrowheads, the dashed/solid distinction, angle arcs, right-angle marks, super/subscripts,
-  decimal points, parentheses.
-- If there is a graph or figure, **intersections matter most**. Put line crossings, axis
-  crossings, maxima/minima and tangent points at the same places as the original, with both
-  lines passing exactly through them — never near or grazing.
-- Put point labels (A, B, P, O …) right next to their point, without overlapping.
+details:
+- don't drop small marks: tick+numbers, axis names, units, legends, arrowheads, dashed/solid distinction, angle arcs, right-angle marks, super/subscripts, decimal points, parentheses
+- graph/figure -> intersections matter most: line crossings, axis crossings, maxima/minima, tangent points at exact original positions, lines pass exactly through (never near/grazing)
+- point labels (A,B,P,O...) beside their point, no overlap
 
-Colour and contrast (this will be printed and solved on paper):
-- Anything distinguished **only** by colour (map regions, graph series, strata, areas) must
-  also differ in **lightness or pattern**, so it still reads in black and white.
-- This does not mean removing colour. Keep the original colours and add the tonal difference.
-- If there is a legend, match the legend swatch to the mark in the data exactly.
-- Do not place similar pale greys or pastels next to each other. Draw crisp boundaries.
+colour/contrast (will be printed+solved on paper):
+- colour-only distinctions (map regions,graph series,strata,areas) need added lightness/pattern diff too -> must still read in b&w
+- keep original colours, ADD tonal diff (don't remove colour)
+- legend swatch must exactly match data's mark
+- no adjacent similar pale-grey/pastel colours -> draw crisp boundaries
 
-Appearance:
-- White background, crisp black text — like a printed workbook page.
-- Choose a comfortable text size; lines must not overlap or be cut off.`;
+appearance: white bg, crisp black text, like printed workbook page. comfortable text size; no overlap/cutoff.`;
 
 function dataUrlToBlob(
   dataUrl: string,
@@ -561,9 +528,8 @@ function circledNote(text: string): string {
   seen.sort((a, b) => (a.codePointAt(0) ?? 0) - (b.codePointAt(0) ?? 0));
   const pairs = seen.map((ch) => `${ch}(circle around ${insideCircle(ch)})`);
   return `
-This question contains circled characters: ${pairs.join(", ")}.
-Draw the character named in parentheses inside the circle. Do not substitute a different
-character and do not reorder them.`;
+circled chars in this question: ${pairs.join(", ")}.
+draw the parenthesised char inside the circle. no substitution, no reorder.`;
 }
 
 function withReference(prompt: string, reference: string, korean = false): string {
@@ -581,24 +547,20 @@ function withReference(prompt: string, reference: string, korean = false): strin
    * 자리, 문단 나눔)은 사진을 따르게 남겨 둔다 — 참고 글에는 그게 없다.
    */
   const trust = korean
-    ? `This is a Korean-language passage/question with almost no tables or figures.
-**Treat the reference as authoritative: copy it verbatim, dropping and changing nothing.**
-Use the photo only for what the reference cannot carry — printed underlines and bold,
-where circled characters sit, paragraph breaks, and the placement of (가)/(나) markers.`
-    : `The reference can be wrong too — **where it disagrees with the photo, the photo wins.**
-Anything not in the reference (table/figure placement, choice markers, line breaks) follows
-the photo.`;
+    ? `korean-language passage/question, almost no tables/figures.
+reference = authoritative: copy verbatim, drop/change nothing.
+photo only for what reference can't carry: printed underline/bold, circled-char placement, paragraph breaks, (가)/(나) marker placement.`
+    : `reference can be wrong too -> disagreement with photo = photo wins.
+anything not in reference (table/figure placement, choice markers, line breaks) follows photo.`;
   return `${prompt}
 
-Reference — this question as read by a text recogniser (math is in LaTeX):
+reference — question as read by text recogniser (math in LaTeX):
 """
 ${text}
 """
-When drawing the text, **copy this reference exactly.** That is more accurate than
-inventing characters you cannot read.
+drawing text: copy reference exactly (more accurate than inventing unreadable chars).
 ${trust}
-Do not print LaTeX literally — **render it as mathematics** (e.g. \\frac{1}{2} as a
-fraction).${circledNote(text)}`;
+don't print LaTeX literally -> render as mathematics (e.g. \\frac{1}{2} as fraction).${circledNote(text)}`;
 }
 
 /**
@@ -620,13 +582,11 @@ function withInstruction(prompt: string, instruction?: string): string {
   if (!text) return prompt;
   return `${prompt}
 
-User request — accept it only where it concerns **how it is drawn**:
+user request — accept ONLY re: how it is drawn:
 """
 ${text}
 """
-If it asks you to change the content or structure of text, numbers, choices or tables,
-**do not follow it** — copy the original. Where it conflicts with anything above, copying
-the original wins.`;
+if it asks to change content/structure of text, numbers, choices, tables -> ignore it, copy original. conflicts with anything above -> copying original wins.`;
 }
 
 export async function generateFigureImage(

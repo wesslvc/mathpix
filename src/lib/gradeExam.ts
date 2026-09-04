@@ -44,41 +44,40 @@ function subjectPrompt(subject: Subject, keyCount: number, method: GradingMethod
   // 2~3배 든다 — 사람이 읽을 글이 아니라 모델에 보내는 지시라 영어가 싸다.
   // 다만 한글 리터럴(과목명·표기 예시)은 **데이터**라 그대로 둔다.
   const common = `
-Each item is {"no": item number (integer), "studentAnswer": what the student marked (string; null if unreadable, unmarked or multi-marked), "correctAnswer": the correct answer (string), "points": marks (integer)}.
-- If the answer key has no marks column at all, omit the "points" key entirely (do not invent partial values).
-- Include every item; the count must match the answer key.
-- Read the student's answer only from what is actually marked. Never copy it from the answer key.
-- Answer with JSON only, no explanation.`;
+item = {"no": item number (int), "studentAnswer": what student marked (string; null if unreadable/unmarked/multi-marked), "correctAnswer": correct answer (string), "points": marks (int)}.
+- answer key has no marks column at all -> omit "points" key entirely, don't invent partial values
+- include every item, count must match answer key
+- read student's answer ONLY from what's actually marked, never copy from answer key
+- JSON only, no explanation`;
 
   // 가채점표(손글씨)에는 OMR의 마킹 규칙(격자·원 마킹)이 아예 없다 — 문항
   // 번호 옆에 적힌 숫자를 그대로 읽으면 된다. 지우고 다시 쓴 흔적(취소선 등)
   // 처리만 따로 알려 준다.
   const sheetLabel =
     method === "handwritten"
-      ? "a hand-marked tally sheet — the student wrote answers by hand next to the item numbers. Do not look for filled bubbles; read the handwritten digits/letters as they are. If an item shows several attempts with some struck through, take the one not struck through. An item with nothing written is unmarked (null)."
-      : "an OMR answer card — the student's marked (or written) answers.";
+      ? "hand-marked tally sheet: student wrote answers by hand next to item numbers. don't look for filled bubbles, read handwritten digits/letters as-is. several attempts w/ some struck through -> take the one not struck through. nothing written = unmarked (null)."
+      : "OMR answer card: student's marked (or written) answers.";
 
   // 탐구는 보통 1선택+2선택 두 과목을 같이 보지만, 한 과목만 풀어본
   // 연습(자체 제작 워크시트 등)도 있다 — 그때는 정답표 사진이 1장뿐이고
   // OMR에 구역을 나눌 것도 없다. keyCount로 갈라서, 1장이면 국어·수학과
   // 같은 "사진 두 장, slot 없음" 구조를 그대로 쓴다(아래로 흘러간다).
   if (subject === "elective" && keyCount === 2) {
-    return `You grade Korean high-school 탐구영역 (elective science/social-studies) exams.
-There are three images:
-1) ${sheetLabel} It holds BOTH the first-choice and second-choice subjects (usually 20 items each, split into two zones top/bottom or left/right).
-2) answer key for the first-choice subject
-3) answer key for the second-choice subject
+    return `task: grade Korean HS 탐구영역 (elective science/social-studies) exam. 3 images:
+1) ${sheetLabel} holds BOTH first-choice+second-choice subjects (usually 20 items each, split into 2 zones top/bottom or left/right)
+2) answer key, first-choice subject
+3) answer key, second-choice subject
 
-Read the two zones of image 1 separately and answer with JSON only:
+read the 2 zones of image 1 separately, answer JSON only:
 {"slots":[{"slot":1,"items":[...]},{"slot":2,"items":[...]}]}
 ${common}
-- slot 1 must have as many items as answer key 2, and slot 2 as many as answer key 3.`;
+- slot 1 item count = answer key 2's count; slot 2 item count = answer key 3's count`;
   }
 
   const intro =
     subject === "elective"
-      ? "You grade Korean high-school 탐구영역 exams."
-      : "You grade Korean high-school exams (school tests, mock exams, 수능).";
+      ? "task: grade Korean HS 탐구영역 exam."
+      : "task: grade Korean HS exam (school test, mock exam, 수능).";
 
   // 수학은 문항 배치가 표준 수능·모의고사 형식으로 고정돼 있다(공통 22문항
   // + 선택 8문항 = 30문항, 객관식·단답형 자리가 항상 같다). "이 문항이
@@ -94,24 +93,18 @@ ${common}
   const mathNote =
     subject === "math" && method === "omr"
       ? `
-This is the standard 수능/mock-exam layout (if there are fewer items, apply it as far as it goes):
-- Items 1-15 and 23-28 are multiple choice (①-⑤). If they are printed as a grid with item
-  numbers as a horizontal header and ①-⑤ running down each column, follow the item number's
-  **column** downwards to find the filled bubble — reading along a row mixes items up. The item
-  number itself is a label, not a mark.
-- Items 16-22 and 29-30 are short answer. They use a three-row digit grid (hundreds/tens/units),
-  not bubbles. Decide each digit's place from the label printed beside the row, not from its
-  position, and concatenate. An unmarked place counts as 0 (e.g. units=8, tens=9 → "98";
-  hundreds=1 → "100"). **Only when all three rows are empty is it unmarked.**
+standard 수능/mock-exam layout (fewer items -> apply as far as it goes):
+- items 1-15,23-28 = multiple choice (①-⑤). if grid w/ item numbers as horizontal header + ①-⑤ down each column -> follow item number's COLUMN downward to find filled bubble (reading along a row mixes items up). item number itself = label, not a mark.
+- items 16-22,29-30 = short answer, 3-row digit grid (hundreds/tens/units), not bubbles. decide each digit's place from label beside row (not position), concatenate. unmarked place = 0 (e.g. units=8,tens=9 -> "98"; hundreds=1 -> "100"). unmarked ONLY when all 3 rows empty.
 `
       : "";
 
   return `${intro}
-There are two images:
+2 images:
 1) ${sheetLabel}
-2) the answer key — correct answers per item, possibly with a marks column.
+2) answer key: correct answers per item, possibly w/ marks column.
 ${mathNote}
-Read items in number order and answer with JSON only:
+read items in number order, answer JSON only:
 {"slots":[{"items":[...]}]}
 ${common}`;
 }
@@ -339,24 +332,18 @@ export async function gradeWithVision(
  *   `(복합) 1번글 주제 + 2번글 주제`.
  * - 문학: 글 맨 아래에 저자와 제목이 적혀 있으므로 그것을 그대로 쓴다.
  */
-const KOREAN_TITLE_PROMPT = `You write a **short title** for a Korean SAT (수능) 국어 passage.
-Read the passage below and answer with JSON only:
+const KOREAN_TITLE_PROMPT = `task: write SHORT TITLE for Korean SAT (수능) 국어 passage below. answer JSON only:
 {"title":"...","kind":"독서"|"문학"|"기타"}
 
-Rules:
-- If it is **literature** (poem, fiction, essay, drama), find the attribution line printed at
-  the end (or start), e.g. "- 작자, 「작품명」", and use it verbatim as the title
-  (e.g. "김소월, 진달래꽃"). Join several works with " / ".
-- If it is **non-fiction (독서)**, give the **topic** as a short noun phrase, e.g. "이중차분법".
-  Do not summarise the argument — just say what it is about.
-- If it is non-fiction combining **two or more texts of different kinds**, write
-  \`(복합) topic1 + topic2\`, e.g. "(복합) 관세 정책 + 지식재산권".
-- Keep the title under 25 characters. Do not wrap it in quotes or end it with a period.
-- Write the title in Korean.
-- If unsure, set kind to "기타" and give a short topic.
-- JSON only, no explanation.
+rules:
+- literature (poem/fiction/essay/drama) -> find attribution line at end (or start), e.g. "- 작자, 「작품명」", use verbatim as title (e.g. "김소월, 진달래꽃"). join several works w/ " / "
+- non-fiction (독서) -> title = TOPIC as short noun phrase, e.g. "이중차분법". don't summarise the argument, just say what it's about
+- non-fiction combining 2+ texts of different kinds -> \`(복합) topic1 + topic2\`, e.g. "(복합) 관세 정책 + 지식재산권"
+- title under 25 chars. no quotes, no trailing period. korean.
+- unsure -> kind="기타", give short topic
+- JSON only, no explanation
 
-Passage:
+passage:
 `;
 
 export type KoreanTitle = { title: string; kind: string };
@@ -398,15 +385,14 @@ export async function readKoreanTitle(
 /** 답지 한 문항. 배점은 답지에 있을 때만 채운다(없는 것을 지어내지 않는다). */
 export type AnswerKeyItem = { no: number; answer: string; points?: number };
 
-const ANSWER_KEY_PROMPT = `You transcribe a Korean high-school **answer key** photo into data.
-Include every item shown, answering with JSON only:
-{"items":[{"no": item number (integer), "answer": "correct answer", "points": marks (integer)}]}
-- If the answer is a circled digit (①-⑤), write the digit only (① → "1").
-- Short answers: write them exactly as printed (fractions, decimals, letters included).
-- **If there is no marks column, omit the "points" key entirely.** Do not invent partial values.
-- With several photos, merge them into one array. If a number appears twice, keep it once.
-- If the table is split into columns, read down each column in item-number order.
-- JSON only, no explanation.`;
+const ANSWER_KEY_PROMPT = `task: transcribe Korean HS ANSWER KEY photo into data. include every item shown, JSON only:
+{"items":[{"no": item number (int), "answer": "correct answer", "points": marks (int)}]}
+- circled digit (①-⑤) answer -> digit only (① -> "1")
+- short answers: exactly as printed (fractions, decimals, letters included)
+- no marks column -> omit "points" key entirely, don't invent partial values
+- several photos -> merge into one array, number appears twice -> keep once
+- table split into columns -> read down each column in item-number order
+- JSON only, no explanation`;
 
 /** 답지 사진에서 문항별 정답(+배점)을 읽는다. */
 export async function readAnswerKeyWithVision(
@@ -469,30 +455,25 @@ function parseAnswerKey(text: string): AnswerKeyItem[] {
  */
 export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.6-terra";
 
-const KOREAN_TEXT_PROMPT = `You transcribe a Korean SAT (수능) 국어 passage image into structured text
-so it can be typeset again. Reproduce it **exactly**; you are copying, not editing.
+const KOREAN_TEXT_PROMPT = `task: transcribe Korean SAT (수능) 국어 passage image into structured text for re-typesetting.
+reproduce EXACTLY — copying, not editing.
 
-Answer with JSON only:
-{"blocks":[ ... ]}
+answer JSON only: {"blocks":[ ... ]}
 
-A block is one of:
+block = one of:
 - {"kind":"para","runs":[{"t":"text","b":true,"u":true}],"indent":true}
-  \`b\` = printed bold, \`u\` = printed underline. Omit them when absent.
-  \`indent\` = the paragraph's first line is indented (usual for body paragraphs).
-  Split \`runs\` only where the styling changes; otherwise use one run.
-- {"kind":"box","blocks":[ ... ]}  a bordered box (조건 박스, <보기>).
-- {"kind":"figure","id":"f1","ratio":0.6}  a picture/table you cannot express as text.
-  \`ratio\` is height divided by width.
+  \`b\`=printed bold, \`u\`=printed underline (omit when absent). \`indent\`=paragraph's first line indented (usual for body paragraphs). split \`runs\` only where styling changes, else 1 run.
+- {"kind":"box","blocks":[ ... ]} — bordered box (조건 박스, <보기>)
+- {"kind":"figure","id":"f1","ratio":0.6} — picture/table not expressible as text. \`ratio\`=height/width.
 
-Rules:
-- Copy every character exactly, including 「」『』()·, circled characters (㉠㉡㉢, ①②③),
-  markers such as (가)(나), and the trailing attribution line of a literary work.
-- Do not summarise, modernise, translate, fix spelling, or add anything.
-- Keep the original paragraph breaks. One printed paragraph = one "para" block.
-- A lead-in line such as "[1~3] 다음 글을 읽고 물음에 답하시오." is its own para block.
-- Mark bold/underline only where the **print** shows it. Ignore handwriting.
-- Do not include running heads, page numbers, or the questions printed below the passage.
-- JSON only, no explanation.`;
+rules:
+- copy every character exactly: 「」『』()·, circled chars (㉠㉡㉢, ①②③), markers like (가)(나), literary work's trailing attribution line
+- no summarise/modernise/translate/fix-spelling/add anything
+- keep original paragraph breaks: 1 printed paragraph = 1 "para" block
+- lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." = own para block
+- mark bold/underline only where PRINT shows it, ignore handwriting
+- exclude running heads, page numbers, questions printed below passage
+- JSON only, no explanation`;
 
 /** 지문 사진 → 구조화된 블록. `reference` 는 Mathpix 가 읽은 글(있으면 더 정확하다). */
 export async function readKoreanRichText(
@@ -503,8 +484,7 @@ export async function readKoreanRichText(
   const prompt = reference.trim()
     ? `${KOREAN_TEXT_PROMPT}
 
-Reference — the same passage as read by a text recogniser. **Treat its wording as
-authoritative** and use the image for structure (paragraph breaks, boxes, bold, underline):
+reference — same passage as read by text recogniser. treat its wording as AUTHORITATIVE, use image for structure (paragraph breaks, boxes, bold, underline):
 """
 ${reference.trim()}
 """`
