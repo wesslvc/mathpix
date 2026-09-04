@@ -11,6 +11,7 @@
 
 import { OPENAI_DETECT_MODEL } from "./detectProblems";
 import type { GradedItem, GradeSlot, Subject } from "./gradeSummary";
+import { normalizeJamo } from "./renderMathText";
 
 export type { Subject, GradedItem, GradeSlot } from "./gradeSummary";
 export { computeSummary } from "./gradeSummary";
@@ -461,17 +462,17 @@ reproduce EXACTLY — copying, not editing.
 answer JSON only: {"blocks":[ ... ]}
 
 block = one of:
-- {"kind":"para","runs":[{"t":"text","b":true,"u":true}],"indent":true}
-  \`b\`=printed bold, \`u\`=printed underline (omit when absent). \`indent\`=paragraph's first line indented (usual for body paragraphs). split \`runs\` only where styling changes, else 1 run.
-- {"kind":"box","blocks":[ ... ]} — bordered box (조건 박스, <보기>)
+- {"kind":"para","runs":[{"t":"text","b":true,"u":true,"sq":true}],"indent":true}
+  \`b\`=printed bold, \`u\`=printed underline, \`sq\`=printed small box/rectangle drawn tightly around this word or phrase — a DIFFERENT mark from underline, used the same way (points at the expression a question refers to). omit each when absent. \`indent\`=paragraph's first line indented (usual for body paragraphs). split \`runs\` only where styling changes, else 1 run.
+- {"kind":"box","blocks":[ ... ]} — a bordered frame actually drawn in the image (조건 박스, <보기>, or a frame enclosing several lettered sections like (가)(나) together). one continuous border = exactly ONE box block containing every paragraph inside it, from where the border starts to where it ends — never split one border into multiple box blocks, never leave a paragraph that is visually inside the border sitting outside as a top-level para. only emit a box when a border is actually visible; never invent one.
 - {"kind":"figure","id":"f1","ratio":0.6} — picture/table not expressible as text. \`ratio\`=height/width.
 
 rules:
-- copy every character exactly: 「」『』()·, circled chars (㉠㉡㉢, ①②③), markers like (가)(나), literary work's trailing attribution line
+- copy every character exactly, reading the IMAGE itself for these (the reference text below can be wrong here): 「」『』()·, circled chars (㉠㉡㉢, ①②③), ㄱ/ㄴ/ㄷ list markers, markers like (가)(나), literary work's trailing attribution line
 - no summarise/modernise/translate/fix-spelling/add anything
 - keep original paragraph breaks: 1 printed paragraph = 1 "para" block
 - lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." = own para block
-- mark bold/underline only where PRINT shows it, ignore handwriting
+- mark bold/underline/sq only where PRINT shows it, ignore handwriting
 - exclude running heads, page numbers, questions printed below passage
 - JSON only, no explanation`;
 
@@ -481,12 +482,22 @@ export async function readKoreanRichText(
   reference: string,
   signal?: AbortSignal,
 ): Promise<{ blocks: unknown; usage?: GradeUsage; model: string }> {
-  const prompt = reference.trim()
+  // 조합용 자모(ᄀᄂᄃ)를 먼저 호환용(ㄱㄴㄷ)으로 바꾼다 — Mathpix 가 이 형태로
+  // 주는 경우가 있는데, 그대로 두면 모델이 "참고 글을 베끼라"는 지시를 따라
+  // 이 깨진 코드를 그대로 옮겨 적는다(renderMathText.ts 와 같은 사고).
+  const cleanedReference = normalizeJamo(reference.trim());
+  // **"참고 글이 최우선"을 무조건으로 적으면 안 된다.** Mathpix 는 원문자·
+  // ㄱㄴㄷ 표지 같은 기호를 자주 놓치거나 깨뜨린다(이 저장소에 이미 여러 번
+  // 기록된 약점이다) — 그런데 예전 문구는 "참고 글의 표현을 AUTHORITATIVE로
+  // 따르라"고만 적어서, 모델이 사진에서 기호를 제대로 봤어도 참고 글이
+  // 빠뜨린 대로 따라 빠뜨렸다. 일반 산문은 참고 글을 우선하되, 기호는
+  // 사진을 우선하라고 갈라 적는다.
+  const prompt = cleanedReference
     ? `${KOREAN_TEXT_PROMPT}
 
-reference — same passage as read by text recogniser. treat its wording as AUTHORITATIVE, use image for structure (paragraph breaks, boxes, bold, underline):
+reference — same passage as read by a text recogniser (Mathpix). for ORDINARY PROSE WORDING, treat it as authoritative — copy its spelling/spacing over your own reading when they differ. BUT it often drops or garbles circled characters, ㄱ/ㄴ/ㄷ list markers, and other symbols — for those, and for structure (paragraph breaks, boxes, bold, underline, sq), trust the IMAGE instead:
 """
-${reference.trim()}
+${cleanedReference}
 """`
     : KOREAN_TEXT_PROMPT;
 
