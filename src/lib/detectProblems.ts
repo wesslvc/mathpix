@@ -42,43 +42,42 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
  */
 export const DETECT_MODEL = process.env.GEMINI_DETECT_MODEL ?? "gemini-flash-latest";
 
-const PROMPT = `이 이미지는 한국 고등학교 문제집·모의고사 지면입니다.
-**문제 한 개씩** 차지하는 영역을 모두 찾아 주세요.
+const PROMPT = `This image is a page from a Korean high-school workbook / mock exam.
+Find the region of **each individual question**.
 
-한 문제의 영역에는 그 문제에 딸린 것이 전부 들어가야 합니다:
-- 문제 번호(예: 12.)부터 시작해서
-- 발문, 조건 박스, <보기>, 표·그래프·지도 같은 자료,
-- 선지(①②③④⑤)의 마지막 줄까지.
+A question's region must contain everything that belongs to it:
+- from the question number (e.g. 12.)
+- through the stem, condition boxes, <보기>, tables / graphs / maps,
+- to the last line of the choices (①②③④⑤).
 
-영역은 **딱 맞게** 잡으세요:
-- 내용의 바깥 경계(맨 위 글자의 위, 맨 아래 글자의 아래, 가장 왼쪽·오른쪽 끝)에
-  **바짝 붙이세요.** 빈 여백을 넣지 마세요.
-- 글자가 잘리지만 않을 정도로 아주 조금만 남기세요. 넉넉하게 잡지 마세요.
-- 문제와 문제 사이의 빈 줄, 단 사이의 빈 공간, 종이 가장자리 여백은 넣지 마세요.
-- 문제마다 하나씩, 서로 겹치지 않게 잡으세요.
-- **한 문제를 여러 조각으로 나누지 마세요.** 발문·조건 박스·자료·선지는 한
-  문제의 일부이지 따로 잡을 것이 아닙니다. 같은 단 안에 있으면 처음부터 끝까지
-  **통째로 하나**로 잡으세요. 조각을 나누는 경우는 아래의 "단을 넘어간 문제"
-  하나뿐입니다.
-- 지면에 단이 둘이면 왼쪽 단을 위에서 아래로 먼저, 그다음 오른쪽 단 순서로 두세요.
-- 머리말, 쪽번호, 광고, 해설은 넣지 마세요.
+Crop **tight**:
+- Hug the outer edge of the content (top of the highest glyph, bottom of the lowest, and the
+  leftmost/rightmost extents). Leave no empty margin.
+- Leave only enough that no glyph is clipped. Do not be generous.
+- Exclude blank lines between questions, the gutter between columns, and the page margin.
+- One region per question, non-overlapping.
+- **Never split one question into several pieces.** The stem, condition box, data and choices
+  are parts of one question, not separate things. Within a single column take the whole thing
+  as **one** region. The only case that is split is the cross-column case below.
+- If the page has two columns, order left column top-to-bottom first, then the right column.
+- Exclude running heads, page numbers, adverts and solutions.
 
-**단을 넘어 이어진 문제**를 놓치지 마세요. 이게 가장 중요합니다:
-- 새 문제는 **반드시 문제 번호로 시작합니다**(예: "12.").
-- 그러니 어떤 덩어리가 **번호 없이** 그냥 글자나 선지(①②③④⑤)로 시작하면
-  그건 새 문제가 아니라 **앞 문제의 나머지**입니다.
-- 특히 오른쪽 단 맨 위가 번호 없이 시작하면, 왼쪽 단 맨 아래 문제가 거기로
-  이어진 것입니다. 반대쪽 단으로 넘어간 겁니다.
-- 그런 경우 **조각을 따로 하나씩** 잡되, no 에 **앞 조각과 같은 문제 번호**를
-  적어 주세요(뒤 조각에 번호가 안 보여도 앞 조각의 번호를 그대로 적습니다).
-  그래야 두 조각을 이어 붙여 한 문제로 만들 수 있습니다.
-- 이어지는 조각의 영역도 여백 없이 딱 맞게 잡으세요 — 두 조각을 붙였을 때
-  원래 한 문제였던 것처럼 이어져야 합니다.
+Do not miss **questions that continue across columns**. This matters most:
+- A new question **always starts with a question number** (e.g. "12.").
+- So if a block starts **without a number** — with plain text or with a choice marker
+  (①②③④⑤) — it is not a new question, it is the **rest of the previous one**.
+- In particular, if the top of the right column starts without a number, the last question of
+  the left column continues there.
+- In that case take **each piece as its own region**, but put the **same question number** in
+  \`no\` for both (use the leading piece's number even if the trailing piece shows none), so we
+  can stitch them into one question.
+- Crop the continuation piece tight as well — the two pieces must join as if they were never
+  separated.
 
-결과는 JSON 배열로만 답하세요. 각 항목은
-{"box_2d": [ymin, xmin, ymax, xmax], "no": "12"} 형식이고
-좌표는 0~1000 으로 정규화한 값, no 는 문제 번호(숫자만)입니다.
-번호를 알 수 없으면 no 를 빈 문자열로 두세요. 설명은 쓰지 마세요.`;
+Answer with a JSON array only. Each item is
+{"box_2d": [ymin, xmin, ymax, xmax], "no": "12"}
+where coordinates are normalised to 0-1000 and \`no\` is the question number (digits only).
+Leave \`no\` empty if unknown. Write no explanation.`;
 
 type GeminiBox = { box_2d?: unknown; no?: unknown; label?: unknown };
 
@@ -307,32 +306,33 @@ async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[
  * 같은 문제를 알아본다"는 규칙에 기대는 것인데, 지문에는 번호가 없어서 그
  * 규칙이 통째로 어긋난다.
  */
-const KOREAN_PROMPT = `이 이미지는 한국 수능 **국어 영역** 문제지 지면입니다.
-**지문 영역**과 **문제 영역**을 모두 찾아 주세요.
+const KOREAN_PROMPT = `This image is a page from a Korean SAT (수능) **국어 영역** paper.
+Find both the **passage** regions and the **question** regions.
 
-지문(passage):
-- 문항 여러 개가 함께 딸린 **읽을 글** 전체입니다(독서 지문, 문학 작품, 보기 자료 포함).
-- "[1~3] 다음 글을 읽고 물음에 답하시오." 같은 안내 줄이 있으면 **그 줄부터** 포함하세요.
-- 글이 (가)(나) 처럼 여럿 묶인 복합지문이면 **묶어서 하나**로 잡으세요.
-- 문학이면 끝에 붙은 출전 표기(- 작자, 「작품명」)까지 넣으세요.
-- 지문 밑에 붙은 문항(발문·선지)은 지문에 넣지 마세요.
+passage:
+- The whole body of text that several questions share (non-fiction passage, literary work,
+  including any 보기 material).
+- If there is a lead-in line such as "[1~3] 다음 글을 읽고 물음에 답하시오.", start **from that line**.
+- If several texts are grouped as (가)(나), take them **together as one** region.
+- For literature, include the trailing attribution (- 작자, 「작품명」).
+- Do not include the questions (stem / choices) printed under the passage.
 
-문제(question):
-- 문제 번호(예: 12.)부터 선지(①②③④⑤) 마지막 줄까지 **한 문항씩** 잡으세요.
-- 발문·<보기> 상자·선지는 한 문항의 일부입니다. 나누지 마세요.
-- 그 문항이 어느 지문에 딸렸는지 set 에 적으세요(지문에도 같은 set 을 적습니다).
-  지문이 여러 개면 위에서부터 1, 2, 3... 입니다. 딸린 지문이 없으면 set 을 0 으로 두세요.
+question:
+- Take **one item at a time**, from its number (e.g. 12.) to the last line of the choices (①②③④⑤).
+- The stem, the <보기> box and the choices are parts of one item. Do not split them.
+- Put which passage the item belongs to in \`set\` (the passage carries the same \`set\`).
+  Number the passages 1, 2, 3 … from the top. Use 0 if it belongs to no passage.
 
-공통:
-- 영역은 내용 바깥 경계에 **바짝 붙이세요.** 빈 여백·단 사이 공백·머리말·쪽번호는 넣지 마세요.
-- 서로 겹치지 않게 잡으세요.
-- 단이 둘이면 왼쪽 단을 위에서 아래로 먼저, 그다음 오른쪽 단 순서로 두세요.
-- **지문이 단을 넘어 이어지면 조각마다 하나씩** 잡고 같은 set 을 적으세요.
+Both:
+- Hug the outer edge of the content. Exclude empty margin, the gutter, running heads and page numbers.
+- Regions must not overlap.
+- If the page has two columns, order left column top-to-bottom first, then the right column.
+- **If a passage continues across columns, take one region per piece** and give them the same \`set\`.
 
-결과는 JSON 으로만 답하세요:
+Answer with JSON only:
 {"regions":[{"box_2d":[ymin,xmin,ymax,xmax],"kind":"passage"|"question","set":1,"no":"12"}]}
-좌표는 0~1000 으로 정규화한 값입니다. no 는 문항 번호(숫자만)이고 지문이면 빈 문자열입니다.
-설명은 쓰지 마세요.`;
+Coordinates are normalised to 0-1000. \`no\` is the item number (digits only), empty for a passage.
+Write no explanation.`;
 
 export type DetectedKoreanRegion = {
   kind: "passage" | "question";

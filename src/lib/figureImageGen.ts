@@ -296,16 +296,16 @@ const workingVariant = new Map<string, number>();
  * 지우고 끝내면 안 된다는 것도 못박는다 — 손글씨에 덮인 인쇄 내용은 그 아래에
  * 있던 대로 되살려야 한다. 안 그러면 지운 자리가 빈칸으로 남는다.
  */
-const ERASE_HANDWRITING = `손으로 쓴 것을 전부 지우세요. 이것부터 하세요:
-- 연필·볼펜·형광펜·색연필로 쓴 것은 **하나도 남기지 마세요.** 메모, 풀이 과정,
-  계산, 밑줄, 동그라미, 세모, 별표, 화살표, 체크, 빗금, 지운 자국, 채점 표시.
-- **검은 볼펜으로 쓴 것도 손글씨입니다.** 색으로 판단하지 마세요. 획 굵기가
-  들쭉날쭉하거나, 크기·기울기가 제각각이거나, 인쇄 글자와 서체가 다르거나,
-  칸 밖으로 삐져나가 있으면 손으로 쓴 것입니다.
-- 옅게 남기거나 흐리게 뭉개지 마세요. 그 자리를 **깨끗한 흰 종이로 되돌리고**
-  가려져 있던 인쇄 내용만 원래대로 그리세요.
-- 인쇄된 밑줄·굵은 글씨는 그대로 두세요(두께가 일정하고 글자와 나란히 반듯합니다).
-- 종이 접힌 자국, 얼룩, 그림자, 스캔 줄무늬, 손가락, 기울어짐도 없애세요.`;
+const ERASE_HANDWRITING = `Remove every handwritten mark. Do this first:
+- Erase ALL pen/pencil/highlighter marks: notes, working, calculations, underlines,
+  circles, stars, arrows, checks, hatching, erasures, grading marks.
+- **Black ballpoint is handwriting too.** Do not judge by colour. It is handwritten if
+  stroke width varies, size/slant is uneven, the letterform differs from the printed
+  type, or it spills outside the ruled area.
+- Do not leave it faint or smudged. Restore that area to **clean white paper** and
+  redraw only the printed content that was hidden underneath.
+- Keep printed underlines and bold text (uniform thickness, aligned with the type).
+- Also remove fold creases, stains, shadows, scan streaks, fingers and skew.`;
 
 /**
  * 원문자(㉠ ① ⓐ)를 그리는 법. 두 프롬프트가 똑같이 쓴다.
@@ -319,13 +319,14 @@ const ERASE_HANDWRITING = `손으로 쓴 것을 전부 지우세요. 이것부�
  * 사회탐구·국어에서 `밑줄 친 ㉠에 대한 설명으로…` 처럼 원문자가 곧 문제의
  * 지시 대상인 경우가 흔해서, 안쪽 글자가 하나 바뀌면 문제가 성립하지 않는다.
  */
-const CIRCLED_CHARS = `원문자(㉠㉡㉢㉣㉤, ①②③④⑤, ⓐⓑⓒ)는 **동그라미 안에 글자 하나**입니다:
-- 통글자로 외워 그리지 말고, 가는 원을 그린 뒤 그 안에 글자를 가운데 맞춰 넣으세요.
-  원은 찌그러지지 않은 동그라미여야 하고 안쪽 글자가 원에 닿지 않아야 합니다.
-- 안쪽 글자를 다른 것으로 바꾸지 마세요. ㉠㉡㉢㉣㉤㉥㉦ 은 차례로 ㄱㄴㄷㄹㅁㅂㅅ,
-  ①②③④⑤ 는 차례로 1 2 3 4 5 입니다.
-- 본문에서 가리키는 원문자(예: "밑줄 친 ㉠")와 자료에 찍힌 원문자는 **같은 글자**여야
-  합니다. 서로 다르면 문제가 성립하지 않습니다.`;
+const CIRCLED_CHARS = `Circled characters (㉠㉡㉢㉣㉤, ①②③④⑤, ⓐⓑⓒ) are **one glyph inside a circle**:
+- Do not draw them from memory as a single shape. Draw a thin circle, then place the
+  character centred inside it. The circle must be round, and the inner character must
+  not touch it.
+- Never swap the inner character. ㉠㉡㉢㉣㉤㉥㉦ are ㄱㄴㄷㄹㅁㅂㅅ in order;
+  ①②③④⑤ are 1 2 3 4 5.
+- A circled character referenced in the body (e.g. "밑줄 친 ㉠") and the one printed in
+  the figure must be **the same character**. If they differ the question is broken.`;
 
 /**
  * 그림 재구성 프롬프트. **하나뿐이다.**
@@ -335,50 +336,50 @@ const CIRCLED_CHARS = `원문자(㉠㉡㉢㉣㉤, ①②③④⑤, ⓐⓑⓒ)는
  * 대신 각 항목을 "…라면"으로 조건부로 적었다 — 삼각형에 지층 순서 지시는,
  * 세포 모식도에 교점 좌표 지시는 모델이 알아서 건너뛴다.
  */
-const PROMPT = `이 이미지는 한국 고등학교 문제집(수학·과학탐구·사회탐구)에 실린 그림입니다.
-문제를 풀 수 있도록 원본과 최대한 똑같이, 깨끗하고 또렷하게 다시 그려주세요.
+const PROMPT = `This image is a figure from a Korean high-school workbook (math / science / social studies).
+Redraw it as closely to the original as possible, clean and sharp, so the question can be solved.
 
 ${ERASE_HANDWRITING}
 
-어떤 그림이든 반드시:
-- 원본에 있는 모든 요소를 그대로 두세요. 무엇 하나 빼거나 새로 만들지 마세요.
-- 글자(한글 라벨, 기호, 숫자, 단위)는 원본에 적힌 그대로 옮기세요. 다른 말로 바꾸거나
-  번역하지 말고, 읽을 수 없는 글자는 지어내지 마세요.
+For any figure, always:
+- Keep every element that is in the original. Do not drop anything and do not invent anything.
+- Copy all text (Korean labels, symbols, numbers, units) **exactly** as printed. Do not
+  reword or translate, and do not invent glyphs you cannot read.
 - ${CIRCLED_CHARS.replace(/\n/g, "\n  ")}
-- 개수를 그대로 지키세요(눈금, 층, 입자, 칸, 점, 화살표).
-- 작은 표시도 빼지 마세요: 눈금과 눈금 숫자, 단위, 범례, 화살표 머리, 점선과 실선의
-  구분, 각도 호, 직각 표시, 같은 길이 표시(빗금), 소수점.
+- Preserve counts exactly (ticks, layers, particles, cells, dots, arrows).
+- Keep the small marks: tick marks and their numbers, units, legends, arrowheads, the
+  dashed/solid distinction, angle arcs, right-angle marks, equal-length hatches, decimal points.
 
-색과 명암(인쇄해서 푸는 자료입니다):
-- 색으로만 구분된 것(지도의 지역, 그래프의 계열, 지층, 영역)은 **밝기 차이나
-  무늬로도 구분되게** 하세요. 흑백으로 인쇄해도 어느 게 어느 것인지 알 수 있어야
-  합니다. 진하기를 뚜렷하게 다르게 하거나 빗금·점무늬를 겹쳐 주세요.
-- 색을 없애라는 뜻이 아닙니다. 원본의 색은 유지하되 명암 차이를 함께 주세요.
-- 범례가 있으면 범례의 표시와 그림 속 표시를 똑같은 진하기·무늬로 맞추세요.
-- 옅은 회색끼리, 비슷한 파스텔끼리 붙여 놓지 마세요. 경계선을 또렷하게 그으세요.
+Colour and contrast (this will be printed and solved on paper):
+- Anything distinguished **only** by colour (map regions, graph series, strata, areas) must
+  also differ in **lightness or pattern**, so it still reads in black and white. Make the
+  tones clearly different or overlay hatching / dots.
+- This does not mean removing colour. Keep the original colours and add the tonal difference.
+- If there is a legend, match the legend swatch to the mark in the figure exactly.
+- Do not place similar pale greys or pastels next to each other. Draw crisp boundaries.
 
-도형이나 그래프라면(원, 삼각형, 좌표평면 등):
-- 가장 중요한 건 "어느 점에서 만나는가"입니다. 두 선이 만나는 지점을 원본과 같은
-  자리에 두고, 양쪽 선이 정확히 그 점을 지나가게 하세요. 근처에서 어긋나거나
-  스치듯 지나가면 안 됩니다.
-- 접선이나 접하는 원은 딱 한 점에서만 닿아야 합니다. 파고들거나 떨어지면 안 됩니다.
-- 곡선이 축과 만나는 점, 극대·극소, 꼭짓점의 위치를 원본과 같게 맞추세요.
-- 한 점에 여러 선이 모이면 모두 정확히 같은 자리에서 만나게 하고, 어떤 점이 선분
-  위에 있으면 반드시 그 선분 위에 놓으세요.
-- 축·원점 O·눈금 숫자·점근선·색칠된 영역이 있으면 원본대로 두세요.
-- 라벨(A, B, P, O 등)은 그 점 바로 옆에 붙이고 서로 겹치지 않게 하세요.
+If it is a geometric figure or graph (circles, triangles, coordinate planes):
+- The most important thing is **where lines meet**. Put each intersection at the same place
+  as the original and make both lines pass exactly through it — never near it or grazing it.
+- A tangent line or tangent circle must touch at exactly one point, neither cutting in nor
+  standing off.
+- Match the original for axis crossings, maxima/minima, and vertices.
+- Where several lines meet at one point, they must all meet at exactly the same place; a
+  point stated to be on a segment must lie on that segment.
+- Keep axes, the origin O, tick numbers, asymptotes and shaded regions as in the original.
+- Put point labels (A, B, P, O …) right next to their point, without overlapping.
 
-장치도·모식도·단면도라면(실험 장치, 세포, 지층, 회로 등):
-- 위치 관계를 원본과 똑같이 하세요: 무엇이 무엇의 위/아래/안/밖/왼쪽/오른쪽인지
-  (지층 순서, 세포 속 소기관, 회로 연결 순서, 대기층 높이 등).
-- 화살표 방향을 원본과 똑같이 하세요. 반대로 그리면 완전히 다른 자료가 됩니다.
-- 선이나 관으로 이어진 것들은 원본과 똑같은 것끼리 이어지게 하세요.
+If it is an apparatus / schematic / cross-section (experiment setups, cells, strata, circuits):
+- Preserve the spatial relations exactly: what is above/below/inside/outside/left/right of
+  what (stratum order, organelles, circuit order, atmospheric layers).
+- Preserve arrow directions exactly. Reversing one makes it a different diagram.
+- Whatever is connected by a line or tube must connect to the same thing as in the original.
 
-색이 의미를 구분하고 있지 않으면 흰 배경에 검은 선으로 정리하세요.
+If colour is not carrying meaning, render it as black lines on a white background.
 
-결과는 배경이 흰색이고 선이 또렷한, 문제집 삽화 같은 그림이어야 합니다.
-사진처럼 입체적으로 꾸미거나 그림자를 넣지 마세요(위에서 말한 "구분을 위한
-명암 차이"는 예외입니다 — 그건 넣어야 합니다).`;
+The result must look like a workbook illustration: white background, crisp lines. Do not
+add photographic shading or drop shadows (the "tonal difference for distinction" above is
+the one exception — that must be there).`;
 
 /**
  * **문제 전체**를 다시 그릴 때 쓰는 프롬프트.
@@ -388,47 +389,50 @@ ${ERASE_HANDWRITING}
  * 바뀌어도 답이 뒤집히고, 사용자가 나중에 고칠 방법도 없다(결과가 이미지라
  * 본문 수정이 안 된다). 그래서 "그대로 옮겨 적기"를 반복해 못박는다.
  */
-const WHOLE_PROBLEM_PROMPT = `이 이미지는 한국 고등학교 문제집(사회탐구·과학탐구)에 실린 **문제 한 개 전체**입니다.
-사진을 깨끗한 인쇄물처럼 정서해 주세요. 내용은 무엇 하나 바꾸지 않습니다.
+const WHOLE_PROBLEM_PROMPT = `This image is **one complete question** from a Korean high-school workbook.
+Render it as a clean printed page. Change nothing about the content.
 
 ${ERASE_HANDWRITING}
 
-그 다음으로 중요한 것 — 글자:
-- 모든 글자를 원본에 적힌 **그대로** 옮기세요. 한 글자도 바꾸거나 다듬거나
-  요약하거나 번역하지 마세요.
-- "옳은 것"과 "옳지 않은 것", "있는 대로"와 "하나만" 같은 표현은 답을 뒤집습니다.
-  원본 그대로 두세요.
-- 숫자, 단위, 기호, 연도, 지명, 인명은 원본과 정확히 같아야 합니다.
-- 읽기 어려운 글자가 있으면 지어내지 말고 원본의 획을 최대한 그대로 따라 그리세요.
+Next in importance — the text:
+- Copy every character **exactly** as printed. Do not change, polish, summarise or translate
+  a single character.
+- Phrases like "옳은 것" vs "옳지 않은 것", "있는 대로" vs "하나만" flip the answer. Leave
+  them exactly as they are.
+- Numbers, units, symbols, years, place names and personal names must match exactly.
+- If a character is hard to read, do not invent one — follow the original strokes as closely
+  as you can.
 
 ${CIRCLED_CHARS}
 
-구조도 그대로:
-- 문제 번호, 발문, 조건 박스, 표, 자료, <보기>, 선지(①②③④⑤)를 원본과 같은
-  순서·같은 배치로 두세요. 빼거나 새로 만들지 마세요.
-- 표는 행·열 수와 칸 내용을 그대로 두고, 테두리를 또렷하게 그리세요.
-- 그림·지도·그래프·모식도는 위치 관계, 화살표 방향, 개수를 그대로 두세요.
-- 박스로 둘러싸인 부분은 박스를 유지하세요.
+Structure, unchanged:
+- Keep the question number, the stem, condition boxes, tables, data, <보기>, and the choices
+  (①②③④⑤) in the same order and arrangement. Do not drop or add anything.
+- Keep tables to the same number of rows and columns with the same cell contents, and draw
+  crisp borders.
+- Keep figures, maps, graphs and schematics with the same spatial relations, arrow directions
+  and counts.
+- Keep any surrounding box.
 
-세부까지 살려서:
-- 작은 표시를 빼지 마세요: 눈금과 눈금 숫자, 축 이름, 단위, 범례, 화살표 머리,
-  점선과 실선의 구분, 각도 호, 직각 표시, 위·아래 첨자, 소수점, 괄호.
-- 그래프·도형이 있으면 **만나는 점**이 가장 중요합니다. 두 선이 만나는 자리,
-  곡선이 축과 만나는 점, 극대·극소, 접점을 원본과 같은 자리에 두고 양쪽 선이
-  정확히 그 점을 지나게 하세요. 근처에서 어긋나거나 스치면 안 됩니다.
-- 점 라벨(A, B, P, O 등)은 그 점 바로 옆에 붙이고 서로 겹치지 않게 하세요.
+Down to the details:
+- Do not drop the small marks: tick marks and their numbers, axis names, units, legends,
+  arrowheads, the dashed/solid distinction, angle arcs, right-angle marks, super/subscripts,
+  decimal points, parentheses.
+- If there is a graph or figure, **intersections matter most**. Put line crossings, axis
+  crossings, maxima/minima and tangent points at the same places as the original, with both
+  lines passing exactly through them — never near or grazing.
+- Put point labels (A, B, P, O …) right next to their point, without overlapping.
 
-색과 명암(인쇄해서 푸는 자료입니다):
-- 색으로만 구분된 것(지도의 지역, 그래프의 계열, 지층, 영역)은 **밝기 차이나
-  무늬로도 구분되게** 하세요. 흑백으로 인쇄해도 어느 게 어느 것인지 알 수 있어야
-  합니다. 진하기를 뚜렷하게 다르게 하거나 빗금·점무늬를 겹쳐 주세요.
-- 색을 없애라는 뜻이 아닙니다. 원본의 색은 유지하되 명암 차이를 함께 주세요.
-- 범례가 있으면 범례의 표시와 자료 속 표시를 똑같은 진하기·무늬로 맞추세요.
-- 옅은 회색끼리, 비슷한 파스텔끼리 붙여 놓지 마세요. 경계선을 또렷하게 그으세요.
+Colour and contrast (this will be printed and solved on paper):
+- Anything distinguished **only** by colour (map regions, graph series, strata, areas) must
+  also differ in **lightness or pattern**, so it still reads in black and white.
+- This does not mean removing colour. Keep the original colours and add the tonal difference.
+- If there is a legend, match the legend swatch to the mark in the data exactly.
+- Do not place similar pale greys or pastels next to each other. Draw crisp boundaries.
 
-모양:
-- 배경은 흰색, 글자는 검은색으로 또렷하게. 인쇄된 문제집 지면처럼 보이게 하세요.
-- 글자 크기는 읽기 편하게 고르고, 줄이 겹치거나 잘리지 않게 하세요.`;
+Appearance:
+- White background, crisp black text — like a printed workbook page.
+- Choose a comfortable text size; lines must not overlap or be cut off.`;
 
 function dataUrlToBlob(
   dataUrl: string,
@@ -555,11 +559,11 @@ function circledNote(text: string): string {
   // 먼저 나오면 나온 차례는 ㉠ ㉢ ㉡ 이 되는데, 바로 아래에서 "순서를 뒤바꾸지
   // 말라"고 해 놓고 우리가 뒤바꾼 목록을 주는 꼴이 된다.
   seen.sort((a, b) => (a.codePointAt(0) ?? 0) - (b.codePointAt(0) ?? 0));
-  const pairs = seen.map((ch) => `${ch}(동그라미 안에 ${insideCircle(ch)})`);
+  const pairs = seen.map((ch) => `${ch}(circle around ${insideCircle(ch)})`);
   return `
-이 문제에는 원문자가 나옵니다: ${pairs.join(", ")}.
-괄호 안에 적은 글자를 동그라미 안에 넣어 그리세요. 다른 글자로 바꾸거나 순서를
-뒤바꾸지 마세요.`;
+This question contains circled characters: ${pairs.join(", ")}.
+Draw the character named in parentheses inside the circle. Do not substitute a different
+character and do not reorder them.`;
 }
 
 function withReference(prompt: string, reference: string, korean = false): string {
@@ -577,23 +581,24 @@ function withReference(prompt: string, reference: string, korean = false): strin
    * 자리, 문단 나눔)은 사진을 따르게 남겨 둔다 — 참고 글에는 그게 없다.
    */
   const trust = korean
-    ? `이 글은 국어 지문·문항이라 표나 그림이 거의 없습니다. **참고 글을
-우선으로 삼아 한 글자도 빠뜨리거나 바꾸지 말고 그대로 옮겨 적으세요.**
-사진은 참고 글에 담기지 않은 것 — 인쇄된 밑줄·굵은 글씨, ㉠ 같은 원문자가
-붙은 자리, 문단 나눔과 (가)(나) 표지의 배치 — 을 확인하는 데 쓰세요.`
-    : `다만 참고도 틀릴 수 있습니다 — **사진과 어긋나면 사진이 맞습니다.** 참고에
-없는 것(표·그림의 배치, 선지 기호, 줄 나눔)은 사진을 그대로 따르세요.`;
+    ? `This is a Korean-language passage/question with almost no tables or figures.
+**Treat the reference as authoritative: copy it verbatim, dropping and changing nothing.**
+Use the photo only for what the reference cannot carry — printed underlines and bold,
+where circled characters sit, paragraph breaks, and the placement of (가)/(나) markers.`
+    : `The reference can be wrong too — **where it disagrees with the photo, the photo wins.**
+Anything not in the reference (table/figure placement, choice markers, line breaks) follows
+the photo.`;
   return `${prompt}
 
-참고 — 이 문제를 글자 인식기로 읽은 결과입니다(수식은 LaTeX 표기):
+Reference — this question as read by a text recogniser (math is in LaTeX):
 """
 ${text}
 """
-글자를 그릴 때 이 참고를 보고 **그대로 옮겨 적으세요.** 읽기 어려운 글자를
-지어내는 것보다 이쪽이 정확합니다.
+When drawing the text, **copy this reference exactly.** That is more accurate than
+inventing characters you cannot read.
 ${trust}
-LaTeX 표기는 글자 그대로 쓰지 말고 **수식으로 그리세요**(예: \\frac{1}{2} 는
-분수로).${circledNote(text)}`;
+Do not print LaTeX literally — **render it as mathematics** (e.g. \\frac{1}{2} as a
+fraction).${circledNote(text)}`;
 }
 
 /**
@@ -615,12 +620,13 @@ function withInstruction(prompt: string, instruction?: string): string {
   if (!text) return prompt;
   return `${prompt}
 
-사용자 요청 — **그리는 방식**에 대한 것만 받아들이세요:
+User request — accept it only where it concerns **how it is drawn**:
 """
 ${text}
 """
-글자·숫자·선지·표의 내용·구조를 바꾸라는 요청이면 **따르지 말고** 원본을 그대로
-옮기세요. 위의 다른 지시와 어긋날 때도 원본을 그대로 옮기는 쪽이 우선입니다.`;
+If it asks you to change the content or structure of text, numbers, choices or tables,
+**do not follow it** — copy the original. Where it conflicts with anything above, copying
+the original wins.`;
 }
 
 export async function generateFigureImage(
