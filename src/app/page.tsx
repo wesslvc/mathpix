@@ -47,32 +47,41 @@ export default async function DashboardPage({
     );
   }
 
-  const { data: categories } = await supabase
-    .from("categories")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .returns<Category[]>();
+  // **넷을 한꺼번에 부른다.** 서로 필요로 하는 게 없는데 예전에는 `await` 를
+  // 네 줄로 늘어놓아 왕복 네 번이 **차례로** 일어났다 — Vercel↔Supabase 한
+  // 번이 수십~수백 ms 라 그대로 화면 뜨는 시간에 더해졌다. 한 번에 보내면
+  // 가장 느린 하나만큼만 걸린다.
+  const [
+    { data: categories },
+    { data: folders },
+    { data: linked },
+    access,
+  ] = await Promise.all([
+    supabase
+      .from("categories")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .returns<Category[]>(),
+    supabase
+      .from("folders")
+      .select("*")
+      .order("created_at", { ascending: true })
+      .returns<Folder[]>(),
+    // 실모 라벨의 만점(탐구 50 / 그 밖 100)은 연결된 채점 기록의 과목에서
+    // 온다 — categories 자체에는 과목이 없다. 없으면 100으로 두면 예전 표기
+    // 그대로다.
+    supabase
+      .from("exam_scores")
+      .select("category_id, subject")
+      .not("category_id", "is", null)
+      .returns<{ category_id: string; subject: Subject }[]>(),
+    getAccessState(supabase),
+  ]);
 
-  const { data: folders } = await supabase
-    .from("folders")
-    .select("*")
-    .order("created_at", { ascending: true })
-    .returns<Folder[]>();
-
-  // 실모 라벨의 만점(탐구 50 / 그 밖 100)은 연결된 채점 기록의 과목에서
-  // 온다 — categories 자체에는 과목이 없다. 없으면 100으로 두면 예전 표기
-  // 그대로다.
-  const { data: linked } = await supabase
-    .from("exam_scores")
-    .select("category_id, subject")
-    .not("category_id", "is", null)
-    .returns<{ category_id: string; subject: Subject }[]>();
   const maxScoreByCategory: Record<string, number> = {};
   for (const row of linked ?? []) {
     maxScoreByCategory[row.category_id] = examMaxScore(row.subject);
   }
-
-  const access = await getAccessState(supabase);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10">

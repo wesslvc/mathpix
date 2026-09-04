@@ -48,18 +48,23 @@ export default async function ProfilePage() {
     );
   }
 
-  const access = await getAccessState(supabase);
-  const { data: scores } = await supabase
-    .from("exam_scores")
-    .select("*")
-    .order("taken_at", { ascending: true })
-    .returns<ExamScore[]>();
-
-  const { data: prefs } = await supabase
-    .from("grading_prefs")
-    .select("subject, math_elective, korean_elective, tamgu_single, elective1_label, elective2_label")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // 셋이 서로 필요로 하는 게 없다 — 차례로 기다리면 왕복 세 번이 그대로
+  // 화면 뜨는 시간이 된다(대시보드·실모 화면과 같은 이유).
+  const [access, { data: scores }, { data: prefs }] = await Promise.all([
+    getAccessState(supabase),
+    supabase
+      .from("exam_scores")
+      .select("*")
+      .order("taken_at", { ascending: true })
+      .returns<ExamScore[]>(),
+    supabase
+      .from("grading_prefs")
+      .select(
+        "subject, math_elective, korean_elective, tamgu_single, elective1_label, elective2_label",
+      )
+      .eq("user_id", user.id)
+      .maybeSingle(),
+  ]);
   const gradingPrefs: GradingPrefsValue = {
     subject: asSubject(prefs?.subject),
     mathElective: prefs?.math_elective ?? "",

@@ -2,9 +2,41 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import ImageUploader from "@/components/ImageUploader";
-import CropStage from "@/components/CropStage";
-import ResultStage from "@/components/ResultStage";
+
+/**
+ * **크롭·결과 화면은 사진을 고른 뒤에야 필요하다** — 그런데 통째로 처음부터
+ * 받고 있었다. `ResultStage` 는 수식을 그리느라 KaTeX 를 끌고 오는데, 그게
+ * 실모 화면을 여는 것만으로 내려받는 짐이 됐다(그 화면에 들어온 사람 대부분은
+ * 목록만 보고 나간다).
+ *
+ * 지연 로딩해도 눈에 띄는 지연이 없다: 사용자가 사진을 고르는 **그 동작**이
+ * 곧 다음 화면으로 넘어가는 신호라 그 사이에 받아진다. `ExportComposer` 가
+ * 평가원 패널에 이미 같은 방식을 쓰고 있다.
+ *
+ * `ssr: false` 인 이유 — 둘 다 캔버스·포인터 이벤트로만 사는 화면이라 서버에서
+ * 미리 그려 봐야 얻을 게 없다.
+ */
+const CropStage = dynamic(() => import("@/components/CropStage"), {
+  ssr: false,
+  loading: () => <StagePlaceholder label="크롭 화면을 준비하는 중…" />,
+});
+const ResultStage = dynamic(() => import("@/components/ResultStage"), {
+  ssr: false,
+  loading: () => <StagePlaceholder label="결과 화면을 준비하는 중…" />,
+});
+
+function StagePlaceholder({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col gap-3 py-6" aria-busy="true">
+      <div className="h-1 w-full overflow-hidden rounded bg-slate-100">
+        <div className="h-full w-1/4 rounded bg-slate-300 animate-loading-sweep" />
+      </div>
+      <p className="text-sm text-slate-500">{label}</p>
+    </div>
+  );
+}
 import { createClient } from "@/lib/supabase/client";
 import type { RecognizeResponse } from "@/lib/types";
 import type { AnswerType } from "@/lib/answer";

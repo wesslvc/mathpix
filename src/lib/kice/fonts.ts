@@ -36,8 +36,12 @@ let cached: Promise<Record<string, Uint8Array>> | null = null;
  * 내주므로, 서버 쪽 글꼴을 고쳐 올려도 이미 한 번 요청해 본 브라우저는
  * 깨진 옛 글꼴을 계속 쓴다 — **실제로 이렇게 재발했다**(`(한)신중명조`의
  * 마지막 글리프 버그를 고쳐 올렸는데도 같은 "Trying to access beyond
- * buffer length" 가 그대로 떴다). 이 라우트는 ETag/Last-Modified 를
- * 안 보내므로 `no-cache` 는 사실상 "항상 새로 받기"가 된다.
+ * buffer length" 가 그대로 떴다).
+ *
+ * **그렇다고 `no-cache` 가 "매번 통째로 다시 받기"인 것도 아니다** — 이제
+ * 라우트가 내용으로 만든 ETag 를 보내므로, 안 바뀌었으면 본문 없는 304 로
+ * 끝난다. 예전에는 검증자가 없어서 정말로 매번 1MB 넘게 다시 받았고 그게
+ * 내보내기 화면이 휴대폰에서 몇 초씩 멎던 이유 중 하나였다.
  */
 export function loadKiceFonts(): Promise<Record<string, Uint8Array>> {
   cached ??= (async () => {

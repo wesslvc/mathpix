@@ -104,9 +104,101 @@ function textFromFrames(): string {
  */
 const FULL_HANGUL_FONTS = new Set(["(한)신중명조", "(환)디나루"]);
 
-/** 이 글꼴 이름에 실제로 **필요한** 글자(검증도 이 값 기준으로 한다). */
-function textFor(fontName: string): string {
-  if (FULL_HANGUL_FONTS.has(fontName)) return fullHangulText();
+/**
+ * **한자까지 담아야 하는 글꼴** — 지문 본문을 그리는 `(한)신중명조` 하나다.
+ *
+ * 왜 필요한가: 국어 지문에는 한자가 예사로 나온다(고전 제목 `赤壁歌`, 한자
+ * 병기, 인용). 실제 사용자 지문을 DB에서 세어 보니 한 편에 **39자**가 들어
+ * 있었다. terra 는 그걸 제대로 읽어 저장까지 하는데 — **PDF 에서 통째로
+ * 사라지고 있었다.** 서브셋에 한자 글리프가 없으니 `pdf.ts` 의
+ * `fontForText()` 가 "이 글꼴로도 저 글꼴로도 못 그리는 글자"로 판정하고
+ * **그 글자를 지운 채** 그렸기 때문이다(오류도 네모도 안 남는다 — 글자가
+ * 그냥 없어진다). 사용자가 "한자는 인식이 아예 안 되나?" 라고 물은 게
+ * 이것이다. 인식은 됐고 조판에서 버려지고 있었다.
+ *
+ * **목록을 손으로 적지 않는다.** KS X 1001 한자 4,888자를 소스에 적어 넣는
+ * 것은 이 저장소가 이미 여러 번 데인 자리다(손으로 옮겨 적은 글자·파일명이
+ * 조용히 어긋난다). 대신 **원본 글꼴이 실제로 가진 한자를 그대로 가져온다** —
+ * 완성형 한글을 범위로 만든 것과 같은 방식이라 옮겨 적을 게 없다. 실제로
+ * 재 보니 이 글꼴은 통합한자 4,620 + 호환한자 268 = **정확히 KS X 1001의
+ * 4,888자**를 갖고 있다.
+ *
+ * **값**: 서브셋이 1.13MB → 3.24MB 로 는다. 예전 같으면 못 낼 값이었지만
+ * (`no-cache` 라 열 때마다 통째로 다시 받았다) 이제 글꼴 라우트가 ETag 를
+ * 보내므로 **처음 한 번만** 받고 그 뒤로는 304 다. 부분만 넣어 아끼는 길은
+ * 택하지 않았다 — 어느 한자가 나올지 미리 알 수 없는데 빠진 글자는 조용히
+ * 삭제되므로, 반만 담는 것은 이 버그를 반만 고치는 것이다.
+ */
+const HANJA_FONTS = new Set(["(한)신중명조"]);
+
+/** 한자 — 통합(KS X 1001 이 여기 있다) + 호환. */
+const HANJA_RANGES: [number, number][] = [
+  [0x4e00, 0x9fff],
+  [0xf900, 0xfaff],
+];
+
+/**
+ * **문장부호·기호.** 한자와 똑같은 사고가 여기에도 있었다 —
+ * `fullHangulText()` 가 ASCII(0020~007E)까지만 담고 있어서 국어 지문에 늘
+ * 나오는 **「」『』〈〉《》 ‘’“” … ·** 가 통째로 빠져 있었다. 빠진 글자는
+ * 조용히 삭제되므로(`fontForText`), 지문의 인용부호와 괄호가 소리 없이
+ * 사라지고 있었던 것이다. **프롬프트에서는 이것들을 그대로 옮기라고 시켜
+ * 놓고(`「」『』()·`) 우리가 그리는 자리에서 지우고 있었다.**
+ *
+ * 이 사고를 잡아낸 것은 글자별 전수 검사가 아니라 **실제 문장을 그려 본
+ * 검증**이었다(버킷에 올린 뒤 `작자 미상, 적벽가 赤壁歌 — 한자 漢字` 를
+ * 그려 보니 `—` 가 없다고 나왔다). 범위만 훑는 검사로는 "우리가 애초에
+ * 요청하지 않은 글자"를 영영 못 찾는다.
+ */
+const SYMBOL_RANGES: [number, number][] = [
+  [0x00a1, 0x00ff], // ·(00B7) × ÷ 등 라틴 보충
+  [0x2000, 0x206f], // ‘’ “” … ‥ 등 일반 문장부호
+  [0x2190, 0x21ff], // 화살표
+  [0x2200, 0x22ff], // 수학 기호(≠ ≤ ≥ …)
+  [0x3000, 0x303f], // 「」『』〈〉《》【】〔〕 등 CJK 부호
+  [0xff01, 0xff65], // 전각 영문·부호(！？：；／～)
+];
+
+/**
+ * 원본 글꼴이 **실제로 가진** 글자만 범위에서 골라 온다.
+ *
+ * **목록을 손으로 적지 않는다**(한자 4,888자를 소스에 적어 넣는 것은 이
+ * 저장소가 이미 여러 번 데인 자리다 — 손으로 옮겨 적은 글자·파일명이 조용히
+ * 어긋난다). 원본에서 뽑으면 옮겨 적을 게 없고, 그 글꼴에 없는 글자를
+ * 요청해 `missing` 목록만 길어지는 일도 없다.
+ */
+function charsInRanges(original: Buffer, ranges: [number, number][]): string {
+  let charset: number[];
+  try {
+    charset = Array.from(fontkit.create(original).characterSet ?? []);
+  } catch {
+    // 원본을 못 읽으면 없이 간다 — 예전과 같은 결과라 회귀는 아니다.
+    return "";
+  }
+  return charset
+    .filter((cp) => ranges.some(([a, b]) => cp >= a && cp <= b))
+    .sort((a, b) => a - b)
+    .map((cp) => String.fromCodePoint(cp))
+    .join("");
+}
+
+/**
+ * 이 글꼴 이름에 실제로 **필요한** 글자(검증도 이 값 기준으로 한다).
+ *
+ * `original` 은 한자를 원본에서 뽑아내는 데만 쓴다 — 없으면 예전과 같다.
+ */
+function textFor(fontName: string, original?: Buffer): string {
+  if (FULL_HANGUL_FONTS.has(fontName)) {
+    if (!original) return fullHangulText();
+    // 문장부호는 두 글꼴 다 필요하다(제목에도 「」·… 가 온다).
+    // 한자는 본문 글꼴에만 넣는다 — 표지 제목에 한자가 오는 일은 드물고,
+    // 오더라도 `fontForText()` 폴백이 본문 글꼴로 그려 준다.
+    const symbols = charsInRanges(original, SYMBOL_RANGES);
+    const hanja = HANJA_FONTS.has(fontName)
+      ? charsInRanges(original, HANJA_RANGES)
+      : "";
+    return fullHangulText() + symbols + hanja;
+  }
   return textFromFrames() + (FRAME_EXTRA[fontName] ?? "") + "0123456789";
 }
 
@@ -145,7 +237,7 @@ export async function subsetKiceFont(
   fontName: string,
   original: Buffer,
 ): Promise<SubsetResult> {
-  const text = textFor(fontName);
+  const text = textFor(fontName, original);
   const bytes = await subsetFont(original, text + paddingFor(fontName), {
     targetFormat: "sfnt",
     noHinting: true,

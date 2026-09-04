@@ -92,19 +92,26 @@ export default async function ExportPage({
 
   const supabase = await createClient();
 
-  const { data: categories } = await supabase
-    .from("categories")
-    .select("*")
-    .in("id", idList)
-    .returns<Category[]>();
+  // 셋 다 `idList` 하나만 있으면 되므로 서로 기다릴 이유가 없다. 예전에는
+  // 차례로 불러 왕복 세 번이 화면 뜨는 시간에 그대로 얹혔다 — 내보내기는
+  // 배치를 만지느라 여러 번 여는 화면이라 특히 손해였다.
+  const [{ data: categories }, slim, { data: gradeRows }] = await Promise.all([
+    supabase.from("categories").select("*").in("id", idList).returns<Category[]>(),
+    supabase
+      .from("problems")
+      .select(EXPORT_COLUMNS)
+      .in("category_id", idList)
+      .returns<ExportRow[]>(),
+    // 채점 기록이 연동된 문제는 **내가 무엇을 골라서 틀렸는지**도 정답표에
+    // 같이 찍는다. 학생답은 exam_scores.items 에 문항 번호별로 들어 있다.
+    supabase
+      .from("exam_scores")
+      .select("id, category_id, items")
+      .in("category_id", idList)
+      .returns<Pick<ExamScore, "id" | "category_id" | "items">[]>(),
+  ]);
 
   const categoryById = new Map((categories ?? []).map((c) => [c.id, c]));
-
-  const slim = await supabase
-    .from("problems")
-    .select(EXPORT_COLUMNS)
-    .in("category_id", idList)
-    .returns<ExportRow[]>();
 
   let problems = slim.data;
   if (slim.error) {
@@ -145,14 +152,6 @@ export default async function ExportPage({
       if (ao !== bo) return ao - bo;
       return a.created_at.localeCompare(b.created_at);
     });
-
-  // 채점 기록이 연동된 문제는 **내가 무엇을 골라서 틀렸는지**도 정답표에
-  // 같이 찍는다. 학생답은 exam_scores.items 에 문항 번호별로 들어 있다.
-  const { data: gradeRows } = await supabase
-    .from("exam_scores")
-    .select("id, category_id, items")
-    .in("category_id", idList)
-    .returns<Pick<ExamScore, "id" | "category_id" | "items">[]>();
 
   // 문제 → 학생답을 찾는 표. 채점 기록 id 로 맞추는 게 정확하지만(한 실모에
   // 여러 번 채점했을 수 있다), 옛 문제에는 gradeId 가 없으므로 실모+번호로도

@@ -117,23 +117,69 @@ export default async function CategoryPage({
 
   const supabase = await createClient();
 
-  const { data: category } = await supabase
-    .from("categories")
-    .select("*")
-    .eq("id", id)
-    .single<Category>();
+  // **서로 기다릴 이유가 없는 것은 한꺼번에 부른다.** 이 화면은 왕복이
+  // 여섯 번이나 차례로 일어나고 있었다(실모 → 문제 → 서명 → 권한 → 채점 →
+  // 연결된 채점). 그중 실모·문제·권한·연결된 채점·`?gradeId=` 는 서로
+  // 독립이라 함께 보낼 수 있다 — 서명만 문제 목록이 있어야 하므로 뒤에 남는다.
+  // 왕복 여섯 번이 두 번으로 줄었다.
+  const [{ data: category }, slim, access, { data: linkedGrades }, gradeRes] =
+    await Promise.all([
+      supabase.from("categories").select("*").eq("id", id).single<Category>(),
+      supabase
+        .from("problems")
+        .select(PROBLEM_LIST_COLUMNS)
+        .eq("category_id", id)
+        .order("sort_order", { ascending: true, nullsFirst: false })
+        .order("created_at", { ascending: true })
+        .returns<ProblemListRow[]>(),
+      getAccessState(supabase),
+      // 이 실모에 연결된 채점 기록들. exam_scores → categories 쪽 연결은
+      // LinkCategoryPicker로 이미 되지만, 반대 방향(실모 화면에서 "이 실모는
+      // 어느 채점과 연결돼 있나")을 보여줄 곳이 없었다 — 연동을 양쪽에서
+      // 확인할 수 있어야 "연동됐다"는 게 실감난다.
+      //
+      // **wrong_numbers·items 까지 가져온다.** 예전에는 이름·점수만 가져와서
+      // 링크만 보여줬고, 오답 업로더는 `?gradeId=` 를 달고 채점 화면에서 넘어온
+      // 경우에만 떴다 — 폴더를 거쳐 실모로 바로 들어오면 연동이 통째로 사라져서
+      // 번호도, 정답 자동 매핑도 없었다(사용자 신고). 이제 연결된 채점이 있으면
+      // 어디로 들어오든 기본으로 뜬다.
+      supabase
+        .from("exam_scores")
+        .select(
+          "id, subject, exam_name, elective_label, score, taken_at, wrong_numbers, items",
+        )
+        .eq("category_id", id)
+        .order("taken_at", { ascending: false })
+        .returns<
+          Pick<
+            ExamScore,
+            | "id"
+            | "subject"
+            | "exam_name"
+            | "elective_label"
+            | "score"
+            | "taken_at"
+            | "wrong_numbers"
+            | "items"
+          >[]
+        >(),
+      // 자동채점에서 "틀린문제 오답 업로드하기"로 넘어온 경우. RLS가 이미 본인
+      // 것만 걸러 주지만, 다른 실모의 채점 결과가 실려 오는 사고를 막기 위해
+      // category_id도 함께 맞춘다.
+      gradeId
+        ? supabase
+            .from("exam_scores")
+            .select("*")
+            .eq("id", gradeId)
+            .eq("category_id", id)
+            .maybeSingle<ExamScore>()
+        : Promise.resolve({ data: null }),
+    ]);
 
   if (!category) {
     notFound();
   }
-
-  const slim = await supabase
-    .from("problems")
-    .select(PROBLEM_LIST_COLUMNS)
-    .eq("category_id", id)
-    .order("sort_order", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: true })
-    .returns<ProblemListRow[]>();
+  const grade = gradeRes.data;
 
   let problems = slim.data;
   if (slim.error) {
@@ -221,53 +267,9 @@ export default async function CategoryPage({
     })
     .filter((p): p is GalleryProblem => p !== null);
 
-  const access = await getAccessState(supabase);
-
-  // 자동채점에서 "틀린문제 오답 업로드하기"로 넘어온 경우. RLS가 이미 본인
-  // 것만 걸러 주지만, 다른 실모의 채점 결과가 실려 오는 사고를 막기 위해
-  // category_id도 함께 맞춘다.
-  const grade = gradeId
-    ? (
-        await supabase
-          .from("exam_scores")
-          .select("*")
-          .eq("id", gradeId)
-          .eq("category_id", id)
-          .maybeSingle<ExamScore>()
-      ).data
-    : null;
   const existingNumbers = galleryProblems
     .map((p) => p.number)
     .filter((n): n is number => n != null);
-
-  // 이 실모에 연결된 채점 기록들. exam_scores → categories 쪽 연결은
-  // LinkCategoryPicker로 이미 되지만, 반대 방향(실모 화면에서 "이 실모는
-  // 어느 채점과 연결돼 있나")을 보여줄 곳이 없었다 — 연동을 양쪽에서
-  // 확인할 수 있어야 "연동됐다"는 게 실감난다.
-  //
-  // **wrong_numbers·items 까지 가져온다.** 예전에는 이름·점수만 가져와서
-  // 링크만 보여줬고, 오답 업로더는 `?gradeId=` 를 달고 채점 화면에서 넘어온
-  // 경우에만 떴다 — 폴더를 거쳐 실모로 바로 들어오면 연동이 통째로 사라져서
-  // 번호도, 정답 자동 매핑도 없었다(사용자 신고). 이제 연결된 채점이 있으면
-  // 어디로 들어오든 기본으로 뜬다.
-  const { data: linkedGrades } = await supabase
-    .from("exam_scores")
-    .select("id, subject, exam_name, elective_label, score, taken_at, wrong_numbers, items")
-    .eq("category_id", id)
-    .order("taken_at", { ascending: false })
-    .returns<
-      Pick<
-        ExamScore,
-        | "id"
-        | "subject"
-        | "exam_name"
-        | "elective_label"
-        | "score"
-        | "taken_at"
-        | "wrong_numbers"
-        | "items"
-      >[]
-    >();
 
   // `?gradeId=` 로 들어왔으면 그 채점 하나에 집중하고(채점 화면에서 "틀린문제
   // 오답 업로드하기"로 넘어온 흐름), 아니면 연결된 채점을 전부 보여준다.

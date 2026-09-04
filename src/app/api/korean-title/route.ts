@@ -90,6 +90,17 @@ export async function POST(req: NextRequest) {
     const { result, usage, model } = await readKoreanTitle(text, deadline.signal);
     const estKrw = usage ? gradingEstKrw(usage) : undefined;
     const chargedTokens = await billing.settle(estKrw);
+
+    // 지문 인식(`/api/korean-text`)과 **같은 모양으로** 찍는다. 사용자가
+    // 견준 것이 바로 이 둘("루나는 제목 하나에 몇천 토큰, 테라는 천 토큰
+    // 초반")이라, 둘이 같은 형식으로 남아야 로그에서 바로 견줄 수 있다.
+    // 이쪽은 **사진을 안 보내고 글자만** 보낸다는 게 핵심 차이다.
+    console.info(
+      `[korean-title] usage model=${model} 입력글=${text.length}자(사진 없음) ` +
+        `in=${usage?.inputTokens ?? "?"} out=${usage?.outputTokens ?? "?"} ` +
+        `est=${estKrw != null ? `${Math.round(estKrw)}원` : "단가미설정"} ` +
+        `차감=${chargedTokens}토큰`,
+    );
     return NextResponse.json({
       ...result,
       // 금액은 무제한 계정에만 보여준다(막는 자리는 서버다).

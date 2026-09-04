@@ -9,6 +9,7 @@
  * 값이다. 이름을 또 하나 만들면 모델을 추측하는 셈이 된다.
  */
 
+import { circledCharsIn, circledPairs } from "./circledChars";
 import { OPENAI_DETECT_MODEL } from "./detectProblems";
 import type { GradedItem, GradeSlot, Subject } from "./gradeSummary";
 import { normalizeJamo } from "./renderMathText";
@@ -468,7 +469,8 @@ block = one of:
 - {"kind":"figure","id":"f1","ratio":0.6} — picture/table not expressible as text. \`ratio\`=height/width.
 
 rules:
-- copy every character exactly, reading the IMAGE itself for these (the reference text below can be wrong here): 「」『』()·, circled chars (㉠㉡㉢, ①②③), ㄱ/ㄴ/ㄷ list markers, markers like (가)(나), literary work's trailing attribution line
+- copy every character exactly, reading the IMAGE itself for these (the reference text below can be wrong here): 「」『』()·, ㄱ/ㄴ/ㄷ list markers, markers like (가)(나), literary work's trailing attribution line
+- circled chars (㉠㉡㉢, ①②③) are the ONE exception: take them from the reference text, never from your own reading of the image (see the circled-chars line below)
 - no summarise/modernise/translate/fix-spelling/add anything
 - keep original paragraph breaks: 1 printed paragraph = 1 "para" block
 - lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." = own para block
@@ -486,16 +488,42 @@ export async function readKoreanRichText(
   // 주는 경우가 있는데, 그대로 두면 모델이 "참고 글을 베끼라"는 지시를 따라
   // 이 깨진 코드를 그대로 옮겨 적는다(renderMathText.ts 와 같은 사고).
   const cleanedReference = normalizeJamo(reference.trim());
-  // **"참고 글이 최우선"을 무조건으로 적으면 안 된다.** Mathpix 는 원문자·
-  // ㄱㄴㄷ 표지 같은 기호를 자주 놓치거나 깨뜨린다(이 저장소에 이미 여러 번
-  // 기록된 약점이다) — 그런데 예전 문구는 "참고 글의 표현을 AUTHORITATIVE로
-  // 따르라"고만 적어서, 모델이 사진에서 기호를 제대로 봤어도 참고 글이
-  // 빠뜨린 대로 따라 빠뜨렸다. 일반 산문은 참고 글을 우선하되, 기호는
-  // 사진을 우선하라고 갈라 적는다.
-  const prompt = cleanedReference
-    ? `${KOREAN_TEXT_PROMPT}
 
-reference — same passage as read by a text recogniser (Mathpix). for ORDINARY PROSE WORDING, treat it as authoritative — copy its spelling/spacing over your own reading when they differ. BUT it often drops or garbles circled characters, ㄱ/ㄴ/ㄷ list markers, and other symbols — for those, and for structure (paragraph breaks, boxes, bold, underline, sq), trust the IMAGE instead:
+  /**
+   * **원문자는 무조건 Mathpix 를 따른다**(사용자 지시, 실제 결과물을 보고 정함).
+   *
+   * 한때는 반대로 적어 뒀다 — "Mathpix 가 기호를 자주 놓치니 원문자도 사진을
+   * 보라". 그런데 사용자가 실제로 조판된 지문을 보고 **원문자만 유독 틀린다**고
+   * 알려 왔다. 생각해 보면 당연하다: ㉠ 은 사람 눈에도 작은 동그라미 안의 획
+   * 하나라, **사진을 눈으로 읽는 쪽(terra)이 가장 불리한 글자**다. 반대로
+   * Mathpix 는 인쇄물의 글자를 코드포인트로 집어내는 일에 맞춰진 엔진이라
+   * 이 자리에서는 더 낫다. "기호는 사진이 낫다"는 일반론을 원문자에까지
+   * 밀어붙인 것이 잘못이었다.
+   *
+   * 두 겹으로 못박는다 — ① 프롬프트 규칙에서 원문자만 예외로 빼 두고,
+   * ② 참고 글에 **실제로 나온 원문자를 우리가 뽑아 목록으로 준다**
+   * (`circledCharsIn`). 목록을 주는 쪽이 결정적이다: 문장 안에 섞여 있으면
+   * 모델이 사진 쪽 읽기로 덮어쓰지만, "이 지문의 원문자는 정확히 이것들이다"
+   * 라고 따로 뽑아 주면 그대로 쓴다(그림 프롬프트의 `circledNote` 가 이미
+   * 같은 방식으로 효과를 봤다).
+   *
+   * **대가**: Mathpix 가 아예 못 읽은 원문자는 우리도 못 살린다. 그건 받아들인
+   * 선택이다 — 틀린 글자가 찍히는 것보다 낫고(㉠ 이 ㉡ 으로 바뀌면 문제가
+   * 성립하지 않는다), 참고 글이 없을 때는 예전처럼 사진을 본다.
+   */
+  const circled = circledCharsIn(cleanedReference);
+  const circledLine = circled.length
+    ? `
+circled chars — this passage contains EXACTLY these, in this order: ${circledPairs(circled)}.
+use these exact characters from the reference. never substitute a different inner char, never reorder, never add or drop one based on the image.`
+    : "";
+
+  // 일반 산문은 참고 글을 우선하되, **구조**(문단·박스·굵게·밑줄·네모)는
+  // 사진을 우선한다 — 참고 글에는 그 정보가 아예 없기 때문이다.
+  const prompt = cleanedReference
+    ? `${KOREAN_TEXT_PROMPT}${circledLine}
+
+reference — same passage as read by a text recogniser (Mathpix). for ORDINARY PROSE WORDING and for CIRCLED CHARS, treat it as authoritative — copy it over your own reading when they differ. it can still drop ㄱ/ㄴ/ㄷ list markers and other symbols, and it carries no structure at all — for those (paragraph breaks, boxes, bold, underline, sq), trust the IMAGE instead:
 """
 ${cleanedReference}
 """`
