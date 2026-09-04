@@ -321,6 +321,71 @@ export async function gradeWithVision(
   return { slots: parseSlots(text), usage, model };
 }
 
+/**
+ * 국어 지문에 붙일 제목을 짓는다. **글자만 보낸다**(사진이 아니다) —
+ * 지문은 Mathpix 가 이미 읽어 두었고, 사진을 다시 보내면 입력 그림 토큰이
+ * 붙어 값이 몇 배가 된다. 글자만 보내면 지문 한 편이 1,000토큰 안쪽이다.
+ *
+ * 규칙은 사용자가 정한 것이다:
+ * - 독서(비문학): 글이 하나면 그 글의 주제. 둘 이상 묶인 복합지문이면
+ *   `(복합) 1번글 주제 + 2번글 주제`.
+ * - 문학: 글 맨 아래에 저자와 제목이 적혀 있으므로 그것을 그대로 쓴다.
+ */
+const KOREAN_TITLE_PROMPT = `당신은 한국 수능 국어 지문에 **짧은 제목**을 붙이는 도우미입니다.
+아래 지문 본문을 읽고 다음 JSON으로만 답하세요:
+{"title":"제목","kind":"독서"|"문학"|"기타"}
+
+규칙:
+- **문학**(시·소설·수필·극)이면 글 끝(또는 처음)에 붙은 "- 작자, 「작품명」" 같은
+  출전 표기를 찾아 그대로 제목으로 쓰세요. 예: "김소월, 진달래꽃".
+  여러 작품이 묶여 있으면 " / " 로 이으세요.
+- **독서**(비문학)이면 글의 **주제**를 명사구로 짧게 적으세요. 예: "이중차분법".
+  줄거리를 설명하지 말고 무엇에 대한 글인지만 적으세요.
+- 독서인데 **성격이 다른 글이 둘 이상 묶인 복합지문**이면
+  \`(복합) 1번글 주제 + 2번글 주제\` 형태로 적으세요. 예: "(복합) 관세 정책 + 지식재산권".
+- 제목은 25자를 넘기지 마세요. 따옴표·마침표로 감싸지 마세요.
+- 판단이 어려우면 kind 를 "기타"로 두고 주제를 짧게 적으세요.
+- 설명은 쓰지 말고 JSON만 답하세요.
+
+지문 본문:
+`;
+
+export type KoreanTitle = { title: string; kind: string };
+
+/** Mathpix 가 읽은 지문 글자로 제목을 짓는다. */
+export async function readKoreanTitle(
+  passageText: string,
+  signal?: AbortSignal,
+): Promise<{ result: KoreanTitle; usage?: GradeUsage; model: string }> {
+  const { text, usage, model } = await callVision(
+    KOREAN_TITLE_PROMPT + passageText,
+    [],
+    "제목 짓기",
+    signal,
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const a = text.indexOf("{");
+    const b = text.lastIndexOf("}");
+    if (a === -1 || b <= a) throw new GradeError("제목을 짓지 못했습니다.", 502);
+    try {
+      parsed = JSON.parse(text.slice(a, b + 1));
+    } catch {
+      throw new GradeError("제목을 짓지 못했습니다.", 502);
+    }
+  }
+  const o = parsed as { title?: unknown; kind?: unknown };
+  const title = String(o?.title ?? "").trim();
+  if (!title) throw new GradeError("제목을 짓지 못했습니다.", 502);
+  return {
+    result: { title, kind: String(o?.kind ?? "기타") },
+    usage,
+    model,
+  };
+}
+
 /** 답지 한 문항. 배점은 답지에 있을 때만 채운다(없는 것을 지어내지 않는다). */
 export type AnswerKeyItem = { no: number; answer: string; points?: number };
 

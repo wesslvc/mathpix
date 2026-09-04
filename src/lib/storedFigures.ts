@@ -1,4 +1,5 @@
 import { collectTables, type CardFigure } from "./cardHtml";
+import type { KoreanMeta } from "./koreanSet";
 import {
   DEFAULT_DIAGRAM_LAYOUT,
   DEFAULT_TABLE_LAYOUT,
@@ -176,4 +177,10 @@ export type StoredBoxRange = {
    * 1번부터 매긴다. 통째로 그린 문제는 본문이 없어서 손으로 적어야 한다.
    */
   number?: number | null;
+  /**
+   * 국어 지문·문제 묶음(`koreanSet.ts`). 국어 모드로 넣은 것에만 있다.
+   * 여기 얹는 이유는 번호·글자 크기와 같다 — 새 컬럼을 만들면 마이그레이션을
+   * 안 돌린 사람에게는 저장 자체가 실패한다.
+   */
+  korean?: KoreanMeta;
 };

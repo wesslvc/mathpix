@@ -83,6 +83,15 @@ const PROMPT = `이 이미지는 한국 고등학교 문제집·모의고사 지
 type GeminiBox = { box_2d?: unknown; no?: unknown; label?: unknown };
 
 /** 응답에서 배열을 뽑아 0~1 좌표로 바꾼다. 모양이 이상한 항목은 버린다. */
+/** `box_2d`(0~1000 정규화) 하나를 0~1 상자로 바꾼다. 모양이 아니면 null. */
+function toBox(raw: unknown): ProblemBox | null {
+  const got = toBoxes([{ box_2d: raw }]);
+  if (got.length === 0) return null;
+  const { no: _no, ...box } = got[0];
+  void _no;
+  return box;
+}
+
 function toBoxes(raw: unknown): (ProblemBox & { no: string })[] {
   if (!Array.isArray(raw)) return [];
   const out: (ProblemBox & { no: string })[] = [];
@@ -246,7 +255,8 @@ function parse(text: string): DetectedProblem[] {
   }
 }
 
-async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[]; model: string }> {
+/** Gemini 한 번 부르기. 프롬프트만 갈아 끼우면 다른 일에도 쓸 수 있다. */
+async function callGemini(dataUrl: string, prompt: string): Promise<string> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new DetectError("GEMINI_API_KEY가 설정되지 않았습니다.", 500);
   const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
@@ -257,7 +267,7 @@ async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [
-        { parts: [{ inline_data: { mime_type: m[1], data: m[2] } }, { text: PROMPT }] },
+        { parts: [{ inline_data: { mime_type: m[1], data: m[2] } }, { text: prompt }] },
       ],
       // 자리를 재는 일이라 매번 같은 답이 나와야 한다.
       generationConfig: { responseMimeType: "application/json", temperature: 0 },
@@ -274,13 +284,106 @@ async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[
       res.status,
     );
   }
-  let text: string;
   try {
-    text = JSON.parse(body)?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    return JSON.parse(body)?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
   } catch {
     throw new DetectError("모델이 정상적인 응답을 주지 않았습니다.", 502);
   }
-  return { problems: parse(text), model: DETECT_MODEL };
+}
+
+async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[]; model: string }> {
+  return { problems: parse(await callGemini(dataUrl, PROMPT)), model: DETECT_MODEL };
+}
+
+/**
+ * 국어 지면에서 **지문 영역과 문제 영역을 함께** 찾는다.
+ *
+ * 국어는 지문 하나에 문항 여러 개가 딸린다. 다른 과목처럼 문제만 잡으면
+ * 지문이 어느 문제 것인지 알 수 없어 인쇄할 때 지문과 문제가 갈라진다.
+ * 그래서 **한 번의 호출로** 둘을 함께 잡고 어느 지문에 딸린 문제인지도
+ * 받는다 — 호출을 나누면 그만큼 돈이 더 든다.
+ *
+ * 여기서는 **조각을 합치지 않는다**(`group` 을 쓰지 않는다). 그건 "번호로
+ * 같은 문제를 알아본다"는 규칙에 기대는 것인데, 지문에는 번호가 없어서 그
+ * 규칙이 통째로 어긋난다.
+ */
+const KOREAN_PROMPT = `이 이미지는 한국 수능 **국어 영역** 문제지 지면입니다.
+**지문 영역**과 **문제 영역**을 모두 찾아 주세요.
+
+지문(passage):
+- 문항 여러 개가 함께 딸린 **읽을 글** 전체입니다(독서 지문, 문학 작품, 보기 자료 포함).
+- "[1~3] 다음 글을 읽고 물음에 답하시오." 같은 안내 줄이 있으면 **그 줄부터** 포함하세요.
+- 글이 (가)(나) 처럼 여럿 묶인 복합지문이면 **묶어서 하나**로 잡으세요.
+- 문학이면 끝에 붙은 출전 표기(- 작자, 「작품명」)까지 넣으세요.
+- 지문 밑에 붙은 문항(발문·선지)은 지문에 넣지 마세요.
+
+문제(question):
+- 문제 번호(예: 12.)부터 선지(①②③④⑤) 마지막 줄까지 **한 문항씩** 잡으세요.
+- 발문·<보기> 상자·선지는 한 문항의 일부입니다. 나누지 마세요.
+- 그 문항이 어느 지문에 딸렸는지 set 에 적으세요(지문에도 같은 set 을 적습니다).
+  지문이 여러 개면 위에서부터 1, 2, 3... 입니다. 딸린 지문이 없으면 set 을 0 으로 두세요.
+
+공통:
+- 영역은 내용 바깥 경계에 **바짝 붙이세요.** 빈 여백·단 사이 공백·머리말·쪽번호는 넣지 마세요.
+- 서로 겹치지 않게 잡으세요.
+- 단이 둘이면 왼쪽 단을 위에서 아래로 먼저, 그다음 오른쪽 단 순서로 두세요.
+- **지문이 단을 넘어 이어지면 조각마다 하나씩** 잡고 같은 set 을 적으세요.
+
+결과는 JSON 으로만 답하세요:
+{"regions":[{"box_2d":[ymin,xmin,ymax,xmax],"kind":"passage"|"question","set":1,"no":"12"}]}
+좌표는 0~1000 으로 정규화한 값입니다. no 는 문항 번호(숫자만)이고 지문이면 빈 문자열입니다.
+설명은 쓰지 마세요.`;
+
+export type DetectedKoreanRegion = {
+  kind: "passage" | "question";
+  box: ProblemBox;
+  /** 어느 지문에 딸렸는지. 0 이면 딸린 지문이 없다. */
+  set: number;
+  no: number | null;
+};
+
+export async function detectKoreanRegions(
+  dataUrl: string,
+): Promise<{ regions: DetectedKoreanRegion[]; model: string }> {
+  const text = await callGemini(dataUrl, KOREAN_PROMPT);
+  return { regions: parseKorean(text), model: DETECT_MODEL };
+}
+
+function parseKorean(text: string): DetectedKoreanRegion[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    const a = text.indexOf("{");
+    const b = text.lastIndexOf("}");
+    if (a === -1 || b <= a) throw new DetectError("영역을 읽지 못했습니다.", 502);
+    try {
+      raw = JSON.parse(text.slice(a, b + 1));
+    } catch {
+      throw new DetectError("영역을 읽지 못했습니다.", 502);
+    }
+  }
+  const list = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { regions?: unknown })?.regions)
+      ? (raw as { regions: unknown[] }).regions
+      : [];
+
+  const out: DetectedKoreanRegion[] = [];
+  for (const row of list) {
+    const o = row as { box_2d?: unknown; kind?: unknown; set?: unknown; no?: unknown };
+    const box = toBox(o.box_2d);
+    if (!box) continue;
+    const no = Number(String(o.no ?? "").replace(/[^\d]/g, ""));
+    out.push({
+      kind: o.kind === "passage" ? "passage" : "question",
+      box,
+      set: Number.isFinite(Number(o.set)) ? Number(o.set) : 0,
+      no: Number.isFinite(no) && no > 0 ? no : null,
+    });
+  }
+  if (out.length === 0) throw new DetectError("영역을 하나도 찾지 못했습니다.", 502);
+  return out;
 }
 
 const OPENAI_MODELS = "https://api.openai.com/v1/models";

@@ -16,6 +16,7 @@ import { enhanceContrast } from "@/lib/autoContrast";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import BatchSplitPanel from "./BatchSplitPanel";
+import KoreanModePanel from "./KoreanModePanel";
 import BulkMappedImportPanel from "./BulkMappedImportPanel";
 
 /**
@@ -467,6 +468,16 @@ export default function AddProblemFlow({
           계정에서 보이고, 막는 자리는 서버다(화면은 우회할 수 있다). */}
       {stage === "idle" && canAdd && (
         <BatchSplitPanel
+          onSave={handleSaveToCategory}
+          unlimited={tokenStatus?.unlimited ?? false}
+          figureCost={tokenStatus?.figureCost ?? null}
+        />
+      )}
+
+      {/* 국어는 지문 한 편에 문항 여러 개가 딸려서 낱개로 넣으면 인쇄할 때
+          지문과 문제가 갈라진다. 세트로 묶어 넣는 길을 따로 둔다. */}
+      {stage === "idle" && canAdd && (
+        <KoreanModePanel
           onSave={handleSaveToCategory}
           unlimited={tokenStatus?.unlimited ?? false}
           figureCost={tokenStatus?.figureCost ?? null}
