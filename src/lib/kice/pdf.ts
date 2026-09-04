@@ -26,6 +26,13 @@ import {
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import type { Frame, FrameBox, FrameItem, FrameSet } from "./frames";
+import type { RichBlock } from "./richText";
+import {
+  DEFAULT_FLOW_STYLE,
+  flowBlocks,
+  type FlowColumn,
+  type FlowItem,
+} from "./textFlow";
 
 /** 용지·여백·단 (hwpx 의 secPr 에서 그대로 가져온 값, 단위 pt). */
 export const LAYOUT = {
@@ -374,6 +381,11 @@ export type KiceSpec = {
     toc: string[];
     pages: (
       | { kind: "toc" }
+      /**
+       * **글자로 된 지문.** 사진이 아니라 우리가 평가원 글꼴로 조판한다 —
+       * 확대해도 또렷하고, 단을 따라 흐르고, 상자가 단을 넘어가면 잘린다.
+       */
+      | { kind: "passageText"; blocks: RichBlock[] }
       | {
           kind: "passage";
           index: number;
@@ -655,7 +667,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   // 국어는 쪽마다 무엇이 들어갈지 이미 정해져 있다(짝수 지문 / 홀수 문제).
   const pages = plan
     ? plan.pages.map((p, n) =>
-        p.kind === "toc"
+        p.kind === "toc" || p.kind === "passageText"
           ? { items: [] as Placed[] }
           : p.kind === "passage"
             ? layoutPassage(images[p.index], spec.frames, n + 1, p.splitAt)
@@ -700,8 +712,32 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       page.drawImage(it.img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
       if (it.clip) page.pushOperators(popGraphicsState());
     }
-    if (plan?.pages[n]?.kind === "toc") {
-      await drawToc(page, frameFor(spec.frames, n + 1), plan.toc, fontForText, flip);
+    const planned = plan?.pages[n];
+    if (planned?.kind === "toc") {
+      await drawToc(page, frameFor(spec.frames, n + 1), plan!.toc, fontForText, flip);
+    }
+    if (planned?.kind === "passageText") {
+      // 두 단에 흘려 넣는다. 남는 것이 있어도 이 쪽에서 끊는다 — 국어 계획은
+      // 세트마다 쪽을 정해 두므로(짝수 지문 / 홀수 문제) 여기서 쪽을 더
+      // 만들면 그 규칙이 무너진다. 넘칠 만큼 긴 지문은 계획을 짜는 쪽이
+      // 두 쪽으로 나눠 준다.
+      const b = frameBounds(frameFor(spec.frames, n + 1));
+      const cols: FlowColumn[] = [0, 1].map((i) => ({
+        x: columnX(i),
+        top: b.headerBottom + LAYOUT.gap,
+        bottom: b.contentBottom,
+        width: LAYOUT.columnWidth,
+      }));
+      const body = await fontForText(BODY_FONT, "");
+      const measure = (t: string, size: number, bold: boolean) =>
+        body.font.widthOfTextAtSize(t, size) * (bold ? 1.02 : 1);
+      const flowed = flowBlocks(planned.blocks, cols, measure, DEFAULT_FLOW_STYLE);
+      for (const r of flowed.results) {
+        await drawFlow(page, r.items, fontForText, flip, new Map());
+      }
+      if (flowed.rest.length > 0 && spec.onWarn) {
+        spec.onWarn("지문이 한 쪽에 다 들어가지 않아 뒷부분이 잘렸습니다.");
+      }
     }
   }
 
@@ -741,6 +777,88 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   }
 
   return pdf.save();
+}
+
+/** 본문 글꼴. 실제 수능 문제지의 지문·문항이 이 계열이다. */
+const BODY_FONT = "(한)신중명조";
+
+/**
+ * 조판된 지문을 그린다.
+ *
+ * **굵게는 글꼴을 바꾸지 않고 두 번 그려 흉내 낸다.** 버킷에 굵은 짝이 있는
+ * 글꼴이 없고, 있더라도 잘라 둔 글꼴이라 글자가 빌 위험이 크다 — 아주 조금
+ * 어긋나게 두 번 그리면 획이 두꺼워진다.
+ *
+ * **밑줄은 직접 긋는다.** `밑줄 친 ㉠` 처럼 문제가 가리키는 자리라 빠지면
+ * 문제가 성립하지 않는다.
+ */
+async function drawFlow(
+  page: PDFPage,
+  items: FlowItem[],
+  fontForText: (name: string, text: string) => Promise<{ font: PDFFont; text: string }>,
+  flip: (y: number) => number,
+  figures: Map<string, PDFImage>,
+) {
+  for (const it of items) {
+    if (it.kind === "boxEdge") {
+      const x0 = it.x;
+      const x1 = it.x + it.w;
+      const y0 = it.y;
+      const y1 = it.y + it.h;
+      const line = (ax: number, ay: number, bx: number, by: number) =>
+        page.drawLine({
+          start: { x: ax, y: flip(ay) },
+          end: { x: bx, y: flip(by) },
+          thickness: 0.7,
+          color: rgb(0, 0, 0),
+        });
+      // 단을 넘어간 도막은 그쪽 테두리를 긋지 않는다 — 잘린 것처럼 보여야 한다.
+      if (it.top) line(x0, y0, x1, y0);
+      if (it.bottom) line(x0, y1, x1, y1);
+      line(x0, y0, x0, y1);
+      line(x1, y0, x1, y1);
+      continue;
+    }
+    if (it.kind === "figure") {
+      const img = figures.get(it.id);
+      if (img) {
+        page.drawImage(img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
+      }
+      continue;
+    }
+    for (const piece of it.pieces) {
+      const picked = await fontForText(BODY_FONT, piece.t);
+      if (!picked.text.trim()) continue;
+      const x = it.x + piece.dx;
+      // 글자 줄은 칸 위에서 크기만큼 내려온 자리다.
+      const baseline = flip(it.y + it.size);
+      page.drawText(picked.text, {
+        x,
+        y: baseline,
+        size: it.size,
+        font: picked.font,
+        color: rgb(0, 0, 0),
+      });
+      if (piece.b) {
+        // 굵게 흉내 — 아주 조금 어긋나게 한 번 더.
+        page.drawText(picked.text, {
+          x: x + it.size * 0.035,
+          y: baseline,
+          size: it.size,
+          font: picked.font,
+          color: rgb(0, 0, 0),
+        });
+      }
+      if (piece.u) {
+        page.drawLine({
+          start: { x, y: baseline - it.size * 0.16 },
+          end: { x: x + piece.w, y: baseline - it.size * 0.16 },
+          thickness: 0.6,
+          color: rgb(0, 0, 0),
+        });
+      }
+    }
+  }
 }
 
 /**

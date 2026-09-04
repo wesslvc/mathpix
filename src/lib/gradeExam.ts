@@ -218,10 +218,12 @@ async function callVision(
   images: string[],
   what: string,
   signal?: AbortSignal,
+  /** 쓸 모델. 기본은 자리·채점용(luna). 지문 옮겨 적기는 terra 를 쓴다. */
+  modelName?: string,
 ): Promise<{ text: string; usage?: GradeUsage; model: string }> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
-  const model = OPENAI_DETECT_MODEL;
+  const model = modelName ?? OPENAI_DETECT_MODEL;
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
 
   let res = await fetch(OPENAI_RESPONSES, {
@@ -450,4 +452,84 @@ function parseAnswerKey(text: string): AnswerKeyItem[] {
   if (out.length === 0) throw new GradeError("답지에서 정답을 하나도 읽지 못했습니다.", 502);
   out.sort((a, b) => a.no - b.no);
   return out;
+}
+
+/**
+ * 국어 지문 사진을 **구조화된 글자**로 옮긴다(terra).
+ *
+ * 그림으로 다시 그리는 것과 다르다 — 결과가 글자라 우리가 평가원 글꼴로
+ * 조판할 수 있다(`textFlow.ts`). 확대해도 또렷하고 단을 따라 흐른다.
+ *
+ * **모델을 따로 둔다**(`OPENAI_TEXT_MODEL`, 기본 `gpt-5.6-terra`). 사용자가
+ * 이 일을 terra 에 맡기라고 정했다 — 자리를 재는 luna 와 갈라 두면 한쪽을
+ * 바꿔도 다른 쪽이 흔들리지 않는다.
+ *
+ * **Mathpix 가 읽은 글을 함께 준다.** 글자를 정확히 읽는 일은 Mathpix 가 낫고,
+ * 무엇이 문단이고 무엇이 상자인지 가리는 일은 vision 모델이 낫다.
+ */
+export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.6-terra";
+
+const KOREAN_TEXT_PROMPT = `You transcribe a Korean SAT (수능) 국어 passage image into structured text
+so it can be typeset again. Reproduce it **exactly**; you are copying, not editing.
+
+Answer with JSON only:
+{"blocks":[ ... ]}
+
+A block is one of:
+- {"kind":"para","runs":[{"t":"text","b":true,"u":true}],"indent":true}
+  \`b\` = printed bold, \`u\` = printed underline. Omit them when absent.
+  \`indent\` = the paragraph's first line is indented (usual for body paragraphs).
+  Split \`runs\` only where the styling changes; otherwise use one run.
+- {"kind":"box","blocks":[ ... ]}  a bordered box (조건 박스, <보기>).
+- {"kind":"figure","id":"f1","ratio":0.6}  a picture/table you cannot express as text.
+  \`ratio\` is height divided by width.
+
+Rules:
+- Copy every character exactly, including 「」『』()·, circled characters (㉠㉡㉢, ①②③),
+  markers such as (가)(나), and the trailing attribution line of a literary work.
+- Do not summarise, modernise, translate, fix spelling, or add anything.
+- Keep the original paragraph breaks. One printed paragraph = one "para" block.
+- A lead-in line such as "[1~3] 다음 글을 읽고 물음에 답하시오." is its own para block.
+- Mark bold/underline only where the **print** shows it. Ignore handwriting.
+- Do not include running heads, page numbers, or the questions printed below the passage.
+- JSON only, no explanation.`;
+
+/** 지문 사진 → 구조화된 블록. `reference` 는 Mathpix 가 읽은 글(있으면 더 정확하다). */
+export async function readKoreanRichText(
+  imageDataUrl: string,
+  reference: string,
+  signal?: AbortSignal,
+): Promise<{ blocks: unknown; usage?: GradeUsage; model: string }> {
+  const prompt = reference.trim()
+    ? `${KOREAN_TEXT_PROMPT}
+
+Reference — the same passage as read by a text recogniser. **Treat its wording as
+authoritative** and use the image for structure (paragraph breaks, boxes, bold, underline):
+"""
+${reference.trim()}
+"""`
+    : KOREAN_TEXT_PROMPT;
+
+  const { text, usage, model } = await callVision(
+    prompt,
+    [imageDataUrl],
+    "지문 인식",
+    signal,
+    OPENAI_TEXT_MODEL,
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const a = text.indexOf("{");
+    const b = text.lastIndexOf("}");
+    if (a === -1 || b <= a) throw new GradeError("지문을 읽지 못했습니다.", 502);
+    try {
+      parsed = JSON.parse(text.slice(a, b + 1));
+    } catch {
+      throw new GradeError("지문을 읽지 못했습니다.", 502);
+    }
+  }
+  const blocks = (parsed as { blocks?: unknown })?.blocks ?? parsed;
+  return { blocks, usage, model };
 }
