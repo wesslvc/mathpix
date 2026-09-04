@@ -201,12 +201,28 @@ export function flowBlocks(
    * `left`/`width` 는 상자 안쪽이면 그만큼 좁아진 자리다.
    */
   const run = (block: RichBlock, left: number, width: number): RichBlock | null => {
+    // `left` 는 이 블록을 부를 때의 단(baseCol) 기준 자리다. 문단·그림이
+    // 도중에 다음 단으로 넘어가면(`nextColumn()`) `col` 이 바뀌는데, 그때도
+    // "그 단의 왼쪽 끝에서 원래 있던 만큼 들여써진 자리"를 지켜야 한다 —
+    // 상자 안이면 `boxPad` 만큼, 아니면 0만큼. **이 상수(`inset`)를 한 번만
+    // 재고 두고두고 `columns[col].x + inset` 으로 쓴다.**
+    //
+    // 예전에는 `columns[col].x + (left - columns[col].x)` 라고 적었는데, 이건
+    // 대수적으로 그냥 `left` 다(`col` 이 상쇄된다) — 단이 바뀌어도 옛 단의
+    // x 좌표를 그대로 썼다는 뜻이다. 두 단의 `top` 이 같아서 이어지는 줄이
+    // 옛 단의 맨 위와 **같은 자리에 겹쳐 찍혔다**(실제로 그렇게 났다 —
+    // 사용자가 캡처한 PDF에서 지문 도입부와 한참 뒤 문단이 같은 좌표에
+    // 겹쳐 있었다). 그림과 상자 테두리도 같은 계산식을 썼어서 같은 값으로
+    // 고쳤다.
+    const baseCol = col;
+    const inset = left - columns[baseCol].x;
+
     if (block.kind === "figure") {
       const h = width * block.ratio;
       if (y + h > columns[col].bottom && !(y === columns[col].top)) {
         if (!nextColumn()) return block;
       }
-      results[col].items.push({ kind: "figure", id: block.id, x: left, y, w: width, h });
+      results[col].items.push({ kind: "figure", id: block.id, x: columns[col].x + inset, y, w: width, h });
       y += h + style.paraGap;
       return null;
     }
@@ -233,7 +249,7 @@ export function flowBlocks(
         results[col].items.push(
           placeLine(
             lines[i],
-            columns[col].x + (left - columns[col].x),
+            columns[col].x + inset,
             y,
             style.size,
             measure,
@@ -250,7 +266,6 @@ export function flowBlocks(
     // ── 상자 ──────────────────────────────────────────────────────
     // **단을 넘어가면 잘린다.** 앞쪽은 아래 테두리를 그리지 않고, 이어지는
     // 쪽은 위 테두리를 그리지 않는다 — 그래야 한 상자가 이어진 것으로 보인다.
-    const innerLeft = left + style.boxPad;
     const innerWidth = width - style.boxPad * 2;
     let startY = y;
     let startCol = col;
@@ -260,7 +275,7 @@ export function flowBlocks(
     const closeSegment = (bottom: boolean) => {
       results[startCol].items.push({
         kind: "boxEdge",
-        x: left,
+        x: columns[startCol].x + inset,
         y: startY,
         w: width,
         h: (bottom ? y + style.boxPad : columns[startCol].bottom) - startY,
@@ -272,7 +287,10 @@ export function flowBlocks(
     const remaining: RichBlock[] = [...block.blocks];
     while (remaining.length > 0) {
       const before = col;
-      const leftover = run(remaining[0], innerLeft, innerWidth);
+      // 안쪽 왼쪽 자리도 **매번 지금 단 기준으로** 다시 잰다 — 안 그러면
+      // 상자 속 문단이 단을 넘을 때 같은 버그가 상자 안에서도 재현된다.
+      const curLeft = columns[col].x + inset + style.boxPad;
+      const leftover = run(remaining[0], curLeft, innerWidth);
       if (col !== before) {
         // 단이 바뀌었다 — 여기까지를 한 도막으로 닫고 새 도막을 연다.
         closeSegment(false);
