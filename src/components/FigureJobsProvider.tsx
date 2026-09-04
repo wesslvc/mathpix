@@ -77,6 +77,12 @@ export type FigureJob = {
    * 없으면 프롬프트도 캐시 키도 예전과 **한 글자도 다르지 않다.**
    */
   instruction?: string;
+  /**
+   * 국어인가. 국어는 지문·문항이 **거의 글자뿐**이라 Mathpix 가 사진보다
+   * 정확한 경우가 많다 — 그래서 참고 글을 더 앞세우라고 프롬프트에 적는다
+   * (사용자 요청). 다른 과목은 표·그림이 섞여 있어 사진이 우선이다.
+   */
+  korean?: boolean;
   status: "pending" | "running" | "done" | "error";
   /**
    * 글자 인식(Mathpix)이 어떻게 됐는가. **문제 전체를 그릴 때만** 쓴다.
@@ -381,6 +387,7 @@ export default function FigureJobsProvider({
             body: JSON.stringify({
               image: forModel,
               mode,
+              korean: next.korean ? true : undefined,
               width: forModelSize?.width,
               height: forModelSize?.height,
               // 서버가 결과를 직접 저장할 수 있게 알려준다(탭을 닫아도 남는다).

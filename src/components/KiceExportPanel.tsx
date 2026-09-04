@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { buildKicePdf, type KiceSpec } from "@/lib/kice/pdf";
+import { buildKicePdf, LAYOUT, type KiceSpec } from "@/lib/kice/pdf";
+import { passageSplitAt } from "@/lib/kice/passageSplit";
 import {
   frameKeyFor,
   loadFrameImages,
@@ -44,6 +45,13 @@ const LAYOUTS = [
 ] as const;
 
 type LayoutKey = (typeof LAYOUTS)[number]["key"];
+
+/**
+ * 국어 본문 쪽의 단 높이(pt). 머리말 아래 가로줄(99.2)에서 본문 끝(962.63)
+ * 까지에서 문제 사이 간격을 뺀 값이다 — `pdf.ts` 의 `frameBounds` 와 같은
+ * 자리를 본다. 지문을 두 단에 나눌지 정하는 데 쓴다.
+ */
+const KOREAN_COLUMN_HEIGHT = 962.63 - 99.2 - LAYOUT.gap;
 
 /**
  * 영역마다의 **기본 배치**(사용자가 정한 것).
@@ -121,7 +129,7 @@ export default function KiceExportPanel({ title, items }: Props) {
    * 지문 없는 문항(국어 모드를 안 거친 것)은 세트 뒤에 이어 붙인다. 지문
    * 쪽을 차지할 이유가 없어서 보통 배치처럼 한 쪽에 둘씩 넣는다.
    */
-  function buildKoreanPlan() {
+  async function buildKoreanPlan(pngs: Uint8Array[]) {
     const index = new Map(items.map((it, i) => [it.id, i] as const));
     const { sets, loose } = groupKoreanSets(items, (it) => it.korean ?? null);
 
@@ -131,7 +139,11 @@ export default function KiceExportPanel({ title, items }: Props) {
     for (const set of sets) {
       const from = pages.length + 1; // 지금 넣을 쪽의 번호(1부터)
       if (set.passage) {
-        pages.push({ kind: "passage", index: index.get(set.passage.id)! });
+        const at = index.get(set.passage.id)!;
+        // 좌단만으로 충분하면 좌단에 몰아넣고, 넘치면 우단으로 이어 흘린다.
+        // 자를 자리는 줄과 줄 사이 빈 띠에서 고른다(글자 줄이 반으로 잘리면 안 된다).
+        const splitAt = await passageSplitAt(pngs[at], KOREAN_COLUMN_HEIGHT);
+        pages.push({ kind: "passage", index: at, ...(splitAt ? { splitAt } : {}) });
       }
       if (set.questions.length > 0) {
         pages.push({
@@ -186,7 +198,7 @@ export default function KiceExportPanel({ title, items }: Props) {
             showSource && items[i].korean?.role !== "passage" ? items[i].label : "",
         })),
         pagePattern: [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
-        koreanPlan: layoutKey === "korean" ? buildKoreanPlan() : undefined,
+        koreanPlan: layoutKey === "korean" ? await buildKoreanPlan(pngs) : undefined,
         answers: showAnswers
           ? items.map((item) => ({ label: item.answerLabel, answer: item.answer }))
           : [],

@@ -107,6 +107,10 @@ export default function KoreanModePanel({
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [title, setTitle] = useState("");
   const [titleNote, setTitleNote] = useState<string | null>(null);
+  /** 제목을 짓는 중인가. 다 되기 전에 저장하면 제목 없이 저장된다. */
+  const [titling, setTitling] = useState(false);
+  /** 제목을 지을 재료(지문 크롭). 다시 짓기 버튼이 쓴다. */
+  const passageCropRef = useRef<string | null>(null);
   const [noPassage, setNoPassage] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -381,6 +385,8 @@ export default function KoreanModePanel({
 
   /** Mathpix 로 지문을 읽고 그 **글자만** 보내 제목을 짓는다. */
   async function makeTitle(passageCrop: string) {
+    passageCropRef.current = passageCrop;
+    setTitling(true);
     setTitleNote("제목을 짓는 중...");
     try {
       const ocr = await fetch("/api/mathpix", {
@@ -407,6 +413,8 @@ export default function KoreanModePanel({
       setTitleNote(
         (err instanceof Error ? err.message : "제목을 짓지 못했습니다.") + " 직접 적어주세요.",
       );
+    } finally {
+      setTitling(false);
     }
   }
 
@@ -478,6 +486,8 @@ export default function KoreanModePanel({
             label: piece.kind === "passage" ? "지문" : `${qIndex}번째 문제`,
             crop: piece.crop,
             mode: "problem",
+            // 국어는 글자뿐이라 Mathpix 가 읽은 것을 더 앞세운다.
+            korean: true,
             problemId,
           });
         }
@@ -721,13 +731,32 @@ export default function KoreanModePanel({
           {!noPassage && (
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               지문 제목 (첫 장 목차에 적힙니다)
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="예: 이중차분법"
-                className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-              />
+              <div className="flex gap-2">
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="예: 이중차분법"
+                  className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    passageCropRef.current && void makeTitle(passageCropRef.current)
+                  }
+                  disabled={titling || !passageCropRef.current}
+                  className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {titling ? "짓는 중..." : "다시 짓기"}
+                </button>
+              </div>
               {titleNote && <span className="text-xs text-slate-400">{titleNote}</span>}
+              {/* 제목이 비면 첫 장 목차에 그냥 "지문" 으로 찍힌다 — 목차의
+                  쓸모가 통째로 사라지므로 넣기 전에 채우게 한다. */}
+              {!title.trim() && !titling && (
+                <span className="text-xs text-amber-700">
+                  제목이 비어 있으면 목차에 &quot;지문&quot;으로만 찍힙니다. 적어주세요.
+                </span>
+              )}
             </label>
           )}
 

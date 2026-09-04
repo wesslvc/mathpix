@@ -17,6 +17,9 @@ import {
   pushGraphicsState,
   popGraphicsState,
   concatTransformationMatrix,
+  rectangle,
+  clip,
+  endPath,
   type PDFFont,
   type PDFImage,
   type PDFPage,
@@ -171,6 +174,14 @@ type Placed = {
   y: number;
   w: number;
   h: number;
+  /**
+   * 이 네모 안만 보이게 자른다(위에서 잰 좌표).
+   *
+   * 지문을 두 단에 나눠 흘려 넣을 때 쓴다 — 같은 그림을 두 번 그리되 한 번은
+   * 위쪽 띠만, 한 번은 아래쪽 띠만 보이게 한다. 그림을 실제로 자르지 않으므로
+   * 다시 인코딩할 필요가 없다.
+   */
+  clip?: { x: number; y: number; w: number; h: number };
 };
 
 type Shot = { img: PDFImage; label: string };
@@ -270,23 +281,66 @@ function layoutOnePage(take: Shot[], frames: FrameSet, pageNo: number) {
  * 두면 비율에 따라 알아서 자리를 잡는다 — 세로로 긴 지문은 결국 한 단 폭쯤
  * 이 되고, 넓은 지문은 두 단을 다 쓴다. 가운데로 모은다.
  */
-function layoutPassage(shot: Shot, frames: FrameSet, pageNo: number): { items: Placed[] } {
+function layoutPassage(
+  shot: Shot,
+  frames: FrameSet,
+  pageNo: number,
+  splitAt?: number,
+): { items: Placed[] } {
   const b = frameBounds(frameFor(frames, pageNo));
   const top = b.headerBottom + LAYOUT.gap;
-  const availW = LAYOUT.columnWidth * 2 + LAYOUT.columnGap;
-  const availH = b.contentBottom - top;
-  const k = Math.min(availW / shot.img.width, availH / shot.img.height);
+  const colW = LAYOUT.columnWidth;
+  const colH = b.contentBottom - top;
+
+  // **단 폭에 맞춰 놓는다.** 쪽 전체에 맞춰 줄이면 세로로 긴 지문이 가운데
+  // 좁은 띠가 되어 글자가 작아진다 — 실제 문제지처럼 단을 따라 흘려야 한다.
+  if (splitAt == null || splitAt <= 0 || splitAt >= 1) {
+    // 좌단만으로 충분하면 좌단에 몰아넣는다. 넘치면(계획이 안 왔으면) 줄인다.
+    const k = Math.min(colW / shot.img.width, colH / shot.img.height);
+    return {
+      items: [
+        {
+          img: shot.img,
+          label: shot.label,
+          x: columnX(0),
+          y: top,
+          w: shot.img.width * k,
+          h: shot.img.height * k,
+        },
+      ],
+    };
+  }
+
+  // 두 단에 나눠 흘린다. **두 띠의 배율이 같아야 한다** — 다르면 왼쪽과
+  // 오른쪽의 글자 크기가 달라져 한 지문으로 안 보인다.
+  const k = Math.min(
+    colW / shot.img.width,
+    colH / (shot.img.height * splitAt),
+    colH / (shot.img.height * (1 - splitAt)),
+  );
   const w = shot.img.width * k;
-  const h = shot.img.height * k;
+  const full = shot.img.height * k;
+  const upper = full * splitAt;
   return {
     items: [
       {
         img: shot.img,
         label: shot.label,
-        x: LAYOUT.marginLeft + (availW - w) / 2,
+        x: columnX(0),
         y: top,
         w,
-        h,
+        h: full,
+        clip: { x: columnX(0), y: top, w, h: upper },
+      },
+      {
+        // 아래 띠는 그림을 위로 밀어 올려 그 부분이 단 안에 오게 한다.
+        img: shot.img,
+        label: "",
+        x: columnX(1),
+        y: top - upper,
+        w,
+        h: full,
+        clip: { x: columnX(1), y: top, w, h: full - upper },
       },
     ],
   };
@@ -320,7 +374,15 @@ export type KiceSpec = {
     toc: string[];
     pages: (
       | { kind: "toc" }
-      | { kind: "passage"; index: number }
+      | {
+          kind: "passage";
+          index: number;
+          /**
+           * 두 단에 나눠 흘릴 때의 **가르는 자리**(그림 높이의 0~1).
+           * 없으면 좌단에만 놓는다(좌단만으로 충분한 지문).
+           */
+          splitAt?: number;
+        }
       | { kind: "questions"; indexes: number[] }
     )[];
   };
@@ -596,7 +658,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
         p.kind === "toc"
           ? { items: [] as Placed[] }
           : p.kind === "passage"
-            ? layoutPassage(images[p.index], spec.frames, n + 1)
+            ? layoutPassage(images[p.index], spec.frames, n + 1, p.splitAt)
             : layoutOnePage(
                 p.indexes.map((i) => images[i]),
                 spec.frames,
@@ -626,7 +688,17 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
           });
         }
       }
+      // 자를 자리가 있으면 그 네모 안만 보이게 한다(지문 두 단 흘리기).
+      if (it.clip) {
+        page.pushOperators(
+          pushGraphicsState(),
+          rectangle(it.clip.x, flip(it.clip.y + it.clip.h), it.clip.w, it.clip.h),
+          clip(),
+          endPath(),
+        );
+      }
       page.drawImage(it.img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
+      if (it.clip) page.pushOperators(popGraphicsState());
     }
     if (plan?.pages[n]?.kind === "toc") {
       await drawToc(page, frameFor(spec.frames, n + 1), plan.toc, fontForText, flip);

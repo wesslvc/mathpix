@@ -562,9 +562,27 @@ function circledNote(text: string): string {
 뒤바꾸지 마세요.`;
 }
 
-function withReference(prompt: string, reference: string): string {
+function withReference(prompt: string, reference: string, korean = false): string {
   const text = reference.trim();
   if (!text) return prompt;
+  /**
+   * **국어는 참고 글을 더 앞세운다**(사용자 요청).
+   *
+   * 국어 지문·문항은 표도 그림도 거의 없는 **순수한 글**이라, 사진을 보고
+   * 한 자씩 옮겨 그리는 것보다 글자 인식기가 읽은 것을 베끼는 편이 훨씬
+   * 정확하다. 다른 과목은 표·지도·그래프가 섞여 있어 사진이 우선이어야
+   * 하지만(참고에 배치가 없다) 국어는 그 위험이 작다.
+   *
+   * 그래도 **사진에만 있는 것**(밑줄·굵게 같은 인쇄된 강조, ㉠ 같은 원문자의
+   * 자리, 문단 나눔)은 사진을 따르게 남겨 둔다 — 참고 글에는 그게 없다.
+   */
+  const trust = korean
+    ? `이 글은 국어 지문·문항이라 표나 그림이 거의 없습니다. **참고 글을
+우선으로 삼아 한 글자도 빠뜨리거나 바꾸지 말고 그대로 옮겨 적으세요.**
+사진은 참고 글에 담기지 않은 것 — 인쇄된 밑줄·굵은 글씨, ㉠ 같은 원문자가
+붙은 자리, 문단 나눔과 (가)(나) 표지의 배치 — 을 확인하는 데 쓰세요.`
+    : `다만 참고도 틀릴 수 있습니다 — **사진과 어긋나면 사진이 맞습니다.** 참고에
+없는 것(표·그림의 배치, 선지 기호, 줄 나눔)은 사진을 그대로 따르세요.`;
   return `${prompt}
 
 참고 — 이 문제를 글자 인식기로 읽은 결과입니다(수식은 LaTeX 표기):
@@ -573,8 +591,7 @@ ${text}
 """
 글자를 그릴 때 이 참고를 보고 **그대로 옮겨 적으세요.** 읽기 어려운 글자를
 지어내는 것보다 이쪽이 정확합니다.
-다만 참고도 틀릴 수 있습니다 — **사진과 어긋나면 사진이 맞습니다.** 참고에
-없는 것(표·그림의 배치, 선지 기호, 줄 나눔)은 사진을 그대로 따르세요.
+${trust}
 LaTeX 표기는 글자 그대로 쓰지 말고 **수식으로 그리세요**(예: \\frac{1}{2} 는
 분수로).${circledNote(text)}`;
 }
@@ -610,6 +627,11 @@ export async function generateFigureImage(
   imageDataUrl: string,
   modelId: string,
   mode: FigureMode = "figure",
+  /**
+   * 국어인가. 국어는 지문·문항이 거의 글자뿐이라 Mathpix 가 사진보다 정확한
+   * 경우가 많다 — 참고 글을 더 앞세운다(사용자 요청).
+   */
+  korean = false,
   /** 문제 전체를 그릴 때 함께 주는 OCR 본문. 없으면 예전과 똑같이 동작한다. */
   reference?: string,
   /**
@@ -671,7 +693,7 @@ export async function generateFigureImage(
       "prompt",
       withInstruction(
         mode === "problem"
-          ? withReference(WHOLE_PROBLEM_PROMPT, reference ?? "")
+          ? withReference(WHOLE_PROBLEM_PROMPT, reference ?? "", korean)
           : PROMPT,
         instruction,
       ),

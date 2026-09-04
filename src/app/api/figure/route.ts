@@ -190,6 +190,7 @@ export async function POST(req: NextRequest) {
   let body: {
     image?: string;
     mode?: string;
+    korean?: boolean;
     problemId?: string;
     figureId?: string;
     reference?: string;
@@ -209,6 +210,7 @@ export async function POST(req: NextRequest) {
   const image = body.image;
   // "problem"이면 문제 한 개 전체를 다시 그린다(탐구). 프롬프트가 달라진다.
   const mode: FigureMode = body.mode === "problem" ? "problem" : "figure";
+  const korean = body.korean === true;
   // 문제 전체를 그리는 경우에는 결과를 **서버가 직접 저장**한다. 브라우저를
   // 닫아도 결과가 남게 하려는 것이다(자세한 이유는 persistWholeProblem 주석).
   const problemId = typeof body.problemId === "string" ? body.problemId : null;
@@ -376,6 +378,7 @@ export async function POST(req: NextRequest) {
           image,
           modelId,
           mode,
+          korean,
           reference,
           deadline.signal,
           inputSize,
