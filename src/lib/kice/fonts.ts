@@ -30,11 +30,20 @@ export const KICE_FONT_NAMES = Object.keys(KICE_FONT_FILES);
 
 let cached: Promise<Record<string, Uint8Array>> | null = null;
 
+/**
+ * **`force-cache` 를 쓰면 안 된다**(`frames.ts` 와 같은 사고). 브라우저가
+ * 예전에 받은 사본을 응답 헤더의 `max-age`(24시간)와 무관하게 그대로
+ * 내주므로, 서버 쪽 글꼴을 고쳐 올려도 이미 한 번 요청해 본 브라우저는
+ * 깨진 옛 글꼴을 계속 쓴다 — **실제로 이렇게 재발했다**(`(한)신중명조`의
+ * 마지막 글리프 버그를 고쳐 올렸는데도 같은 "Trying to access beyond
+ * buffer length" 가 그대로 떴다). 이 라우트는 ETag/Last-Modified 를
+ * 안 보내므로 `no-cache` 는 사실상 "항상 새로 받기"가 된다.
+ */
 export function loadKiceFonts(): Promise<Record<string, Uint8Array>> {
   cached ??= (async () => {
     const entries = await Promise.all(
       Object.entries(KICE_FONT_FILES).map(async ([name, file]) => {
-        const res = await fetch(`/api/kice/font/${file}`, { cache: "force-cache" });
+        const res = await fetch(`/api/kice/font/${file}`, { cache: "no-cache" });
         if (!res.ok) {
           const reason =
             res.status === 404
