@@ -18,6 +18,16 @@ export const KICE_FONT_FILES: Record<string, string> = {
   "(한)신중명조": "sinjungmyeongjo.ttf",
 };
 
+/**
+ * 이름 목록만 필요한 화면(글꼴 올리기 페이지)이 쓴다.
+ *
+ * **`fontSubset.ts` 에서 가져오면 안 된다** — 그 파일은 `subset-font`
+ * (harfbuzz WASM)를 불러오는데, 클라이언트 컴포넌트가 그걸 가져오면 웹팩이
+ * WASM 을 브라우저 번들에 넣으려다 실패한다("WebAssembly module... not
+ * flagged"). 자르는 일은 서버 라우트에서만 하고 화면은 이름만 안다.
+ */
+export const KICE_FONT_NAMES = Object.keys(KICE_FONT_FILES);
+
 let cached: Promise<Record<string, Uint8Array>> | null = null;
 
 export function loadKiceFonts(): Promise<Record<string, Uint8Array>> {
