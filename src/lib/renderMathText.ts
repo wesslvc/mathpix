@@ -145,7 +145,7 @@ const BOGI_ITEM = /^\s*[ㄱ-ㅎ]\s*[.,)]/;
 const CHOSEONG_JAMO = "ᄀᄁᄂᄃᄄᄅᄆᄇᄈᄉᄊᄋᄌᄍᄎᄏᄐᄑᄒ";
 const COMPAT_JAMO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
 
-function normalizeJamo(input: string): string {
+export function normalizeJamo(input: string): string {
   return input.replace(/[ᄀ-ᄒ]/g, (ch) => {
     const i = CHOSEONG_JAMO.indexOf(ch);
     return i === -1 ? ch : COMPAT_JAMO[i];

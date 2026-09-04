@@ -857,6 +857,25 @@ async function drawFlow(
           color: rgb(0, 0, 0),
         });
       }
+      if (piece.sq) {
+        // 밑줄과 같은 용도로 쓰이는 작은 네모 — 글자 잉크가 아니라 대략의
+        // 오름/내림 폭으로 그린다(정확한 글리프 경계일 필요는 없다).
+        const bx0 = x - it.size * 0.06;
+        const bx1 = x + piece.w + it.size * 0.06;
+        const by0 = baseline - it.size * 0.22;
+        const by1 = baseline + it.size * 0.82;
+        const rectLine = (ax: number, ay: number, bx: number, by: number) =>
+          page.drawLine({
+            start: { x: ax, y: ay },
+            end: { x: bx, y: by },
+            thickness: 0.6,
+            color: rgb(0, 0, 0),
+          });
+        rectLine(bx0, by0, bx1, by0);
+        rectLine(bx0, by1, bx1, by1);
+        rectLine(bx0, by0, bx0, by1);
+        rectLine(bx1, by0, bx1, by1);
+      }
     }
   }
 }

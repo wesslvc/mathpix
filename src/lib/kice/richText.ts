@@ -19,6 +19,14 @@ export type RichRun = {
   b?: boolean;
   /** 밑줄 — `밑줄 친 ㉠` 처럼 문제가 가리키는 자리라 빠뜨리면 안 된다. */
   u?: boolean;
+  /**
+   * 인쇄된 작은 네모 — 밑줄 대신 낱말·구절을 네모로 둘러 표시한 자리
+   * (`ⓐ에 대한 설명으로` 처럼 밑줄과 같은 용도로 쓰인다). 밑줄과 똑같이
+   * 문제가 가리키는 대상이라 빠뜨리면 안 된다. 예전에는 이걸 담을 자리가
+   * 없어서(RichRun 에 `b`/`u` 뿐) 모델이 이걸 표현하려고 문단 하나를 통째로
+   * `box` 블록(원래 조건 박스·<보기> 전용)으로 잘못 감싸는 일이 있었다.
+   */
+  sq?: boolean;
 };
 
 export type RichBlock =
@@ -43,10 +51,15 @@ function readRuns(raw: unknown): RichRun[] {
       continue;
     }
     if (!item || typeof item !== "object") continue;
-    const o = item as { t?: unknown; b?: unknown; u?: unknown };
+    const o = item as { t?: unknown; b?: unknown; u?: unknown; sq?: unknown };
     const t = typeof o.t === "string" ? o.t : "";
     if (!t) continue;
-    out.push({ t, ...(o.b === true ? { b: true } : {}), ...(o.u === true ? { u: true } : {}) });
+    out.push({
+      t,
+      ...(o.b === true ? { b: true } : {}),
+      ...(o.u === true ? { u: true } : {}),
+      ...(o.sq === true ? { sq: true } : {}),
+    });
   }
   return out;
 }

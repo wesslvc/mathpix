@@ -47,7 +47,7 @@ export const DEFAULT_FLOW_STYLE: FlowStyle = {
 export type Measure = (text: string, size: number, bold: boolean) => number;
 
 /** 한 줄에 놓인 토막 하나. `dx` 는 줄 왼쪽 끝에서의 거리. */
-export type FlowPiece = { t: string; dx: number; w: number; b?: boolean; u?: boolean };
+export type FlowPiece = { t: string; dx: number; w: number; b?: boolean; u?: boolean; sq?: boolean };
 
 export type FlowItem =
   | { kind: "line"; x: number; y: number; size: number; pieces: FlowPiece[] }
@@ -65,7 +65,7 @@ export type FlowColumn = { x: number; top: number; bottom: number; width: number
 export type FlowResult = { column: number; items: FlowItem[] };
 
 /** 줄 하나를 만들 재료. */
-type Chunk = { t: string; b?: boolean; u?: boolean };
+type Chunk = { t: string; b?: boolean; u?: boolean; sq?: boolean };
 
 /**
  * 문단을 줄로 나눈다. **그리디로 채운다** — 남은 폭에 들어가는 만큼 넣고
@@ -93,7 +93,12 @@ function breakRuns(
     let buf = "";
     const flush = () => {
       if (!buf) return;
-      line.push({ t: buf, ...(run.b ? { b: true } : {}), ...(run.u ? { u: true } : {}) });
+      line.push({
+        t: buf,
+        ...(run.b ? { b: true } : {}),
+        ...(run.u ? { u: true } : {}),
+        ...(run.sq ? { sq: true } : {}),
+      });
       used += measure(buf, size, run.b === true);
       buf = "";
     };
@@ -160,7 +165,14 @@ function placeLine(
   let dx = indent;
   for (const c of chunks) {
     const w = measure(c.t, size, c.b === true);
-    pieces.push({ t: c.t, dx, w, ...(c.b ? { b: true } : {}), ...(c.u ? { u: true } : {}) });
+    pieces.push({
+      t: c.t,
+      dx,
+      w,
+      ...(c.b ? { b: true } : {}),
+      ...(c.u ? { u: true } : {}),
+      ...(c.sq ? { sq: true } : {}),
+    });
     dx += w;
   }
   if (center != null && dx < center) {
@@ -240,9 +252,14 @@ export function flowBlocks(
         if (y + step > columns[col].bottom) {
           if (!nextColumn()) {
             // 남은 줄을 새 문단으로 돌려준다(들여쓰기는 이미 썼다).
-            const restRuns: RichRun[] = lines
-              .slice(i)
-              .flatMap((l) => l.map((c) => ({ t: c.t, ...(c.b ? { b: true } : {}), ...(c.u ? { u: true } : {}) })));
+            const restRuns: RichRun[] = lines.slice(i).flatMap((l) =>
+              l.map((c) => ({
+                t: c.t,
+                ...(c.b ? { b: true } : {}),
+                ...(c.u ? { u: true } : {}),
+                ...(c.sq ? { sq: true } : {}),
+              })),
+            );
             return restRuns.length > 0 ? { kind: "para", runs: restRuns } : null;
           }
         }
