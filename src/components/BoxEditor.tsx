@@ -22,7 +22,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * 두 개 생긴 적이 있다. 끄는 동안의 값은 ref 로 든다.
  */
 
-export type EditBox = { id: string; x: number; y: number; w: number; h: number };
+export type EditBox = {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /**
+   * 같은 묶음(한 문항)에 속하는 네모끼리 같은 값을 갖는다.
+   *
+   * **한 문항이 여러 단·여러 쪽에 걸치는 일이 흔하다** — 국어는 발문이 왼쪽
+   * 단 아래에서 시작해 오른쪽 단 위로, 심하면 다음 쪽으로 이어진다. 네모
+   * 하나만 잡게 두면 그런 문항은 통째로 넣을 수가 없다. 조각마다 네모를
+   * 그리고 같은 묶음으로 묶으면 자를 때 세로로 이어 붙인다.
+   */
+  group: string;
+};
 
 /** 이보다 작으면 그리다 만 것으로 본다(사진 크기 대비 비율). */
 const MIN_SIZE = 0.02;
@@ -40,18 +55,26 @@ export default function BoxEditor({
   image,
   boxes,
   onChange,
-  single = false,
   color = "#2563eb",
   labelOf,
+  picked,
+  onPick,
+  newGroup,
 }: {
   image: string;
   boxes: EditBox[];
   onChange: (boxes: EditBox[]) => void;
-  /** 한 개만 둘 수 있는가(지문처럼). 새로 그리면 기존 것을 갈아치운다. */
-  single?: boolean;
   color?: string;
-  /** 네모 위에 찍을 글자. 없으면 차례 번호. */
-  labelOf?: (index: number) => string;
+  /** 네모 위에 찍을 글자. 묶음 id 를 받는다. */
+  labelOf?: (groupId: string) => string;
+  /** 고른 묶음들. 이름표를 눌러 고른다(합치기·풀기에 쓴다). */
+  picked?: Set<string>;
+  onPick?: (groupId: string) => void;
+  /**
+   * 새로 그린 네모가 가질 묶음 id. 지문 단계처럼 **그린 것이 전부 한 덩어리**
+   * 여야 하는 곳에서는 고정값을 준다. 없으면 네모마다 새 묶음이다.
+   */
+  newGroup?: string;
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<Drag | null>(null);
@@ -93,6 +116,7 @@ export default function BoxEditor({
     if (drag.kind === "draw") {
       const box: EditBox = {
         id: drag.box.id,
+        group: drag.box.group,
         x: Math.min(drag.from.x, at.x),
         y: Math.min(drag.from.y, at.y),
         w: Math.abs(at.x - drag.from.x),
@@ -145,7 +169,7 @@ export default function BoxEditor({
     if (drag.kind === "draw") {
       // 손가락이 살짝 떨린 것은 네모가 아니다.
       if (!box || box.w < MIN_SIZE || box.h < MIN_SIZE) return;
-      onChange(single ? [box] : [...boxes, box]);
+      onChange([...boxes, box]);
       return;
     }
     if (!box) return;
@@ -171,7 +195,14 @@ export default function BoxEditor({
     if (e.button !== 0 && e.pointerType === "mouse") return;
     const at = ratio(e.clientX, e.clientY);
     if (!at) return;
-    const box: EditBox = { id: crypto.randomUUID(), x: at.x, y: at.y, w: 0, h: 0 };
+    const box: EditBox = {
+      id: crypto.randomUUID(),
+      x: at.x,
+      y: at.y,
+      w: 0,
+      h: 0,
+      group: newGroup ?? crypto.randomUUID(),
+    };
     dragRef.current = { kind: "draw", from: at, box };
     currentRef.current = box;
     setPreview(box);
@@ -225,9 +256,23 @@ export default function BoxEditor({
               덮어 버려 눌리지 않았다(실제 브라우저에서 클릭이 가로막혔다). */}
           <span
             className="absolute -top-0.5 left-0 z-10 flex -translate-y-full items-center gap-1 whitespace-nowrap rounded px-1 text-[11px] font-medium text-white"
-            style={{ background: color }}
+            style={{
+              background: color,
+              // 고른 묶음은 테두리로 표시한다(색을 바꾸면 지문/문제 구분과 섞인다).
+              outline: picked?.has(b.group) ? "2px solid #f59e0b" : undefined,
+            }}
           >
-            {labelOf ? labelOf(i) : String(i + 1)}
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPick?.(b.group);
+              }}
+              className={onPick ? "hover:underline" : "cursor-default"}
+            >
+              {labelOf ? labelOf(b.group) : String(i + 1)}
+            </button>
             <button
               type="button"
               // 지우려고 누른 것이 새 네모를 그리기 시작하면 안 된다.
@@ -237,6 +282,7 @@ export default function BoxEditor({
                 onChange(boxes.filter((q) => q.id !== b.id));
               }}
               aria-label="이 네모 지우기"
+              title="이 네모만 지웁니다"
               className="rounded px-1 leading-none hover:bg-white/25"
             >
               ×
