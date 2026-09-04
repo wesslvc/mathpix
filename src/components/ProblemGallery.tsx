@@ -17,6 +17,7 @@ import {
   type StoredFigure,
 } from "@/lib/storedFigures";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
+import type { KoreanMeta } from "@/lib/koreanSet";
 import FontSizeControl from "./FontSizeControl";
 import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import BoxRangeEditor from "./BoxRangeEditor";
@@ -58,6 +59,11 @@ export type GalleryProblem = {
   number: number | null;
   /** 이 문제의 배점. 정해두지 않았으면 null(정답표·통계에 안 쓴다). */
   points: number | null;
+  /**
+   * 국어 지문·문제 묶음. **지문은 문제가 아니다** — 번호를 붙이거나 정답을
+   * 붙이는 자리에서 빼고, 목록에서도 지문이라고 알려 준다.
+   */
+  korean?: KoreanMeta | null;
   /**
    * 못 낸 토큰. 0보다 크면 **잠긴 문제**다.
    *
@@ -747,6 +753,13 @@ export default function ProblemGallery({ problems }: Props) {
                 }`}
               />
               <span className="min-w-0 flex-1 truncate text-xs text-slate-600">
+                {/* 지문은 문제가 아니다. 번호가 없는 게 정상이라, 없다고
+                    알려 주는 대신 지문이라고 알려 준다. */}
+                {problem.korean?.role === "passage" && (
+                  <span className="mr-1 rounded bg-emerald-100 px-1 font-medium text-emerald-700">
+                    지문{problem.korean.title ? ` · ${problem.korean.title}` : ""}
+                  </span>
+                )}
                 {problem.number != null && (
                   <span className="mr-1 font-medium text-slate-500">
                     {problem.number}번
