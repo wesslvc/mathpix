@@ -455,14 +455,7 @@ function parseAnswerKey(text: string): AnswerKeyItem[] {
  * **Mathpix 가 읽은 글을 함께 준다.** 글자를 정확히 읽는 일은 Mathpix 가 낫고,
  * 무엇이 문단이고 무엇이 상자인지 가리는 일은 vision 모델이 낫다.
  */
-/**
- * 지문을 옮겨 적는 모델. **사용자가 terra → sol 로 바꾸라고 정했다**(더
- * 꼼꼼히 읽기를 기대). 이름을 못 박아 두는 것은 이 저장소의 규칙이다 —
- * 404 면 조용히 다른 모델로 갈아타지 않고 **그 이름을 그대로 알린다**
- * (`explain404` 가 이 계정의 gpt 이름들을 함께 보여 준다). 이름이 다르면
- * 재배포 없이 `OPENAI_TEXT_MODEL` 로 고칠 수 있다.
- */
-export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.6-sol";
+export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.6-terra";
 
 const KOREAN_TEXT_PROMPT = `task: transcribe Korean SAT (수능) 국어 passage image into structured text for re-typesetting.
 reproduce EXACTLY — copying, not editing.
@@ -496,13 +489,6 @@ export async function readKoreanRichText(
   imageDataUrl: string,
   reference: string,
   signal?: AbortSignal,
-  /**
-   * 지문을 위에서 아래로 잘라 **확대한** 조각들(`passageTiles.ts`). 없어도 된다.
-   *
-   * 통째로 보낸 한 장에서는 글자 높이가 20~30px 라 밑줄·네모 표시·ㄱㄴㄷ
-   * 표지가 잘 안 보인다. 조각을 함께 주면 같은 자리를 몇 배 크게 볼 수 있다.
-   */
-  tiles: string[] = [],
 ): Promise<{ blocks: unknown; usage?: GradeUsage; model: string }> {
   // 조합용 자모(ᄀᄂᄃ)를 먼저 호환용(ㄱㄴㄷ)으로 바꾼다 — Mathpix 가 이 형태로
   // 주는 경우가 있는데, 그대로 두면 모델이 "참고 글을 베끼라"는 지시를 따라
@@ -549,24 +535,9 @@ ${cleanedReference}
 """`
     : KOREAN_TEXT_PROMPT;
 
-  /**
-   * **확대 조각을 함께 보낸다.** 첫 장은 늘 원본 전체(구조를 보는 용도),
-   * 그 뒤가 위에서 아래로 겹치게 자른 확대본이다. 순서를 프롬프트에 적어
-   * 두지 않으면 모델이 조각을 **서로 다른 지문**으로 오해해 같은 문단을
-   * 두 번 적는다.
-   */
-  const zoomNote = tiles.length
-    ? `
-images: [1] whole passage — use for STRUCTURE (paragraph breaks, box borders, reading order).
-[2..${tiles.length + 1}] the SAME passage, cut top-to-bottom into overlapping zoomed strips. same text, magnified — NOT extra passages, never transcribe a paragraph twice.
-read small marks from the ZOOMED strips, they are what you cannot see in [1]: printed underline (u), the small box around a word (sq), bold (b), ㄱ/ㄴ/ㄷ list markers, (가)(나) markers.
-LOOK CLOSELY at every place carrying such a mark before deciding — an underline is a thin rule directly under the glyphs; a sq is a thin rectangle around a word or phrase. strips overlap, so a line near a strip edge appears whole in the neighbouring strip.
-when [1] and a strip disagree about a small mark, the strip wins.`
-    : "";
-
   const { text, usage, model } = await callVision(
-    `${prompt}${zoomNote}`,
-    [imageDataUrl, ...tiles],
+    prompt,
+    [imageDataUrl],
     "지문 인식",
     signal,
     OPENAI_TEXT_MODEL,

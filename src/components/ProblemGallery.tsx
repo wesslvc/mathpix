@@ -21,7 +21,6 @@ import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { KoreanMeta } from "@/lib/koreanSet";
 import { readRichBlocks, type RichBlock } from "@/lib/kice/richText";
 import { enhanceContrast } from "@/lib/autoContrast";
-import { makeZoomTiles } from "@/lib/passageTiles";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
 import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "@/lib/layout";
@@ -392,23 +391,12 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       } catch {
         // Mathpix 가 실패해도 진행한다 — 사진만 보고 읽는 예전 경로와 같다.
       }
-      const tiles = await makeZoomTiles(crop);
-      setPassageStatus({
-        mathpix: reference ? "ok" : "failed",
-        terra: "running",
-        tiles: tiles.length,
-      });
+      setPassageStatus({ mathpix: reference ? "ok" : "failed", terra: "running" });
 
       const res = await fetch("/api/korean-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // 밑줄·네모 표시가 있는 자리를 크게 보게 확대 조각을 함께 보낸다
-        // (`KoreanModePanel` 과 같다 — 두 경로가 달라지면 안 된다).
-        body: JSON.stringify({
-          image: enhanced,
-          reference,
-          tiles,
-        }),
+        body: JSON.stringify({ image: enhanced, reference }),
       });
       const json = (await res.json()) as {
         blocks?: unknown;
@@ -423,7 +411,6 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       setPassageStatus({
         mathpix: reference ? "ok" : "failed",
         terra: "done",
-        tiles: tiles.length,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
       });
