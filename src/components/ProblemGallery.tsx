@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toPng } from "html-to-image";
@@ -23,12 +24,27 @@ import { enhanceContrast } from "@/lib/autoContrast";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
 import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "@/lib/layout";
-import BoxRangeEditor from "./BoxRangeEditor";
-import TextEditTabs from "./TextEditTabs";
-import DiagramAdjuster, { DEFAULT_DIAGRAM_LAYOUT } from "./DiagramAdjuster";
+import { DEFAULT_DIAGRAM_LAYOUT } from "./DiagramAdjuster";
 import { DEFAULT_TABLE_LAYOUT } from "@/lib/diagramLayout";
-import DraggableCard from "./DraggableCard";
-import DiagramCropModal from "./DiagramCropModal";
+
+/**
+ * **수정 모달에서만 쓰는 것들은 열 때 받는다.**
+ *
+ * 이 화면에 들어온 사람 대부분은 목록만 보고 나가는데, 예전에는 수정 모달의
+ * 짐(본문 편집기·박스 편집기·도형 조절·다시 오려내기 모달·카드 드래그)을
+ * 전부 처음부터 받고 있었다. 목록을 그리는 데는 하나도 필요 없다.
+ *
+ * 전부 `{editing && ...}` 안에서만 그려지므로 `ssr: false` 로 미뤄도 보이는
+ * 게 달라지지 않는다 — "수정"을 누르는 그 동작이 곧 받아 오는 신호다.
+ *
+ * `DEFAULT_DIAGRAM_LAYOUT` 은 **값**이라 위에서 따로 정적으로 가져온다(기본값은
+ * 모달을 열기 전에도 필요하다 — 미뤘다면 첫 렌더에 undefined 가 된다).
+ */
+const BoxRangeEditor = dynamic(() => import("./BoxRangeEditor"), { ssr: false });
+const TextEditTabs = dynamic(() => import("./TextEditTabs"), { ssr: false });
+const DiagramAdjuster = dynamic(() => import("./DiagramAdjuster"), { ssr: false });
+const DraggableCard = dynamic(() => import("./DraggableCard"), { ssr: false });
+const DiagramCropModal = dynamic(() => import("./DiagramCropModal"), { ssr: false });
 import { useFigureJobs } from "./FigureJobsProvider";
 import { rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
 import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";

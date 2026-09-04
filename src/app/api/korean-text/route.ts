@@ -91,6 +91,28 @@ export async function POST(req: NextRequest) {
     );
     const estKrw = usage ? gradingEstKrw(usage) : undefined;
     const chargedTokens = await billing.settle(estKrw);
+
+    /**
+     * **요청마다 usage 를 찍는다**(`figureImageGen` 과 같은 이유).
+     *
+     * 사용자가 "terra 는 천 토큰 초반밖에 안 드는데 정상이냐, luna 는 제목
+     * 하나에 몇천 토큰 드는데" 라고 물었을 때, 우리 쪽에 남는 기록이 하나도
+     * 없어서 **짐작밖에 할 수 없었다.** 그림 생성에서 똑같은 일을 겪고
+     * (청구서가 하루 단위로만 나와 무엇이 비용을 끌어올리는지 끝내 단정하지
+     * 못했다) 로그를 남기기로 한 자리인데, 지문 인식에는 그게 안 들어가 있었다.
+     *
+     * 입력·출력을 갈라 찍는 게 중요하다 — 이 일은 입력이 사진 + 참고 글이고
+     * 출력이 지문 전체 JSON 이라, 어느 쪽이 큰지 알아야 값이 이상할 때
+     * (참고 글이 안 붙었나? 출력이 잘렸나?) 짚을 수 있다. 참고 글 길이도
+     * 함께 남긴다 — 0 이면 Mathpix 가 실패했다는 뜻이고, 그러면 글자 정확도가
+     * 떨어지는 이유가 바로 설명된다.
+     */
+    console.info(
+      `[korean-text] usage model=${model} 참고글=${reference.length}자 ` +
+        `in=${usage?.inputTokens ?? "?"} out=${usage?.outputTokens ?? "?"} ` +
+        `est=${estKrw != null ? `${Math.round(estKrw)}원` : "단가미설정"} ` +
+        `차감=${chargedTokens}토큰`,
+    );
     return NextResponse.json({
       blocks,
       // 금액은 무제한 계정에만 보여준다(막는 자리는 서버다).

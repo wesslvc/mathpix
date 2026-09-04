@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { categoryLabel, type Category, type Folder } from "@/lib/supabase/types";
@@ -45,6 +45,22 @@ export default function CategoryList({
   const [renamingFolder, setRenamingFolder] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [busy, setBusy] = useState(false);
+  /**
+   * **`router.refresh()` 는 기다려 주지 않는다.**
+   *
+   * 이 함수는 서버에 다시 그려 달라고 부탁만 하고 **곧바로 반환한다** — 그래서
+   * `finally { setBusy(false) }` 가 서버 응답이 오기 한참 전에 실행됐다.
+   * 화면은 "다 됐다"는 얼굴을 하고 있는데 목록은 아직 예전 것이고, 잠시 뒤
+   * 갑자기 바뀐다. 사용자가 말한 "뚜둑뚜둑 끊긴 다음 다음 화면이 뜬다"가
+   * 이 자리에도 있었다(폴더 만들기·이름 바꾸기·실모 옮기기).
+   *
+   * `startTransition` 으로 감싸면 그 갱신이 끝날 때까지 `pending` 이 켜져
+   * 있으므로, 그때까지 눌린 상태를 유지할 수 있다.
+   */
+  const [pending, startTransition] = useTransition();
+  const working = busy || pending;
+  /** 서버 갱신이 실제로 끝날 때까지 pending 이 유지되게 감싼다. */
+  const refresh = () => startTransition(() => router.refresh());
 
   function toggle(id: string) {
     setSelected((cur) => {
@@ -76,7 +92,7 @@ export default function CategoryList({
       if (error) throw error;
       setNewFolderName("");
       setCreatingFolder(false);
-      router.refresh();
+      refresh();
     } finally {
       setBusy(false);
     }
@@ -89,7 +105,7 @@ export default function CategoryList({
       const supabase = createClient();
       await supabase.from("folders").update({ name: renameValue.trim() }).eq("id", id);
       setRenamingFolder(false);
-      router.refresh();
+      refresh();
     } finally {
       setBusy(false);
     }
@@ -106,7 +122,7 @@ export default function CategoryList({
       // 지금 보고 있던 폴더를 지웠으면 전체 목록으로 나간다 — 없어진 폴더
       // 안에 계속 남아 있을 수는 없다.
       router.push("/");
-      router.refresh();
+      refresh();
     } finally {
       setBusy(false);
     }
@@ -115,7 +131,7 @@ export default function CategoryList({
   async function moveCategory(categoryId: string, folderId: string | null) {
     const supabase = createClient();
     await supabase.from("categories").update({ folder_id: folderId }).eq("id", categoryId);
-    router.refresh();
+    refresh();
   }
 
   const filtered = useMemo(() => {
@@ -268,7 +284,7 @@ export default function CategoryList({
                 </button>
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={working}
                   onClick={() => void deleteFolder(currentFolder.id, currentFolder.name)}
                   className="text-xs text-slate-400 underline underline-offset-2 hover:text-red-600"
                 >
@@ -313,7 +329,7 @@ export default function CategoryList({
               />
               <button
                 type="button"
-                disabled={busy || !newFolderName.trim()}
+                disabled={working || !newFolderName.trim()}
                 onClick={() => void createFolder()}
                 className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
               >
