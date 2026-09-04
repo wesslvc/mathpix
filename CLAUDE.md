@@ -1993,6 +1993,36 @@ NW 손잡이로 줄이기 / 사진 바깥에서 놓기 / 너무 작은 것 무�
   `korean`(과 `gradeId`)을 옮겨 담았는지 확인할 것** — 이번에 놓친 게
   바로 이 패턴이었다.
 
+**지문 인식 진행 상황도 그림 생성 큐처럼 보여준다(`PassageProgress`,
+2026-09-04).** 예전에는 "지문을 글자로 옮기는 중..." 한 줄뿐이라, 지금 뭘
+하고 있는지(Mathpix인지 terra인지) · 비용이 얼마인지 알 수 없었다.
+`FigureJobsPanel`이 그림 작업에 이미 하던 방식(단계 이름 + 비용)을 그대로
+가져왔다 — 사용자가 "초 단위로 말고 Mathpix/terra 라고 구체적으로, 비용도
+보여달라"고 요청했다.
+
+- `src/components/PassageProgress.tsx` — `{mathpix, terra, chargedTokens,
+  costKrw}` 상태를 받아 두 줄(`Mathpix: ...` / `terra: ...`) + 끝나면 비용
+  한 줄을 그린다. `KoreanModePanel`(처음 만들 때)과 `ProblemGallery`(저장된
+  지문 재인식)가 똑같이 쓴다 — 두 곳이 서로 다르게 보이면 안 된다.
+- **`ProblemGallery.reReadPassage()`에 Mathpix 호출을 새로 추가했다**(1토큰
+  더 든다). 처음에는 비용을 아끼려고 뺐었는데, "참고 글이 있어야 terra
+  정확도가 오른다"는 게 이 기능 전체의 설계 전제라 재인식에서만 빼면
+  처음 만들 때보다 정확도가 떨어지는 경로가 하나 더 생긴다. Mathpix가
+  실패해도(`try/catch`) terra 호출은 그대로 진행한다(사진만 보고 읽는
+  예전 경로와 같다).
+- `KoreanModePanel` 쪽은 Mathpix 를 또 부르지 않는다 — 제목 짓기
+  (`makeTitle`)가 이미 읽어 둔 것을 재사용하므로, 여기서는 "이미 확보함
+  (ok)" 상태만 바로 보여준다.
+- **비용 표시는 기존 규칙을 그대로 따른다.** terra(`/api/korean-text`)가
+  돌려주는 `chargedTokens`(일반 계정) · `usage.estKrw`(무제한 계정만,
+  서버가 가린다)를 그대로 쓴다 — 화면에서 새로 계산하지 않는다. Mathpix
+  단계는 늘 1토큰 고정이라 숫자를 받아올 필요 없이 그냥 적어 둔다.
+- `unlimited` prop을 `ProblemGallery`에 새로 추가해 `page.tsx`의
+  `access.unlimited`를 그대로 넘긴다(`KoreanModePanel`은 이미 받고 있었다).
+- **검증**: `npx tsc --noEmit`·`npm run build` 통과(`/categories/[id]`
+  44.7kB→45.4kB). **실제 로그인 계정으로 두 화면 모두 Mathpix→terra 두
+  줄과 비용이 실제로 뜨는지는 아직 못 봤다** — 다음 세션 검증 항목.
+
 **글꼴 5벌 전부 갱신 완료(2026-09-04).** 예전엔 버킷의 평가원 글꼴이 좁게
 잘라 둔 것이라 한글이 거의 없어서 지문을 글자로 조판하면 대부분이 빠졌다.
 지금은 다섯 벌 다 갱신했다 — `(한)신중명조`(본문 글꼴)는 완성형 한글 전체

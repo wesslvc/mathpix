@@ -392,7 +392,7 @@ export default async function CategoryPage({
         />
       )}
 
-      <ProblemGallery problems={galleryProblems} />
+      <ProblemGallery problems={galleryProblems} unlimited={access.unlimited} />
     </main>
   );
 }
