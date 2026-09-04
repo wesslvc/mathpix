@@ -91,9 +91,22 @@ function textFromFrames(): string {
   return [...seen].join("");
 }
 
+/**
+ * 완성형 한글 전체가 필요한 글꼴 — "이 자리에 어떤 글자가 올지 미리 셀 수
+ * 없는" 역할을 맡은 것들이다. `(한)신중명조`는 정답표·지문 본문이 그렇고,
+ * `(환)디나루`는 **표지 큰 제목**이 그렇다 — 원본 문구("2025학년도
+ * 대학수학능력시험문제지")를 사용자가 지은 실모 제목(예: "국어 테스트용")
+ * 으로 통째로 갈아 끼우는데(`KiceExportPanel`의 `replace` 맵), 그 제목은
+ * 사용자가 무엇이든 타이핑할 수 있어 미리 글자를 셀 수 없다. 좁게 자르면
+ * (frames.json에 박힌 글자만) 제목의 글자가 대부분 빠져서, PDF 뷰어가
+ * `.notdef` 를 감추려고 조용히 다른 글꼴로 대신 그린다 — 네모(⊠)가 찍히지는
+ * 않아 겉보기엔 "그냥 다른 서체로 보인다"뿐이라 한동안 못 알아챘다.
+ */
+const FULL_HANGUL_FONTS = new Set(["(한)신중명조", "(환)디나루"]);
+
 /** 이 글꼴 이름에 실제로 **필요한** 글자(검증도 이 값 기준으로 한다). */
 function textFor(fontName: string): string {
-  if (fontName === "(한)신중명조") return fullHangulText();
+  if (FULL_HANGUL_FONTS.has(fontName)) return fullHangulText();
   return textFromFrames() + (FRAME_EXTRA[fontName] ?? "") + "0123456789";
 }
 
@@ -101,9 +114,11 @@ function textFor(fontName: string): string {
  * `textFor()` 에 더해 subset-font 에 **실제로 보낼** 여분의 미끼 글자.
  * 필요해서가 아니라 위 `HANGUL_PADDING` 설명대로 마지막 글리프가 깨지는
  * 자리를 밀어내려는 것이다 — 검증은 이 글자들을 보지 않는다(없어도 상관없다).
+ * 이 한자들이 그 글꼴에 없으면 subset-font 가 조용히 빼놓을 뿐이라
+ * 안전하다(구조 검증이 그래도 깨진 게 남았는지 다시 확인한다).
  */
 function paddingFor(fontName: string): string {
-  return fontName === "(한)신중명조" ? HANGUL_PADDING : "";
+  return FULL_HANGUL_FONTS.has(fontName) ? HANGUL_PADDING : "";
 }
 
 export type SubsetResult = {
