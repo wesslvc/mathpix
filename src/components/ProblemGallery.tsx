@@ -20,6 +20,7 @@ import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { KoreanMeta } from "@/lib/koreanSet";
 import { readRichBlocks, type RichBlock } from "@/lib/kice/richText";
 import { enhanceContrast } from "@/lib/autoContrast";
+import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
 import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "@/lib/layout";
 import BoxRangeEditor from "./BoxRangeEditor";
@@ -89,6 +90,8 @@ function siblingPath(imagePath: string): string {
 
 type Props = {
   problems: GalleryProblem[];
+  /** 지문 재인식 비용을 원화로 보여줄지(무제한 계정만 — 막는 자리는 서버다). */
+  unlimited?: boolean;
 };
 
 /**
@@ -168,7 +171,7 @@ function OrderInput({
   );
 }
 
-export default function ProblemGallery({ problems }: Props) {
+export default function ProblemGallery({ problems, unlimited = false }: Props) {
   const router = useRouter();
   const [list, setList] = useState<GalleryProblem[]>(problems);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -227,6 +230,8 @@ export default function ProblemGallery({ problems }: Props) {
     undefined,
   );
   const [passageBusy, setPassageBusy] = useState(false);
+  /** 지문 재인식 진행 상황(Mathpix → terra). 안 돌고 있으면 null. */
+  const [passageStatus, setPassageStatus] = useState<PassageStatus | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   /**
    * 오려내기 창을 무엇 때문에 열었는가.
@@ -335,33 +340,73 @@ export default function ProblemGallery({ problems }: Props) {
   }
 
   /**
-   * 저장된 국어 지문을 다시 읽는다(`KoreanModePanel.readPassageBlocks` 와
-   * 같은 API, `/api/korean-text`). **이미지 재생성이 아니다** — 그림을
-   * 그리는 게 아니라 terra 가 글자를 다시 읽어 구조화된 블록을 돌려주고,
-   * 그걸로 평가원 글꼴 조판을 다시 만든다(5토큰).
+   * 저장된 국어 지문을 다시 읽는다 — `KoreanModePanel`의 제목 짓기(Mathpix)
+   * + `readPassageBlocks`(terra, `/api/korean-text`)와 같은 두 단계다.
+   * **이미지 재생성이 아니다** — 그림을 그리는 게 아니라 terra 가 글자를
+   * 다시 읽어 구조화된 블록을 돌려주고, 그걸로 평가원 글꼴 조판을 다시
+   * 만든다(terra 5토큰).
    *
-   * `KoreanModePanel` 과 달리 여기서는 Mathpix 참고 글을 새로 만들지
-   * 않는다(이미 한 번 인식된 걸 고치는 자리라 매번 Mathpix 를 다시 부르면
-   * 배가 든다) — 없어도 동작한다(사진만 보고 읽는 예전 경로와 같다).
+   * **여기서도 Mathpix 를 새로 부른다**(1토큰 추가). 처음에는 비용을
+   * 아끼려고 뺐었는데, 참고 글이 있어야 terra 의 글자 정확도가 오른다는
+   * 게 이 기능 전체의 설계 전제라 — 재인식에서만 빼면 처음 만들 때보다
+   * 정확도가 떨어지는 경로가 하나 더 생긴다. 두 단계의 진행 상황과 비용을
+   * `PassageProgress` 로 그대로 보여준다(초 단위 타이머가 아니라 지금
+   * Mathpix 인지 terra 인지 이름으로).
    */
   async function reReadPassage(crop: string) {
     setPassageBusy(true);
     setEditError(null);
+    setPassageStatus({ mathpix: "running", terra: "pending" });
+    let reference = "";
     try {
+      const enhanced = await enhanceContrast(crop);
+      try {
+        const ocrRes = await fetch("/api/mathpix", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: enhanced }),
+        });
+        const ocrJson = (await ocrRes.json()) as {
+          text?: string;
+          latex?: string;
+          error?: string;
+        };
+        if (ocrRes.ok) reference = (ocrJson.text || ocrJson.latex || "").trim();
+      } catch {
+        // Mathpix 가 실패해도 진행한다 — 사진만 보고 읽는 예전 경로와 같다.
+      }
+      setPassageStatus({ mathpix: reference ? "ok" : "failed", terra: "running" });
+
       const res = await fetch("/api/korean-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await enhanceContrast(crop) }),
+        body: JSON.stringify({ image: enhanced, reference }),
       });
-      const json = (await res.json()) as { blocks?: unknown; error?: string };
+      const json = (await res.json()) as {
+        blocks?: unknown;
+        error?: string;
+        chargedTokens?: number;
+        usage?: { estKrw?: number };
+      };
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
       const blocks = readRichBlocks(json.blocks);
       if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
       setEditKoreanBlocks(blocks);
+      setPassageStatus({
+        mathpix: reference ? "ok" : "failed",
+        terra: "done",
+        chargedTokens: json.chargedTokens,
+        costKrw: json.usage?.estKrw,
+      });
     } catch (err) {
-      setEditError(
-        err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.",
-      );
+      const message =
+        err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.";
+      setPassageStatus({
+        mathpix: reference ? "ok" : "failed",
+        terra: "error",
+        errorMessage: message,
+      });
+      setEditError(message);
     } finally {
       setPassageBusy(false);
     }
@@ -521,6 +566,7 @@ export default function ProblemGallery({ problems }: Props) {
     setEditFigures([]);
     setMaybeLostFigures(false);
     setEditKoreanBlocks(undefined);
+    setPassageStatus(null);
     void loadFigures(problem.id);
   }
 
@@ -1112,20 +1158,27 @@ export default function ProblemGallery({ problems }: Props) {
                           // 지문은 그림이 아니라 글자다 — "AI로 다시 그리기"
                           // (이미지 재생성, 유료 50토큰)를 쓰면 안 된다. 대신
                           // 같은 사진을 다시 인식(`reReadPassage`, 5토큰)한다.
-                          <div className="flex flex-wrap items-center gap-1.5 pl-1">
-                            <button
-                              type="button"
-                              onClick={() => reReadPassage(f.origin ?? raster)}
-                              disabled={passageBusy}
-                              className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-                            >
-                              {passageBusy ? "글을 옮겨 적는 중..." : "다시 인식하기"}
-                            </button>
-                            <span className="text-[11px] text-slate-400">
-                              {editKoreanBlocks
-                                ? "다시 인식했습니다 — 저장을 눌러야 반영됩니다."
-                                : "사진에서 글자를 다시 읽어 조판을 새로 만듭니다."}
-                            </span>
+                          <div className="flex flex-col gap-1.5 pl-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => reReadPassage(f.origin ?? raster)}
+                                disabled={passageBusy}
+                                className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                              >
+                                다시 인식하기
+                              </button>
+                              {!passageStatus && (
+                                <span className="text-[11px] text-slate-400">
+                                  {editKoreanBlocks
+                                    ? "다시 인식했습니다 — 저장을 눌러야 반영됩니다."
+                                    : "사진에서 글자를 다시 읽어 조판을 새로 만듭니다."}
+                                </span>
+                              )}
+                            </div>
+                            {passageStatus && (
+                              <PassageProgress status={passageStatus} unlimited={unlimited} />
+                            )}
                           </div>
                         )}
                         {f.kind !== "table" && raster && !isPassage && (

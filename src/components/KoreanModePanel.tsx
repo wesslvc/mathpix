@@ -21,6 +21,7 @@ import type { ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { useFigureJobs } from "./FigureJobsProvider";
 import BoxEditor, { type EditBox } from "./BoxEditor";
+import { PassageProgress, type PassageStatus } from "./PassageProgress";
 
 /**
  * **국어 모드** — 지문 한 편과 그에 딸린 문항들을 한 세트로 넣는다.
@@ -122,6 +123,8 @@ export default function KoreanModePanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  /** 지문 인식 진행 상황(Mathpix → terra). 지문이 없거나 아직 안 돌면 null. */
+  const [passageStatus, setPassageStatus] = useState<PassageStatus | null>(null);
 
   function reset() {
     setStep("pick");
@@ -458,27 +461,43 @@ export default function KoreanModePanel({
    */
   async function readPassageBlocks(crop: string) {
     setBusy("지문을 글자로 옮기는 중... (평가원 글꼴로 조판됩니다)");
+    // makeTitle 이 이미 Mathpix 로 읽어 둔 것을 재사용한다 — 여기서 다시
+    // 부르면 Mathpix 요청이 한 번 더 나가 토큰이 헛되이 든다. 없으면
+    // "건너뜀"이라 예전(참고 없이 사진만 보고 읽기)과 같다.
+    const reference = passageOcrRef.current ?? "";
+    setPassageStatus({ mathpix: reference ? "ok" : "skipped", terra: "running" });
     try {
       const res = await fetch("/api/korean-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: await enhanceContrast(crop),
-          // makeTitle 이 이미 Mathpix 로 읽어 둔 것을 재사용한다 — 없으면
-          // 빈 문자열이라 예전(참고 없이 사진만 보고 읽기)과 같다.
-          reference: passageOcrRef.current ?? "",
-        }),
+        body: JSON.stringify({ image: await enhanceContrast(crop), reference }),
       });
-      const json = (await res.json()) as { blocks?: unknown; error?: string };
+      const json = (await res.json()) as {
+        blocks?: unknown;
+        error?: string;
+        chargedTokens?: number;
+        usage?: { estKrw?: number };
+      };
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
       const blocks = readRichBlocks(json.blocks);
       if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
+      setPassageStatus({
+        mathpix: reference ? "ok" : "skipped",
+        terra: "done",
+        chargedTokens: json.chargedTokens,
+        costKrw: json.usage?.estKrw,
+      });
       return blocks;
     } catch (err) {
-      setError(
+      const message =
         (err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.") +
-          " 이 지문은 사진으로 대신 저장했어요.",
-      );
+        " 이 지문은 사진으로 대신 저장했어요.";
+      setPassageStatus({
+        mathpix: reference ? "ok" : "skipped",
+        terra: "error",
+        errorMessage: message,
+      });
+      setError(message);
       return undefined;
     }
   }
@@ -872,6 +891,9 @@ export default function KoreanModePanel({
         </div>
       )}
 
+      {passageStatus && (
+        <PassageProgress status={passageStatus} unlimited={unlimited} />
+      )}
       {note && <p className="text-sm text-emerald-700">{note}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
     </div>
