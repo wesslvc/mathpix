@@ -39,42 +39,46 @@ function subjectPrompt(subject: Subject, keyCount: number, method: GradingMethod
   // 공통 지시는 짧게 유지한다 — 매 채점 호출마다 입력 토큰으로 나가므로,
   // 특정 과목에만 해당하는 설명(예: 수학의 격자형 표기)은 여기 넣지 않고
   // 그 과목 분기에만 붙인다.
+  //
+  // **프롬프트는 영어로 쓴다**(사용자 지시). 같은 내용을 한글로 쓰면 토큰이
+  // 2~3배 든다 — 사람이 읽을 글이 아니라 모델에 보내는 지시라 영어가 싸다.
+  // 다만 한글 리터럴(과목명·표기 예시)은 **데이터**라 그대로 둔다.
   const common = `
-각 문항은 {"no": 문항번호(정수), "studentAnswer": 학생이 마킹한 답(문자열, 못 읽었거나 무마킹·복수마킹이면 null), "correctAnswer": 정답(문자열), "points": 배점(정수)} 형태입니다.
-- 정답표 전체에 배점 칸이 하나도 없으면 points 키를 아예 넣지 마세요(일부만 있는 것처럼 지어내지 마세요).
-- 문항을 하나도 빠뜨리지 말고, 정답표에 있는 문항 수만큼 전부 넣으세요.
-- 학생 답은 실제로 마킹(칠하거나 표시)된 것만 읽으세요. 정답표를 보고 지어내지 마세요.
-- 설명은 쓰지 말고 JSON만 답하세요.`;
+Each item is {"no": item number (integer), "studentAnswer": what the student marked (string; null if unreadable, unmarked or multi-marked), "correctAnswer": the correct answer (string), "points": marks (integer)}.
+- If the answer key has no marks column at all, omit the "points" key entirely (do not invent partial values).
+- Include every item; the count must match the answer key.
+- Read the student's answer only from what is actually marked. Never copy it from the answer key.
+- Answer with JSON only, no explanation.`;
 
   // 가채점표(손글씨)에는 OMR의 마킹 규칙(격자·원 마킹)이 아예 없다 — 문항
   // 번호 옆에 적힌 숫자를 그대로 읽으면 된다. 지우고 다시 쓴 흔적(취소선 등)
   // 처리만 따로 알려 준다.
   const sheetLabel =
     method === "handwritten"
-      ? "가채점표 — 학생이 문항 번호 옆에 손으로 쓴 답입니다. 마킹된 원을 찾지 말고 손글씨 숫자·문자를 그대로 읽으세요. 한 문항에 여러 개를 썼다가 지운 흔적(취소선 등)이 있으면 지워지지 않은 것을 답으로 보세요. 아무것도 안 쓴 문항은 무마킹(null)입니다."
-      : "OMR 카드 — 학생이 마킹(또는 적은) 답입니다.";
+      ? "a hand-marked tally sheet — the student wrote answers by hand next to the item numbers. Do not look for filled bubbles; read the handwritten digits/letters as they are. If an item shows several attempts with some struck through, take the one not struck through. An item with nothing written is unmarked (null)."
+      : "an OMR answer card — the student's marked (or written) answers.";
 
   // 탐구는 보통 1선택+2선택 두 과목을 같이 보지만, 한 과목만 풀어본
   // 연습(자체 제작 워크시트 등)도 있다 — 그때는 정답표 사진이 1장뿐이고
   // OMR에 구역을 나눌 것도 없다. keyCount로 갈라서, 1장이면 국어·수학과
   // 같은 "사진 두 장, slot 없음" 구조를 그대로 쓴다(아래로 흘러간다).
   if (subject === "elective" && keyCount === 2) {
-    return `당신은 한국 고등학교 탐구영역 시험을 채점하는 도우미입니다.
-사진은 세 장입니다.
-1) ${sheetLabel} 1선택 과목과 2선택 과목의 답이 한 장에 함께 있습니다(보통 각 20문항이고, 위아래 또는 좌우로 구역이 나뉘어 있습니다).
-2) 1선택 과목 정답표
-3) 2선택 과목 정답표
+    return `You grade Korean high-school 탐구영역 (elective science/social-studies) exams.
+There are three images:
+1) ${sheetLabel} It holds BOTH the first-choice and second-choice subjects (usually 20 items each, split into two zones top/bottom or left/right).
+2) answer key for the first-choice subject
+3) answer key for the second-choice subject
 
-1) 사진에서 1선택 과목 구역과 2선택 과목 구역을 각각 구분해서 읽고, 다음 JSON으로만 답하세요:
+Read the two zones of image 1 separately and answer with JSON only:
 {"slots":[{"slot":1,"items":[...]},{"slot":2,"items":[...]}]}
 ${common}
-- slot 1의 items 개수는 1선택 정답표의 문항 수와, slot 2는 2선택 정답표의 문항 수와 같아야 합니다.`;
+- slot 1 must have as many items as answer key 2, and slot 2 as many as answer key 3.`;
   }
 
   const intro =
     subject === "elective"
-      ? "당신은 한국 고등학교 탐구영역 시험을 채점하는 도우미입니다."
-      : "당신은 한국 고등학교 시험(내신·모의고사·수능)의 답안을 채점하는 도우미입니다.";
+      ? "You grade Korean high-school 탐구영역 exams."
+      : "You grade Korean high-school exams (school tests, mock exams, 수능).";
 
   // 수학은 문항 배치가 표준 수능·모의고사 형식으로 고정돼 있다(공통 22문항
   // + 선택 8문항 = 30문항, 객관식·단답형 자리가 항상 같다). "이 문항이
@@ -90,22 +94,24 @@ ${common}
   const mathNote =
     subject === "math" && method === "omr"
       ? `
-이 시험은 표준 수능·모의고사 형식입니다(문항이 이보다 적으면 있는 범위까지만 적용하세요):
-- 1~15번·23~28번은 객관식(①~⑤)입니다. 문항 번호가 가로 헤더로 먼저 나오고 그 아래 세로줄에 ①~⑤가
-  늘어선 격자로 표기됐다면, 가로줄이 아니라 문항 번호의 세로줄을 따라가며 마킹된 원을 찾으세요
-  (가로줄로 읽으면 다른 문항 마킹과 섞입니다). 문항 번호 숫자 자체는 라벨일 뿐 마킹이 아닙니다.
-- 16~22번·29~30번은 단답형입니다. 원 마킹이 아니라 "백·십·일" 세 줄 숫자 격자로 표기되며, 줄의
-  위치가 아니라 옆에 적힌 글자로 자리를 판단해 이어 붙이세요. 마킹 없는 자리는 0으로 봅니다
-  (예: 일=8·십=9→"98", 백=1→"100"). **세 줄이 모두 비었을 때만 무마킹**입니다.
+This is the standard 수능/mock-exam layout (if there are fewer items, apply it as far as it goes):
+- Items 1-15 and 23-28 are multiple choice (①-⑤). If they are printed as a grid with item
+  numbers as a horizontal header and ①-⑤ running down each column, follow the item number's
+  **column** downwards to find the filled bubble — reading along a row mixes items up. The item
+  number itself is a label, not a mark.
+- Items 16-22 and 29-30 are short answer. They use a three-row digit grid (hundreds/tens/units),
+  not bubbles. Decide each digit's place from the label printed beside the row, not from its
+  position, and concatenate. An unmarked place counts as 0 (e.g. units=8, tens=9 → "98";
+  hundreds=1 → "100"). **Only when all three rows are empty is it unmarked.**
 `
       : "";
 
   return `${intro}
-사진은 두 장입니다.
+There are two images:
 1) ${sheetLabel}
-2) 정답표 — 문항별 정답이고, 배점(점수) 칸이 있을 수도 있습니다.
+2) the answer key — correct answers per item, possibly with a marks column.
 ${mathNote}
-문항 번호 순서대로 읽어 다음 JSON으로만 답하세요:
+Read items in number order and answer with JSON only:
 {"slots":[{"items":[...]}]}
 ${common}`;
 }
@@ -331,23 +337,24 @@ export async function gradeWithVision(
  *   `(복합) 1번글 주제 + 2번글 주제`.
  * - 문학: 글 맨 아래에 저자와 제목이 적혀 있으므로 그것을 그대로 쓴다.
  */
-const KOREAN_TITLE_PROMPT = `당신은 한국 수능 국어 지문에 **짧은 제목**을 붙이는 도우미입니다.
-아래 지문 본문을 읽고 다음 JSON으로만 답하세요:
-{"title":"제목","kind":"독서"|"문학"|"기타"}
+const KOREAN_TITLE_PROMPT = `You write a **short title** for a Korean SAT (수능) 국어 passage.
+Read the passage below and answer with JSON only:
+{"title":"...","kind":"독서"|"문학"|"기타"}
 
-규칙:
-- **문학**(시·소설·수필·극)이면 글 끝(또는 처음)에 붙은 "- 작자, 「작품명」" 같은
-  출전 표기를 찾아 그대로 제목으로 쓰세요. 예: "김소월, 진달래꽃".
-  여러 작품이 묶여 있으면 " / " 로 이으세요.
-- **독서**(비문학)이면 글의 **주제**를 명사구로 짧게 적으세요. 예: "이중차분법".
-  줄거리를 설명하지 말고 무엇에 대한 글인지만 적으세요.
-- 독서인데 **성격이 다른 글이 둘 이상 묶인 복합지문**이면
-  \`(복합) 1번글 주제 + 2번글 주제\` 형태로 적으세요. 예: "(복합) 관세 정책 + 지식재산권".
-- 제목은 25자를 넘기지 마세요. 따옴표·마침표로 감싸지 마세요.
-- 판단이 어려우면 kind 를 "기타"로 두고 주제를 짧게 적으세요.
-- 설명은 쓰지 말고 JSON만 답하세요.
+Rules:
+- If it is **literature** (poem, fiction, essay, drama), find the attribution line printed at
+  the end (or start), e.g. "- 작자, 「작품명」", and use it verbatim as the title
+  (e.g. "김소월, 진달래꽃"). Join several works with " / ".
+- If it is **non-fiction (독서)**, give the **topic** as a short noun phrase, e.g. "이중차분법".
+  Do not summarise the argument — just say what it is about.
+- If it is non-fiction combining **two or more texts of different kinds**, write
+  \`(복합) topic1 + topic2\`, e.g. "(복합) 관세 정책 + 지식재산권".
+- Keep the title under 25 characters. Do not wrap it in quotes or end it with a period.
+- Write the title in Korean.
+- If unsure, set kind to "기타" and give a short topic.
+- JSON only, no explanation.
 
-지문 본문:
+Passage:
 `;
 
 export type KoreanTitle = { title: string; kind: string };
@@ -389,15 +396,15 @@ export async function readKoreanTitle(
 /** 답지 한 문항. 배점은 답지에 있을 때만 채운다(없는 것을 지어내지 않는다). */
 export type AnswerKeyItem = { no: number; answer: string; points?: number };
 
-const ANSWER_KEY_PROMPT = `당신은 한국 고등학교 시험의 **정답표(답지)** 사진을 읽어 데이터로 옮기는 도우미입니다.
-사진에 있는 문항을 하나도 빠뜨리지 말고 다음 JSON으로만 답하세요:
-{"items":[{"no": 문항번호(정수), "answer": "정답(문자열)", "points": 배점(정수)}]}
-- 정답이 원숫자(①~⑤)면 숫자만 적으세요(① → "1").
-- 단답형은 적힌 그대로 적으세요(분수·소수·문자 포함).
-- **배점 칸이 없으면 points 키를 아예 넣지 마세요.** 일부만 있는 것처럼 지어내지 마세요.
-- 사진이 여러 장이면 전부 합쳐서 한 배열로 주세요. 같은 번호가 두 번 나오면 한 번만 넣으세요.
-- 표가 여러 단으로 나뉘어 있으면 단을 따라 번호 순서대로 읽으세요.
-- 설명은 쓰지 말고 JSON만 답하세요.`;
+const ANSWER_KEY_PROMPT = `You transcribe a Korean high-school **answer key** photo into data.
+Include every item shown, answering with JSON only:
+{"items":[{"no": item number (integer), "answer": "correct answer", "points": marks (integer)}]}
+- If the answer is a circled digit (①-⑤), write the digit only (① → "1").
+- Short answers: write them exactly as printed (fractions, decimals, letters included).
+- **If there is no marks column, omit the "points" key entirely.** Do not invent partial values.
+- With several photos, merge them into one array. If a number appears twice, keep it once.
+- If the table is split into columns, read down each column in item-number order.
+- JSON only, no explanation.`;
 
 /** 답지 사진에서 문항별 정답(+배점)을 읽는다. */
 export async function readAnswerKeyWithVision(
