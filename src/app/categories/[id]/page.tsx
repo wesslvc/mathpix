@@ -23,6 +23,7 @@ import { examMaxScore } from "@/lib/gradeSummary";
 import GradeProblemUploader from "@/components/GradeProblemUploader";
 import AnswerKeyPanel from "@/components/AnswerKeyPanel";
 import ProblemNumberScanner from "@/components/ProblemNumberScanner";
+import { readKoreanMeta } from "@/lib/koreanSet";
 
 /**
  * 목록 조회에서 실제로 받아오는 모양.
@@ -57,6 +58,7 @@ type ProblemListRow = {
   gradeId: string | null;
   /** 이 문제의 배점. 정해두지 않았으면 null. */
   points: number | null;
+  korean: unknown;
 };
 
 const PROBLEM_LIST_COLUMNS = [
@@ -78,6 +80,9 @@ const PROBLEM_LIST_COLUMNS = [
   "debt:box_range->debt",
   "gradeId:box_range->>gradeId",
   "points:box_range->points",
+  // 국어 지문·문제 묶음. **지문을 문제로 취급하지 않으려면** 이 값이 필요하다
+  // (번호 인식·답지 붙이기에서 지문을 빼야 한다).
+  "korean:box_range->korean",
 ].join(", ");
 
 /** 목록 행에서 조건 박스 값을 되살린다(옛 형태 셋을 모두 받는다). */
@@ -211,6 +216,7 @@ export default async function CategoryPage({
         debt: typeof p.debt === "number" && p.debt > 0 ? p.debt : null,
         gradeId: p.gradeId ?? null,
         points: typeof p.points === "number" ? p.points : null,
+        korean: readKoreanMeta(p.korean),
       };
     })
     .filter((p): p is GalleryProblem => p !== null);
@@ -360,6 +366,10 @@ export default async function CategoryPage({
           에서 저장된 차례대로 1번부터 매겨져 실제 시험지와 어긋난다. */}
       <ProblemNumberScanner
         targets={galleryProblems
+          // **지문은 문제가 아니다.** 번호가 없는 게 정상이라 인식에 보내면
+          // 토큰만 쓰고 못 읽거나, 안내 줄("[1~3] 다음 글을 읽고…")에서
+          // 엉뚱한 번호를 집어 온다.
+          .filter((p) => p.korean?.role !== "passage")
           .filter((p) => (p.number ?? parseProblemNumber(p.text)) == null)
           .map((p) => ({ id: p.id, imageUrl: p.imageUrl, text: p.text }))}
       />
@@ -372,10 +382,13 @@ export default async function CategoryPage({
           categoryName={category.source}
           // 번호는 손으로 정한 값이 우선이고, 없으면 본문 맨 앞에서 뽑는다
           // (내보내기 화면과 같은 규칙 — 여기만 다르면 붙는 문제가 달라진다).
-          problems={galleryProblems.map((p) => ({
-            id: p.id,
-            number: p.number ?? parseProblemNumber(p.text),
-          }))}
+          problems={galleryProblems
+            // 지문에는 붙일 정답이 없다.
+            .filter((p) => p.korean?.role !== "passage")
+            .map((p) => ({
+              id: p.id,
+              number: p.number ?? parseProblemNumber(p.text),
+            }))}
         />
       )}
 

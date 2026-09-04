@@ -181,7 +181,9 @@ export default function KiceExportPanel({ title, items }: Props) {
         images,
         problems: pngs.map((png, i) => ({
           png,
-          label: showSource ? items[i].label : "",
+          // 지문에는 "N번" 표기를 붙이지 않는다 — 지문은 문제가 아니다.
+          label:
+            showSource && items[i].korean?.role !== "passage" ? items[i].label : "",
         })),
         pagePattern: [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
         koreanPlan: layoutKey === "korean" ? buildKoreanPlan() : undefined,
