@@ -200,11 +200,17 @@ export function flowBlocks(
   let col = 0;
   let y = columns[0]?.top ?? 0;
 
+  /**
+   * 새 단 맨 위에서 띄울 여백. 상자 안을 흘리는 동안에는 `boxPad` 가 되어
+   * 이어지는 도막의 글이 상자 위 테두리에 붙지 않는다(중첩 상자면 겹쳐 쌓인다).
+   */
+  let topPad = 0;
+
   /** 다음 단으로 넘어간다. 더 없으면 false. */
   const nextColumn = (): boolean => {
     col += 1;
     if (col >= columns.length) return false;
-    y = columns[col].top;
+    y = columns[col].top + topPad;
     return true;
   };
 
@@ -302,26 +308,45 @@ export function flowBlocks(
     };
 
     const remaining: RichBlock[] = [...block.blocks];
-    while (remaining.length > 0) {
-      const before = col;
-      // 안쪽 왼쪽 자리도 **매번 지금 단 기준으로** 다시 잰다 — 안 그러면
-      // 상자 속 문단이 단을 넘을 때 같은 버그가 상자 안에서도 재현된다.
-      const curLeft = columns[col].x + inset + style.boxPad;
-      const leftover = run(remaining[0], curLeft, innerWidth);
-      if (col !== before) {
-        // 단이 바뀌었다 — 여기까지를 한 도막으로 닫고 새 도막을 연다.
-        closeSegment(false);
-        startCol = col;
-        startY = columns[col].top;
-        openedTop = false;
-        y = startY + style.boxPad;
+    // 상자 안을 흘리는 동안에는 새 단 맨 위에도 `boxPad` 를 띄운다.
+    // `finally` 로 되돌리는 이유 — 아래에 이른 반환(leftover)이 있어서
+    // 한 자리에서만 복원하면 상자가 잘렸을 때 값이 새어 나간다.
+    const prevTopPad = topPad;
+    topPad = prevTopPad + style.boxPad;
+    try {
+      while (remaining.length > 0) {
+        const before = col;
+        // 안쪽 왼쪽 자리도 **매번 지금 단 기준으로** 다시 잰다 — 안 그러면
+        // 상자 속 문단이 단을 넘을 때 같은 버그가 상자 안에서도 재현된다.
+        const curLeft = columns[col].x + inset + style.boxPad;
+        const leftover = run(remaining[0], curLeft, innerWidth);
+        if (col !== before) {
+          // 단이 바뀌었다 — 여기까지를 한 도막으로 닫고 새 도막을 연다.
+          //
+          // **`y` 는 절대 건드리지 않는다.** 예전에는 여기서
+          // `y = startY + style.boxPad` 로 되돌렸는데, 그때는 방금 부른
+          // `run()` 이 **이미 새 단에 줄을 놓고 그만큼 y 를 내려놓은
+          // 뒤**다. 되돌리면 그 줄들 위에 다음 문단이 겹쳐 찍힌다 —
+          // 새 단 첫 줄이 y=0, 다음 문단이 y=8(줄 간격은 22.4)에 그려져
+          // 두세 줄이 서로 뭉개졌다. 사용자가 "단 넘어갈 때 찌그러진다"고
+          // 한 것이 정확히 이것이다(캡처로 확인).
+          //
+          // 새 도막의 글이 위 테두리에 붙지 않게 하는 일은 `topPad` 가
+          // 대신한다 — `nextColumn()` 이 처음부터 그만큼 내려서 시작한다.
+          closeSegment(false);
+          startCol = col;
+          startY = columns[col].top;
+          openedTop = false;
+        }
+        if (leftover) {
+          // 자리가 아예 없어 못 넣었다. 남은 것을 상자째 돌려준다.
+          closeSegment(false);
+          return { kind: "box", blocks: [leftover, ...remaining.slice(1)] };
+        }
+        remaining.shift();
       }
-      if (leftover) {
-        // 자리가 아예 없어 못 넣었다. 남은 것을 상자째 돌려준다.
-        closeSegment(false);
-        return { kind: "box", blocks: [leftover, ...remaining.slice(1)] };
-      }
-      remaining.shift();
+    } finally {
+      topPad = prevTopPad;
     }
     closeSegment(true);
     y += style.boxPad + style.paraGap;

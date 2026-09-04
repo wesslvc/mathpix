@@ -465,7 +465,13 @@ answer JSON only: {"blocks":[ ... ]}
 block = one of:
 - {"kind":"para","runs":[{"t":"text","b":true,"u":true,"sq":true}],"indent":true}
   \`b\`=printed bold, \`u\`=printed underline, \`sq\`=printed small box/rectangle drawn tightly around this word or phrase — a DIFFERENT mark from underline, used the same way (points at the expression a question refers to). omit each when absent. \`indent\`=paragraph's first line indented (usual for body paragraphs). split \`runs\` only where styling changes, else 1 run.
-- {"kind":"box","blocks":[ ... ]} — a bordered frame actually drawn in the image (조건 박스, <보기>, or a frame enclosing several lettered sections like (가)(나) together). one continuous border = exactly ONE box block containing every paragraph inside it, from where the border starts to where it ends — never split one border into multiple box blocks, never leave a paragraph that is visually inside the border sitting outside as a top-level para. only emit a box when a border is actually visible; never invent one.
+- {"kind":"box","blocks":[ ... ]} — a bordered frame actually drawn in the image (조건 박스, <보기>, or a frame enclosing several lettered sections like (가)(나) together). one continuous border = exactly ONE box block containing every paragraph inside it, from where the border starts to where it ends — never split one border into multiple box blocks, never leave a paragraph that is visually inside the border sitting outside as a top-level para.
+  a box is the EXCEPTION, not the default. rules:
+  - the passage body itself is NEVER in a box. 수능 국어 지문 본문(독서·문학·판소리 사설·고전소설) has no frame around it — plain paragraphs, even when it carries markers like [중모리], (가)(나), or 「」.
+  - if your candidate box would hold most of the passage, it is wrong — emit those paragraphs as top-level para blocks instead.
+  - a real box is small (a few lines), sits apart from the body, and you can see all four ruled sides.
+  - the column rule / page frame printed on every exam page is NOT a box.
+  - when unsure, do NOT emit a box. a missed box costs a border; an invented box swallows the whole passage.
 - {"kind":"figure","id":"f1","ratio":0.6} — picture/table not expressible as text. \`ratio\`=height/width.
 
 rules:

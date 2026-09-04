@@ -39,6 +39,13 @@ export default function CategoryList({
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /**
+   * **고르는 중인가.** 예전에는 체크박스가 줄마다 늘 떠 있고 그 옆에 폴더
+   * 고르는 드롭다운과 삭제 버튼까지 붙어서, 실모 하나를 여는 게 목적인
+   * 화면인데 컨트롤이 넷씩 보였다. 고르는 일은 "여러 개를 PDF 로 묶을 때"만
+   * 하는 일이라 평소에는 감춰 둔다 — 누르면 그때 체크박스가 나온다.
+   */
+  const [picking, setPicking] = useState(false);
   const [search, setSearch] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -147,50 +154,71 @@ export default function CategoryList({
 
   function Row({ category, showFolderTag = false }: { category: Category; showFolderTag?: boolean }) {
     const folderName = showFolderTag ? folderNameOf(category.folder_id) : null;
+    const label = categoryLabel(category, maxOf(category.id));
     return (
-      <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-        <input
-          type="checkbox"
-          checked={selected.has(category.id)}
-          onChange={() => toggle(category.id)}
-          className="h-4 w-4 shrink-0 rounded border-slate-300"
-          aria-label="선택"
-        />
-        <Link href={`/categories/${category.id}`} className="min-w-0 flex-1">
+      <div className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition hover:border-blue-300 hover:shadow">
+        {picking && (
+          <input
+            type="checkbox"
+            checked={selected.has(category.id)}
+            onChange={() => toggle(category.id)}
+            className="h-4 w-4 shrink-0 rounded border-slate-300"
+            aria-label={`${label} 선택`}
+          />
+        )}
+        {/* 줄 전체가 여는 자리다 — "열기 →" 를 따로 두지 않는다(누르는 자리가
+            둘이면 어디를 눌러야 할지 헷갈리고 줄만 길어진다). */}
+        <Link href={`/categories/${category.id}`} className="min-w-0 flex-1 py-0.5">
           <p className="truncate font-semibold text-ink">
-            {categoryLabel(category, maxOf(category.id))}
+            {label}
             {category.is_exam && (
               <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
                 실모
               </span>
             )}
           </p>
-          <p className="text-xs text-slate-400">
+          <p className="mt-0.5 text-xs text-slate-400">
             {folderName && <>📁 {folderName} · </>}
-            {new Date(category.created_at).toLocaleDateString("ko-KR")} 생성
+            {new Date(category.created_at).toLocaleDateString("ko-KR")}
           </p>
         </Link>
-        <div className="flex shrink-0 items-center gap-2">
-          <select
-            value={category.folder_id ?? NO_FOLDER}
-            onChange={(e) =>
-              void moveCategory(category.id, e.target.value === NO_FOLDER ? null : e.target.value)
-            }
-            className="rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-600 focus:border-blue-500 focus:outline-none"
-            aria-label="폴더로 이동"
+
+        {/* 폴더 옮기기·삭제는 자주 쓰는 일이 아니다 — `⋯` 안으로 넣어
+            평소에는 안 보이게 한다. `<details>` 를 쓰면 바깥을 눌렀을 때
+            닫는 처리를 직접 만들 필요가 없다(브라우저가 해 준다). */}
+        <details className="relative shrink-0">
+          <summary
+            className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 [&::-webkit-details-marker]:hidden"
+            aria-label={`${label} 더보기`}
           >
-            <option value={NO_FOLDER}>폴더 없음</option>
-            {folders.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
-          <DeleteCategoryButton categoryId={category.id} label={categoryLabel(category, maxOf(category.id))} />
-          <Link href={`/categories/${category.id}`} className="text-sm text-blue-600">
-            열기 →
-          </Link>
-        </div>
+            ⋯
+          </summary>
+          <div className="absolute right-0 top-9 z-20 flex w-52 flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              폴더로 옮기기
+              <select
+                value={category.folder_id ?? NO_FOLDER}
+                onChange={(e) =>
+                  void moveCategory(
+                    category.id,
+                    e.target.value === NO_FOLDER ? null : e.target.value,
+                  )
+                }
+                className="rounded border border-slate-300 px-2 py-1.5 text-sm text-ink focus:border-blue-500 focus:outline-none"
+              >
+                <option value={NO_FOLDER}>폴더 없음</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="border-t border-slate-100 pt-2">
+              <DeleteCategoryButton categoryId={category.id} label={label} />
+            </div>
+          </div>
+        </details>
       </div>
     );
   }
@@ -199,26 +227,58 @@ export default function CategoryList({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-400">
-          여러 실모를 체크하면 오답을 한 번에 PDF로 모을 수 있습니다.
-        </p>
+      {/* 검색과 도구를 한 줄에 둔다. 예전에는 안내 문구 한 줄 + PDF 버튼 한
+          줄 + 검색 한 줄 + 폴더 만들기 한 줄로 **네 줄**이 목록 위를 차지했다. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="실모 이름으로 검색"
+          className="min-w-[12rem] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+        />
+        {!currentFolder && !creatingFolder && (
+          <button
+            type="button"
+            onClick={() => setCreatingFolder(true)}
+            className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-ink hover:bg-slate-50"
+          >
+            + 폴더
+          </button>
+        )}
         <button
           type="button"
-          onClick={exportSelected}
-          disabled={selected.size === 0}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          onClick={() => {
+            setPicking((v) => !v);
+            setSelected(new Set());
+          }}
+          className={`shrink-0 rounded-lg border px-3 py-2 text-sm ${
+            picking
+              ? "border-blue-500 bg-blue-50 text-blue-700"
+              : "border-slate-300 bg-white text-ink hover:bg-slate-50"
+          }`}
         >
-          선택한 {selected.size || ""}개로 PDF 만들기
+          {picking ? "선택 끝내기" : "선택해서 PDF"}
         </button>
       </div>
 
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="실모 이름으로 검색 (폴더 안이든 밖이든 전체에서 찾아요)"
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-      />
+      {/* 고르는 중일 때만 나오는 띠. 몇 개 골랐는지와 만들기 버튼이 여기 있다. */}
+      {picking && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+          <p className="text-xs text-blue-800">
+            {selected.size === 0
+              ? "PDF로 묶을 실모를 골라주세요."
+              : `${selected.size}개 선택됨`}
+          </p>
+          <button
+            type="button"
+            onClick={exportSelected}
+            disabled={selected.size === 0}
+            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+          >
+            PDF 만들기
+          </button>
+        </div>
+      )}
 
       {nothingAtAll ? (
         <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
@@ -271,30 +331,44 @@ export default function CategoryList({
               </>
             ) : (
               <>
-                <h2 className="text-lg font-semibold text-ink">📁 {currentFolder.name}</h2>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRenamingFolder(true);
-                    setRenameValue(currentFolder.name);
-                  }}
-                  className="text-xs text-slate-400 underline underline-offset-2 hover:text-slate-600"
-                >
-                  이름 바꾸기
-                </button>
-                <button
-                  type="button"
-                  disabled={working}
-                  onClick={() => void deleteFolder(currentFolder.id, currentFolder.name)}
-                  className="text-xs text-slate-400 underline underline-offset-2 hover:text-red-600"
-                >
-                  삭제
-                </button>
+                <h2 className="min-w-0 flex-1 truncate text-lg font-semibold text-ink">
+                  📁 {currentFolder.name}
+                </h2>
+                {/* 폴더 이름 바꾸기·삭제도 실모 줄과 같은 `⋯` 로 통일한다 —
+                    화면마다 다른 모양이면 어디에 뭐가 있는지 외워야 한다. */}
+                <details className="relative shrink-0">
+                  <summary
+                    className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 [&::-webkit-details-marker]:hidden"
+                    aria-label="폴더 더보기"
+                  >
+                    ⋯
+                  </summary>
+                  <div className="absolute right-0 top-9 z-20 flex w-40 flex-col rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRenamingFolder(true);
+                        setRenameValue(currentFolder.name);
+                      }}
+                      className="rounded-lg px-3 py-2 text-left text-sm text-ink hover:bg-slate-50"
+                    >
+                      이름 바꾸기
+                    </button>
+                    <button
+                      type="button"
+                      disabled={working}
+                      onClick={() => void deleteFolder(currentFolder.id, currentFolder.name)}
+                      className="rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-40"
+                    >
+                      폴더 삭제
+                    </button>
+                  </div>
+                </details>
               </>
             )}
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2.5">
             {categories
               .filter((c) => c.folder_id === currentFolder.id)
               .map((c) => (
@@ -302,7 +376,9 @@ export default function CategoryList({
               ))}
             {categories.filter((c) => c.folder_id === currentFolder.id).length === 0 && (
               <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400">
-                이 폴더는 비어 있어요.
+                이 폴더는 비어 있어요. 위에서 실모를 추가하거나, 전체 목록에서
+                실모의 <span className="font-medium">⋯ → 폴더로 옮기기</span>로
+                가져올 수 있어요.
               </p>
             )}
           </div>
@@ -310,20 +386,19 @@ export default function CategoryList({
       ) : (
         // ── 전체(루트) ───────────────────────────────────────────
         <div className="flex flex-col gap-4">
-          {!creatingFolder ? (
-            <button
-              type="button"
-              onClick={() => setCreatingFolder(true)}
-              className="self-start text-sm text-blue-600 underline underline-offset-2 hover:text-blue-800"
-            >
-              + 폴더 만들기
-            </button>
-          ) : (
+          {creatingFolder && (
             <div className="flex items-center gap-2">
               <input
                 autoFocus
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createFolder();
+                  if (e.key === "Escape") {
+                    setCreatingFolder(false);
+                    setNewFolderName("");
+                  }
+                }}
                 placeholder="폴더 이름"
                 className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
               />
@@ -348,32 +423,40 @@ export default function CategoryList({
             </div>
           )}
 
+          {/* 폴더는 **격자**로 놓는다. 한 줄에 하나씩 쌓으면 폴더가 몇 개만
+              돼도 실모 목록이 화면 아래로 밀려나 "파일탐색기 같다"는 느낌이
+              안 난다. 좁은 화면에서는 한 줄, 넓으면 두세 줄이다. */}
           {folders.length > 0 && (
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {folders.map((folder) => {
                 const count = categories.filter((c) => c.folder_id === folder.id).length;
                 return (
                   <Link
                     key={folder.id}
                     href={`/?folder=${folder.id}`}
-                    className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm hover:border-blue-300 hover:bg-blue-50"
+                    className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
                   >
-                    <span className="font-medium text-ink">📁 {folder.name}</span>
-                    <span className="text-xs text-slate-400">{count}개</span>
+                    <span aria-hidden className="text-lg leading-none">📁</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-ink">
+                        {folder.name}
+                      </span>
+                      <span className="block text-xs text-slate-400">{count}개</span>
+                    </span>
                   </Link>
                 );
               })}
             </div>
           )}
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2.5">
             {categories
               .filter((c) => !c.folder_id)
               .map((c) => (
                 <Row key={c.id} category={c} />
               ))}
             {categories.length > 0 && categories.every((c) => c.folder_id) && folders.length > 0 && (
-              <p className="text-center text-sm text-slate-400">
+              <p className="py-4 text-center text-sm text-slate-400">
                 폴더 밖에는 실모가 없어요. 위 폴더를 눌러 들어가보세요.
               </p>
             )}
