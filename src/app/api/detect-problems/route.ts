@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { DetectError, detectProblems } from "@/lib/detectProblems";
+import { DetectError, detectKoreanRegions, detectProblems } from "@/lib/detectProblems";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -15,7 +15,7 @@ export const maxDuration = 60;
  * 화면에서도 감추지만 막는 자리는 여기다 — 화면은 얼마든지 우회할 수 있다.
  */
 export async function POST(req: NextRequest) {
-  let body: { image?: string };
+  let body: { image?: string; mode?: string };
   try {
     body = await req.json();
   } catch {
@@ -51,6 +51,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // 국어는 지문과 문제를 **한 번의 호출로 함께** 잡는다 — 나누면 그만큼
+    // 돈이 더 든다. 뒤처리(묶기·이어 붙이기)가 달라서 함수만 갈린다.
+    if (body.mode === "korean") {
+      const { regions, model } = await detectKoreanRegions(body.image);
+      return NextResponse.json({ regions, model });
+    }
     const { problems, model } = await detectProblems(body.image);
     return NextResponse.json({ problems, model });
   } catch (err) {
