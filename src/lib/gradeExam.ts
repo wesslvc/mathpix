@@ -20,6 +20,12 @@ export { computeSummary } from "./gradeSummary";
 export type GradeUsage = {
   inputTokens: number;
   outputTokens: number;
+  /**
+   * 그중 **캐시로 처리된** 입력 토큰. 캐시 단가가 정가의 10분의 1이라
+   * (terra 기준 $2.00 → $0.20) 이걸 안 세면 원가를 크게 부풀려 잡는다.
+   * 안 주는 응답도 있어서 선택 항목이다.
+   */
+  cachedInputTokens?: number;
 };
 
 export class GradeError extends Error {
@@ -293,12 +299,26 @@ async function callVision(
     : ((json?.choices as { message?: { content?: string } }[])?.[0]?.message?.content ?? "");
 
   const usageRaw = json?.usage as
-    | { input_tokens?: number; output_tokens?: number; prompt_tokens?: number; completion_tokens?: number }
+    | {
+        input_tokens?: number;
+        output_tokens?: number;
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        // Responses API / Chat Completions 가 캐시된 입력을 알려 주는 자리.
+        input_tokens_details?: { cached_tokens?: number };
+        prompt_tokens_details?: { cached_tokens?: number };
+      }
     | undefined;
+  const cached =
+    usageRaw?.input_tokens_details?.cached_tokens ??
+    usageRaw?.prompt_tokens_details?.cached_tokens;
   const usage = usageRaw
     ? {
         inputTokens: usageRaw.input_tokens ?? usageRaw.prompt_tokens ?? 0,
         outputTokens: usageRaw.output_tokens ?? usageRaw.completion_tokens ?? 0,
+        ...(typeof cached === "number" && cached > 0
+          ? { cachedInputTokens: cached }
+          : {}),
       }
     : undefined;
 
