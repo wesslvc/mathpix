@@ -114,11 +114,52 @@ export default function KoreanModePanel({
   /** 제목을 지을 재료(지문 크롭). 다시 짓기 버튼이 쓴다. */
   const passageCropRef = useRef<string | null>(null);
   /**
-   * `makeTitle` 이 Mathpix 로 읽어 둔 지문 글자. 제목 짓기와 지문 구조화
-   * 인식(`readKoreanRichText`)이 **같은 참고 글**을 쓴다 — 다시 부르면
-   * Mathpix 요청이 한 번 더 나가 토큰이 헛되이 든다.
+   * Mathpix 로 읽은 지문 글자. 제목 짓기와 지문 구조화 인식이 **같은 참고
+   * 글**을 나눠 쓴다 — 따로 부르면 Mathpix 요청이 두 번 나간다.
+   *
+   * **글자가 아니라 약속(Promise)을 들고 있다.** 예전에는 `makeTitle` 이
+   * 다 읽은 뒤에야 채워지는 `string | null` 이었는데, 그 `makeTitle` 은
+   * 크롭이 끝나자마자 **기다리지 않고**(`void makeTitle(...)`) 던져진다.
+   * 그래서 사용자가 그 사이에 저장을 누르면 참고 글이 아직 `null` 이고,
+   * 지문 인식이 **"건너뜀 — 사진만 보고 읽습니다"** 로 떨어졌다. 이 기능의
+   * 설계 전제가 "글자는 Mathpix, 구조는 vision" 인데 그 절반이 조용히
+   * 빠지는 것이라, 정확도가 가장 나쁜 조합으로 도는 셈이었다(원문자를
+   * 참고 글에서 가져오는 규칙도 이때는 아예 적용되지 않는다).
+   *
+   * 약속으로 들면 **읽는 중이면 그걸 기다리고, 아직 안 읽었으면 그때 읽는다.**
+   * 크롭을 함께 들고 있어서, 저장 전에 네모를 다시 잡아 크롭이 달라졌으면
+   * 엉뚱한 글을 재사용하지 않고 새로 읽는다.
    */
-  const passageOcrRef = useRef<string | null>(null);
+  const passageOcrRef = useRef<{ crop: string; text: Promise<string> } | null>(
+    null,
+  );
+
+  /** 이 크롭의 Mathpix 결과. 이미 읽었거나 읽는 중이면 그것을 쓴다. */
+  function readPassageOcr(crop: string): Promise<string> {
+    if (passageOcrRef.current?.crop === crop) return passageOcrRef.current.text;
+    const text = (async () => {
+      const res = await fetch("/api/mathpix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: await enhanceContrast(crop) }),
+      });
+      const read = (await res.json()) as {
+        text?: string;
+        latex?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(read.error ?? "지문을 읽지 못했습니다.");
+      const t = (read.text || read.latex || "").trim();
+      if (t.length < 20) throw new Error("지문 글자가 거의 인식되지 않았습니다.");
+      return t;
+    })();
+    passageOcrRef.current = { crop, text };
+    // 실패한 약속을 붙들고 있으면 다시 시도해도 같은 실패가 나온다.
+    text.catch(() => {
+      if (passageOcrRef.current?.text === text) passageOcrRef.current = null;
+    });
+    return text;
+  }
   const [noPassage, setNoPassage] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -399,16 +440,9 @@ export default function KoreanModePanel({
     setTitling(true);
     setTitleNote("제목을 짓는 중...");
     try {
-      const ocr = await fetch("/api/mathpix", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await enhanceContrast(passageCrop) }),
-      });
-      const read = (await ocr.json()) as { text?: string; latex?: string; error?: string };
-      if (!ocr.ok) throw new Error(read.error ?? "지문을 읽지 못했습니다.");
-      const text = (read.text || read.latex || "").trim();
-      if (text.length < 20) throw new Error("지문 글자가 거의 인식되지 않았습니다.");
-      passageOcrRef.current = text;
+      // 지문 인식과 **같은 약속**을 쓴다 — 둘 중 누가 먼저 부르든 Mathpix 는
+      // 한 번만 나간다.
+      const text = await readPassageOcr(passageCrop);
 
       const res = await fetch("/api/korean-title", {
         method: "POST",
@@ -461,11 +495,27 @@ export default function KoreanModePanel({
    */
   async function readPassageBlocks(crop: string) {
     setBusy("지문을 글자로 옮기는 중... (평가원 글꼴로 조판됩니다)");
-    // makeTitle 이 이미 Mathpix 로 읽어 둔 것을 재사용한다 — 여기서 다시
-    // 부르면 Mathpix 요청이 한 번 더 나가 토큰이 헛되이 든다. 없으면
-    // "건너뜀"이라 예전(참고 없이 사진만 보고 읽기)과 같다.
-    const reference = passageOcrRef.current ?? "";
-    setPassageStatus({ mathpix: reference ? "ok" : "skipped", terra: "running" });
+    /**
+     * **참고 글은 여기서 반드시 확보한다.**
+     *
+     * 예전에는 `makeTitle` 이 채워 둔 값을 그냥 읽고, 없으면 "건너뜀"으로
+     * 두고 사진만 보고 읽었다. 그런데 `makeTitle` 은 기다리지 않고 던져지는
+     * 호출이라 **저장을 조금만 빨리 눌러도 비어 있었다** — 이 기능의 설계
+     * 전제(글자는 Mathpix, 구조는 vision)의 절반이 조용히 빠진 채 도는
+     * 셈이었다. 이제 `readPassageOcr` 이 "읽는 중이면 기다리고, 안 읽었으면
+     * 읽는다"를 맡으므로 경쟁 상태가 사라진다.
+     *
+     * 그래도 실패하면(사진이 흐리거나 Mathpix 오류) 예전처럼 사진만 보고
+     * 읽는다 — 참고가 없다고 지문 인식을 막을 이유는 없다.
+     */
+    setPassageStatus({ mathpix: "running", terra: "pending" });
+    let reference = "";
+    try {
+      reference = await readPassageOcr(crop);
+    } catch {
+      // 사진만 보고 읽는 예전 경로로 내려간다.
+    }
+    setPassageStatus({ mathpix: reference ? "ok" : "failed", terra: "running" });
     try {
       const res = await fetch("/api/korean-text", {
         method: "POST",
@@ -482,7 +532,7 @@ export default function KoreanModePanel({
       const blocks = readRichBlocks(json.blocks);
       if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
       setPassageStatus({
-        mathpix: reference ? "ok" : "skipped",
+        mathpix: reference ? "ok" : "failed",
         terra: "done",
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
@@ -493,7 +543,7 @@ export default function KoreanModePanel({
         (err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.") +
         " 이 지문은 사진으로 대신 저장했어요.";
       setPassageStatus({
-        mathpix: reference ? "ok" : "skipped",
+        mathpix: reference ? "ok" : "failed",
         terra: "error",
         errorMessage: message,
       });
