@@ -33,6 +33,15 @@ function OcrLine({ ocr, preview }: { ocr?: string; preview?: string }) {
       </p>
     );
   }
+  // **끈 것과 못 읽은 것을 갈라 놓는다.** 자기가 끈 것을 실패로 읽으면
+  // 없는 문제를 고치려 든다.
+  if (ocr === "off") {
+    return (
+      <p className="text-[11px] text-slate-500">
+        Mathpix 참고 끔 — 사진만 보고 그립니다
+      </p>
+    );
+  }
   return (
     <>
       <p className="text-[11px] text-emerald-700">Mathpix 글자 참고 ✓</p>

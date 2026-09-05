@@ -83,16 +83,27 @@ export type FigureJob = {
    * (사용자 요청). 다른 과목은 표·그림이 섞여 있어 사진이 우선이다.
    */
   korean?: boolean;
+  /**
+   * 글자 인식(Mathpix)을 쓸지. 없으면 **쓴다**(문제 전체 모드일 때).
+   *
+   * 수정 화면에서 다시 그릴 때 끌 수 있다(사용자 요청). 참고 글이 늘 이로운
+   * 것은 아니다 — Mathpix 가 잘못 읽으면 모델이 그 오류를 **베껴 쓴다**. 결과를
+   * 눈으로 본 사람이 "이번엔 참고 없이 사진만 보고 그려 봐"를 고를 수 있어야
+   * 한다. 인식 토큰 1도 아낀다.
+   */
+  useOcr?: boolean;
   status: "pending" | "running" | "done" | "error";
   /**
    * 글자 인식(Mathpix)이 어떻게 됐는가. **문제 전체를 그릴 때만** 쓴다.
    *   reading — 지금 읽는 중
    *   ok      — 읽어서 프롬프트에 참고로 넣었다
    *   none    — 못 읽었다(키가 없거나 실패). 참고 없이 그린다
+   *   off     — 사용자가 **일부러 껐다**. 못 읽은 것과 갈라 둔다 — 안 그러면
+   *             자기가 끈 것을 실패로 읽는다.
    * 화면에 그대로 보여 준다 — 글자 정확도가 걸린 단계라 됐는지 안 됐는지
    * 눈에 보여야 한다.
    */
-  ocr?: "reading" | "ok" | "none";
+  ocr?: "reading" | "ok" | "none" | "off";
   /** 읽어 낸 글자의 앞부분. 무엇을 참고했는지 눈으로 확인할 수 있게. */
   ocrPreview?: string;
   /**
@@ -370,8 +381,14 @@ export default function FigureJobsProvider({
         // 캐시가 걸려 예전 그림이 그대로 나온다 — 사용자 눈에는 지시를 적었는데
         // 아무것도 안 바뀐 것으로 보인다. 지시가 없으면 빈 문자열이라 예전
         // 키와 같다.
+        // **참고 글을 끈 것도 키에 들어가야 한다.** 같은 크롭·같은 지시로
+        // "이번엔 참고 없이"를 골랐는데 캐시가 걸리면 참고를 썼던 예전 그림이
+        // 그대로 나온다 — 사용자 눈에는 껐는데 아무것도 안 바뀐 것으로 보인다
+        // (`instruction` 을 키에 넣은 것과 같은 이유). 켠 쪽(기본)은 꼬리표를
+        // 안 붙여 **예전 키를 그대로 쓴다** — 이미 쌓인 캐시를 버릴 이유가 없다.
+        const useOcr = next.useOcr !== false;
         const key = await figureCacheKey(
-          `${mode}:${next.instruction ?? ""}:${forModel}`,
+          `${mode}${useOcr ? "" : ":noocr"}:${next.instruction ?? ""}:${forModel}`,
         );
         let svg = readFigureCache(key);
         /** 이 작업에 실제로 든 추정 비용. 캐시에 걸리면 끝까지 undefined 다. */
@@ -389,7 +406,12 @@ export default function FigureJobsProvider({
           // **실패해도 그냥 진행한다.** 참고가 없으면 예전과 똑같이 동작할
           // 뿐이라, 이것 때문에 그림 생성을 막을 이유가 없다.
           let reference: string | undefined;
-          if (mode === "problem") {
+          if (mode === "problem" && !useOcr) {
+            // 사용자가 일부러 껐다. 못 읽은 것과 갈라서 보여 준다.
+            setJobs((prev) =>
+              prev.map((j) => (j.id === id ? { ...j, ocr: "off" as const } : j)),
+            );
+          } else if (mode === "problem") {
             setJobs((prev) =>
               prev.map((j) => (j.id === id ? { ...j, ocr: "reading" as const } : j)),
             );
