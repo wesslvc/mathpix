@@ -21,7 +21,7 @@ import type { BoxOverride } from "@/lib/renderMathText";
 import type { ExamScore } from "@/lib/supabase/types";
 import { SUBJECT_LABEL } from "@/lib/examSubjects";
 import { examMaxScore } from "@/lib/gradeSummary";
-import GradeProblemUploader from "@/components/GradeProblemUploader";
+import GradeLinkPanel from "@/components/GradeLinkPanel";
 import AnswerKeyPanel from "@/components/AnswerKeyPanel";
 import ProblemNumberScanner from "@/components/ProblemNumberScanner";
 import { readKoreanMeta } from "@/lib/koreanSet";
@@ -261,10 +261,6 @@ export default async function CategoryPage({
     })
     .filter((p): p is GalleryProblem => p !== null);
 
-  const existingNumbers = galleryProblems
-    .map((p) => p.number)
-    .filter((n): n is number => n != null);
-
   // `?gradeId=` 로 들어왔으면 그 채점 하나에 집중하고(채점 화면에서 "틀린문제
   // 오답 업로드하기"로 넘어온 흐름), 아니면 연결된 채점을 전부 보여준다.
   // 탐구는 1선택·2선택이 각각 독립된 행이라 한 실모에 둘이 붙을 수 있다.
@@ -335,27 +331,34 @@ export default async function CategoryPage({
         </div>
       )}
 
-      {/* 작업 큐(FigureJobsProvider)와 진행 패널은 루트 레이아웃에 있다 —
-          목록으로 돌아가도 작업이 계속 돌아야 하기 때문이다.
-          자동채점에서 넘어온 경우(gradeId)는 번호부터 고르고 나서 사진을
-          올리게 한다 — GradeProblemUploader 가 그 순서를 강제한다. */}
+      {/* **번호를 하나 고르고 사진 한 장씩 올리던 흐름은 없앴다**(사용자
+          결정). 번호를 한꺼번에 붙이는 길(ProblemNumberScanner)이 따로 있고
+          문제를 넣는 길도 여럿이라, 넣는 것은 편한 길로 넣고 **연결만
+          여기서 한꺼번에** 하면 된다. "내가 고른 답"은 번호만 맞으면 저절로
+          이어지므로(내보내기가 실모+번호로도 찾는다) 여기서는 정답 붙이기만
+          한다. */}
       {uploaderGrades.map((g) => (
-        <GradeProblemUploader
+        <GradeLinkPanel
           key={g.id}
-          categoryId={category.id}
-          canAdd={access.canRecognize}
           gradeId={g.id}
           title={
             g.exam_name ||
             `${SUBJECT_LABEL[g.subject]}${g.elective_label ? ` · ${g.elective_label}` : ""}`
           }
           wrongNumbers={g.wrong_numbers}
-          existingNumbers={existingNumbers}
           items={g.items}
+          problems={galleryProblems
+            // 지문은 문제가 아니다 — 번호도 정답도 붙일 대상이 아니다.
+            .filter((p) => p.korean?.role !== "passage")
+            .map((p) => ({
+              id: p.id,
+              number: p.number ?? parseProblemNumber(p.text),
+              hasAnswer: p.answer.trim() !== "",
+            }))}
         />
       ))}
 
-      {/* 채점과 무관하게 그냥 오답을 추가하는 길은 늘 열어 둔다. */}
+      {/* 오답을 추가하는 길. 채점과 무관하게 늘 열려 있다. */}
       <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
 
       {/* 번호가 없는 문제에 번호를 한꺼번에 붙인다. 번호가 없으면 목록·PDF
