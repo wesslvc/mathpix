@@ -5,6 +5,7 @@ import { categoryLabel, type Category, type ExamScore } from "@/lib/supabase/typ
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { formatAnswer, toAnswerType } from "@/lib/answer";
 import { readKoreanMeta } from "@/lib/koreanSet";
+import { signCached } from "@/lib/signedUrls";
 import ExportComposer, {
   type ComposerProblem,
 } from "@/components/ExportComposer";
@@ -172,9 +173,10 @@ export default async function ExportPage({
   const paths = ordered.map((p) => p.image_path);
   const signedUrlByPath = new Map<string, string>();
   if (paths.length > 0) {
-    const { data: signed } = await supabase.storage
-      .from("problem-images")
-      .createSignedUrls(paths, 60 * 60);
+    // 같은 주소로 다시 준다(`signedUrls.ts`) — 안 그러면 PDF 를 뽑을 때마다
+    // 원본 PNG(평균 760kB)를 문제 수만큼 통째로 다시 받는다.
+    const signedMap = await signCached(supabase, "problem-images", paths);
+    const signed = [...signedMap].map(([path, signedUrl]) => ({ path, signedUrl }));
     for (const s of signed ?? []) {
       if (s.signedUrl && s.path) signedUrlByPath.set(s.path, s.signedUrl);
     }

@@ -19,7 +19,11 @@ import {
 } from "@/lib/storedFigures";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { KoreanMeta } from "@/lib/koreanSet";
-import { readRichBlocks, type RichBlock } from "@/lib/kice/richText";
+import {
+  alignCircledToReference,
+  readRichBlocks,
+  type RichBlock,
+} from "@/lib/kice/richText";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
@@ -405,12 +409,17 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         usage?: { estKrw?: number };
       };
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
-      const blocks = readRichBlocks(json.blocks);
-      if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
+      const raw = readRichBlocks(json.blocks);
+      if (raw.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
+      // **원문자는 Mathpix 를 따른다**(KoreanModePanel 과 같은 규칙 — 두 경로가
+      // 달라지면 안 된다).
+      const { blocks, replaced, matched } = alignCircledToReference(raw, reference);
       setEditKoreanBlocks(blocks);
       setPassageStatus({
         mathpix: reference ? "ok" : "failed",
         terra: "done",
+        circledFixed: replaced,
+        circledMismatch: !matched,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
       });

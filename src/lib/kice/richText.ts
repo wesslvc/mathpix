@@ -1,3 +1,5 @@
+import { circledCharsIn } from "../circledChars";
+
 /**
  * 지문을 **그림이 아니라 글자로** 담는 형식.
  *
@@ -111,4 +113,61 @@ export function richToPlainText(blocks: RichBlock[]): string {
   };
   walk(blocks);
   return out.join("\n");
+}
+
+/**
+ * terra 가 적어 놓은 원문자를 **Mathpix 참고 글 기준으로 갈아 끼운다.**
+ *
+ * **왜 프롬프트로 안 되나.** "원문자는 참고 글을 따르라"고 적어 두는 것은
+ * 부탁일 뿐이다. ㉠ 은 작은 동그라미 안의 획 하나라 사진을 눈으로 읽는 쪽이
+ * 가장 불리한 글자인데, 프롬프트를 아무리 강하게 적어도 모델이 사진 쪽 읽기로
+ * 덮어쓰는 일이 남는다. 사용자가 "원문자는 무조건 매쓰픽스 우선으로" 라고
+ * 한 것을 **코드로 강제**하는 자리다.
+ *
+ * **어떻게 맞추나.** 원문자를 낱개로 짝짓지 않는다 — 같은 ㉠ 이 본문에 여러 번
+ * 나오기 때문이다. 대신 **서로 다른 원문자의 집합**을 코드포인트 차례로 늘어
+ * 놓고 i번째끼리 짝짓는다. terra 가 흔히 내는 오류가 **한 칸씩 밀리는 것**
+ * (㉠㉡㉢ → ㉡㉢㉣)이라 이 방식이면 통째로 바로잡힌다.
+ *
+ * **개수가 다르면 손대지 않는다.** 짝지을 근거가 없는데 억지로 맞추면 멀쩡한
+ * 글자까지 틀리게 만든다 — 못 고치는 쪽이 안전하다(놓친 것은 그대로 남을 뿐,
+ * 잘못 바꾸면 문제가 성립하지 않는다). 그때는 `matched: false` 로 알린다.
+ */
+export function alignCircledToReference(
+  blocks: RichBlock[],
+  reference: string,
+): { blocks: RichBlock[]; replaced: number; matched: boolean } {
+  const want = circledCharsIn(reference);
+  if (want.length === 0) return { blocks, replaced: 0, matched: true };
+
+  const got = circledCharsIn(richToPlainText(blocks));
+  if (got.length === 0) return { blocks, replaced: 0, matched: true };
+  if (got.length !== want.length) return { blocks, replaced: 0, matched: false };
+
+  const map = new Map<string, string>();
+  for (let i = 0; i < got.length; i++) {
+    if (got[i] !== want[i]) map.set(got[i], want[i]);
+  }
+  if (map.size === 0) return { blocks, replaced: 0, matched: true };
+
+  let replaced = 0;
+  const fixRun = (r: RichRun): RichRun => ({
+    ...r,
+    t: [...r.t]
+      .map((ch) => {
+        const to = map.get(ch);
+        if (to === undefined) return ch;
+        replaced += 1;
+        return to;
+      })
+      .join(""),
+  });
+  const walk = (list: RichBlock[]): RichBlock[] =>
+    list.map((b) => {
+      if (b.kind === "para") return { ...b, runs: b.runs.map(fixRun) };
+      if (b.kind === "box") return { ...b, blocks: walk(b.blocks) };
+      return b;
+    });
+
+  return { blocks: walk(blocks), replaced, matched: true };
 }

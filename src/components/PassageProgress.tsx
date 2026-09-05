@@ -12,6 +12,14 @@
 export type PassageStatus = {
   mathpix: "running" | "ok" | "failed" | "skipped";
   terra: "pending" | "running" | "done" | "error";
+  /**
+   * Mathpix 기준으로 갈아 끼운 원문자 수(`alignCircledToReference`).
+   * **보여 주는 이유**: 원문자 하나가 바뀌면 문제가 성립하지 않는 자리라,
+   * 우리가 고쳤는지 안 고쳤는지가 눈에 보여야 한다.
+   */
+  circledFixed?: number;
+  /** 원문자 개수가 참고 글과 달라 손대지 못했다(짝지을 근거가 없다). */
+  circledMismatch?: boolean;
   /** 일반 계정에 보여줄 토큰 수(terra 호출, 실사용량 정산). */
   chargedTokens?: number;
   /** 무제한 계정에만 보여줄 원화 추정치(막는 자리는 서버다). */
@@ -65,6 +73,12 @@ export function PassageProgress({
         }
       >
         terra: {TERRA_LABEL[status.terra]}
+        {status.terra === "done" && status.circledFixed
+          ? ` · 원문자 ${status.circledFixed}자를 Mathpix 기준으로 교정`
+          : ""}
+        {status.terra === "done" && status.circledMismatch
+          ? " · 원문자 개수가 참고 글과 달라 그대로 뒀어요(확인해 주세요)"
+          : ""}
       </p>
       {status.terra === "done" &&
         (unlimited && typeof status.costKrw === "number" ? (
