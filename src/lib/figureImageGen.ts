@@ -387,6 +387,7 @@ ${CIRCLED_CHARS}
 structure (unchanged):
 - keep question number, stem, condition boxes, tables, data, <보기>, choices (①②③④⑤) in same order/arrangement. drop/add nothing
 - tables: same row/col count, same cell contents, crisp borders
+- text-fraction (korean words/phrase stacked above AND below a horizontal rule, e.g. 특정 원소의 함량 / 전체 함량): keep it stacked over the rule. never flatten to one line, never reorder numerator/denominator
 - figures/maps/graphs/schematics: same spatial relations, arrow directions, counts
 - keep any surrounding box
 
@@ -501,6 +502,25 @@ circled chars in this question: ${circledPairs(seen)}.
 draw the parenthesised char inside the circle. no substitution, no reorder.`;
 }
 
+/**
+ * **글자 분수는 참고 글을 믿으면 안 된다**(사용자 지시 — "글자 분수꼴은
+ * mathpix 가 인식 못 하니 이거는 gpt 가 직접 하라고 해").
+ *
+ * 분자·분모가 한글 낱말·구절인 분수(사과탐·수학에 흔하다)를 Mathpix 가
+ * 자주 놓친다 — 이 저장소가 이미 기록해 둔 사례가 있다: 분모를 반쯤 읽다
+ * 흘리고 "…X 의 함량(%) 0.5 억 년 전 P 에 포는" 처럼 **한 줄로 뭉개서**
+ * 보냈다(`mathTokens.ts` 의 글씨 분수 지원이 그래서 생겼다).
+ *
+ * **이 실패는 눈에 안 띈다.** 분수가 사라진 자리에 그럴듯한 문장 한 줄이
+ * 남기 때문에, "어긋나면 사진이 우선"이라는 일반 규칙만으로는 모델이 어긋난
+ * 줄도 모른다. 그래서 이 한 자리만 따로 짚어 "참고 글은 여기서 절대 이기지
+ * 못한다"고 못박는다 — 원문자를 반대 방향으로 못박은 것과 같은 방식이다.
+ *
+ * **국어 갈래에도 함께 건다.** 국어는 참고 글이 최우선이라고 적어 두었으므로
+ * 예외를 명시하지 않으면 뭉개진 줄을 그대로 베껴 쓴다.
+ */
+const TEXT_FRACTION_NOTE = `text-fraction (korean words/phrase stacked above AND below a rule): recogniser flattens it into one run-on line and loses parts -> read it from the PHOTO yourself and draw it stacked. reference NEVER wins here (korean included).`;
+
 function withReference(prompt: string, reference: string, korean = false): string {
   const text = reference.trim();
   if (!text) return prompt;
@@ -529,6 +549,7 @@ ${text}
 """
 drawing text: copy reference exactly (more accurate than inventing unreadable chars).
 ${trust}
+${TEXT_FRACTION_NOTE}
 don't print LaTeX literally -> render as mathematics (e.g. \\frac{1}{2} as fraction).${circledNote(text)}`;
 }
 
