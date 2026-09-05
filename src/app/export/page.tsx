@@ -215,8 +215,6 @@ export default async function ExportPage({
         id: p.id,
         imageUrl,
         source: cat ? categoryLabel(cat) : "출처",
-        // 점수를 뺀 출처. 같은 출처가 여러 페이지에 걸칠 때 점수를 반복하지 않는다.
-        sourceBase: cat?.source ?? "출처",
         origNumber: parseProblemNumber(p.text_content || p.latex || ""),
         // 손으로 정해 둔 번호가 있으면 그게 우선이다(통째로 그린 문제는 본문이
         // 없어서 뽑을 것도 없다).
@@ -245,8 +243,8 @@ export default async function ExportPage({
 
   const multi = idList.length > 1;
   const firstCategory = categories?.find((c) => c.id === idList[0]);
-  const defaultTitle =
-    !multi && firstCategory ? categoryLabel(firstCategory) : "";
+  // 제목은 실모 이름 그대로다 — 점수를 괄호로 붙이지 않는다(사용자 요청).
+  const defaultTitle = !multi && firstCategory ? categoryLabel(firstCategory) : "";
 
   const today = new Date();
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;

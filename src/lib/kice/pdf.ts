@@ -402,9 +402,12 @@ export type KiceSpec = {
    * 마지막에 붙일 **정답표**. 비어 있으면 붙이지 않는다.
    *
    * 실제 문제지에는 없는 쪽이지만, 이건 문제지가 아니라 **오답프린트**다 —
-   * 풀고 나서 맞춰 볼 답이 없으면 쓸모가 반이다. 그래서 맨 뒤에 한 쪽 붙인다.
+   * 풀고 나서 맞춰 볼 답이 없으면 쓸모가 반이다. 그래서 맨 뒤에 붙인다.
+   *
+   * `source`(실모 이름)가 둘 이상이면 **출처별로 표를 나누고 제목을 얹는다**
+   * (`planAnswerPages`). 그러다 한 쪽을 넘치면 다음 쪽으로 이어진다.
    */
-  answers?: { label: string; answer: string; picked?: string }[];
+  answers?: AnswerRow[];
   /**
    * 정답표 쪽의 쪽번호를 **직접 정한다**(정답표 생성기 전용).
    *
@@ -679,8 +682,27 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       )
     : layoutPages(images, spec.frames, pattern.length ? pattern : [4]);
   const answers = (spec.answers ?? []).filter((a) => a.answer.trim() !== "");
-  // 정답표도 한 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
-  const total = pages.length + (answers.length > 0 ? 1 : 0);
+  /**
+   * 정답표를 미리 짠다 — **쪽수를 알아야 쪽번호 상자에 찍을 수 있다.**
+   * 출처가 둘 이상이면 출처별로 표가 갈리므로 한 쪽을 넘길 수 있다.
+   *
+   * 자리를 재려면 틀이 필요하고 틀은 쪽번호로 고르는데, 첫 정답표 쪽 번호는
+   * 전체 쪽수와 무관하게 정해지므로 순환이 생기지 않는다.
+   */
+  const firstAnswerNo = spec.answerPage?.no ?? pages.length + 1;
+  const answerPages =
+    answers.length > 0
+      ? (() => {
+          const b = frameBounds(frameFor(spec.frames, firstAnswerNo));
+          const width = LAYOUT.columnWidth * 2 + LAYOUT.columnGap;
+          // `drawAnswers` 의 첫 `top` 과 **같은 식이어야 한다**(제목 20pt).
+          // 어긋나면 마지막 표가 쪽 밖으로 밀리거나 쪽수가 틀린다.
+          const top = b.headerBottom + LAYOUT.gap + 20 + LAYOUT.gap * 2;
+          return planAnswerPages(answers, b.contentBottom - top, width);
+        })()
+      : [];
+  // 정답표도 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
+  const total = pages.length + answerPages.length;
 
   for (let n = 0; n < pages.length; n++) {
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
@@ -741,10 +763,10 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     }
   }
 
-  if (answers.length > 0) {
+  for (const [i, blocks] of answerPages.entries()) {
     // 정답표만 따로 뽑을 때만 쪽번호를 직접 받는다(그때는 자동값이 1이라
     // 표지 틀에 그려진다). 문제와 함께 내보낼 때는 예전 그대로다.
-    const pageNo = spec.answerPage?.no ?? total;
+    const pageNo = firstAnswerNo + i;
     const shownTotal = spec.answerPage?.total ?? total;
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
     const frame = frameFor(spec.frames, pageNo);
@@ -753,13 +775,17 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     const bare: Frame = {
       ...frame,
       items: frame.items.filter(
-        (i) =>
-          !(i.k === "line" && Math.abs(i.x1 - i.x2) < 0.5 && Math.abs(i.y2 - i.y1) > 300),
+        (i2) =>
+          !(
+            i2.k === "line" &&
+            Math.abs(i2.x1 - i2.x2) < 0.5 &&
+            Math.abs(i2.y2 - i2.y1) > 300
+          ),
       ),
     };
     await drawFrame(page, bare, { pageNo, total: shownTotal });
     // 본문 위아래 끝은 **원래 틀**에서 잰다(구분선을 뺀 틀에는 아래 끝이 없다).
-    await drawAnswers(page, frame, answers, fontForText, flip);
+    await drawAnswers(page, frame, blocks, fontForText, flip);
   }
 
   if (spec.onWarn && (missing.size > 0 || swappedFont.size > 0)) {
@@ -938,6 +964,11 @@ async function drawToc(
 const ANSWER_ROW = 26;
 /** 한 벌(번호+정답)의 폭. 종이 폭을 다 늘리면 표가 아니라 줄자처럼 보인다. */
 const ANSWER_GROUP_W = 150;
+/** 출처별 표 사이의 간격. 표가 맞붙으면 어디까지가 한 시험지인지 안 보인다. */
+const ANSWER_BLOCK_GAP = 22;
+/** 출처 제목 줄의 글자 크기와 그 아래 여백. */
+const ANSWER_BLOCK_TITLE = 12;
+const ANSWER_BLOCK_TITLE_GAP = 7;
 
 /**
  * 내가 잘못 쓴 답의 색. 흑백으로 인쇄해도 **진한 회색으로 남게** 어두운
@@ -945,6 +976,129 @@ const ANSWER_GROUP_W = 150;
  */
 const WRONG_ANSWER_COLOR = rgb(0.75, 0.11, 0.11);
 const ANSWER_FONT = "(한)신중명조";
+
+export type AnswerRow = {
+  label: string;
+  answer: string;
+  picked?: string;
+  /** 어느 시험지에서 온 답인가(실모 이름). 두 개 이상이면 출처별로 나눠 그린다. */
+  source?: string;
+};
+
+/** 정답표의 표 한 덩어리. 출처가 하나뿐이면 `title` 이 빈 문자열이다. */
+export type AnswerBlock = {
+  title: string;
+  rows: AnswerRow[];
+  /** 가로로 늘어놓을 벌 수. */
+  groups: number;
+  /** 한 벌에 들어갈 줄 수. */
+  perGroup: number;
+  /** 머리줄까지 포함한 표 높이. */
+  height: number;
+};
+
+/**
+ * 정답표를 쪽마다 어떻게 앉힐지 미리 짠다(그리기 전에 **쪽수를 알아야** 한다 —
+ * 쪽번호 상자에 전체 쪽수가 찍히기 때문이다).
+ *
+ * **출처가 둘 이상이면 출처별로 표를 나누고 사이를 벌린다**(사용자 요청 —
+ * "2개 이상 pdf로 할 땐 출처별로 답지 칸을 좀 간격을 두고 시험지 제목 알려줘").
+ * 여러 실모를 묶어 뽑으면 정답표가 한 덩어리로 붙어 나와서, 어느 답이 어느
+ * 시험지 것인지 번호만 보고는 알 수 없었다(번호가 실모마다 겹친다).
+ *
+ * **출처가 하나뿐이면 예전과 글자 하나까지 같다** — 제목 줄을 만들지 않고
+ * 표 하나를 예전과 똑같은 규칙으로 앉힌다.
+ *
+ * 순수 함수다(글꼴도 pdf-lib 도 안 쓴다) — 그래야 쪽수를 재는 쪽과 그리는
+ * 쪽이 같은 계산을 한다.
+ */
+export function planAnswerPages(
+  rows: AnswerRow[],
+  avail: number,
+  width: number,
+): AnswerBlock[][] {
+  // 출처별로 묶는다. 같은 출처가 떨어져 있어도 한 표로 모은다.
+  const bySource = new Map<string, AnswerRow[]>();
+  for (const r of rows) {
+    const key = (r.source ?? "").trim();
+    const cur = bySource.get(key);
+    if (cur) cur.push(r);
+    else bySource.set(key, [r]);
+  }
+  // 이름이 있는 출처가 둘 이상일 때만 나눈다 — 하나뿐이면 제목 줄이 군더더기다.
+  const named = [...bySource.keys()].filter((k) => k !== "");
+  const split = named.length > 1;
+  const chunks: { title: string; rows: AnswerRow[] }[] = split
+    ? [...bySource].map(([title, rs]) => ({ title, rows: rs }))
+    : [{ title: "", rows }];
+  const maxGroups = Math.max(1, Math.floor(width / ANSWER_GROUP_W));
+  /**
+   * 벌 수는 **개수에 맞춰** 정하고(한 벌에 열두 줄쯤), 그래도 자리에 안 들어가면
+   * 더 늘린다. 폭은 벌마다 고정이라 답이 적으면 표도 작게 나온다.
+   * (출처가 하나일 때 예전과 같은 값이 나오는 계산이다.)
+   */
+  const fit = (n: number, room: number) => {
+    let groups = Math.min(maxGroups, Math.max(1, Math.ceil(n / 12)));
+    while (groups < maxGroups && (Math.ceil(n / groups) + 1) * ANSWER_ROW > room) {
+      groups += 1;
+    }
+    const perGroup = Math.ceil(n / groups);
+    return { groups, perGroup, height: (perGroup + 1) * ANSWER_ROW };
+  };
+
+  const pages: AnswerBlock[][] = [];
+  let cur: AnswerBlock[] = [];
+  let used = 0;
+
+  for (const chunk of chunks) {
+    let rest = chunk.rows;
+    let first = true;
+    // 제목 줄 자리. **그리는 쪽과 같은 조건이어야 한다**(`drawAnswers` 는
+    // `block.title` 이 있을 때만 자리를 쓴다) — 어긋나면 마지막 표가 쪽 밖으로
+    // 밀리거나 쓸데없는 빈 자리가 남는다.
+    const headH = chunk.title ? ANSWER_BLOCK_TITLE + ANSWER_BLOCK_TITLE_GAP : 0;
+    while (rest.length > 0) {
+      /**
+       * **남은 자리에 맞춰 찌그러뜨리지 않는다.** 표 모양은 개수로만 정한다
+       * (`fit` 에 쪽 전체를 준다) — 남은 자리에 억지로 끼우면 그 표만 넓고
+       * 납작해져 다른 출처와 다르게 보이는데, 정작 다음 출처는 어차피 다음
+       * 쪽으로 넘어가 아낀 자리가 쓰이지도 않는다.
+       */
+      let f = fit(rest.length, avail - headH);
+      let take = rest.length;
+      let gap = cur.length > 0 ? ANSWER_BLOCK_GAP : 0;
+
+      if (gap + headH + f.height > avail - used) {
+        // 이 쪽에는 안 들어간다 — 쪽을 넘긴다.
+        if (cur.length > 0) {
+          pages.push(cur);
+          cur = [];
+          used = 0;
+          gap = 0;
+        }
+        // 새 쪽에도 통째로는 안 들어가면 그때만 나눠 담는다.
+        if (headH + f.height > avail) {
+          const room = avail - headH;
+          const capacity = maxGroups * (Math.floor(room / ANSWER_ROW) - 1);
+          take = Math.min(rest.length, Math.max(1, capacity));
+          f = fit(take, room);
+        }
+      }
+
+      cur.push({
+        // 잘려 다음 쪽으로 이어지면 제목에 그렇다고 적는다.
+        title: chunk.title && (first ? chunk.title : `${chunk.title} (이어서)`),
+        rows: rest.slice(0, take),
+        ...f,
+      });
+      used += gap + headH + f.height;
+      rest = rest.slice(take);
+      first = false;
+    }
+  }
+  if (cur.length > 0) pages.push(cur);
+  return pages;
+}
 
 /**
  * 마지막 쪽에 정답표를 그린다.
@@ -956,7 +1110,7 @@ const ANSWER_FONT = "(한)신중명조";
 async function drawAnswers(
   page: PDFPage,
   frame: Frame,
-  rows: { label: string; answer: string; picked?: string }[],
+  blocks: AnswerBlock[],
   // 정답표 글자는 사용자가 적은 것이라(정답에 한글이 들어가는 단답형도 있다)
   // 잘라 둔 글꼴에 없는 글자가 섞일 수 있다. 틀 글자와 같은 길을 태운다.
   fontForText: (name: string, text: string) => Promise<{ font: PDFFont; text: string }>,
@@ -978,20 +1132,8 @@ async function drawAnswers(
     color: rgb(0, 0, 0),
   });
 
-  const top = titleY + LAYOUT.gap * 2;
-  const avail = bounds.contentBottom - top;
-  // 벌 수는 **개수에 맞춰** 정하고(한 벌에 열두 줄쯤), 그래도 한 쪽에 안 들어가면
-  // 더 늘린다. 폭은 벌마다 고정이라 답이 적으면 표도 작게 나온다.
-  const maxGroups = Math.max(1, Math.floor(width / ANSWER_GROUP_W));
-  let groups = Math.min(maxGroups, Math.max(1, Math.ceil(rows.length / 12)));
-  while (groups < maxGroups && (Math.ceil(rows.length / groups) + 1) * ANSWER_ROW > avail) {
-    groups += 1;
-  }
-  const perGroup = Math.ceil(rows.length / groups);
   const groupW = ANSWER_GROUP_W;
   const numW = groupW * 0.5;
-  // 표 전체를 종이 가운데에 놓는다.
-  const tableLeft = left + (width - groupW * groups) / 2;
 
   const line = (x1: number, y1: number, x2: number, y2: number) =>
     page.drawLine({
@@ -1063,29 +1205,61 @@ async function drawAnswers(
     }
   };
 
-  for (let g = 0; g < groups; g++) {
-    const x = tableLeft + g * groupW;
-    const count = Math.min(perGroup, Math.max(0, rows.length - g * perGroup));
-    if (count === 0) continue;
-    const height = (count + 1) * ANSWER_ROW;
+  let top = titleY + LAYOUT.gap * 2;
 
-    // 바깥 테두리와 가운데 세로선.
-    line(x, top, x + groupW, top);
-    line(x, top + height, x + groupW, top + height);
-    line(x, top, x, top + height);
-    line(x + groupW, top, x + groupW, top + height);
-    line(x + numW, top, x + numW, top + height);
+  for (const [i, block] of blocks.entries()) {
+    // 표가 맞붙으면 어디까지가 한 시험지인지 안 보인다 — 사이를 벌린다.
+    if (i > 0) top += ANSWER_BLOCK_GAP;
 
-    await cell("번호", x, numW, top);
-    await cell("정답", x + numW, groupW - numW, top);
-    line(x, top + ANSWER_ROW, x + groupW, top + ANSWER_ROW);
-
-    for (let r = 0; r < count; r++) {
-      const row = rows[g * perGroup + r];
-      const y = top + (r + 1) * ANSWER_ROW;
-      await cell(row.label, x, numW, y);
-      await answerCellAt(row, x + numW, groupW - numW, y);
-      line(x, y + ANSWER_ROW, x + groupW, y + ANSWER_ROW);
+    if (block.title) {
+      // 제목은 **그 표 위에** 가운데 맞춰 얹는다(표마다 폭이 다르므로 종이
+      // 가운데가 아니라 표 가운데다) — 제목과 표가 한 덩어리로 보여야 한다.
+      const head = await fontForText(ANSWER_FONT, block.title);
+      if (head.text.trim()) {
+        const w = groupW * block.groups;
+        const x = left + (width - w) / 2;
+        page.drawText(head.text, {
+          x:
+            x +
+            (w - head.font.widthOfTextAtSize(head.text, ANSWER_BLOCK_TITLE)) / 2,
+          y: flip(top + ANSWER_BLOCK_TITLE),
+          size: ANSWER_BLOCK_TITLE,
+          font: head.font,
+          color: rgb(0.25, 0.25, 0.25),
+        });
+      }
+      top += ANSWER_BLOCK_TITLE + ANSWER_BLOCK_TITLE_GAP;
     }
+
+    const { rows, groups, perGroup } = block;
+    // 표 전체를 종이 가운데에 놓는다.
+    const tableLeft = left + (width - groupW * groups) / 2;
+
+    for (let g = 0; g < groups; g++) {
+      const x = tableLeft + g * groupW;
+      const count = Math.min(perGroup, Math.max(0, rows.length - g * perGroup));
+      if (count === 0) continue;
+      const height = (count + 1) * ANSWER_ROW;
+
+      // 바깥 테두리와 가운데 세로선.
+      line(x, top, x + groupW, top);
+      line(x, top + height, x + groupW, top + height);
+      line(x, top, x, top + height);
+      line(x + groupW, top, x + groupW, top + height);
+      line(x + numW, top, x + numW, top + height);
+
+      await cell("번호", x, numW, top);
+      await cell("정답", x + numW, groupW - numW, top);
+      line(x, top + ANSWER_ROW, x + groupW, top + ANSWER_ROW);
+
+      for (let r = 0; r < count; r++) {
+        const row = rows[g * perGroup + r];
+        const y = top + (r + 1) * ANSWER_ROW;
+        await cell(row.label, x, numW, y);
+        await answerCellAt(row, x + numW, groupW - numW, y);
+        line(x, y + ANSWER_ROW, x + groupW, y + ANSWER_ROW);
+      }
+    }
+    top += block.height;
   }
 }

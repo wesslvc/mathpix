@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { categoryLabel, type Category } from "@/lib/supabase/types";
+import { categoryLabel, categoryScore, type Category } from "@/lib/supabase/types";
 
 import AddProblemFlow from "@/components/AddProblemFlow";
 import ProblemGallery, {
@@ -280,12 +280,15 @@ export default async function CategoryPage({
           >
             ← 목록으로
           </Link>
+          {/* 점수는 **제목 안이 아니라 옆에** 붙인다(사용자 요청 — "이제 제목에
+              괄호치고 점수넣지마"). 만점은 연결된 채점의 과목에서 온다(탐구
+              50). 연결된 채점이 없으면 알 길이 없으니 100. */}
           <CategoryTitleEditor
             id={category.id}
             source={category.source}
-            label={categoryLabel(
+            label={categoryLabel(category)}
+            score={categoryScore(
               category,
-              // 만점은 연결된 채점의 과목에서 온다(탐구 50). 없으면 100.
               linkedGrades?.[0] ? examMaxScore(linkedGrades[0].subject) : 100,
             )}
             examDate={category.exam_date}

@@ -3,7 +3,12 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { categoryLabel, type Category, type Folder } from "@/lib/supabase/types";
+import {
+  categoryLabel,
+  categoryScore,
+  type Category,
+  type Folder,
+} from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
 import DeleteCategoryButton from "@/components/DeleteCategoryButton";
 
@@ -144,7 +149,7 @@ export default function CategoryList({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return null; // null = 검색 안 함
-    return categories.filter((c) => categoryLabel(c, maxOf(c.id)).toLowerCase().includes(q));
+    return categories.filter((c) => categoryLabel(c).toLowerCase().includes(q));
   }, [categories, search]);
 
   function folderNameOf(id: string | null): string | null {
@@ -154,7 +159,10 @@ export default function CategoryList({
 
   function Row({ category, showFolderTag = false }: { category: Category; showFolderTag?: boolean }) {
     const folderName = showFolderTag ? folderNameOf(category.folder_id) : null;
-    const label = categoryLabel(category, maxOf(category.id));
+    const label = categoryLabel(category);
+    // 점수는 **제목 안이 아니라 옆에** 붙인다(사용자 요청). 제목은 시험 이름
+    // 그대로 두고, 점수는 배지로 따로 보여 준다.
+    const score = categoryScore(category, maxOf(category.id));
     return (
       <div className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition hover:border-blue-300 hover:shadow">
         {picking && (
@@ -174,6 +182,11 @@ export default function CategoryList({
             {category.is_exam && (
               <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
                 실모
+              </span>
+            )}
+            {score && (
+              <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">
+                {score}
               </span>
             )}
           </p>

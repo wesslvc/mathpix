@@ -10,20 +10,23 @@ import { createClient } from "@/lib/supabase/client";
  * 실모를 만들 때 적은 출처가 곧 제목인데, 오타를 냈거나 나중에 이름을 바꾸고
  * 싶어도 방법이 없었다. 제목을 눌러 바로 고칠 수 있게 한다.
  *
- * **점수는 여기서 건드리지 않는다.** 화면에 보이는 제목(`categoryLabel`)에는
- * 점수가 함께 붙지만 그건 따로 관리되는 값이라, 여기서 같이 고치면 무엇을
- * 바꾸는 중인지 헷갈린다.
+ * **점수는 여기서 건드리지 않는다.** 점수는 따로 관리되는 값이라 여기서 같이
+ * 고치면 무엇을 바꾸는 중인지 헷갈린다. 제목 **옆에** 배지로만 보여 준다 —
+ * 예전에는 제목 안에 "(96/100)"으로 붙었는데 사용자가 그만두라고 했다.
  */
 export default function CategoryTitleEditor({
   id,
   source,
   label,
+  score,
   examDate,
 }: {
   id: string;
-  /** 고칠 값(출처). 화면에 보이는 `label` 과 다를 수 있다(점수가 붙는다). */
+  /** 고칠 값(출처). 지금은 `label` 과 같지만 보여 주는 값과 고치는 값을 갈라 둔다. */
   source: string;
   label: string;
+  /** 제목 옆에 배지로 붙일 점수("96/100"). 없으면 안 붙는다. */
+  score?: string | null;
   /** 시행일(YYYY-MM-DD). PDF 머리말에 쓰인다 — 잘못 넣으면 고칠 길이 없었다. */
   examDate: string | null;
 }) {
@@ -82,6 +85,11 @@ export default function CategoryTitleEditor({
     return (
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <h1 className="text-2xl font-bold text-ink">{label}</h1>
+        {score && (
+          <span className="rounded bg-slate-100 px-2 py-0.5 text-sm font-medium text-slate-600">
+            {score}
+          </span>
+        )}
         {examDate && <span className="text-sm text-slate-500">{examDate}</span>}
         <button
           type="button"
