@@ -6,6 +6,7 @@ import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { formatAnswer, toAnswerType } from "@/lib/answer";
 import { readKoreanMeta } from "@/lib/koreanSet";
 import { signCached } from "@/lib/signedUrls";
+import { sortByProblemNumber } from "@/lib/problemOrder";
 import ExportComposer, {
   type ComposerProblem,
 } from "@/components/ExportComposer";
@@ -140,19 +141,42 @@ export default async function ExportPage({
   const isLocked = (p: ExportRow) => typeof p.debt === "number" && p.debt > 0;
   const lockedCount = (problems ?? []).filter(isLocked).length;
 
-  // 선택한 실모 순서대로, 각 실모 안에서는 sort_order 순으로 정렬.
-  const ordered = (problems ?? [])
-    .filter((p) => !isLocked(p))
-    .slice()
-    .sort((a, b) => {
-      const ai = idList.indexOf(a.category_id);
-      const bi = idList.indexOf(b.category_id);
-      if (ai !== bi) return ai - bi;
-      const ao = a.sort_order ?? Number.MAX_SAFE_INTEGER;
-      const bo = b.sort_order ?? Number.MAX_SAFE_INTEGER;
-      if (ao !== bo) return ao - bo;
-      return a.created_at.localeCompare(b.created_at);
-    });
+  /**
+   * 실모의 기본 차례는 **오래된 것부터**다(사용자 결정). 예전에는 목록에서
+   * 고른 차례(=`?ids=` 에 적힌 차례)를 그대로 썼는데, 그건 사용자가 어디를
+   * 먼저 눌렀는지에 달린 값이라 매번 달라졌다. 시행일(없으면 만든 날)로
+   * 줄을 세우면 여러 회차를 묶어 뽑을 때 시간 순서대로 나온다.
+   * 화면에서 바꿀 수 있다(`ExportComposer` 의 실모 차례 바꾸기).
+   */
+  const orderedCategoryIds = [...idList].sort((a, b) => {
+    const ca = categoryById.get(a);
+    const cb = categoryById.get(b);
+    const ka = ca?.exam_date || ca?.created_at || "";
+    const kb = cb?.exam_date || cb?.created_at || "";
+    if (ka !== kb) return ka.localeCompare(kb);
+    return idList.indexOf(a) - idList.indexOf(b);
+  });
+
+  /**
+   * 실모 차례대로, 각 실모 안에서는 **문제 번호 차례**로 늘어놓는다.
+   * 목록 화면과 **같은 함수**를 쓴다(`problemOrder.ts`) — 화면에서 본 차례와
+   * 인쇄된 차례가 다르면 무엇이 맞는지 알 수 없다.
+   */
+  const ordered = orderedCategoryIds.flatMap((cid) =>
+    sortByProblemNumber(
+      (problems ?? [])
+        .filter((p) => !isLocked(p) && p.category_id === cid)
+        .map((p) => ({
+          ...p,
+          number:
+            readProblemNumber({ number: p.problemNo }) ??
+            parseProblemNumber(p.text_content || p.latex || ""),
+          sortOrder: p.sort_order,
+          createdAt: p.created_at,
+          korean: readKoreanMeta(p.korean),
+        })),
+    ),
+  );
 
   // 문제 → 학생답을 찾는 표. 채점 기록 id 로 맞추는 게 정확하지만(한 실모에
   // 여러 번 채점했을 수 있다), 옛 문제에는 gradeId 가 없으므로 실모+번호로도

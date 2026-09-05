@@ -18,6 +18,8 @@ import {
   type StoredFigure,
 } from "@/lib/storedFigures";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
+import { parseProblemNumber } from "@/lib/problemNumber";
+import { sortByProblemNumber } from "@/lib/problemOrder";
 import type { KoreanMeta } from "@/lib/koreanSet";
 import {
   alignCircledToReference,
@@ -138,37 +140,37 @@ async function captureNode(node: HTMLElement): Promise<Blob> {
 }
 
 /**
- * 자리 번호 칸. **숫자를 직접 적어 그 자리로 보낼 수 있다.**
+ * **실제 문제 번호** 칸. 시험지에 적힌 번호를 그대로 적는다.
  *
- * 화살표만으로는 20번을 1번으로 보내려면 열아홉 번을 눌러야 한다.
- * 적은 값은 Enter 나 칸을 벗어날 때 반영하고, 실제 자리가 바뀌면 그 값으로
- * 되돌린다(범위를 벗어난 값을 적었을 때 화면과 어긋나지 않게).
+ * 예전에는 **자리 번호**(1, 2, 3…)를 보여 주고 그 자리로 보내는 칸이었다.
+ * 그런데 실제 번호는 5·8·17 처럼 띄엄띄엄이라, 화면의 "1번"이 무엇을
+ * 가리키는지 알 수 없었다(사용자 지적). 이제 이 칸이 곧 시험지 번호이고,
+ * 목록은 그 번호대로 저절로 줄을 선다 — 번호를 고치면 자리도 따라 움직인다.
+ *
+ * 비워 두면 "번호 없음"이라 맨 뒤로 간다(지문처럼 번호가 없는 게 정상인
+ * 것도 있다 — 그건 제 세트를 따라간다).
  */
-function OrderInput({
-  index,
-  total,
+function NumberInput({
+  value,
   disabled,
   onCommit,
 }: {
-  index: number;
-  total: number;
+  value: number | null;
   disabled: boolean;
-  onCommit: (to: number) => void;
+  onCommit: (next: number | null) => void;
 }) {
-  const [draft, setDraft] = useState(String(index + 1));
-  useEffect(() => setDraft(String(index + 1)), [index]);
+  const [draft, setDraft] = useState(value == null ? "" : String(value));
+  useEffect(() => setDraft(value == null ? "" : String(value)), [value]);
 
   function commit() {
-    const n = Number.parseInt(draft, 10);
-    if (!Number.isFinite(n) || n === index + 1) {
-      setDraft(String(index + 1));
+    const trimmed = draft.trim();
+    const n = trimmed === "" ? null : Number.parseInt(trimmed, 10);
+    if (n !== null && (!Number.isFinite(n) || n <= 0)) {
+      setDraft(value == null ? "" : String(value));
       return;
     }
-    onCommit(Math.min(Math.max(n, 1), total) - 1);
-    // 옮겨지면 index 가 바뀌어 위 이펙트가 새 번호를 넣어 준다. **안 바뀌는
-    // 경우**(자리가 그대로거나 저장에 실패해 되돌아간 경우)에도 칸에 적어 둔
-    // 값이 남아 있으면 화면과 어긋나므로 여기서 원래 번호로 되돌린다.
-    setDraft(String(index + 1));
+    if (n === value) return;
+    onCommit(n);
   }
 
   return (
@@ -179,11 +181,12 @@ function OrderInput({
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
-          if (e.key === "Escape") setDraft(String(index + 1));
+          if (e.key === "Escape") setDraft(value == null ? "" : String(value));
         }}
         disabled={disabled}
         inputMode="numeric"
-        aria-label="자리 번호"
+        placeholder="—"
+        aria-label="문제 번호"
         className="w-10 rounded border border-slate-300 px-1 py-0.5 text-center text-xs text-ink focus:border-blue-500 focus:outline-none disabled:opacity-40"
       />
       번
@@ -193,7 +196,24 @@ function OrderInput({
 
 export default function ProblemGallery({ problems, unlimited = false }: Props) {
   const router = useRouter();
-  const [list, setList] = useState<GalleryProblem[]>(problems);
+  const [raw, setList] = useState<GalleryProblem[]>(problems);
+  /**
+   * **번호 차례로 늘어놓는다**(`problemOrder.ts`). 내보내기도 같은 함수를
+   * 쓰므로 화면에서 본 차례와 인쇄된 차례가 어긋나지 않는다.
+   *
+   * 저장된 `sort_order` 는 건드리지 않는다 — 번호가 없는 것들끼리의 차례를
+   * 정하는 데 그대로 쓰인다.
+   */
+  const list = useMemo(
+    () =>
+      sortByProblemNumber(
+        raw.map((p) => ({
+          ...p,
+          number: p.number ?? parseProblemNumber(p.text),
+        })),
+      ),
+    [raw],
+  );
   const [busyId, setBusyId] = useState<string | null>(null);
   /**
    * 카드로 볼지 목록으로 볼지.
@@ -526,49 +546,37 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
    *
    * 바뀐 행만 갱신한다 — 한 칸 옮기면 두 행, 멀리 보내면 그 사이 행들만이다.
    */
-  async function moveTo(index: number, target: number) {
-    const to = Math.max(0, Math.min(list.length - 1, target));
-    if (to === index) return;
-
-    const orders = list.map((p) => p.sortOrder);
-    if (orders.some((o) => o == null)) {
-      window.alert(
-        "정렬 순서가 아직 준비되지 않았습니다. 0003 마이그레이션 SQL을 실행했는지 확인해주세요.",
-      );
-      return;
-    }
-    const slots = [...(orders as number[])].sort((a, b) => a - b);
-
-    const moved = list[index];
-    setBusyId(moved.id);
-
-    const reordered = [...list];
-    reordered.splice(index, 1);
-    reordered.splice(to, 0, moved);
-    const next = reordered.map((p, i) => ({ ...p, sortOrder: slots[i] }));
-    const changed = next.filter(
-      (p) => p.sortOrder !== list.find((x) => x.id === p.id)?.sortOrder,
+  /**
+   * **실제 문제 번호를 고친다.** 목록 차례는 이 번호를 따라 저절로 바뀐다.
+   *
+   * 예전에는 이 자리에 `moveTo`(자리 바꾸기)가 있었다 — `sort_order` 슬롯을
+   * 돌려 쓰며 "누가 그 자리를 갖는지"를 바꿨다. 지금은 **번호가 곧 차례**라
+   * (`problemOrder.ts`) 자리를 따로 옮길 일이 없다.
+   *
+   * 저장은 `set_problem_numbers` RPC 로 서버에서 합친다 — 번호가
+   * `box_range` jsonb 안에 있어서, 화면에서 고치려면 그림이 든 box_range 를
+   * 통째로 내려받아야 한다(문제당 수백 KB~4MB).
+   */
+  async function setNumber(problem: GalleryProblem, next: number | null) {
+    setBusyId(problem.id);
+    // 되돌릴 때는 **원본(raw)** 을 쓴다 — 화면에 보이는 `list` 는 번호를
+    // 채워 넣고 정렬한 파생값이라, 그걸 되돌려 넣으면 본문에서 뽑은 번호가
+    // 손으로 정한 값인 것처럼 굳어 버린다.
+    const before = raw;
+    // 먼저 화면부터 고친다 — 왕복을 기다리면 번호가 뒤늦게 튀어 보인다.
+    setList((cur) =>
+      cur.map((p) => (p.id === problem.id ? { ...p, number: next } : p)),
     );
-    setList(next);
-
     try {
-      const supabase = createClient();
-      // 서로 독립된 행 갱신이라 동시에 보낸다(순서대로 기다리면 왕복이 겹쳐 느리다).
-      const results = await Promise.all(
-        changed.map((p) =>
-          supabase
-            .from("problems")
-            .update({ sort_order: p.sortOrder })
-            .eq("id", p.id),
-        ),
-      );
-      const failed = results.find((r) => r.error);
-      if (failed?.error) throw failed.error;
+      const { error } = await createClient().rpc("set_problem_numbers", {
+        p_updates: [{ id: problem.id, number: next }],
+      });
+      if (error) throw error;
+      router.refresh();
     } catch (err) {
-      // 실패하면 원래 순서로 되돌린다.
-      setList(list);
+      setList(before);
       window.alert(
-        err instanceof Error ? err.message : "순서 변경에 실패했습니다.",
+        err instanceof Error ? err.message : "번호를 저장하지 못했습니다.",
       );
     } finally {
       setBusyId(null);
@@ -806,24 +814,6 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     <>
       <button
         type="button"
-        onClick={() => moveTo(index, index - 1)}
-        disabled={index === 0 || busyId === problem.id}
-        aria-label="앞으로"
-        className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-      >
-        ↑
-      </button>
-      <button
-        type="button"
-        onClick={() => moveTo(index, index + 1)}
-        disabled={index === list.length - 1 || busyId === problem.id}
-        aria-label="뒤로"
-        className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
-      >
-        ↓
-      </button>
-      <button
-        type="button"
         onClick={() => openEdit(problem)}
         className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
       >
@@ -873,11 +863,10 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                 busyId === problem.id ? "opacity-50" : ""
               }`}
             >
-              <OrderInput
-                index={index}
-                total={list.length}
+              <NumberInput
+                value={problem.number ?? parseProblemNumber(problem.text)}
                 disabled={busyId === problem.id}
-                onCommit={(to) => void moveTo(index, to)}
+                onCommit={(next) => void setNumber(problem, next)}
               />
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {/* 잠긴 문제는 내용을 가린다 — 결제 전에는 못 쓰는 게 요점이다. */}
@@ -947,11 +936,10 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
               />
               <div className="flex flex-wrap items-center justify-between gap-1 px-1 pb-1">
                 {!problem.debt && (
-                  <OrderInput
-                    index={index}
-                    total={list.length}
+                  <NumberInput
+                    value={problem.number ?? parseProblemNumber(problem.text)}
                     disabled={busyId === problem.id}
-                    onCommit={(to) => void moveTo(index, to)}
+                    onCommit={(next) => void setNumber(problem, next)}
                   />
                 )}
                 <div className="flex flex-wrap items-center gap-1">

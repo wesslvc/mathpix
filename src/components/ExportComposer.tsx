@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { KoreanMeta } from "@/lib/koreanSet";
 
@@ -91,6 +91,42 @@ export default function ExportComposer({
   const [showPicked, setShowPicked] = useState(true);
   const hasPicked = problems.some((p) => (p.studentAnswer ?? "").trim() !== "");
 
+  /**
+   * **여러 실모를 묶어 뽑을 때 실모 차례를 바꾼다**(사용자 요청).
+   *
+   * 기본은 **오래된 것부터**다(서버가 시행일로 줄을 세워 보낸다). 문제 하나씩
+   * 옮기는 것만으로는 회차를 통째로 앞뒤로 보내기가 번거롭다 — 20문제짜리
+   * 실모를 앞으로 보내려면 스무 번을 옮겨야 한다.
+   *
+   * 실모 차례를 바꾸면 그 실모의 문제들이 **덩어리째** 따라 움직인다.
+   * 실모 안의 차례(문제 번호 순)는 그대로다.
+   */
+  const sourceOrder = useMemo(() => {
+    const seen: string[] = [];
+    for (const p of problems) {
+      if (!seen.includes(p.sourceBase)) seen.push(p.sourceBase);
+    }
+    return seen;
+  }, [problems]);
+  const [sources, setSources] = useState<string[]>(sourceOrder);
+
+  function moveSource(index: number, dir: -1 | 1) {
+    const j = index + dir;
+    if (j < 0 || j >= sources.length) return;
+    const next = [...sources];
+    [next[index], next[j]] = [next[j], next[index]];
+    setSources(next);
+    // 문제 목록도 그 차례로 다시 늘어놓는다(실모 안의 차례는 유지).
+    setOrder((cur) =>
+      [...cur].sort((a, b) => {
+        const ia = next.indexOf(a.sourceBase);
+        const ib = next.indexOf(b.sourceBase);
+        if (ia !== ib) return ia - ib;
+        return cur.indexOf(a) - cur.indexOf(b);
+      }),
+    );
+  }
+
   function move(index: number, dir: -1 | 1) {
     const j = index + dir;
     if (j < 0 || j >= order.length) return;
@@ -144,6 +180,54 @@ export default function ExportComposer({
           시행일 : {formatDate(examDate)} (실모 추가 시 정한 날짜)
         </p>
       </div>
+
+      {sources.length > 1 && (
+        <div className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-slate-700">
+            실모 순서 ({sources.length}개)
+          </h2>
+          <p className="text-xs text-slate-400">
+            기본은 오래된 것부터입니다. 옮기면 그 실모의 문제가 덩어리째 따라
+            움직여요.
+          </p>
+          <ol className="flex flex-col gap-1.5">
+            {sources.map((name, index) => (
+              <li
+                key={name}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+              >
+                <span className="w-5 shrink-0 text-center text-xs text-slate-400">
+                  {index + 1}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-slate-700">
+                  {name}
+                </span>
+                <span className="shrink-0 text-xs text-slate-400">
+                  {order.filter((p) => p.sourceBase === name).length}문제
+                </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => moveSource(index, -1)}
+                    disabled={index === 0}
+                    className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveSource(index, 1)}
+                    disabled={index === sources.length - 1}
+                    className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  >
+                    ↓
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
