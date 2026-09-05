@@ -16,6 +16,7 @@ import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { thumbPathFor } from "@/lib/cardThumb";
+import { signCached } from "@/lib/signedUrls";
 import type { BoxOverride } from "@/lib/renderMathText";
 import type { ExamScore } from "@/lib/supabase/types";
 import { SUBJECT_LABEL } from "@/lib/examSubjects";
@@ -211,17 +212,10 @@ export default async function CategoryPage({
 
   /** 주어진 경로들을 서명해 map 으로. 실패하면 빈 map 이다. */
   async function sign(list: string[]): Promise<Map<string, string>> {
-    if (list.length === 0) return new Map();
-    const { data } = await supabase.storage
-      .from("problem-images")
-      .createSignedUrls(list, 60 * 60);
-    return new Map(
-      (data ?? [])
-        .filter((s): s is typeof s & { signedUrl: string } =>
-          Boolean(s.signedUrl),
-        )
-        .map((s) => [s.path ?? "", s.signedUrl]),
-    );
+    // **같은 주소로 다시 준다**(`signedUrls.ts`). 부를 때마다 새 주소를 만들면
+    // 브라우저 이미지 캐시가 한 번도 안 걸려, 들어올 때마다 그림을 통째로
+    // 다시 받는다 — Supabase egress 의 대부분이 여기서 나가고 있었다.
+    return signCached(supabase, "problem-images", list);
   }
 
   /**

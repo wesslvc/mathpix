@@ -35,6 +35,40 @@ export async function GET(req: Request, { params }: { params: { file: string } }
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
 
+  /**
+   * **먼저 메타데이터만 본다 — 내려받지 않는다.**
+   *
+   * 예전에는 무조건 `download()` 부터 하고 그 바이트로 ETag 를 만들었다.
+   * 그러면 브라우저가 304 를 받아 한 글자도 안 쓰는 경우에도 **Supabase
+   * 에서 우리 서버로는 파일이 통째로 나온다** — 그게 곧 Supabase egress 다.
+   * 글꼴 다섯 벌이면 PDF 한 번 뽑을 때마다 4MB 넘게 새고 있었고, 무료 요금제
+   * 한도가 한 달 5GB 라 이것만으로도 상당한 몫이었다(`(한)신중명조` 에 한자를
+   * 넣으며 1.13MB → 3.27MB 로 커져서 더 나빠졌다).
+   *
+   * `list()` 는 파일 목록(JSON)만 받아 오므로 사실상 공짜고, 그 안에
+   * **저장소가 들고 있는 eTag**(내용 해시)가 들어 있다. 그걸로 304 를
+   * 판정하면 **안 바뀐 글꼴은 Supabase 에서 한 바이트도 안 나온다.**
+   */
+  const { data: listed } = await supabase.storage
+    .from("kice-fonts")
+    .list("", { limit: 100, search: params.file });
+  const meta = listed?.find((o) => o.name === params.file);
+  const rawTag =
+    (meta?.metadata as { eTag?: string } | undefined)?.eTag ?? meta?.updated_at;
+  // 저장소가 주는 eTag 는 따옴표가 붙어 오기도 한다 — 한 겹으로 맞춘다.
+  const etag = rawTag ? `"${String(rawTag).replace(/^"|"$/g, "")}"` : null;
+  const headers = {
+    "Content-Type": "font/ttf",
+    // 사용자마다 같은 파일이지만 로그인이 있어야 받을 수 있으므로 private.
+    // `must-revalidate` 로 "쓰기 전에 반드시 물어보라"를 못박는다.
+    "Cache-Control": "private, no-cache, must-revalidate",
+    ...(etag ? { ETag: etag } : {}),
+  };
+
+  if (etag && req.headers.get("if-none-match") === etag) {
+    return new NextResponse(null, { status: 304, headers });
+  }
+
   const { data, error } = await supabase.storage.from("kice-fonts").download(params.file);
   if (error || !data) {
     return NextResponse.json(
@@ -49,34 +83,23 @@ export async function GET(req: Request, { params }: { params: { file: string } }
   const bytes = new Uint8Array(await data.arrayBuffer());
 
   /**
-   * **ETag 를 붙인다 — 이게 없어서 "느리거나 깨지거나" 둘 중 하나였다.**
-   *
-   * 예전에는 검증자(ETag/Last-Modified)를 하나도 안 보내면서
-   * `Cache-Control: max-age=86400` 만 보냈다. 그래서 화면 쪽은 두 가지
-   * 나쁜 선택지밖에 없었다 — `force-cache` 로 받으면 **글꼴을 고쳐 올려도
-   * 24시간 동안 깨진 옛 사본을 계속 쓰고**(실제로 `(한)신중명조` 사고가
-   * 이렇게 재발했다), 그게 무서워 `no-cache` 로 바꾸면 검증할 방법이 없어
-   * **매번 통째로 다시 받는다**(다섯 벌 합쳐 1MB 넘는다 — 내보내기 화면을
-   * 열 때마다 휴대폰에서 몇 초씩 걸렸다).
-   *
-   * 내용으로 만든 ETag 를 붙이면 그 딜레마가 사라진다. `no-cache` 는 원래
-   * "캐시에 두되 쓰기 전에 반드시 확인하라"는 뜻이라, 검증자만 있으면
-   * **안 바뀌었을 때 본문 없는 304** 로 끝난다. 글꼴을 다시 잘라 올리면
-   * 내용이 달라져 ETag 도 달라지므로 그 순간 새 파일을 받는다 — 빠르면서
-   * 절대 낡지 않는다.
+   * 메타데이터에 eTag 가 없는 저장소면(옛 파일 등) 그때만 내용으로 만든다.
+   * 이 경우는 어차피 내려받은 뒤라 추가 비용이 없다.
    */
-  const etag = `"${createHash("sha256").update(bytes).digest("base64url").slice(0, 27)}"`;
-  const headers = {
-    "Content-Type": "font/ttf",
-    // 사용자마다 같은 파일이지만 로그인이 있어야 받을 수 있으므로 private.
-    // `must-revalidate` 로 "쓰기 전에 반드시 물어보라"를 못박는다.
-    "Cache-Control": "private, no-cache, must-revalidate",
-    ETag: etag,
-  };
+  const finalHeaders = etag
+    ? headers
+    : {
+        ...headers,
+        ETag: `"${createHash("sha256").update(bytes).digest("base64url").slice(0, 27)}"`,
+      };
 
-  if (req.headers.get("if-none-match") === etag) {
-    return new NextResponse(null, { status: 304, headers });
+  if (
+    !etag &&
+    req.headers.get("if-none-match") ===
+      (finalHeaders as Record<string, string>).ETag
+  ) {
+    return new NextResponse(null, { status: 304, headers: finalHeaders });
   }
 
-  return new NextResponse(bytes, { headers });
+  return new NextResponse(bytes, { headers: finalHeaders });
 }
