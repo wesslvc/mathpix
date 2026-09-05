@@ -360,6 +360,17 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   const [redrawNote, setRedrawNote] = useState<Record<string, string>>({});
 
   /**
+   * 다시 그릴 때 **Mathpix 참고 글을 쓸지**(사용자 요청 — "mathpix 개입 여부를
+   * 수정할 때는 선택할 수 있게 해"). 없으면 켠 것으로 본다.
+   *
+   * 참고 글이 늘 이로운 것은 아니다. Mathpix 가 잘못 읽으면 모델이 그 오류를
+   * **베껴 쓴다** — 글자 분수를 한 줄로 뭉갠 경우가 그랬다. 결과를 눈으로 본
+   * 사람이 "이번엔 참고 없이 사진만 보고 그려 봐"를 고를 수 있어야 한다.
+   * 지시(`redrawNote`)와 같은 이유로 **그림마다 따로** 들고, 한 번 쓰고 버린다.
+   */
+  const [redrawOcr, setRedrawOcr] = useState<Record<string, boolean>>({});
+
+  /**
    * 큐에 넣는다.
    *
    * **같은 id 를 두 번 넣을 수 없으므로**(중복 과금을 막는 자리다) 다시 그릴
@@ -405,6 +416,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       // 지문은 이 버튼이 아예 안 뜨지만(그쪽은 "다시 인식하기"다) 조건을
       // 그대로 적어 둔다 — 나중에 버튼이 옮겨 다녀도 안전하게.
       mode: isWholeProblemFigure(id) ? "problem" : undefined,
+      // 켠 것이 기본이다. 끄면 참고 글 없이 사진만 보고 그린다.
+      useOcr: redrawOcr[id] !== false,
       // 국어 문항은 거의 글자뿐이라 참고 글을 더 앞세운다(KoreanModePanel 이
       // 처음 만들 때 쓰는 것과 같은 값).
       korean: editing?.korean ? true : undefined,
@@ -1293,6 +1306,32 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                               placeholder="다시 그릴 때 요청할 것 (예: 표 테두리를 진하게)"
                               className="w-full rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-700 placeholder:text-slate-400 disabled:opacity-50"
                             />
+                            {/* **Mathpix 참고 글을 쓸지 고른다**(사용자 요청).
+                                문제 한 장을 다시 그릴 때만 뜻이 있다 — 도형
+                                하나에는 참고 글이 애초에 안 붙는다. */}
+                            {isWholeProblemFigure(f.id) && (
+                              <label className="flex items-start gap-1.5 text-[11px] text-slate-600">
+                                <input
+                                  type="checkbox"
+                                  checked={redrawOcr[f.id] !== false}
+                                  onChange={(e) =>
+                                    setRedrawOcr((prev) => ({
+                                      ...prev,
+                                      [f.id]: e.target.checked,
+                                    }))
+                                  }
+                                  disabled={busy}
+                                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300"
+                                />
+                                <span>
+                                  Mathpix로 글자를 읽어 참고로 주기 (인식 1토큰)
+                                  <span className="block text-slate-400">
+                                    끄면 사진만 보고 그립니다. 글자를 잘못
+                                    베껴 썼다면 꺼 보세요.
+                                  </span>
+                                </span>
+                              </label>
+                            )}
                           </div>
                         )}
                       </div>
