@@ -404,7 +404,7 @@ export type KiceSpec = {
    * 실제 문제지에는 없는 쪽이지만, 이건 문제지가 아니라 **오답프린트**다 —
    * 풀고 나서 맞춰 볼 답이 없으면 쓸모가 반이다. 그래서 맨 뒤에 한 쪽 붙인다.
    */
-  answers?: { label: string; answer: string }[];
+  answers?: { label: string; answer: string; picked?: string }[];
   /**
    * 정답표 쪽의 쪽번호를 **직접 정한다**(정답표 생성기 전용).
    *
@@ -938,6 +938,12 @@ async function drawToc(
 const ANSWER_ROW = 26;
 /** 한 벌(번호+정답)의 폭. 종이 폭을 다 늘리면 표가 아니라 줄자처럼 보인다. */
 const ANSWER_GROUP_W = 150;
+
+/**
+ * 내가 잘못 쓴 답의 색. 흑백으로 인쇄해도 **진한 회색으로 남게** 어두운
+ * 빨강을 쓴다 — 밝은 빨강은 흑백에서 옅어져 오히려 덜 보인다.
+ */
+const WRONG_ANSWER_COLOR = rgb(0.75, 0.11, 0.11);
 const ANSWER_FONT = "(한)신중명조";
 
 /**
@@ -950,7 +956,7 @@ const ANSWER_FONT = "(한)신중명조";
 async function drawAnswers(
   page: PDFPage,
   frame: Frame,
-  rows: { label: string; answer: string }[],
+  rows: { label: string; answer: string; picked?: string }[],
   // 정답표 글자는 사용자가 적은 것이라(정답에 한글이 들어가는 단답형도 있다)
   // 잘라 둔 글꼴에 없는 글자가 섞일 수 있다. 틀 글자와 같은 길을 태운다.
   fontForText: (name: string, text: string) => Promise<{ font: PDFFont; text: string }>,
@@ -996,15 +1002,65 @@ async function drawAnswers(
     });
   const cell = async (text: string, x: number, w: number, y: number, size = 12) => {
     if (!text) return;
-    const picked = await fontForText(ANSWER_FONT, text);
-    if (!picked.text.trim()) return;
-    page.drawText(picked.text, {
-      x: x + (w - picked.font.widthOfTextAtSize(picked.text, size)) / 2,
+    const got = await fontForText(ANSWER_FONT, text);
+    if (!got.text.trim()) return;
+    page.drawText(got.text, {
+      x: x + (w - got.font.widthOfTextAtSize(got.text, size)) / 2,
       y: flip(y + ANSWER_ROW / 2 + size * 0.36),
       size,
-      font: picked.font,
+      font: got.font,
       color: rgb(0, 0, 0),
     });
+  };
+
+  /**
+   * 정답 칸. **내가 잘못 쓴 답은 빨강으로 찍는다**(사용자 요청) — 오답프린트라
+   * "무엇을 잘못 골랐는지"가 정답만큼 중요한데, 검정 한 색이면 눈에 안 띈다.
+   *
+   * 두 토막을 **따로 그리되 하나로 묶어 가운데에 놓는다.** 각자 가운데
+   * 맞추면 서로 겹치고, 합쳐 그리면 색을 나눌 수 없다. 그래서 전체 폭을 먼저
+   * 재고 왼쪽 끝을 구한 뒤 차례로 그린다.
+   *
+   * **글자만으로도 구분된다**(`(내답 ②)` 라는 말이 그대로 있다) — 흑백으로
+   * 인쇄하면 색이 회색이 되지만 뜻은 그대로 남는다.
+   */
+  const answerCellAt = async (
+    row: { answer: string; picked?: string },
+    x: number,
+    w: number,
+    y: number,
+    size = 12,
+  ) => {
+    const picked = (row.picked ?? "").trim();
+    if (!picked) return cell(row.answer, x, w, y, size);
+
+    const head = await fontForText(ANSWER_FONT, row.answer);
+    const tail = await fontForText(ANSWER_FONT, ` (내답 ${picked})`);
+    if (!head.text.trim()) return;
+    const headW = head.font.widthOfTextAtSize(head.text, size);
+    const tailW = tail.text.trim()
+      ? tail.font.widthOfTextAtSize(tail.text, size)
+      : 0;
+    const baseY = flip(y + ANSWER_ROW / 2 + size * 0.36);
+    let cursor = x + (w - (headW + tailW)) / 2;
+
+    page.drawText(head.text, {
+      x: cursor,
+      y: baseY,
+      size,
+      font: head.font,
+      color: rgb(0, 0, 0),
+    });
+    cursor += headW;
+    if (tailW > 0) {
+      page.drawText(tail.text, {
+        x: cursor,
+        y: baseY,
+        size,
+        font: tail.font,
+        color: WRONG_ANSWER_COLOR,
+      });
+    }
   };
 
   for (let g = 0; g < groups; g++) {
@@ -1028,7 +1084,7 @@ async function drawAnswers(
       const row = rows[g * perGroup + r];
       const y = top + (r + 1) * ANSWER_ROW;
       await cell(row.label, x, numW, y);
-      await cell(row.answer, x + numW, groupW - numW, y);
+      await answerCellAt(row, x + numW, groupW - numW, y);
       line(x, y + ANSWER_ROW, x + groupW, y + ANSWER_ROW);
     }
   }
