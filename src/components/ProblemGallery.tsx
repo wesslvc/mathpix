@@ -364,7 +364,35 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
    *
    * **같은 id 를 두 번 넣을 수 없으므로**(중복 과금을 막는 자리다) 다시 그릴
    * 때는 먼저 옛 작업을 목록에서 지운다.
+   *
+   * **모드를 반드시 넘겨야 한다.** 안 넘기면 큐가 "그림 하나"(`figure`)로
+   * 보는데, 통째로 그린 문제는 그림이 아니라 **문제 한 장**이다. 그러면 셋이
+   * 한꺼번에 어긋난다 —
+   *   ① Mathpix 를 아예 안 부른다(참고 글은 문제 전체 모드에만 붙는다).
+   *      "글자는 Mathpix 가 읽고 그림은 생성 모델이 그린다"는 이 기능의
+   *      설계 전제가 다시 그릴 때만 통째로 빠졌다(사용자 지적 — "다시
+   *      생성하기 누를 때도 mathpix 개입해").
+   *   ② 프롬프트가 그림용으로 바뀐다(글자를 한 자도 틀리지 말라는 지시가
+   *      빠진다 — "옳은/옳지 않은" 하나로 답이 뒤집히는 자리다).
+   *   ③ 입력을 긴 변 768px 로 줄여 보낸다(문제 전체는 폭 1536px 이다).
+   *      본문 글자가 뭉개진 채 모델에 들어간다.
+   * 처음 만들 때(`ResultStage`)는 `mode: "problem"` 을 넘기고 있었다 —
+   * 다시 그리는 이 자리만 빠져 있었다.
    */
+  /**
+   * 이 그림이 곧 문제 한 장인가("통째로 다시 그리기"·"원본 그대로 넣기"로
+   * 만든 것).
+   *
+   * **본문이 없다는 것만으로는 모자란다.** 그런 문제에도 "그림 추가"로 도형을
+   * 더 붙일 수 있는데, 그건 진짜 그림이라 그림 프롬프트로 그려야 한다. 문제
+   * 한 장인 경우는 그림(표 제외)이 **그것 하나뿐**이다.
+   */
+  function isWholeProblemFigure(id: string): boolean {
+    if (!isImageOnly || isPassage) return false;
+    const drawings = cardFigures.filter((f) => f.kind !== "table");
+    return drawings.length === 1 && drawings[0].id === id;
+  }
+
   function requestRedraw(id: string, crop: string) {
     dismiss(id);
     const instruction = redrawNote[id]?.trim() || undefined;
@@ -374,6 +402,12 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       label: editing?.text?.slice(0, 20) || "수정 중인 문제",
       crop,
       instruction,
+      // 지문은 이 버튼이 아예 안 뜨지만(그쪽은 "다시 인식하기"다) 조건을
+      // 그대로 적어 둔다 — 나중에 버튼이 옮겨 다녀도 안전하게.
+      mode: isWholeProblemFigure(id) ? "problem" : undefined,
+      // 국어 문항은 거의 글자뿐이라 참고 글을 더 앞세운다(KoreanModePanel 이
+      // 처음 만들 때 쓰는 것과 같은 값).
+      korean: editing?.korean ? true : undefined,
       // 정산이 모자랐을 때 **어느 문제를 잠글지** 서버가 알아야 한다.
       problemId: editing?.id ?? null,
     });
