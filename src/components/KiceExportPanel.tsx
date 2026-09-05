@@ -74,6 +74,8 @@ export type KiceItem = {
   label: string;
   answerLabel: string;
   answer: string;
+  /** 내가 **잘못 쓴** 답. 틀렸을 때만 있다 — 정답표에 다른 색으로 찍는다. */
+  picked?: string;
   /** 목차에 적을 출처(실모 이름). 국어 배치에서만 쓴다. */
   source?: string;
   /** 국어 지문·문제 묶음. 국어 모드로 넣은 것에만 있다. */
@@ -209,7 +211,11 @@ export default function KiceExportPanel({ title, items }: Props) {
         pagePattern: [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
         koreanPlan: layoutKey === "korean" ? await buildKoreanPlan(pngs) : undefined,
         answers: showAnswers
-          ? items.map((item) => ({ label: item.answerLabel, answer: item.answer }))
+          ? items.map((item) => ({
+              label: item.answerLabel,
+              answer: item.answer,
+              picked: item.picked,
+            }))
           : [],
         onWarn: (m) => console.warn("[kice]", m),
       });

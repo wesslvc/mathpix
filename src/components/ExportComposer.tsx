@@ -40,20 +40,26 @@ export type ComposerProblem = {
 };
 
 /**
- * 정답표 한 칸에 찍을 글자. 채점이 연동돼 **내가 고른 답**을 아는 문제는
- * "④ (내답 ②)" 처럼 함께 적는다 — 맞힌 문제(고른 답 = 정답)는 굳이 두 번
- * 적지 않는다.
+ * 정답과 **내가 잘못 쓴 답**을 갈라서 돌려준다.
+ *
+ * 왜 나눠 두나: PDF 정답표에서 **틀린 답만 다른 색으로** 찍으려면 두 토막이
+ * 따로 있어야 한다(사용자 요청). 한 문자열로 합쳐 버리면 어디까지가 정답이고
+ * 어디부터가 내 답인지 그리는 쪽에서 다시 갈라야 하는데, 정답에 괄호가 들어간
+ * 단답형이 있어서 글자로 되짚는 방식은 안전하지 않다.
+ *
+ * `picked` 는 **틀렸을 때만** 채운다 — 맞힌 문제는 굳이 두 번 적지 않는다.
+ * 정답이 비어 있으면(정답을 안 적어 둔 문제) 정답표에서 빠지는 게 기존
+ * 동작이라, 내 답만 있다고 새로 끼워 넣지는 않는다.
  */
-export function answerCell(
+export function answerParts(
   problem: Pick<ComposerProblem, "answer" | "studentAnswer">,
   showPicked: boolean,
-): string {
+): { answer: string; picked: string } {
   const answer = (problem.answer ?? "").trim();
   const picked = (problem.studentAnswer ?? "").trim();
-  if (!showPicked || !picked || picked === answer) return answer;
-  // 정답이 비어 있으면(정답을 안 적어 둔 문제) 정답표에서 빠지는 게 기존
-  // 동작이라, 내 답만 있다고 새로 끼워 넣지는 않는다.
-  return answer ? `${answer} (내답 ${picked})` : "";
+  if (!answer) return { answer: "", picked: "" };
+  if (!showPicked || !picked || picked === answer) return { answer, picked: "" };
+  return { answer, picked };
 }
 
 type Props = {
@@ -214,7 +220,9 @@ export default function ExportComposer({
           imageUrl: problem.imageUrl,
           label: labelFor(problem, index),
           answerLabel: `${numberFor(problem, index)}번`,
-          answer: answerCell(problem, showPicked),
+          // 정답과 내가 틀린 답을 **갈라서** 넘긴다 — 정답표에서 틀린 답만
+          // 다른 색으로 찍기 위해서다.
+          ...answerParts(problem, showPicked),
           source: problem.sourceBase,
           korean: problem.korean ?? null,
         }))}
