@@ -66,43 +66,16 @@ type Stage = "idle" | "upload" | "crop" | "loading" | "result";
 export default function AddProblemFlow({
   categoryId,
   canAdd = true,
-  presetNumber = null,
-  presetAnswer,
-  gradeId = null,
   onDone,
 }: {
   categoryId: string;
   /** false면 토큰이 없음 → 오답 추가 대신 이용권 안내를 보여준다. */
   canAdd?: boolean;
-  /**
-   * **자동채점에서 넘어온 경우에만 쓴다.** 정해진 값이 있으면 이 문제는
-   * "몇 번인지 적어라"가 아니라 "이미 몇 번인지 정해져 있다" — 그래서
-   * 처음 화면(+오답추가·지면 통째로 넣기)을 건너뛰고 곧바로 사진 올리기로
-   * 들어가며, 저장할 때 `box_range.number`가 이 값으로 정해진다.
-   * (`GradeProblemUploader`가 번호를 먼저 고르게 한 다음 이 컴포넌트를
-   * 그 번호로 새로 마운트한다 — "문제 업로드할 때 가장 먼저" 번호부터
-   * 정하라는 요청이 이 순서다.)
-   */
-  presetNumber?: number | null;
-  /**
-   * **자동채점에서 넘어온 경우에만 쓴다.** 채점할 때 이미 읽어 둔 이
-   * 문항의 정답을 정답 칸에 미리 채워 준다 — 사용자가 정답표를 보고
-   * 다시 옮겨 적을 필요가 없다. 고치는 것은 자유롭다.
-   */
-  presetAnswer?: string;
-  /**
-   * **자동채점에서 넘어온 경우에만 쓴다.** 이 문제가 어느 채점 기록
-   * (`exam_scores.id`)에서 왔는지 `box_range.gradeId`에 심어 둔다 — 문제
-   * 번호만으로는 같은 실모에 여러 번 채점한 경우 어느 시험에서 온 문제인지
-   * 구분할 수 없다. 실모↔채점 기록을 양쪽에서 확인할 수 있게 하는
-   * 명시적인 연결이다.
-   */
-  gradeId?: string | null;
-  /** 이 번호의 작업이 끝났다(저장 완료 또는 취소) — 번호 선택 화면으로 돌아간다. */
+  /** 다 넣고 빠져나갈 때(있으면 바깥이 화면을 정리한다). */
   onDone?: () => void;
 }) {
   const router = useRouter();
-  const [stage, setStage] = useState<Stage>(presetNumber != null ? "upload" : "idle");
+  const [stage, setStage] = useState<Stage>("idle");
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [result, setResult] = useState<RecognizeResponse | null>(null);
   // 인식(result)을 만든 바로 그 이미지. 도형 영역을 오려낼 때 필요하다.
@@ -168,9 +141,7 @@ export default function AddProblemFlow({
       if (dataUrls.length === 0) return;
       const [first, ...rest] = dataUrls;
       setImageSrc(first);
-      // 번호가 정해져 있으면 이 문제 하나만 받는다 — 여러 장을 한꺼번에
-      // 넣어도 전부 같은 번호가 될 수는 없으니 나머지는 버린다.
-      setQueue(presetNumber != null ? [] : rest);
+      setQueue(rest);
       setError(null);
       setStage("crop");
     } catch (err) {
@@ -312,7 +283,7 @@ export default function AddProblemFlow({
       setResult({ mock: false, latex: "", text: "", confidence: null, diagrams: [] });
       setRecognizedSourceImage(croppedDataUrl);
       setStage("result");
-      if (presetNumber == null) void readNumberInBackground(croppedDataUrl);
+      void readNumberInBackground(croppedDataUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "알 수 없는 오류");
       setStage("crop");
@@ -349,13 +320,6 @@ export default function AddProblemFlow({
   }
 
   function handleReset() {
-    // 번호가 정해진 채로 들어온 경우 "idle"(+오답추가·지면 통째로 넣기)로
-    // 돌아가면 안 된다 — 그 화면은 번호 제약이 없는 일반 흐름이다. 대신
-    // 번호 선택 화면으로 돌려보낸다.
-    if (presetNumber != null) {
-      onDone?.();
-      return;
-    }
     setImageSrc(null);
     setResult(null);
     setRecognizedSourceImage(null);
@@ -372,7 +336,7 @@ export default function AddProblemFlow({
     setQueue([]);
     // 번호가 정해진 채로 들어온 경우 사진만 다시 고르면 되므로 업로드
     // 화면에 그대로 둔다(번호 선택으로 튕기지 않는다).
-    setStage(presetNumber != null ? "upload" : "idle");
+    setStage("idle");
   }
 
   async function handleSaveToCategory({
@@ -427,16 +391,12 @@ export default function AddProblemFlow({
       answer_type: answerType,
       // 박스 범위·글자 크기·그림이 한 값에 들어 있다(storedFigures.ts 참고).
       // 번호가 미리 정해져 있으면(자동채점 연동) 여기서 심는다 — 사용자가
-      // 따로 "문제 번호" 칸에 적을 필요가 없다. gradeId도 함께 심어 어느
-      // 채점 기록에서 온 문제인지 명시적으로 남긴다.
-      // "원본 그대로 넣기"에서 읽어 둔 번호가 있으면 그것도 심는다(본문이
-      // 없어 번호를 뽑을 데가 없는 문제다). 손으로 정한 번호가 늘 우선한다.
+      // "원본 그대로 넣기"에서 뒤늦게 읽어 온 번호가 있으면 심는다(본문이
+      // 없어 번호를 뽑을 데가 없는 문제다).
       box_range:
-        presetNumber != null
-          ? { ...boxRange, number: presetNumber, gradeId: gradeId ?? undefined }
-          : autoNumberRef.current != null
-            ? { ...boxRange, number: autoNumberRef.current }
-            : boxRange,
+        autoNumberRef.current != null
+          ? { ...boxRange, number: autoNumberRef.current }
+          : boxRange,
     };
 
     // 이미 저장한 문제를 또 저장하는 건 "고쳐서 다시 저장"이다. 새 행을 만들면
@@ -535,11 +495,6 @@ export default function AddProblemFlow({
 
       {stage === "upload" && (
         <div key="upload" className="animate-stage-in flex flex-col gap-2">
-          {presetNumber != null && (
-            <p className="text-sm font-medium text-blue-700">
-              {presetNumber}번 문제 사진을 올려주세요
-            </p>
-          )}
           <ImageUploader
             onImagesSelected={handleImagesSelected}
             onError={handleImageError}
@@ -551,7 +506,7 @@ export default function AddProblemFlow({
             onClick={handleReset}
             className="self-start text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
           >
-            {presetNumber != null ? "취소" : "그만 추가하기"}
+            그만 추가하기
           </button>
         </div>
       )}
@@ -607,16 +562,11 @@ export default function AddProblemFlow({
           onSaveToCategory={handleSaveToCategory}
           remainingCount={queue.length}
           onNext={advanceQueue}
-          // 번호가 정해진 채로 들어온 경우 "다음 문제 추가"는 이 컴포넌트
-          // 안에서 이어가면 안 된다 — 다음 문제는 다른 번호일 수 있는데
-          // presetNumber는 이 인스턴스가 살아 있는 동안 안 바뀐다. 번호
-          // 선택 화면으로 돌려보내 새 번호로 다시 마운트되게 한다.
-          onAddAnother={presetNumber != null ? onDone : startAnother}
+          onAddAnother={startAnother}
           sourceImage={recognizedSourceImage}
           initialFigures={initialFigures}
           pendingWholeJob={pendingWholeJob}
           onWholeJobQueued={() => setPendingWholeJob(null)}
-          initialAnswer={presetAnswer}
         />
         </div>
       )}
