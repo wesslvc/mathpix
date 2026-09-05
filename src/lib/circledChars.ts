@@ -37,6 +37,26 @@ export function insideCircle(ch: string): string | null {
 }
 
 /**
+ * 원문자가 어느 **계열**인지. 모르는 글자면 null.
+ *
+ * 한 지문에 계열이 **섞여 나온다** — 지문 표시는 ㉠㉡㉢, 선지는 ①②③④⑤,
+ * 표 항목은 ⓐⓑⓒ, 보기는 ㉮㉯㉰ 하는 식이다. 그래서 원문자를 한 줄로 늘어놓고
+ * 맞추면 **계열을 넘나들며 짝지어져** 멀쩡한 글자를 망친다(실제로 그랬다 —
+ * `㉠ ㉡ ① ②` 가 `㉡ ㉢ ① ㉠` 이 되어 선지 표시 ② 가 ㉠ 으로 바뀌었다).
+ * 맞추는 일은 **계열 안에서만** 해야 한다.
+ */
+export function circledFamily(ch: string): string | null {
+  const c = ch.codePointAt(0);
+  if (c === undefined) return null;
+  if (c >= 0x3260 && c <= 0x326d) return "consonant"; // ㉠~㉭
+  if (c >= 0x326e && c <= 0x327b) return "syllable"; // ㉮~㉻
+  if (c >= 0x2460 && c <= 0x2473) return "digit"; // ①~⑳
+  if (c >= 0x24b6 && c <= 0x24cf) return "upper"; // Ⓐ~Ⓩ
+  if (c >= 0x24d0 && c <= 0x24e9) return "lower"; // ⓐ~ⓩ
+  return null;
+}
+
+/**
  * 글에 실제로 나온 원문자만 골라 **원문자 차례로** 늘어놓는다.
  *
  * 나온 차례가 아닌 이유: 본문이 `㉠~㉢` 처럼 범위로 먼저 나오면 나온 차례는

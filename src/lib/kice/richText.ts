@@ -1,4 +1,4 @@
-import { circledCharsIn } from "../circledChars";
+import { circledCharsIn, circledFamily } from "../circledChars";
 
 /**
  * 지문을 **그림이 아니라 글자로** 담는 형식.
@@ -124,31 +124,58 @@ export function richToPlainText(blocks: RichBlock[]): string {
  * 덮어쓰는 일이 남는다. 사용자가 "원문자는 무조건 매쓰픽스 우선으로" 라고
  * 한 것을 **코드로 강제**하는 자리다.
  *
- * **어떻게 맞추나.** 원문자를 낱개로 짝짓지 않는다 — 같은 ㉠ 이 본문에 여러 번
- * 나오기 때문이다. 대신 **서로 다른 원문자의 집합**을 코드포인트 차례로 늘어
- * 놓고 i번째끼리 짝짓는다. terra 가 흔히 내는 오류가 **한 칸씩 밀리는 것**
- * (㉠㉡㉢ → ㉡㉢㉣)이라 이 방식이면 통째로 바로잡힌다.
+ * **계열 안에서만 맞춘다.** 한 지문에 계열이 섞여 나온다 — 지문 표시는 ㉠㉡㉢,
+ * 선지는 ①②③, 표 항목은 ⓐⓑⓒ 하는 식이다. 한 줄로 늘어놓고 맞추면 계열을
+ * 넘나들며 짝지어져 **멀쩡한 글자를 망친다**: 참고 글이 `㉠㉡㉢①`, terra 가
+ * `㉠㉡①②` 이면 총 개수가 4로 같아 아래 개수 검사를 통과해 버리고,
+ * `㉡㉢①㉠` 이 되어 **선지 표시 ② 가 ㉠ 으로 바뀐다**(사용자 지적으로
+ * 발견해 실제로 재현했다). 계열별로 갈라 맞추면 이 사고가 없다.
  *
- * **개수가 다르면 손대지 않는다.** 짝지을 근거가 없는데 억지로 맞추면 멀쩡한
- * 글자까지 틀리게 만든다 — 못 고치는 쪽이 안전하다(놓친 것은 그대로 남을 뿐,
- * 잘못 바꾸면 문제가 성립하지 않는다). 그때는 `matched: false` 로 알린다.
+ * **어떻게 맞추나.** 원문자를 낱개로 짝짓지 않는다 — 같은 ㉠ 이 본문에 여러 번
+ * 나오기 때문이다. 대신 계열마다 **서로 다른 원문자의 집합**을 코드포인트
+ * 차례로 늘어놓고 i번째끼리 짝짓는다. terra 가 흔히 내는 오류가 **한 칸씩
+ * 밀리는 것**(㉠㉡㉢ → ㉡㉢㉣)이라 이 방식이면 통째로 바로잡힌다.
+ *
+ * **개수가 다른 계열은 손대지 않는다.** 짝지을 근거가 없는데 억지로 맞추면
+ * 멀쩡한 글자까지 틀리게 만든다 — 못 고치는 쪽이 안전하다(놓친 것은 그대로
+ * 남을 뿐, 잘못 바꾸면 문제가 성립하지 않는다). 그 계열만 건너뛰고 나머지는
+ * 그대로 고치며, 건너뛴 게 있으면 `matched: false` 로 알린다.
  */
 export function alignCircledToReference(
   blocks: RichBlock[],
   reference: string,
 ): { blocks: RichBlock[]; replaced: number; matched: boolean } {
-  const want = circledCharsIn(reference);
-  if (want.length === 0) return { blocks, replaced: 0, matched: true };
+  const byFamily = (chars: string[]) => {
+    const out = new Map<string, string[]>();
+    for (const ch of chars) {
+      const fam = circledFamily(ch);
+      if (!fam) continue;
+      const list = out.get(fam);
+      if (list) list.push(ch);
+      else out.set(fam, [ch]);
+    }
+    return out;
+  };
 
-  const got = circledCharsIn(richToPlainText(blocks));
-  if (got.length === 0) return { blocks, replaced: 0, matched: true };
-  if (got.length !== want.length) return { blocks, replaced: 0, matched: false };
+  const want = byFamily(circledCharsIn(reference));
+  if (want.size === 0) return { blocks, replaced: 0, matched: true };
+  const got = byFamily(circledCharsIn(richToPlainText(blocks)));
 
   const map = new Map<string, string>();
-  for (let i = 0; i < got.length; i++) {
-    if (got[i] !== want[i]) map.set(got[i], want[i]);
+  let skipped = false;
+  for (const [fam, mine] of got) {
+    const theirs = want.get(fam);
+    // 참고 글에 아예 없는 계열은 고칠 근거가 없다 — 그대로 둔다.
+    if (!theirs) continue;
+    if (theirs.length !== mine.length) {
+      skipped = true;
+      continue;
+    }
+    for (let i = 0; i < mine.length; i++) {
+      if (mine[i] !== theirs[i]) map.set(mine[i], theirs[i]);
+    }
   }
-  if (map.size === 0) return { blocks, replaced: 0, matched: true };
+  if (map.size === 0) return { blocks, replaced: 0, matched: !skipped };
 
   let replaced = 0;
   const fixRun = (r: RichRun): RichRun => ({
@@ -169,5 +196,5 @@ export function alignCircledToReference(
       return b;
     });
 
-  return { blocks: walk(blocks), replaced, matched: true };
+  return { blocks: walk(blocks), replaced, matched: !skipped };
 }
