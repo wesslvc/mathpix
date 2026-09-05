@@ -21,10 +21,14 @@ const KiceExportPanel = dynamic(() => import("./KiceExportPanel"), {
 export type ComposerProblem = {
   id: string;
   imageUrl: string;
-  /** 점수까지 붙은 출처 표기(예: "강대2회(96/100)"). */
+  /**
+   * 출처 표기(실모 이름, 예: "강대2회").
+   *
+   * 예전에는 점수까지 붙은 것(`source`)과 뺀 것(`sourceBase`) 둘을 들고
+   * 다니며 "그 출처가 처음 나오는 자리에만 점수를 적는" 규칙이 있었다.
+   * 이제 제목에 점수를 안 붙이므로(사용자 요청) 둘이 같아져 하나로 합쳤다.
+   */
   source: string;
-  /** 점수를 뺀 출처(예: "강대2회"). 같은 출처가 반복될 때 쓴다. */
-  sourceBase: string;
   origNumber: number | null;
   /** 사용자가 손으로 정해 둔 번호. 있으면 무조건 이걸 쓴다. */
   manualNumber: number | null;
@@ -104,7 +108,7 @@ export default function ExportComposer({
   const sourceOrder = useMemo(() => {
     const seen: string[] = [];
     for (const p of problems) {
-      if (!seen.includes(p.sourceBase)) seen.push(p.sourceBase);
+      if (!seen.includes(p.source)) seen.push(p.source);
     }
     return seen;
   }, [problems]);
@@ -119,8 +123,8 @@ export default function ExportComposer({
     // 문제 목록도 그 차례로 다시 늘어놓는다(실모 안의 차례는 유지).
     setOrder((cur) =>
       [...cur].sort((a, b) => {
-        const ia = next.indexOf(a.sourceBase);
-        const ib = next.indexOf(b.sourceBase);
+        const ia = next.indexOf(a.source);
+        const ib = next.indexOf(b.source);
         if (ia !== ib) return ia - ib;
         return cur.indexOf(a) - cur.indexOf(b);
       }),
@@ -151,17 +155,16 @@ export default function ExportComposer({
    * 각 문제 라벨.
    *
    * 같은 내용을 페이지마다 반복하지 않는 것이 원칙이다.
-   * - 단일 묶음: 출처와 점수가 이미 첫 페이지 제목에 있으므로 번호만 적는다.
-   * - 여러 묶음: 출처는 문제마다 다를 수 있으니 남기되, 점수는 그 출처가 처음
-   *   나오는 페이지에서 한 번만 적는다.
+   * - 단일 묶음: 출처가 이미 첫 페이지 제목에 있으므로 번호만 적는다.
+   * - 여러 묶음: 출처는 문제마다 다를 수 있으니 함께 적는다.
+   *
+   * (예전에는 "그 출처가 처음 나오는 페이지에만 점수를 적는" 갈래가 있었다.
+   * 제목에 점수를 안 붙이게 되면서 두 갈래가 같은 글자가 되어 없앴다.)
    */
   function labelFor(problem: ComposerProblem, index: number): string {
     const n = numberFor(problem, index);
     if (!multi) return `${n}번`;
-
-    const firstOfSource =
-      order.findIndex((p) => p.sourceBase === problem.sourceBase) === index;
-    return `${firstOfSource ? problem.source : problem.sourceBase} ${n}번`;
+    return `${problem.source} ${n}번`;
   }
 
   return (
@@ -203,7 +206,7 @@ export default function ExportComposer({
                   {name}
                 </span>
                 <span className="shrink-0 text-xs text-slate-400">
-                  {order.filter((p) => p.sourceBase === name).length}문제
+                  {order.filter((p) => p.source === name).length}문제
                 </span>
                 <div className="flex shrink-0 items-center gap-1">
                   <button
@@ -307,7 +310,7 @@ export default function ExportComposer({
           // 정답과 내가 틀린 답을 **갈라서** 넘긴다 — 정답표에서 틀린 답만
           // 다른 색으로 찍기 위해서다.
           ...answerParts(problem, showPicked),
-          source: problem.sourceBase,
+          source: problem.source,
           korean: problem.korean ?? null,
         }))}
       />

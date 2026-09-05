@@ -85,21 +85,34 @@ export type Problem = {
 };
 
 /**
- * 출처 표기 문자열을 만든다.
- * 실모(is_exam)이고 점수가 있으면 "강모2회(96/100)"처럼 뒤에 점수를 붙인다.
+ * 출처 표기 문자열. **적어 둔 제목 그대로다.**
+ *
+ * 예전에는 실모(is_exam)이고 점수가 있으면 "강모2회(96/100)"처럼 뒤에 점수를
+ * 붙였다. 사용자가 그만두라고 했다("이제 제목에 괄호치고 점수넣지마") —
+ * 제목은 시험을 가리키는 이름이고 점수는 그 시험을 본 결과라, 둘을 한 글자로
+ * 묶으면 PDF 제목·문제 출처 표기·정답표 머리글에 점수가 따라다닌다.
+ *
+ * **점수를 화면에서 없애는 것이 아니다.** 목록과 실모 화면에서는
+ * `categoryScore()` 로 뽑아 **제목 옆에 따로** 보여 준다.
+ */
+export function categoryLabel(
+  category: Pick<Category, "source" | "is_exam" | "score">,
+): string {
+  return category.source;
+}
+
+/**
+ * 제목 옆에 따로 붙일 점수("96/100"). 실모가 아니거나 점수가 없으면 null.
  *
  * **만점을 100으로 못박으면 안 된다** — 탐구는 원점수 만점이 50점이라
  * "36/100"처럼 절반짜리로 보인다(사용자 신고). categories 자체에는 과목이
  * 없으므로, 연결된 채점 기록(exam_scores.subject)에서 구한 만점을 넘겨
- * 준다(`examMaxScore`). 연결된 채점이 없으면 알 길이 없으니 100으로 둔다 —
- * 예전과 같은 표기라 회귀가 없다.
+ * 준다(`examMaxScore`). 연결된 채점이 없으면 알 길이 없으니 100으로 둔다.
  */
-export function categoryLabel(
-  category: Pick<Category, "source" | "is_exam" | "score">,
+export function categoryScore(
+  category: Pick<Category, "is_exam" | "score">,
   maxScore = 100,
-): string {
-  if (category.is_exam && category.score != null) {
-    return `${category.source}(${category.score}/${maxScore})`;
-  }
-  return category.source;
+): string | null {
+  if (!category.is_exam || category.score == null) return null;
+  return `${category.score}/${maxScore}`;
 }

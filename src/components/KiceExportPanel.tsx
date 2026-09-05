@@ -76,7 +76,10 @@ export type KiceItem = {
   answer: string;
   /** 내가 **잘못 쓴** 답. 틀렸을 때만 있다 — 정답표에 다른 색으로 찍는다. */
   picked?: string;
-  /** 목차에 적을 출처(실모 이름). 국어 배치에서만 쓴다. */
+  /**
+   * 출처(실모 이름). 국어 목차에 적고, **정답표를 출처별로 나누는** 데 쓴다
+   * (실모를 둘 이상 묶어 뽑을 때).
+   */
   source?: string;
   /** 국어 지문·문제 묶음. 국어 모드로 넣은 것에만 있다. */
   korean?: KoreanMeta | null;
@@ -215,6 +218,10 @@ export default function KiceExportPanel({ title, items }: Props) {
               label: item.answerLabel,
               answer: item.answer,
               picked: item.picked,
+              // 실모를 둘 이상 묶어 뽑으면 정답표가 출처별로 갈린다 — 번호가
+              // 실모마다 겹쳐서 한 덩어리로 붙여 놓으면 어느 시험지 답인지
+              // 알 수 없다.
+              source: item.source,
             }))
           : [],
         onWarn: (m) => console.warn("[kice]", m),
