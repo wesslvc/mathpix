@@ -477,6 +477,133 @@ function parseAnswerKey(text: string): AnswerKeyItem[] {
  */
 export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.6-terra";
 
+/**
+ * **지문 인식은 Gemini Flash 를 먼저 쓰고, 안 되면 terra 로 내려간다**
+ * (사용자 지시 — "terra 를 gemini flash latest 로 바꿔 봐, flash 써 보고 안
+ * 되면 테라로 넘어가게").
+ *
+ * 값이 훨씬 싸다 — terra 는 입력 $2.00 · 출력 $12.00 (100만 토큰당)이고
+ * 지문 한 편이 약 7,000토큰이라 원가가 70원쯤 든다. 이 일은 "사진을 보고
+ * 글자와 구조를 옮겨 적기"라 Flash 가 못 할 이유도 없다.
+ *
+ * **이 저장소의 "조용히 다른 모델로 갈아타지 않는다" 원칙의 예외다.**
+ * 그 원칙은 *고른 적 없는* 모델에 요금이 나가는 것을 막으려던 것인데, 여기서는
+ * 두 모델을 **사용자가 직접 골라 순서까지 정했다.** 그래서 갈아타되 **숨기지
+ * 않는다** — 어느 모델이 실제로 답했는지 응답(`model`)과 로그에 그대로 찍히고,
+ * 갈아탄 이유도 로그에 남는다.
+ *
+ * `GEMINI_API_KEY` 가 없으면 이 갈래는 아예 건너뛰고 예전처럼 terra 만 쓴다.
+ * 이름은 못박아 두고 `KOREAN_TEXT_GEMINI_MODEL` 로 바꾼다(자동으로 고르지
+ * 않는다 — 고른 적 없는 모델이 왜 실패하는지 알 수 없게 된다).
+ */
+export const KOREAN_TEXT_GEMINI_MODEL =
+  process.env.KOREAN_TEXT_GEMINI_MODEL ?? "gemini-flash-latest";
+
+const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/**
+ * Gemini 로 사진 한 장 + 프롬프트를 보내 JSON 을 받는다.
+ *
+ * 요청 모양은 이미 이 저장소에서 `gemini-flash-latest` 로 검증된 것
+ * (`detectProblems.ts` 의 `callGemini`)을 그대로 따른다 — 거기서 되는 조합을
+ * 바꿀 이유가 없다. 다른 점은 셋뿐이다: 길이 상한(지문 JSON 은 길다),
+ * 중단 신호(요청이 시간 안에 안 끝나면 우리가 먼저 끊는다), usage 읽기.
+ */
+async function callGeminiVision(
+  prompt: string,
+  imageDataUrl: string,
+  what: string,
+  signal?: AbortSignal,
+  modelName: string = KOREAN_TEXT_GEMINI_MODEL,
+): Promise<{ text: string; usage?: GradeUsage; model: string }> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new GradeError("GEMINI_API_KEY가 설정되지 않았습니다.", 500);
+  const m = imageDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!m) throw new GradeError("이미지를 읽을 수 없습니다.", 400);
+
+  const res = await fetch(
+    `${GEMINI_ENDPOINT}/${modelName}:generateContent?key=${key}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { inline_data: { mime_type: m[1], data: m[2] } },
+              { text: prompt },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: "application/json",
+          // 옮겨 적는 일이라 매번 같은 답이 나와야 한다.
+          temperature: 0,
+          // 지문 한 편의 JSON 은 실측 3,544토큰이었다(terra 기준). 넉넉히 두되
+          // 넘치면 잘린 JSON 이 오므로 아래에서 실패로 보고 terra 로 내려간다.
+          maxOutputTokens: 8192,
+        },
+      }),
+    },
+  );
+
+  const body = await res.text();
+  if (!res.ok) {
+    throw new GradeError(
+      res.status === 404
+        ? `모델 "${modelName}"을 찾을 수 없습니다. KOREAN_TEXT_GEMINI_MODEL 로 바꿔 주세요.`
+        : `${what}에 실패했습니다 (${modelName}, HTTP ${res.status}). ${body.slice(0, 200)}`,
+      res.status,
+    );
+  }
+
+  let json: {
+    candidates?: {
+      content?: { parts?: { text?: string }[] };
+      finishReason?: string;
+    }[];
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      cachedContentTokenCount?: number;
+    };
+  };
+  try {
+    json = JSON.parse(body);
+  } catch {
+    throw new GradeError("모델이 정상적인 응답을 주지 않았습니다.", 502);
+  }
+
+  const candidate = json.candidates?.[0];
+  // 길이에 걸려 잘린 JSON 은 파싱은 실패하고 요금은 나간다 — 여기서 분명히
+  // 실패로 보고 넘겨야 왜 terra 로 내려갔는지 로그에 남는다.
+  if (candidate?.finishReason && candidate.finishReason !== "STOP") {
+    throw new GradeError(
+      `${what}이 중간에 끊겼습니다 (${modelName}, ${candidate.finishReason}).`,
+      502,
+    );
+  }
+  // 글을 여러 조각으로 나눠 주는 경우가 있어 이어 붙인다.
+  const text = (candidate?.content?.parts ?? [])
+    .map((p) => p.text ?? "")
+    .join("");
+
+  const u = json.usageMetadata;
+  const cached = u?.cachedContentTokenCount;
+  const usage: GradeUsage | undefined = u
+    ? {
+        inputTokens: u.promptTokenCount ?? 0,
+        outputTokens: u.candidatesTokenCount ?? 0,
+        ...(typeof cached === "number" && cached > 0
+          ? { cachedInputTokens: cached }
+          : {}),
+      }
+    : undefined;
+
+  return { text, usage, model: modelName };
+}
+
 const KOREAN_TEXT_PROMPT = `task: transcribe Korean SAT (수능) 국어 passage image into structured text for re-typesetting.
 reproduce EXACTLY — copying, not editing.
 
@@ -555,13 +682,66 @@ ${cleanedReference}
 """`
     : KOREAN_TEXT_PROMPT;
 
-  const { text, usage, model } = await callVision(
-    prompt,
-    [imageDataUrl],
-    "지문 인식",
-    signal,
-    OPENAI_TEXT_MODEL,
-  );
+  /**
+   * **Flash 를 먼저, 안 되면 terra**(사용자 지시). 갈아타는 이유가 무엇이든
+   * 로그에 남긴다 — 조용히 내려가면 Flash 가 왜 안 되는지 영영 모른다.
+   *
+   * **읽기와 파싱을 한 묶음으로 시도한다.** 응답이 오더라도 JSON 이 깨져
+   * 있으면(잘림·군더더기) 쓸 수 없으므로 그것도 실패로 보고 다음으로 내려가야
+   * 한다. 파싱까지 해 봐야 그 판단이 선다.
+   */
+  const attempts: { label: string; run: () => Promise<{ text: string; usage?: GradeUsage; model: string }> }[] = [];
+  if (process.env.GEMINI_API_KEY) {
+    attempts.push({
+      label: KOREAN_TEXT_GEMINI_MODEL,
+      run: () => callGeminiVision(prompt, imageDataUrl, "지문 인식", signal),
+    });
+  }
+  if (process.env.OPENAI_API_KEY) {
+    attempts.push({
+      label: OPENAI_TEXT_MODEL,
+      run: () =>
+        callVision(prompt, [imageDataUrl], "지문 인식", signal, OPENAI_TEXT_MODEL),
+    });
+  }
+  if (attempts.length === 0) {
+    throw new GradeError(
+      "GEMINI_API_KEY 도 OPENAI_API_KEY 도 설정되지 않아 지문 인식을 쓸 수 없습니다.",
+      500,
+    );
+  }
+
+  let lastError: unknown;
+  for (const [i, attempt] of attempts.entries()) {
+    try {
+      const { text, usage, model } = await attempt.run();
+      return { blocks: parseBlocks(text), usage, model };
+    } catch (err) {
+      lastError = err;
+      // **시간이 다 됐으면 갈아타지 않는다.** 어차피 다음 호출도 곧바로
+      // 끊기는데 요금만 한 번 더 나간다.
+      if (signal?.aborted) throw err;
+      const isLast = i === attempts.length - 1;
+      if (isLast) throw err;
+      console.warn(
+        `[korean-text] ${attempt.label} 실패 → ${attempts[i + 1].label} 로 넘어감: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new GradeError("지문을 읽지 못했습니다.", 502);
+}
+
+/**
+ * 모델이 준 글에서 `blocks` 를 꺼낸다.
+ *
+ * JSON 만 달라고 했어도 앞뒤에 군더더기가 붙어 오는 경우가 있어 중괄호
+ * 구간을 다시 잘라 본다. 그래도 안 되면 **실패**다 — 부르는 쪽이 그걸 보고
+ * 다음 모델로 내려간다.
+ */
+function parseBlocks(text: string): unknown {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -575,6 +755,5 @@ ${cleanedReference}
       throw new GradeError("지문을 읽지 못했습니다.", 502);
     }
   }
-  const blocks = (parsed as { blocks?: unknown })?.blocks ?? parsed;
-  return { blocks, usage, model };
+  return (parsed as { blocks?: unknown })?.blocks ?? parsed;
 }

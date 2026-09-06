@@ -48,9 +48,14 @@ export async function POST(req: NextRequest) {
   }
   const reference = typeof body.reference === "string" ? body.reference.slice(0, 12000) : "";
 
-  if (!process.env.OPENAI_API_KEY) {
+  // 지문 인식은 Gemini Flash 를 먼저 쓰고 안 되면 terra 로 내려간다 —
+  // 둘 중 하나만 있어도 돌아간다.
+  if (!process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY) {
     return NextResponse.json(
-      { error: "OPENAI_API_KEY가 설정되지 않아 지문 인식을 쓸 수 없습니다." },
+      {
+        error:
+          "GEMINI_API_KEY 도 OPENAI_API_KEY 도 설정되지 않아 지문 인식을 쓸 수 없습니다.",
+      },
       { status: 500 },
     );
   }
