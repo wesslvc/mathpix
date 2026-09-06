@@ -6,6 +6,7 @@ import type { ExamScore } from "@/lib/supabase/types";
 import GradeDetailActions from "@/components/GradeDetailActions";
 import ExamNameEditor from "@/components/ExamNameEditor";
 import ExamDateEditor from "@/components/ExamDateEditor";
+import DeleteGradeButton from "@/components/DeleteGradeButton";
 import { normalizeElectiveLabel, SUBJECT_LABEL } from "@/lib/examSubjects";
 
 export default async function GradeDetailPage({
@@ -154,6 +155,16 @@ export default async function GradeDetailPage({
             </table>
           </div>
         )}
+      </section>
+
+      {/* 되돌릴 수 없는 조작이라 맨 아래에 따로 둔다 — 등급 고르기·실모
+          연결과 한자리에 있으면 잘못 누르기 쉽다. */}
+      <section className="border-t border-slate-100 pt-4">
+        <DeleteGradeButton
+          examScoreId={row.id}
+          label={row.exam_name?.trim() || title}
+          takenAt={row.taken_at}
+        />
       </section>
     </main>
   );
