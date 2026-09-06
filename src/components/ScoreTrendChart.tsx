@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { TrendMetric, TrendSeries } from "@/lib/scoreTrend";
+import { officialExamOn } from "@/lib/officialExams";
 
 const WIDTH = 720;
 const HEIGHT = 260;
@@ -191,6 +192,40 @@ export default function ScoreTrendChart({
           </g>
         ))}
 
+        {/* **정식 시험(6·9모·수능)은 도드라지게.** 사설 실모와 성적의 무게가
+            달라 추세를 읽을 때 기준이 되는 자리다(사용자 요청). 세로 안내선을
+            먼저 깔아 선·점 뒤에 두고, 이름은 위쪽 여백에 적는다 — 자리를
+            새로 만들지 않으므로 정식 시험이 없으면 그래프가 예전 그대로다. */}
+        {dates.map((d) => {
+          const name = officialExamOn(d);
+          if (!name) return null;
+          const x = xOf(d);
+          const near = (x - PAD_LEFT) / innerW;
+          return (
+            <g key={`official-${d}`}>
+              <line
+                x1={x}
+                x2={x}
+                y1={PAD_TOP}
+                y2={HEIGHT - PAD_BOTTOM}
+                stroke="#94a3b8"
+                strokeWidth={1}
+                strokeDasharray="3 3"
+              />
+              <text
+                x={x + (near < 0.15 ? 3 : near > 0.85 ? -3 : 0)}
+                y={PAD_TOP - 5}
+                fontSize={9}
+                fontWeight={700}
+                fill="#475569"
+                textAnchor={near < 0.15 ? "start" : near > 0.85 ? "end" : "middle"}
+              >
+                {name}
+              </text>
+            </g>
+          );
+        })}
+
         {colored.map((s) => {
           const isActive = active === s.key;
           const isDimmed = active !== null && !isActive;
@@ -211,17 +246,20 @@ export default function ScoreTrendChart({
                 // 같은 자리에 겹친 점은 바깥쪽으로 한 겹씩 키워 동심원으로
                 // 보이게 한다(속을 비워야 안쪽 점이 가려지지 않는다).
                 const ring = ringOf(s.key, xOf(p.takenAt), yOf(p.value));
+                // 정식 시험의 점은 크고 두껍게 — 안내선만으로는 어느 점이
+                // 그 시험 것인지 과목이 여럿일 때 눈이 헷갈린다.
+                const official = officialExamOn(p.takenAt);
                 return (
                 <circle
                   key={i}
                   cx={xOf(p.takenAt)}
                   cy={yOf(p.value)}
-                  r={(isActive ? 4.5 : 3.5) + ring * 2.6}
+                  r={(isActive ? 4.5 : 3.5) + (official ? 1.5 : 0) + ring * 2.6}
                   fill={ring > 0 ? "none" : p.hasScore ? s.color : "#ffffff"}
                   stroke={s.color}
-                  strokeWidth={1.5}
+                  strokeWidth={official ? 2.5 : 1.5}
                 >
-                  <title>{`${s.label} · ${p.takenAt} · ${pointLabel(metric, p.hasScore, p.value)}`}</title>
+                  <title>{`${s.label} · ${p.takenAt}${official ? ` (${official})` : ""} · ${pointLabel(metric, p.hasScore, p.value)}`}</title>
                 </circle>
                 );
               })}
