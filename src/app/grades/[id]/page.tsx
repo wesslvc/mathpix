@@ -114,7 +114,11 @@ export default async function GradeDetailPage({
         <h2 className="mb-2 text-base font-semibold text-ink">세부오답</h2>
         {!row.items ? (
           <p className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400">
-            예전 기록이라 문항별 상세가 없어요. 틀린 번호만 남아 있습니다.
+            {/* 손으로 적어 넣은 성적은 문항 정보가 아예 없다(0 문항).
+                "예전 기록"이라고 하면 왜 없는지 잘못 알려 준다. */}
+            {row.total_questions <= 0
+              ? "직접 입력한 성적이라 문항별 상세가 없어요."
+              : "예전 기록이라 문항별 상세가 없어요. 틀린 번호만 남아 있습니다."}
           </p>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">

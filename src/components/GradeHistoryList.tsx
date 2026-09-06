@@ -19,6 +19,11 @@ export type GradeHistoryRow = {
   score: number | null;
   grade_level: number | null;
   wrong_numbers: number[];
+  /**
+   * 채점한 문항 수. **손으로 적어 넣은 성적은 0 이다** — 문항 정보가 없다는
+   * 뜻이라 "전부 정답"이라고 적으면 안 된다(오답이 없는 게 아니라 모르는 것이다).
+   */
+  total_questions: number;
 };
 
 function subjectTitle(row: GradeHistoryRow): string {
@@ -70,9 +75,11 @@ function Row({ row }: { row: GradeHistoryRow }) {
           <p className="text-sm font-semibold text-ink">{scoreText(row)}</p>
           <p className="text-xs text-slate-400">
             {row.grade_level ? `${row.grade_level}등급 · ` : ""}
-            {row.wrong_numbers.length > 0
-              ? `오답 ${row.wrong_numbers.length}개`
-              : "전부 정답"}
+            {row.total_questions <= 0
+              ? "직접 입력"
+              : row.wrong_numbers.length > 0
+                ? `오답 ${row.wrong_numbers.length}개`
+                : "전부 정답"}
           </p>
         </div>
       </Link>

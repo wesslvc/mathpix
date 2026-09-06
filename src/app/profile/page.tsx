@@ -10,6 +10,7 @@ import ScoreTrendChart from "@/components/ScoreTrendChart";
 import Logo from "@/components/Logo";
 import GradeHistoryList from "@/components/GradeHistoryList";
 import GradingPrefsForm, { type GradingPrefsValue } from "@/components/GradingPrefsForm";
+import ManualScoreForm from "@/components/ManualScoreForm";
 
 const VALID_SUBJECTS: readonly Subject[] = ["korean", "math", "english", "elective"];
 
@@ -112,10 +113,14 @@ export default async function ProfilePage() {
           </Link>
         </div>
 
+        {/* 추세에 필요한 건 과목·응시일·점수(또는 등급)뿐이라, 채점을 거치지
+            않은 시험도 그 넷만 적으면 같은 그래프에 얹힌다(사용자 요청). */}
+        <ManualScoreForm />
+
         {series.length === 0 ? (
           <p className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400">
-            아직 채점 기록이 없어요. 자동채점을 한 번 해보면 여기에 추세가
-            쌓입니다.
+            아직 성적 기록이 없어요. 자동채점을 하거나 위에서 성적을 직접
+            적어 넣으면 여기에 추세가 쌓입니다.
           </p>
         ) : (
           <div className="rounded-xl border border-slate-200 bg-white p-4">
