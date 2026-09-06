@@ -81,7 +81,8 @@ create table if not exists public.exam_scores (
   elective_slot smallint check (elective_slot in (1, 2)),
   -- 탐구 과목명이자 국어·수학의 선택과목명(자리를 넓혀 쓴다).
   elective_label text,
-  total_questions integer not null check (total_questions > 0),
+  -- 0 = 문항 정보가 없다(손으로 적어 넣은 성적). 마이그레이션 0023 참고.
+  total_questions integer not null check (total_questions >= 0),
   correct_count integer not null check (correct_count >= 0),
   wrong_numbers integer[] not null default '{}'::integer[],
   score integer,

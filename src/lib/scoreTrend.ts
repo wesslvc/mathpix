@@ -82,6 +82,11 @@ export function buildTrendSeries(
     // 등급은 적어 둔 시험에만 있다 — 없는 것을 0 같은 값으로 채우면
     // 그래프가 바닥을 찍어 실제로 등급이 떨어진 것처럼 보인다. 아예 뺀다.
     if (metric === "grade" && row.grade_level == null) continue;
+    // **점수도 같은 이유로 뺀다.** 손으로 적어 넣은 기록은 문항 수가 0 이라
+    // 정답률로 대신할 수도 없는데(`total_questions > 0` 이 아니다), 점수까지
+    // 비어 있으면(등급만 적어 둔 기록) 아래 계산이 0 을 돌려준다 — 0점을 받은
+    // 것처럼 바닥에 점이 찍힌다.
+    if (metric === "score" && row.score == null && row.total_questions <= 0) continue;
 
     const key = subjectGroupKey(row);
     const label = subjectGroupLabel(row);
