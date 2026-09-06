@@ -527,6 +527,8 @@ export default function KoreanModePanel({
         error?: string;
         chargedTokens?: number;
         usage?: { estKrw?: number };
+        /** 실제로 답한 모델(Gemini Flash 또는 terra). 화면에 그대로 보여 준다. */
+        model?: string;
       };
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
       const raw = readRichBlocks(json.blocks);
@@ -538,6 +540,7 @@ export default function KoreanModePanel({
         terra: "done",
         circledFixed: replaced,
         circledMismatch: !matched,
+        model: json.model,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
       });

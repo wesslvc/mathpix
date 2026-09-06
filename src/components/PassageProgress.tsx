@@ -20,7 +20,16 @@ export type PassageStatus = {
   circledFixed?: number;
   /** 원문자 개수가 참고 글과 달라 손대지 못했다(짝지을 근거가 없다). */
   circledMismatch?: boolean;
-  /** 일반 계정에 보여줄 토큰 수(terra 호출, 실사용량 정산). */
+  /**
+   * 실제로 답한 모델 이름(서버가 응답에 실어 준다).
+   *
+   * 지문 인식은 **Gemini Flash 를 먼저 쓰고 안 되면 terra 로 내려간다** —
+   * 그래서 "terra" 라고 못박아 두면 거짓말이 된다. 갈아탔는지 여부가 값과
+   * 정확도를 좌우하므로 눈에 보여야 한다(어느 모델이 잡았는지 화면에도
+   * 찍는다는 이 저장소의 규칙과 같다). 끝나기 전에는 어느 쪽이 답할지 모른다.
+   */
+  model?: string;
+  /** 일반 계정에 보여줄 토큰 수(실사용량 정산). */
   chargedTokens?: number;
   /** 무제한 계정에만 보여줄 원화 추정치(막는 자리는 서버다). */
   costKrw?: number;
@@ -72,7 +81,7 @@ export function PassageProgress({
                 : "text-slate-400"
         }
       >
-        terra: {TERRA_LABEL[status.terra]}
+        {status.model ?? "AI"}: {TERRA_LABEL[status.terra]}
         {status.terra === "done" && status.circledFixed
           ? ` · 원문자 ${status.circledFixed}자를 Mathpix 기준으로 교정`
           : ""}
