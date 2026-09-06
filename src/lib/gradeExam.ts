@@ -494,12 +494,34 @@ export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.6-terra
  *
  * `GEMINI_API_KEY` 가 없으면 이 갈래는 아예 건너뛰고 예전처럼 terra 만 쓴다.
  * 이름은 못박아 두고 `KOREAN_TEXT_GEMINI_MODEL` 로 바꾼다(자동으로 고르지
- * 않는다 — 고른 적 없는 모델이 왜 실패하는지 알 수 없게 된다).
+ * 않는다 — 고른 적 없는 모델이 왜 실패하는지 알 수 없게 된다). **쉼표로 여러
+ * 개를 적으면 앞에서부터 시도한다** — `gemini-flash-latest` 가 503(자리 없음)을
+ * 자주 내는 것을 겪고 나서, 재배포 없이 예비 이름을 둘 수 있게 열어 뒀다.
+ * 그래도 이름을 지어내는 건 우리가 아니라 **사용자**다.
  */
-export const KOREAN_TEXT_GEMINI_MODEL =
-  process.env.KOREAN_TEXT_GEMINI_MODEL ?? "gemini-flash-latest";
+export const KOREAN_TEXT_GEMINI_MODELS = (
+  process.env.KOREAN_TEXT_GEMINI_MODEL ?? "gemini-flash-latest"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/**
+ * **잠깐 밀려서 나는 오류는 다시 시도한다.**
+ *
+ * 실제로 겪은 일이다(운영 로그): `gemini-flash-latest` 가 503 UNAVAILABLE —
+ * "This model is currently experiencing high demand. Spikes in demand are
+ * usually temporary." 를 돌려줬다. 이건 이름이 틀렸거나 요청이 잘못된 게
+ * 아니라 **그 순간 자리가 없다**는 뜻이라, 곧바로 terra 로 내려가면 70원짜리
+ * 호출을 하게 된다. 몇 초 기다렸다 다시 물어보는 값이 훨씬 싸다.
+ *
+ * 404(없는 이름)·400(잘못된 요청)은 다시 시도해도 같은 답이라 뺀다.
+ */
+const GEMINI_TRANSIENT = new Set([429, 500, 502, 503, 504]);
+/** 다시 시도하기 전에 기다릴 시간. 전부 합쳐도 4초라 뒤의 terra 를 밀지 않는다. */
+const GEMINI_RETRY_MS = [1000, 3000];
 
 /**
  * Gemini 로 사진 한 장 + 프롬프트를 보내 JSON 을 받는다.
@@ -514,42 +536,60 @@ async function callGeminiVision(
   imageDataUrl: string,
   what: string,
   signal?: AbortSignal,
-  modelName: string = KOREAN_TEXT_GEMINI_MODEL,
+  modelName: string = KOREAN_TEXT_GEMINI_MODELS[0],
 ): Promise<{ text: string; usage?: GradeUsage; model: string }> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new GradeError("GEMINI_API_KEY가 설정되지 않았습니다.", 500);
   const m = imageDataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!m) throw new GradeError("이미지를 읽을 수 없습니다.", 400);
 
-  const res = await fetch(
-    `${GEMINI_ENDPOINT}/${modelName}:generateContent?key=${key}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal,
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { inline_data: { mime_type: m[1], data: m[2] } },
-              { text: prompt },
-            ],
-          },
-        ],
-        generationConfig: {
-          responseMimeType: "application/json",
-          // 옮겨 적는 일이라 매번 같은 답이 나와야 한다.
-          temperature: 0,
-          // 지문 한 편의 JSON 은 실측 3,544토큰이었다(terra 기준). 넉넉히 두되
-          // 넘치면 잘린 JSON 이 오므로 아래에서 실패로 보고 terra 로 내려간다.
-          maxOutputTokens: 8192,
+  const request = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { inline_data: { mime_type: m[1], data: m[2] } },
+            { text: prompt },
+          ],
         },
-      }),
-    },
-  );
+      ],
+      generationConfig: {
+        responseMimeType: "application/json",
+        // 옮겨 적는 일이라 매번 같은 답이 나와야 한다.
+        temperature: 0,
+        // 지문 한 편의 JSON 은 실측 3,544토큰이었다(terra 기준). 넉넉히 두되
+        // 넘치면 잘린 JSON 이 오므로 아래에서 실패로 보고 terra 로 내려간다.
+        maxOutputTokens: 8192,
+      },
+    }),
+  };
 
-  const body = await res.text();
-  if (!res.ok) {
+  let body = "";
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(
+      `${GEMINI_ENDPOINT}/${modelName}:generateContent?key=${key}`,
+      request,
+    );
+    body = await res.text();
+    if (res.ok) break;
+
+    // 자리가 없어 밀린 것뿐이면 몇 초 기다렸다 다시 묻는다 — 곧바로 terra 로
+    // 내려가면 70원짜리 호출이 된다.
+    const wait = GEMINI_RETRY_MS[attempt];
+    if (GEMINI_TRANSIENT.has(res.status) && wait != null && !signal?.aborted) {
+      console.warn(
+        `[korean-text] ${modelName} HTTP ${res.status} — ${wait}ms 뒤 다시 시도합니다.`,
+      );
+      await new Promise((r) => setTimeout(r, wait));
+      if (signal?.aborted) {
+        throw new GradeError(`${what}이 제때 끝나지 않았습니다.`, 504);
+      }
+      continue;
+    }
+
     throw new GradeError(
       res.status === 404
         ? `모델 "${modelName}"을 찾을 수 없습니다. KOREAN_TEXT_GEMINI_MODEL 로 바꿔 주세요.`
@@ -692,10 +732,14 @@ ${cleanedReference}
    */
   const attempts: { label: string; run: () => Promise<{ text: string; usage?: GradeUsage; model: string }> }[] = [];
   if (process.env.GEMINI_API_KEY) {
-    attempts.push({
-      label: KOREAN_TEXT_GEMINI_MODEL,
-      run: () => callGeminiVision(prompt, imageDataUrl, "지문 인식", signal),
-    });
+    // 여러 이름을 적어 두면 앞에서부터 시도한다(`KOREAN_TEXT_GEMINI_MODEL` 에
+    // 쉼표로). **우리가 이름을 지어내지는 않는다** — 사용자가 적은 것만 쓴다.
+    for (const name of KOREAN_TEXT_GEMINI_MODELS) {
+      attempts.push({
+        label: name,
+        run: () => callGeminiVision(prompt, imageDataUrl, "지문 인식", signal, name),
+      });
+    }
   }
   if (process.env.OPENAI_API_KEY) {
     attempts.push({
