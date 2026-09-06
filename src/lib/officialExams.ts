@@ -16,7 +16,8 @@
  * `problemBoxes.ts`·`gradeSummary.ts`·`problemOrder.ts` 와 같은 이유).
  */
 export const OFFICIAL_EXAMS: Readonly<Record<string, string>> = {
-  // 사용자 확인(2026-09-06): 이 날 본 것은 정식 9월 모의평가다.
+  // 아래 둘 다 사용자가 직접 알려 준 시행일이다(2026-09-06 확인).
+  "2026-06-04": "6월 모의평가",
   "2026-09-02": "9월 모의평가",
 };
 
