@@ -1,10 +1,62 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { categoryLabel, type Category, type Folder } from "@/lib/supabase/types";
 
 const NO_FOLDER = "__none__";
+
+/**
+ * 고를 때 보여줄 이름.
+ *
+ * **폴더가 달라도 이름이 같으면 구분이 안 된다**(사용자 지적) — 그건
+ * `<optgroup>` 으로 폴더를 갈라 해결한다. 그런데 **같은 폴더 안에서도** 이름이
+ * 같을 수 있다(같은 회차를 두 번 넣는 경우). 그때는 폴더가 알려 주지 못하므로
+ * 시행일(없으면 만든 날)을 뒤에 붙여 가른다.
+ *
+ * **겹칠 때만 붙인다** — 안 겹치는데 날짜가 붙으면 목록이 공연히 길어진다.
+ * 날짜까지 같으면(같은 날 같은 이름으로 두 번 만든 경우) 그때만 번호를 더
+ * 붙인다. 어느 줄이 어느 것인지 **끝까지 가릴 수 있어야** 한다 — 못 가리면
+ * 고르는 사람은 찍는 수밖에 없다.
+ */
+export function optionLabel(c: Category, sameGroup: Category[]): string {
+  const label = categoryLabel(c);
+  const sameName = sameGroup.filter((o) => categoryLabel(o) === label);
+  if (sameName.length <= 1) return label;
+
+  const dayOf = (o: Category) => (o.exam_date ?? o.created_at).slice(0, 10);
+  const withDate = `${label} (${dayOf(c)})`;
+  const sameDay = sameName.filter((o) => dayOf(o) === dayOf(c));
+  if (sameDay.length <= 1) return withDate;
+  return `${withDate} #${sameDay.findIndex((o) => o.id === c.id) + 1}`;
+}
+
+export type FolderGroup = { key: string; name: string; items: Category[] };
+
+/**
+ * 폴더별 묶음. 폴더 차례대로 놓고 "폴더 없음"을 맨 뒤에 둔다 — 폴더에 넣어
+ * 정리해 둔 것을 먼저 보는 편이 찾기 쉽다.
+ *
+ * - **빈 폴더는 넣지 않는다** — 고를 것이 없는 머리글만 남는다.
+ * - 폴더가 지워졌는데 `folder_id` 가 남아 있는 실모도 "폴더 없음"으로 받는다
+ *   (`on delete set null` 이라 보통은 안 생기지만, 목록에서 통째로 사라지는
+ *   것보다 낫다).
+ */
+export function groupByFolder(
+  categories: Category[],
+  folders: Folder[],
+): FolderGroup[] {
+  const out: FolderGroup[] = [];
+  for (const f of folders) {
+    const items = categories.filter((c) => c.folder_id === f.id);
+    if (items.length > 0) out.push({ key: f.id, name: f.name, items });
+  }
+  const loose = categories.filter(
+    (c) => !c.folder_id || !folders.some((f) => f.id === c.folder_id),
+  );
+  if (loose.length > 0) out.push({ key: NO_FOLDER, name: "폴더 없음", items: loose });
+  return out;
+}
 
 type Props = {
   /** 연결할 채점 기록. */
@@ -55,6 +107,20 @@ export default function LinkCategoryPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [linkedTo, setLinkedTo] = useState<string | null>(null);
+
+  /**
+   * 폴더별 묶음. 폴더 차례대로 놓고 "폴더 없음"을 맨 뒤에 둔다 — 폴더에
+   * 넣어 정리해 둔 것을 먼저 보는 편이 찾기 쉽다. 빈 폴더는 넣지 않는다
+   * (고를 것이 없는 머리글만 남는다).
+   */
+  const groups = useMemo(
+    () => groupByFolder(categories ?? [], folders),
+    [categories, folders],
+  );
+
+  /** 어느 폴더에 있는지("연결됨" 줄에 함께 적는다). */
+  const folderNameOf = (c: Category): string | null =>
+    folders.find((f) => f.id === c.folder_id)?.name ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -161,7 +227,12 @@ export default function LinkCategoryPicker({
     const cat = categories?.find((c) => c.id === linkedTo);
     return (
       <p className="text-xs text-emerald-600">
-        {cat ? categoryLabel(cat) : "실모"}에 연결됨
+        {/* 어느 폴더의 것인지 함께 적는다 — 이름이 같은 실모가 여럿이면
+            이름만으로는 무엇에 연결됐는지 알 수 없다. */}
+        {cat
+          ? `${folderNameOf(cat) ? `📁 ${folderNameOf(cat)} · ` : ""}${categoryLabel(cat)}`
+          : "실모"}
+        에 연결됨
         <button
           type="button"
           onClick={() => {
@@ -190,11 +261,24 @@ export default function LinkCategoryPicker({
             <option value="">
               {categories === null ? "불러오는 중..." : "실모 선택"}
             </option>
-            {categories?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {categoryLabel(c)}
-              </option>
-            ))}
+            {/* **폴더로 묶어 보여준다**(사용자 지적 — "폴더가 다르고 이름이
+                같은 실모가 구분이 안 돼"). 이름만 늘어놓으면 같은 이름이
+                두 줄로 보이고 무엇을 고르는지 알 수 없다. 폴더가 하나도
+                없으면 묶을 것이 없으므로 예전처럼 평면 목록이다. */}
+            {groups.map((g) => {
+              const options = g.items.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {optionLabel(c, g.items)}
+                </option>
+              ));
+              return folders.length === 0 ? (
+                options
+              ) : (
+                <optgroup key={g.key} label={g.name}>
+                  {options}
+                </optgroup>
+              );
+            })}
           </select>
           <button
             type="button"
