@@ -13,9 +13,13 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 
+// **가지 이름이 아니라 커밋 해시로 못박는다.** 가지는 합쳐지고 나면 지워지지만
+// 커밋은 GitHub 에 SHA 로 남는다(이 저장소가 main 을 잃었다가 SHA 로 되살린
+// 적이 있다 — CLAUDE.md 참고). 그림을 바꾸려면 새로 올린 커밋의 해시로 이
+// 줄을 갱신하거나 ASSET_BASE 환경변수로 덮어쓴다.
 const BASE =
   process.env.ASSET_BASE ??
-  "https://raw.githubusercontent.com/wesslvc/mathpix/claude/nepica-brand-site-0hxfq9/brand-site/img";
+  "https://raw.githubusercontent.com/wesslvc/mathpix/04926906f5b4130504429af75788a28ab7f4528d/brand-site/img";
 
 const FILES = [
   "magpie.webp",
