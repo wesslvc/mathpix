@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEPICA — 혼자 공부하는 사람을 위한 도구</title>
+<meta name="description" content="NEPICA는 지오글(지리 퀴즈)과 리프린트OCR(오답프린트 제작)을 만듭니다. 짐작하지 않고 재서 만들고, 조용히 실패하지 않고, 쓴 만큼만 받습니다.">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="NEPICA">
+<meta property="og:description" content="혼자 공부하는 사람을 위한 도구를 만듭니다 — 지오글 · 리프린트OCR">
+<meta property="og:url" content="https://nepica.vercel.app/">
+<meta property="og:image" content="https://nepica.vercel.app/img/og.jpg">
+<meta property="og:image:width" content="1000">
+<meta property="og:image:height" content="525">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="img/magpie-64.png">
+<link rel="apple-touch-icon" href="img/magpie-64.png">
+
+<!-- 글꼴 — 두 제품과 같은 짝(본문 Pretendard · 표시용 Space Grotesk).
+     브랜드 사이트가 제품과 다른 글꼴을 쓰면 같은 곳이라는 말이 무색해진다. -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── 첫 화면 ─────────────────────────────────────────────────────────
+     지오글 랜딩과 같은 짜임이다: 새의 비행 궤적을 뒤에 옅게 깔고, 그 위에
+     마크 · 워드마크 · 영문 표어 · 우리말 한 줄. 브랜드의 새는 아무것도 물고
+     있지 않다 — 무엇을 물릴지는 제품이 정한다. -->
+<header class="hero">
+  <svg class="trail" viewBox="0 0 520 190" aria-hidden="true" preserveAspectRatio="none">
+    <path d="M-10 150 C 90 150 130 40 260 40 C 390 40 430 150 530 150"/>
+  </svg>
+
+  <img class="hero-bird" src="img/magpie.webp" alt="" width="384" height="384" decoding="async">
+  <h1 class="wordmark">NEPICA</h1>
+  <p class="tag-en">Tools for people who study alone</p>
+  <p class="tag-ko">혼자 공부하는 사람을 위한 도구를 만듭니다</p>
+
+  <nav class="hero-links">
+    <a href="#works">만든 것</a>
+    <a href="#values">브랜드 가치</a>
+    <a href="#mark">마크</a>
+  </nav>
+</header>
+
+<main>
+
+<!-- ── 만든 것 ─────────────────────────────────────────────────────── -->
+<section id="works" class="sec">
+  <p class="sec-label">Works</p>
+  <h2 class="sec-title">만든 것</h2>
+  <p class="sec-lead">
+    둘 다 시험을 준비하는 사람이 실제로 쓰는 도구다. 하나는 화면에서 끝나고,
+    하나는 종이로 끝난다.
+  </p>
+
+  <div class="works">
+    <article class="work">
+      <img class="work-bird" src="img/magpie-globe.webp" alt="지구본을 문 물까치" width="256" height="256" loading="lazy">
+      <div class="work-body">
+        <p class="work-kicker">Geogl3 · 지오글</p>
+        <h3 class="work-name">위에서 내려다보는 지리 퀴즈</h3>
+        <p class="work-desc">
+          세계 지도 위에서 나라 이름 · 수도 · 국기 · 접경국을 맞힌다. 대륙과
+          난이도, 출제 비율을 정해 두면 그만큼만 나온다. 틀린 문항은 남고,
+          점수와 랭킹은 계정에 쌓인다.
+        </p>
+        <ul class="work-facts">
+          <li>세계 지도 · 국기 · 수도 · 접경국</li>
+          <li>대륙 · 난이도 · 출제 비율 고르기</li>
+          <li>오답 복습과 랭킹</li>
+        </ul>
+        <a class="work-cta" href="https://geogl3.xyz" target="_blank" rel="noreferrer">
+          geogl3.xyz <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </article>
+
+    <article class="work">
+      <img class="work-bird" src="img/magpie-paper.webp" alt="종이를 문 물까치" width="256" height="256" loading="lazy">
+      <div class="work-body">
+        <p class="work-kicker">ReprintOCR · 리프린트OCR</p>
+        <h3 class="work-name">틀린 문제로 다시 만드는 시험지</h3>
+        <p class="work-desc">
+          찍어 둔 오답 사진을 인식해 읽기 좋은 문항으로 다시 짜고, 실전모의고사별로
+          모아 뒀다가 평가원 판형 그대로 인쇄한다. OMR과 정답표를 올리면 채점과
+          성적 추세까지 이어진다.
+        </p>
+        <ul class="work-facts">
+          <li>사진 인식 · 자동 크롭 · 문항 재구성</li>
+          <li>평가원 판형 PDF · 정답표 자동 생성</li>
+          <li>자동채점과 성적 추세</li>
+        </ul>
+        <a class="work-cta" href="https://reprintocr.vercel.app" target="_blank" rel="noreferrer">
+          reprintocr.vercel.app <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ── 브랜드 가치 ──────────────────────────────────────────────────
+     지어낸 구호가 아니라 두 저장소의 작업 규칙에서 그대로 뽑아 온 것들이다.
+     그래야 사이트를 열어 보면 말과 물건이 맞는다. -->
+<section id="values" class="sec">
+  <p class="sec-label">Principles</p>
+  <h2 class="sec-title">브랜드 가치</h2>
+  <p class="sec-lead">
+    아래 다섯 줄은 표어로 지어낸 것이 아니라, 두 제품을 만들면서 지켜 온
+    작업 규칙을 그대로 옮긴 것이다. 도구를 열어 보면 말과 물건이 맞는다.
+  </p>
+
+  <ol class="values">
+    <li class="value">
+      <span class="value-no">01</span>
+      <h3>짐작하지 않는다. 재 본다.</h3>
+      <p>
+        "아마 이 정도"로 정한 숫자는 반드시 틀린다. 글자 폭도, 잘리는 자리도,
+        요청 하나에 드는 값도 실제로 재서 쓴다. 어림인 것은 어림이라고 적는다.
+      </p>
+    </li>
+    <li class="value">
+      <span class="value-no">02</span>
+      <h3>조용히 실패하지 않는다.</h3>
+      <p>
+        안 되면 안 된다고, 왜 안 되는지 그 자리에서 말한다. 고른 적 없는
+        모델로 몰래 갈아타거나, 빠진 글자를 슬쩍 지우고 넘어가지 않는다.
+      </p>
+    </li>
+    <li class="value">
+      <span class="value-no">03</span>
+      <h3>쓴 만큼만 받는다.</h3>
+      <p>
+        원가가 요청마다 다른데 고정으로 받으면 어느 쪽으로든 틀린다. 끝나고
+        실제로 든 만큼 정산하고, 실패하면 돌려준다. 얼마가 들었는지도 보인다.
+      </p>
+    </li>
+    <li class="value">
+      <span class="value-no">04</span>
+      <h3>사용자가 정한 자리는 넓히지 않는다.</h3>
+      <p>
+        손으로 그은 네모, 손으로 적은 번호, 손으로 옮긴 그림 —
+        사람이 정한 것을 우리가 몰래 고치지 않는다. 자동은 시작점일 뿐이다.
+      </p>
+    </li>
+    <li class="value">
+      <span class="value-no">05</span>
+      <h3>화면에서 끝나지 않는다.</h3>
+      <p>
+        공부는 결국 종이와 손에서 끝난다. 그래서 인쇄했을 때 실제 시험지처럼
+        보이는지, 흑백으로 뽑아도 뜻이 남는지까지 도구의 몫으로 본다.
+      </p>
+    </li>
+  </ol>
+</section>
+
+<!-- ── 마크 ────────────────────────────────────────────────────────── -->
+<section id="mark" class="sec">
+  <p class="sec-label">Identity</p>
+  <h2 class="sec-title">한 마리의 새, 세 가지 부리</h2>
+  <p class="sec-lead">
+    브랜드의 마크는 물까치(<i>Cyanopica cyanus</i>)다. 이름 안에도 새가 있다 —
+    <b>PICA</b>는 까치의 속명이다. 제품은 새를 새로 그리지 않는다.
+    <b>무엇을 물고 있느냐</b>만 바뀐다.
+  </p>
+
+  <div class="marks">
+    <figure class="mark">
+      <img src="img/magpie.webp" alt="아무것도 물지 않은 물까치" width="384" height="384" loading="lazy">
+      <figcaption>
+        <b>NEPICA</b>
+        <span>브랜드. 아직 아무것도 물지 않았다 — 무엇을 물릴지는 제품이 정한다.</span>
+      </figcaption>
+    </figure>
+    <figure class="mark">
+      <img src="img/magpie-globe.webp" alt="지구본을 문 물까치" width="256" height="256" loading="lazy">
+      <figcaption>
+        <b>Geogl3</b>
+        <span>지구본. 세계를 물고 와서 위에서 내려다보게 한다.</span>
+      </figcaption>
+    </figure>
+    <figure class="mark">
+      <img src="img/magpie-paper.webp" alt="종이를 문 물까치" width="256" height="256" loading="lazy">
+      <figcaption>
+        <b>ReprintOCR</b>
+        <span>종이. 틀린 문제를 물어다 다시 인쇄해 준다.</span>
+      </figcaption>
+    </figure>
+  </div>
+
+  <!-- 색·글꼴 — 두 제품이 실제로 쓰는 값이다. 여기 적힌 것과 화면의 것이
+       다르면 브랜드가 아니라 장식이 된다. -->
+  <div class="tokens">
+    <div class="swatches">
+      <span class="sw" style="--c:#141518"><b>Cap</b>#141518</span>
+      <span class="sw" style="--c:#5b96d4"><b>Wing</b>#5b96d4</span>
+      <span class="sw" style="--c:#7ba9db"><b>Sky</b>#7ba9db</span>
+      <span class="sw" style="--c:#f2eddc"><b>Body</b>#f2eddc</span>
+      <span class="sw" style="--c:#d8c0a8"><b>Bark</b>#d8c0a8</span>
+    </div>
+    <p class="tokens-note">
+      마크에서 그대로 뽑은 다섯 색이 두 사이트의 강조색·표면색이 된다.
+      글자는 <b>Pretendard</b>(본문)와 <b>Space Grotesk</b>(표시용) 두 벌뿐이다.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <img src="img/magpie.webp" alt="" width="64" height="64" loading="lazy">
+  <p class="foot-brand">NEPICA</p>
+  <p class="foot-links">
+    <a href="https://geogl3.xyz" target="_blank" rel="noreferrer">지오글</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://reprintocr.vercel.app" target="_blank" rel="noreferrer">리프린트OCR</a>
+  </p>
+</footer>
+
+</body>
+</html>
