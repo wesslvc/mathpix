@@ -30,6 +30,7 @@ const FILES = [
   "img/magpie.webp",
   "img/magpie-globe.webp",
   "img/magpie-paper.webp",
+  "img/magpie-book.webp",
   "img/magpie-64.png",
   "img/og.jpg",
 ];

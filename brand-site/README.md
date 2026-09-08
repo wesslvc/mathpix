@@ -2,7 +2,7 @@
 
 <https://nepica.vercel.app>
 
-NEPICA 가 만든 두 사이트(지오글 · 리프린트OCR)와 브랜드 가치를 소개하는
+NEPICA 가 만든 세 사이트(지오글 · 리프린트OCR · VDIC)와 브랜드 가치를 소개하는
 한 쪽짜리 정적 사이트다. 빌드 도구가 없다 — `index.html` · `style.css` ·
 `img/` 셋뿐이라 그대로 올리면 그게 곧 배포다.
 
@@ -26,6 +26,7 @@ NEPICA 가 만든 두 사이트(지오글 · 리프린트OCR)와 브랜드 가�
 | `img/magpie-512.png` | NEPICA — 아무것도 물지 않음 |
 | `img/magpie-globe-512.png` | 지오글 — 지구본 |
 | `img/magpie-paper-512.png` | 리프린트OCR — 종이 |
+| `img/magpie-book-512.png` | VDIC — 책 |
 
 원본 그림은 검은 바탕 위에 그려져 있다. 밝기만 보고 배경을 지우면 **새의
 검은 두건까지 함께 잘려 나가므로**, 가장자리에서 시작하는 채우기(flood
