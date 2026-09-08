@@ -131,7 +131,9 @@ a{color:inherit}
 
 /* ── 만든 것 ───────────────────────────────────────────────────────── */
 .works{display:grid;gap:1rem;margin-top:2.2rem}
-@media (min-width:820px){.works{grid-template-columns:1fr 1fr}}
+/* 셋을 두 칸에 넣으면 마지막 하나가 반쪽으로 외따로 남는다 — 그래서 두 칸을
+   건너뛰고 좁은 화면은 한 줄씩, 넓은 화면은 셋을 나란히 놓는다. */
+@media (min-width:900px){.works{grid-template-columns:repeat(3,1fr)}}
 
 .work{
   display:flex;flex-direction:column;
@@ -194,7 +196,8 @@ a{color:inherit}
 
 /* ── 마크 ──────────────────────────────────────────────────────────── */
 .marks{display:grid;gap:1rem;margin-top:2.2rem}
-@media (min-width:720px){.marks{grid-template-columns:repeat(3,1fr)}}
+@media (min-width:560px){.marks{grid-template-columns:repeat(2,1fr)}}
+@media (min-width:900px){.marks{grid-template-columns:repeat(4,1fr)}}
 
 .mark{
   background:var(--sf);border:1px solid var(--bd);border-radius:var(--r-lg);

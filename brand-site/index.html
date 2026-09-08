@@ -4,11 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NEPICA — 혼자 공부하는 사람을 위한 도구</title>
-<meta name="description" content="NEPICA는 지오글(지리 퀴즈)과 리프린트OCR(오답프린트 제작)을 만듭니다. 짐작하지 않고 재서 만들고, 조용히 실패하지 않고, 쓴 만큼만 받습니다.">
+<meta name="description" content="NEPICA는 지오글(지리 퀴즈) · 리프린트OCR(오답프린트 제작) · VDIC(영단어 학습)를 만듭니다. 짐작하지 않고 재서 만들고, 조용히 실패하지 않고, 쓴 만큼만 받습니다.">
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="NEPICA">
-<meta property="og:description" content="혼자 공부하는 사람을 위한 도구를 만듭니다 — 지오글 · 리프린트OCR">
+<meta property="og:description" content="혼자 공부하는 사람을 위한 도구를 만듭니다 — 지오글 · 리프린트OCR · VDIC">
 <meta property="og:url" content="https://nepica.vercel.app/">
 <meta property="og:image" content="https://nepica.vercel.app/img/og.jpg">
 <meta property="og:image:width" content="1000">
@@ -18,7 +18,7 @@
 <link rel="icon" href="img/magpie-64.png">
 <link rel="apple-touch-icon" href="img/magpie-64.png">
 
-<!-- 글꼴 — 두 제품과 같은 짝(본문 Pretendard · 표시용 Space Grotesk).
+<!-- 글꼴 — 세 제품과 같은 짝(본문 Pretendard · 표시용 Space Grotesk).
      브랜드 사이트가 제품과 다른 글꼴을 쓰면 같은 곳이라는 말이 무색해진다. -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -56,8 +56,8 @@
   <p class="sec-label">Works</p>
   <h2 class="sec-title">만든 것</h2>
   <p class="sec-lead">
-    둘 다 시험을 준비하는 사람이 실제로 쓰는 도구다. 하나는 화면에서 끝나고,
-    하나는 종이로 끝난다.
+    셋 다 시험을 준비하는 사람이 실제로 쓰는 도구다. 하나는 지도 위에서,
+    하나는 종이로, 하나는 외울 때까지 되묻는 방식으로 끝난다.
   </p>
 
   <div class="works">
@@ -102,17 +102,38 @@
         </a>
       </div>
     </article>
+
+    <article class="work">
+      <img class="work-bird" src="img/magpie-book.webp" alt="책을 문 물까치" width="256" height="256" loading="lazy">
+      <div class="work-body">
+        <p class="work-kicker">VDIC · 브이딕</p>
+        <h3 class="work-name">강의를 따라가는 영단어장</h3>
+        <p class="work-desc">
+          듣는 강의의 차례 그대로 단어를 묶어 두고, 뜻과 뉘앙스를 따로 물어
+          외울 때까지 되묻는다. 틀린 단어는 오답노트에 남고, 별을 단 단어는
+          맞혀도 남는다 — 헷갈리는 것은 맞혔다고 사라지면 안 된다.
+        </p>
+        <ul class="work-facts">
+          <li>강의별 단어 묶음 · 여러 강의 섞어 풀기</li>
+          <li>뜻과 뉘앙스를 따로 묻기</li>
+          <li>오답노트 · 즐겨찾기 · 학습 기록</li>
+        </ul>
+        <a class="work-cta" href="https://vdic.vercel.app" target="_blank" rel="noreferrer">
+          vdic.vercel.app <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </article>
   </div>
 </section>
 
 <!-- ── 브랜드 가치 ──────────────────────────────────────────────────
-     지어낸 구호가 아니라 두 저장소의 작업 규칙에서 그대로 뽑아 온 것들이다.
+     지어낸 구호가 아니라 세 저장소의 작업 규칙에서 그대로 뽑아 온 것들이다.
      그래야 사이트를 열어 보면 말과 물건이 맞는다. -->
 <section id="values" class="sec">
   <p class="sec-label">Principles</p>
   <h2 class="sec-title">브랜드 가치</h2>
   <p class="sec-lead">
-    아래 다섯 줄은 표어로 지어낸 것이 아니라, 두 제품을 만들면서 지켜 온
+    아래 다섯 줄은 표어로 지어낸 것이 아니라, 세 제품을 만들면서 지켜 온
     작업 규칙을 그대로 옮긴 것이다. 도구를 열어 보면 말과 물건이 맞는다.
   </p>
 
@@ -192,9 +213,16 @@
         <span>종이. 틀린 문제를 물어다 다시 인쇄해 준다.</span>
       </figcaption>
     </figure>
+    <figure class="mark">
+      <img src="img/magpie-book.webp" alt="책을 문 물까치" width="256" height="256" loading="lazy">
+      <figcaption>
+        <b>VDIC</b>
+        <span>책. 외울 낱말을 물어다 외울 때까지 되묻는다.</span>
+      </figcaption>
+    </figure>
   </div>
 
-  <!-- 색·글꼴 — 두 제품이 실제로 쓰는 값이다. 여기 적힌 것과 화면의 것이
+  <!-- 색·글꼴 — 세 제품이 실제로 쓰는 값이다. 여기 적힌 것과 화면의 것이
        다르면 브랜드가 아니라 장식이 된다. -->
   <div class="tokens">
     <div class="swatches">
@@ -205,7 +233,7 @@
       <span class="sw" style="--c:#d8c0a8"><b>Bark</b>#d8c0a8</span>
     </div>
     <p class="tokens-note">
-      마크에서 그대로 뽑은 다섯 색이 두 사이트의 강조색·표면색이 된다.
+      마크에서 그대로 뽑은 다섯 색이 세 사이트의 강조색·표면색이 된다.
       글자는 <b>Pretendard</b>(본문)와 <b>Space Grotesk</b>(표시용) 두 벌뿐이다.
     </p>
   </div>
@@ -220,6 +248,8 @@
     <a href="https://geogl3.xyz" target="_blank" rel="noreferrer">지오글</a>
     <span aria-hidden="true">·</span>
     <a href="https://reprintocr.vercel.app" target="_blank" rel="noreferrer">리프린트OCR</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://vdic.vercel.app" target="_blank" rel="noreferrer">VDIC</a>
   </p>
 </footer>
 
