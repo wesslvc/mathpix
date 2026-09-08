@@ -6,19 +6,46 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 구글 계열 UI 색·형태. 문제 본문(나눔명조)과 앱 UI를 분리해서,
-   UI는 시스템 산세리프로 또렷하게 두고 문제 카드만 명조를 쓴다. */
+/* ── 브랜드 색·글꼴 (NEPICA) ─────────────────────────────────────────────
+   같은 브랜드의 지오글(seji)과 **같은 값**을 쓴다. 그쪽은 어두운 화면이
+   기본이고 밝은 화면을 함께 두는데, 이 앱은 인쇄물을 다루는 도구라 밝은
+   화면 한 벌만 쓴다 — 그래서 지오글의 **라이트 모드 팔레트를 그대로**
+   가져왔다(--bg #f6f7f9 · --sf #fff · --bd #e0e5ec · --tx #191c21 ·
+   --tx2 #646a74 · --ac #2f74b8). 두 사이트를 나란히 놓았을 때 같은 곳에서
+   만든 것으로 보이려면 색과 글꼴이 같아야 한다.
+
+   변수 이름(--g-*)은 예전 것을 그대로 둔다 — 값만 바뀌면 이 파일을 쓰는
+   컴포넌트가 전부 따라오고, 이름까지 바꾸면 관계없는 파일을 잔뜩 건드리게
+   된다.
+
+   물까치(Cyanopica cyanus) 팔레트 --mg-* 는 로고 마크에서 가져온 네 색이다:
+   cap 검은 두건 · wing 하늘색 날개 · body 은회색 가슴 · bark 따뜻한 갈색. */
 :root {
-  --g-blue: #1a73e8;
-  --g-blue-hover: #1765cc;
-  --g-red: #d93025;
-  --g-green: #1e8e3e;
-  --g-yellow: #f9ab00;
+  --g-blue: #2f74b8;
+  --g-blue-hover: #265f99;
+  --g-red: #b3453c;
+  --g-green: #1e7a45;
+  --g-yellow: #9a7b3c;
   --g-surface: #ffffff;
-  --g-bg: #f8f9fa;
-  --g-border: #dadce0;
-  --g-text: #202124;
-  --g-text-muted: #5f6368;
+  --g-surface-2: #eef1f5;
+  --g-bg: #f6f7f9;
+  --g-border: #e0e5ec;
+  --g-text: #191c21;
+  --g-text-muted: #646a74;
+
+  --mg-cap: #141518;
+  --mg-wing: #7ba9db;
+  --mg-wing-d: #5b96d4;
+  --mg-body: #f2eddc;
+  --mg-bark: #d8c0a8;
+
+  --font-sans: "Pretendard", "Pretendard Variable", "Noto Sans KR",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-display: "Space Grotesk", "Pretendard", sans-serif;
+
+  /* 그림자 — 지오글 라이트 모드와 같은 두 단계. 값이 흩어지지 않게 여기에만 둔다. */
+  --shadow: 0 1px 2px rgba(28, 25, 20, 0.05), 0 4px 14px rgba(28, 25, 20, 0.05);
+  --shadow-2: 0 6px 20px rgba(28, 25, 20, 0.07), 0 18px 50px rgba(28, 25, 20, 0.06);
 }
 
 /* 문제 카드는 PNG로 캡처돼 그대로 인쇄되는 면이다. 주변 UI 색을 물려받아
@@ -38,8 +65,7 @@ html,
 body {
   background-color: var(--g-bg);
   color: var(--g-text);
-  font-family: "Google Sans", Roboto, "Noto Sans KR", -apple-system,
-    BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -48,6 +74,23 @@ body {
   background: var(--g-surface);
   border: 1px solid var(--g-border);
   border-radius: 12px;
+}
+
+/* 브랜드 표기 — 지오글 랜딩의 .ld-brand 와 같은 모양(넓은 자간·작은 글씨).
+   "이 사이트를 누가 만들었나"를 조용히 적어 두는 자리다. */
+.nepica-brand {
+  font-family: var(--font-display);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--g-text-muted);
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.nepica-brand:hover {
+  opacity: 0.9;
 }
 
 /* 알약 모양 기본 버튼 */
@@ -79,7 +122,7 @@ body {
 
 .g-btn-primary:hover:not(:disabled) {
   background: var(--g-blue-hover);
-  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3);
+  box-shadow: var(--shadow);
 }
 
 .g-btn-outline {
@@ -89,8 +132,8 @@ body {
 }
 
 .g-btn-outline:hover:not(:disabled) {
-  background: #f1f6fe;
-  border-color: #c6dafc;
+  background: var(--g-surface-2);
+  border-color: #b9cee3;
 }
 
 .g-btn-text {
@@ -99,7 +142,7 @@ body {
 }
 
 .g-btn-text:hover:not(:disabled) {
-  background: #f1f6fe;
+  background: var(--g-surface-2);
 }
 
 /* 접근성: 키보드 포커스는 항상 눈에 보이게 둔다. */
