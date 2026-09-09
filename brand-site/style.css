@@ -152,9 +152,21 @@ a{color:inherit}
   letter-spacing:.18em;text-transform:uppercase;
 }
 .work-name{font-size:1.15rem;font-weight:700;margin-top:.35rem;letter-spacing:-.01em}
+
+/* 넣는 것 → 나오는 것. 도구는 결국 이 한 줄이라, 소개글보다 먼저 읽히게
+   두고 화살표만 강조색으로 띄운다. 좁은 화면에서는 줄이 넘어가도 되게
+   flex-wrap 을 켠다(세 카드의 길이가 제각각이다). */
+.work-io{
+  margin-top:.7rem;display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem;
+  font-family:var(--font-display);font-size:.82rem;font-weight:600;
+  line-height:1.45;
+}
+.work-io b{font-weight:600;color:var(--tx)}
+.work-io i{font-style:normal;color:var(--ac);font-size:.95em}
+
 .work-desc{color:var(--tx2);font-size:.9rem;margin-top:.6rem}
 
-.work-facts{list-style:none;margin-top:1rem;display:flex;flex-direction:column;gap:.35rem}
+.work-facts{list-style:none;margin-top:1rem;margin-bottom:1.4rem;display:flex;flex-direction:column;gap:.35rem}
 .work-facts li{
   font-size:.82rem;color:var(--tx2);
   padding-left:1.1rem;position:relative;line-height:1.5;
@@ -165,7 +177,7 @@ a{color:inherit}
 }
 
 .work-cta{
-  margin-top:1.4rem;align-self:flex-start;
+  margin-top:auto;align-self:flex-start;
   font-family:var(--font-display);font-size:.82rem;font-weight:600;
   text-decoration:none;color:var(--tx);
   background:var(--ac2);border:1px solid color-mix(in srgb,var(--ac) 40%,var(--bd));
