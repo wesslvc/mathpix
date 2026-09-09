@@ -135,10 +135,26 @@ function LoginForm() {
 
   return (
     <main className="mx-auto flex max-w-sm flex-col items-center justify-center gap-6 px-4 text-center">
-      <div>
-        <Logo size={52} />
-        <p className="mt-2 text-sm text-slate-500">
-          오답과 실전모의고사를 모아 깔끔한 PDF로 인쇄해보세요.
+      {/* 첫 화면 — 지오글 랜딩과 같은 짜임(마크 · 워드마크 · 영문 표어 ·
+          우리말 한 줄). 같은 브랜드의 두 사이트가 첫인상부터 닮게 둔다. */}
+      <div className="flex flex-col items-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/magpie-paper-512.png"
+          alt=""
+          width={96}
+          height={96}
+          className="h-24 w-24 select-none"
+          draggable={false}
+        />
+        <span className="mt-2 font-display text-3xl font-semibold tracking-tight text-ink">
+          Reprint<span className="text-gblue">OCR</span>
+        </span>
+        <p className="mt-2 font-display text-[0.7rem] font-medium uppercase tracking-[0.2em] text-slate-500">
+          Print what you got wrong
+        </p>
+        <p className="mt-1 text-sm text-slate-500">
+          틀린 문제를 모아 실제 시험지 판형으로 인쇄합니다.
         </p>
       </div>
 
@@ -196,6 +212,17 @@ function LoginForm() {
           ? "계정이 없으신가요? 회원가입"
           : "이미 계정이 있으신가요? 로그인"}
       </button>
+
+      {/* 만든 곳 표기 — 사이트는 ReprintOCR, 브랜드는 NEPICA. 지오글의
+          랜딩 아래에 있는 것과 같은 표기다. */}
+      <a
+        href="https://nepica.vercel.app"
+        target="_blank"
+        rel="noreferrer"
+        className="nepica-brand mt-2"
+      >
+        NEPICA
+      </a>
     </main>
   );
 }

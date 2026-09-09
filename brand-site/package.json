@@ -1,0 +1,7 @@
+{
+  "name": "nepica-brand-site",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

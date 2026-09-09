@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEPICA — 공부하다 필요해서 만든 것들</title>
+<meta name="description" content="공부하다 필요해서 직접 만든 도구 셋 — 지오글(지리 퀴즈) · 리프린트OCR(오답프린트 제작) · VDIC(영단어 학습). 전부 틀린 것에서 시작합니다.">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="NEPICA">
+<meta property="og:description" content="공부하다 필요해서 직접 만든 도구 셋 — 지오글 · 리프린트OCR · VDIC">
+<meta property="og:url" content="https://nepica.vercel.app/">
+<meta property="og:image" content="https://nepica.vercel.app/img/og.jpg">
+<meta property="og:image:width" content="1000">
+<meta property="og:image:height" content="525">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="img/magpie-64.png">
+<link rel="apple-touch-icon" href="img/magpie-64.png">
+
+<!-- 글꼴 — 세 도구와 같은 짝(본문 Pretendard · 표시용 Space Grotesk).
+     브랜드 사이트가 도구와 다른 글꼴을 쓰면 같은 곳이라는 말이 무색해진다. -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── 첫 화면 ─────────────────────────────────────────────────────────
+     지오글 랜딩과 같은 짜임이다: 새의 비행 궤적을 뒤에 옅게 깔고, 그 위에
+     마크 · 워드마크 · 영문 표어 · 우리말 한 줄. 브랜드의 새는 아무것도 물고
+     있지 않다 — 무엇을 물릴지는 도구가 정한다. -->
+<header class="hero">
+  <svg class="trail" viewBox="0 0 520 190" aria-hidden="true" preserveAspectRatio="none">
+    <path d="M-10 150 C 90 150 130 40 260 40 C 390 40 430 150 530 150"/>
+  </svg>
+
+  <img class="hero-bird" src="img/magpie.webp" alt="" width="384" height="384" decoding="async">
+  <h1 class="wordmark">NEPICA</h1>
+  <p class="tag-en">Made because I needed them</p>
+  <p class="tag-ko">공부하다 필요해서 하나씩 만든 것들입니다</p>
+
+  <nav class="hero-links">
+    <a href="#works">만든 것</a>
+    <a href="#values">정한 것</a>
+    <a href="#mark">마크</a>
+  </nav>
+</header>
+
+<main>
+
+<!-- ── 만든 것 ─────────────────────────────────────────────────────── -->
+<section id="works" class="sec">
+  <p class="sec-label">Works</p>
+  <h2 class="sec-title">만든 것</h2>
+  <p class="sec-lead">
+    도구는 결국 무엇을 넣으면 무엇이 나오느냐가 전부다. 셋을 그 한 줄로
+    적어 둔다. 열어 뒀으니 필요한 사람은 그냥 쓰면 된다.
+  </p>
+
+  <div class="works">
+    <article class="work">
+      <img class="work-bird" src="img/magpie-globe.webp" alt="지구본을 문 물까치" width="256" height="256" loading="lazy">
+      <div class="work-body">
+        <p class="work-kicker">Geogl3 · 지오글</p>
+        <h3 class="work-name">위에서 내려다보는 지리 퀴즈</h3>
+        <p class="work-io">
+          <b>세계 지도</b> <i aria-hidden="true">→</i> <b>못 짚는 나라 목록</b>
+        </p>
+        <p class="work-desc">
+          지도 위에 나라가 하나 떠오르고 이름 · 수도 · 국기 · 접경국 중 하나를
+          묻는다. 대륙과 난이도를 정해 두면 딱 그 안에서만 나온다.
+        </p>
+        <ul class="work-facts">
+          <li>세계 지도 · 국기 · 수도 · 접경국</li>
+          <li>대륙 · 난이도 · 출제 비율 고르기</li>
+          <li>오답 복습과 랭킹</li>
+        </ul>
+        <a class="work-cta" href="https://geogl3.xyz" target="_blank" rel="noreferrer">
+          geogl3.xyz <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </article>
+
+    <article class="work">
+      <img class="work-bird" src="img/magpie-paper.webp" alt="종이를 문 물까치" width="256" height="256" loading="lazy">
+      <div class="work-body">
+        <p class="work-kicker">ReprintOCR · 리프린트OCR</p>
+        <h3 class="work-name">틀린 문제로 다시 만드는 시험지</h3>
+        <p class="work-io">
+          <b>오답 사진</b> <i aria-hidden="true">→</i> <b>평가원 판형 시험지</b>
+        </p>
+        <p class="work-desc">
+          찍어 둔 문제를 알아보고 읽기 좋은 문항으로 다시 짠다. 실전모의고사별로
+          모였다가 정답표까지 붙어 한 부로 나온다.
+        </p>
+        <ul class="work-facts">
+          <li>사진 인식 · 자동 크롭 · 문항 재구성</li>
+          <li>평가원 판형 PDF · 정답표 자동 생성</li>
+          <li>자동채점과 성적 추세</li>
+        </ul>
+        <a class="work-cta" href="https://reprintocr.vercel.app" target="_blank" rel="noreferrer">
+          reprintocr.vercel.app <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </article>
+
+    <article class="work">
+      <img class="work-bird" src="img/magpie-book.webp" alt="책을 문 물까치" width="256" height="256" loading="lazy">
+      <div class="work-body">
+        <p class="work-kicker">VDIC · 브이딕</p>
+        <h3 class="work-name">강의를 따라가는 영단어장</h3>
+        <p class="work-io">
+          <b>강의 한 편</b> <i aria-hidden="true">→</i> <b>못 외운 낱말</b>
+        </p>
+        <p class="work-desc">
+          강의 차례 그대로 단어를 묶어 두고 뜻과 뉘앙스를 따로 묻는다. 틀린 것과
+          별을 단 것은 목록에 남아 다시 돌아온다.
+        </p>
+        <ul class="work-facts">
+          <li>강의별 단어 묶음 · 여러 강의 섞어 풀기</li>
+          <li>뜻과 뉘앙스를 따로 묻기</li>
+          <li>오답노트 · 즐겨찾기 · 학습 기록</li>
+        </ul>
+        <a class="work-cta" href="https://vdic.vercel.app" target="_blank" rel="noreferrer">
+          vdic.vercel.app <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ── 브랜드 가치 ──────────────────────────────────────────────────
+     지어낸 구호가 아니라 세 저장소의 작업 규칙에서 그대로 뽑아 온 것들이다.
+     그래야 사이트를 열어 보면 말과 물건이 맞는다.
+
+     **값 이야기는 여기 두지 않는다.** 원가를 재고 쓴 만큼 정산하는 것은
+     실제로 지키는 규칙이지만, 브랜드가 앞세울 말은 아니다 — 다섯 줄 중
+     셋이 요금 이야기면 "무엇을 만드는 곳인가"가 안 보인다.
+
+     **1인칭으로 적는다.** 이건 남에게 파는 학습 서비스가 아니라 내 공부
+     도구다. "사용자를 위해 ~합니다"로 적으면 지키지도 않을 약속처럼 들리고,
+     실제 이유("안 그러면 내가 불편하다")가 훨씬 믿을 만하다. -->
+<section id="values" class="sec">
+  <p class="sec-label">Principles</p>
+  <h2 class="sec-title">만들면서 정한 것</h2>
+  <p class="sec-lead">
+    남에게 보이려고 정한 규칙이 아니라, 내가 쓰다 불편해서 하나씩 정해진
+    것들이다. 도구를 열어 보면 여기 적힌 대로 동작한다.
+  </p>
+
+  <ol class="values">
+    <li class="value">
+      <span class="value-no">01</span>
+      <h3>틀린 것에서 시작한다.</h3>
+      <p>
+        공부하면서 남겨야 했던 건 맞힌 게 아니라 틀린 거였다. 세 도구가 다
+        거기서 나왔다 — 틀린 나라를 다시 묻고, 틀린 문제만 모아 시험지를
+        새로 짜고, 한 번 헷갈린 낱말은 맞혔다고 지우지 않는다.
+      </p>
+    </li>
+    <li class="value">
+      <span class="value-no">02</span>
+      <h3>짐작하지 않는다. 재 본다.</h3>
+      <p>
+        "아마 이 정도"로 만들어 두면 결국 어긋난 결과물을 내가 붙들고 앉아
+        있게 된다. 글자가 어디서 줄을 넘는지, 인쇄하면 여백이 얼마나 남는지
+        — 눈대중 대신 실제로 재서 쓴다.
+      </p>
+    </li>
+    <li class="value">
+      <span class="value-no">03</span>
+      <h3>조용히 실패하지 않는다.</h3>
+      <p>
+        안 되면 안 된다고, 왜 안 되는지 그 자리에서 말한다. 못 읽은 글자를
+        슬쩍 지우고 넘어가면 인쇄해서 풀다가 그때 알게 되는데, 그때는 고칠
+        수 있는 때가 이미 지나 있다.
+      </p>
+    </li>
+    <li class="value">
+      <span class="value-no">04</span>
+      <h3>내가 정한 자리는 건드리지 않는다.</h3>
+      <p>
+        손으로 그은 네모, 손으로 적은 번호, 손으로 옮긴 그림 — 정해 둔 것을
+        도구가 몰래 넓히거나 고치지 않는다. 자동은 시작점을 잡아 줄 뿐,
+        어디까지가 한 문제인지는 앉아서 푸는 사람이 안다.
+      </p>
+    </li>
+    <li class="value">
+      <span class="value-no">05</span>
+      <h3>화면에서 끝나지 않는다.</h3>
+      <p>
+        결국 종이에 뽑아서 연필로 푼다. 그래서 인쇄했을 때 실제 시험지처럼
+        보이는지, 흑백으로 뽑아도 뜻이 남는지까지 만드는 쪽 몫으로 봤다.
+      </p>
+    </li>
+  </ol>
+</section>
+
+<!-- ── 마크 ────────────────────────────────────────────────────────── -->
+<section id="mark" class="sec">
+  <p class="sec-label">Identity</p>
+  <h2 class="sec-title">한 마리의 새, 세 가지 부리</h2>
+  <p class="sec-lead">
+    브랜드의 마크는 물까치(<i>Cyanopica cyanus</i>)다. 이름 안에 새가 있다 —
+    <b>PICA</b>는 까치의 속명이다. 까치는 물어다 주는 새고, 이 도구들이
+    하는 일도 흘려보낸 것을 다시 물어다 놓는 일이다. 그래서 도구마다 새를
+    다시 그리지 않고 <b>무엇을 물고 있느냐</b>만 바꿨다.
+  </p>
+
+  <div class="marks">
+    <figure class="mark">
+      <img src="img/magpie.webp" alt="아무것도 물지 않은 물까치" width="384" height="384" loading="lazy">
+      <figcaption>
+        <b>NEPICA</b>
+        <span>브랜드. 아직 아무것도 물지 않았다 — 무엇을 물릴지는 도구가 정한다.</span>
+      </figcaption>
+    </figure>
+    <figure class="mark">
+      <img src="img/magpie-globe.webp" alt="지구본을 문 물까치" width="256" height="256" loading="lazy">
+      <figcaption>
+        <b>Geogl3</b>
+        <span>지구본. 세계를 물고 와서 위에서 내려다보게 한다.</span>
+      </figcaption>
+    </figure>
+    <figure class="mark">
+      <img src="img/magpie-paper.webp" alt="종이를 문 물까치" width="256" height="256" loading="lazy">
+      <figcaption>
+        <b>ReprintOCR</b>
+        <span>종이. 틀린 문제를 물어다 다시 인쇄해 준다.</span>
+      </figcaption>
+    </figure>
+    <figure class="mark">
+      <img src="img/magpie-book.webp" alt="책을 문 물까치" width="256" height="256" loading="lazy">
+      <figcaption>
+        <b>VDIC</b>
+        <span>책. 외울 낱말을 물어다 외울 때까지 되묻는다.</span>
+      </figcaption>
+    </figure>
+  </div>
+
+  <!-- 색·글꼴 — 세 도구가 실제로 쓰는 값이다. 여기 적힌 것과 화면의 것이
+       다르면 브랜드가 아니라 장식이 된다. -->
+  <div class="tokens">
+    <div class="swatches">
+      <span class="sw" style="--c:#141518"><b>Cap</b>#141518</span>
+      <span class="sw" style="--c:#5b96d4"><b>Wing</b>#5b96d4</span>
+      <span class="sw" style="--c:#7ba9db"><b>Sky</b>#7ba9db</span>
+      <span class="sw" style="--c:#f2eddc"><b>Body</b>#f2eddc</span>
+      <span class="sw" style="--c:#d8c0a8"><b>Bark</b>#d8c0a8</span>
+    </div>
+    <p class="tokens-note">
+      마크에서 그대로 뽑은 다섯 색이 세 사이트의 강조색·표면색이 된다.
+      글자는 <b>Pretendard</b>(본문)와 <b>Space Grotesk</b>(표시용) 두 벌뿐이라,
+      셋을 나란히 열어 두면 같은 곳에서 만든 것으로 보인다.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <img src="img/magpie.webp" alt="" width="64" height="64" loading="lazy">
+  <p class="foot-brand">NEPICA</p>
+  <p class="foot-links">
+    <a href="https://geogl3.xyz" target="_blank" rel="noreferrer">지오글</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://reprintocr.vercel.app" target="_blank" rel="noreferrer">리프린트OCR</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://vdic.vercel.app" target="_blank" rel="noreferrer">VDIC</a>
+  </p>
+</footer>
+
+</body>
+</html>

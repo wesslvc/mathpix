@@ -1,0 +1,263 @@
+/* ── NEPICA 브랜드 사이트 ──────────────────────────────────────────────
+   색·글꼴·모서리·그림자는 전부 지오글(seji)이 쓰는 값을 그대로 가져왔다.
+   브랜드 사이트가 제품과 다른 값을 쓰면 "같은 곳에서 만들었다"는 말이
+   그 자리에서 무너진다.
+
+   어두운 화면이 기본이고, 밝게 쓰는 사람에게는 prefers-color-scheme 으로
+   지오글의 라이트 모드 팔레트를 그대로 내준다. 마크가 배경이 없는 투명
+   PNG 라 두 화면 어디에 얹어도 새만 떠 있는다. */
+:root{
+  color-scheme:dark;
+  --bg:#14171c;
+  --sf:#1c2027;
+  --sf2:#242932;
+  --bd:#333944;
+  --tx:#e9eaec;
+  --tx2:#9298a3;
+  --ac:#7fb2e6;
+  --ac2:rgba(127,178,230,.14);
+
+  /* 물까치(Cyanopica cyanus) 팔레트 — 마크에서 그대로 뽑은 네 색 */
+  --mg-cap:#141518;--mg-wing:#7ba9db;--mg-wing-d:#5b96d4;
+  --mg-body:#f2eddc;--mg-bark:#d8c0a8;
+
+  --font-sans:'Pretendard','Pretendard Variable','Noto Sans KR',system-ui,sans-serif;
+  --font-display:'Space Grotesk','Pretendard',sans-serif;
+
+  --r-sm:10px;--r-md:12px;--r-lg:16px;--r-full:999px;
+  --shadow:0 1px 2px rgba(0,0,0,.28),0 4px 14px rgba(0,0,0,.22);
+  --shadow-2:0 6px 20px rgba(0,0,0,.3),0 18px 50px rgba(0,0,0,.26);
+  --ease:cubic-bezier(.2,.6,.3,1);
+
+  /* 첫 화면 뒤에 까는 옅은 빛. 라이트 모드에서는 흰 바탕에 얼룩으로 보여
+     지오글이 그랬듯 통째로 없앤다. */
+  --hero-glow:radial-gradient(1100px 620px at 50% -12%,#1d222a 0%,var(--bg) 62%);
+}
+
+@media (prefers-color-scheme: light){
+  :root{
+    color-scheme:light;
+    --bg:#f6f7f9;--sf:#ffffff;--sf2:#eef1f5;--bd:#e0e5ec;
+    --tx:#191c21;--tx2:#646a74;--ac:#2f74b8;--ac2:rgba(47,116,184,.08);
+    --shadow:0 1px 2px rgba(28,25,20,.05),0 4px 14px rgba(28,25,20,.05);
+    --shadow-2:0 6px 20px rgba(28,25,20,.07),0 18px 50px rgba(28,25,20,.06);
+    --hero-glow:none;
+  }
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+html{scroll-behavior:smooth}
+@media (min-width:900px){html{font-size:17px}}
+
+body{
+  font-family:var(--font-sans);
+  background:var(--bg);color:var(--tx);
+  -webkit-font-smoothing:antialiased;
+  line-height:1.7;
+  overflow-x:hidden;
+}
+
+a{color:inherit}
+
+/* ── 첫 화면 ───────────────────────────────────────────────────────── */
+.hero{
+  position:relative;
+  min-height:min(78vh,640px);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:.35rem;padding:4.5rem 1.2rem 2.5rem;text-align:center;
+  background:var(--hero-glow);
+}
+
+/* 비행 궤적 — 지오글 랜딩의 그것과 같은 곡선이다. 읽는 데 방해되지 않게
+   아주 옅게 두고, 마크 뒤를 지나가게 한다. */
+.trail{
+  position:absolute;top:14%;left:50%;transform:translateX(-50%);
+  width:min(42rem,94vw);height:14rem;pointer-events:none;
+  fill:none;stroke:var(--ac);stroke-width:1.4;stroke-linecap:round;
+  stroke-dasharray:2 9;opacity:.28;
+}
+
+.hero>*:not(.trail){position:relative;z-index:1}
+
+.hero-bird{
+  width:min(11rem,42vw);height:auto;display:block;
+  user-select:none;-webkit-user-drag:none;
+}
+
+.wordmark{
+  font-family:var(--font-display);
+  font-size:clamp(2.6rem,9vw,4.4rem);
+  font-weight:600;line-height:1;
+  letter-spacing:.16em;text-indent:.16em;
+  margin-top:.6rem;
+}
+
+.tag-en{
+  font-family:var(--font-display);
+  font-size:.78rem;font-weight:500;color:var(--tx2);
+  letter-spacing:.24em;text-transform:uppercase;
+  margin-top:1rem;
+}
+
+.tag-ko{font-size:.95rem;color:var(--tx2);opacity:.85;margin-top:.3rem}
+
+/* 좁은 화면에서는 영문 표어의 자간이 그대로면 화면 폭에 딱 붙는다 —
+   360px 짜리 기기에서 줄이 넘어가지 않게 한 단계 줄인다. */
+@media (max-width:420px){.tag-en{font-size:.7rem;letter-spacing:.18em}}
+
+.hero-links{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;margin-top:2rem}
+.hero-links a{
+  font-size:.82rem;color:var(--tx2);text-decoration:none;
+  border:1px solid var(--bd);border-radius:var(--r-full);
+  padding:.4rem 1rem;background:var(--sf);
+  transition:.15s var(--ease);
+}
+.hero-links a:hover{color:var(--tx);border-color:var(--tx2);background:var(--sf2)}
+
+/* ── 구역 공통 ─────────────────────────────────────────────────────── */
+.sec{max-width:64rem;margin:0 auto;padding:4.5rem 1.2rem}
+.sec+.sec{border-top:1px solid var(--bd)}
+
+.sec-label{
+  font-family:var(--font-display);
+  font-size:.66rem;font-weight:600;color:var(--ac);
+  letter-spacing:.28em;text-transform:uppercase;
+}
+.sec-title{font-size:clamp(1.5rem,3.4vw,2rem);font-weight:700;letter-spacing:-.01em;margin-top:.5rem}
+.sec-lead{color:var(--tx2);font-size:.95rem;margin-top:.7rem;max-width:44rem}
+.sec-lead i{font-style:italic}
+.sec-lead b{color:var(--tx);font-weight:600}
+
+/* ── 만든 것 ───────────────────────────────────────────────────────── */
+.works{display:grid;gap:1rem;margin-top:2.2rem}
+/* 셋을 두 칸에 넣으면 마지막 하나가 반쪽으로 외따로 남는다 — 그래서 두 칸을
+   건너뛰고 좁은 화면은 한 줄씩, 넓은 화면은 셋을 나란히 놓는다. */
+@media (min-width:900px){.works{grid-template-columns:repeat(3,1fr)}}
+
+.work{
+  display:flex;flex-direction:column;
+  background:var(--sf);border:1px solid var(--bd);border-radius:var(--r-lg);
+  padding:1.6rem 1.5rem 1.5rem;
+  transition:border-color .2s var(--ease),box-shadow .2s var(--ease),transform .2s var(--ease);
+}
+.work:hover{border-color:color-mix(in srgb,var(--ac) 45%,var(--bd));box-shadow:var(--shadow-2);transform:translateY(-2px)}
+
+.work-bird{width:5.5rem;height:5.5rem;display:block;user-select:none;-webkit-user-drag:none}
+.work-body{margin-top:1rem;display:flex;flex-direction:column;flex:1}
+
+.work-kicker{
+  font-family:var(--font-display);
+  font-size:.68rem;font-weight:600;color:var(--tx2);
+  letter-spacing:.18em;text-transform:uppercase;
+}
+.work-name{font-size:1.15rem;font-weight:700;margin-top:.35rem;letter-spacing:-.01em}
+
+/* 넣는 것 → 나오는 것. 도구는 결국 이 한 줄이라, 소개글보다 먼저 읽히게
+   두고 화살표만 강조색으로 띄운다. 좁은 화면에서는 줄이 넘어가도 되게
+   flex-wrap 을 켠다(세 카드의 길이가 제각각이다). */
+.work-io{
+  margin-top:.7rem;display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem;
+  font-family:var(--font-display);font-size:.82rem;font-weight:600;
+  line-height:1.45;
+}
+.work-io b{font-weight:600;color:var(--tx)}
+.work-io i{font-style:normal;color:var(--ac);font-size:.95em}
+
+.work-desc{color:var(--tx2);font-size:.9rem;margin-top:.6rem}
+
+.work-facts{list-style:none;margin-top:1rem;margin-bottom:1.4rem;display:flex;flex-direction:column;gap:.35rem}
+.work-facts li{
+  font-size:.82rem;color:var(--tx2);
+  padding-left:1.1rem;position:relative;line-height:1.5;
+}
+.work-facts li::before{
+  content:'';position:absolute;left:0;top:.55em;
+  width:5px;height:5px;border-radius:50%;background:var(--ac);opacity:.75;
+}
+
+.work-cta{
+  margin-top:auto;align-self:flex-start;
+  font-family:var(--font-display);font-size:.82rem;font-weight:600;
+  text-decoration:none;color:var(--tx);
+  background:var(--ac2);border:1px solid color-mix(in srgb,var(--ac) 40%,var(--bd));
+  border-radius:var(--r-full);padding:.5rem 1.1rem;
+  transition:.15s var(--ease);
+}
+.work-cta:hover{background:var(--ac);color:#0f1216;border-color:var(--ac)}
+@media (prefers-color-scheme: light){.work-cta:hover{color:#fff}}
+
+/* ── 브랜드 가치 ───────────────────────────────────────────────────── */
+.values{list-style:none;counter-reset:none;margin-top:2.2rem;display:grid;gap:.8rem}
+@media (min-width:820px){.values{grid-template-columns:1fr 1fr}}
+
+.value{
+  background:var(--sf);border:1px solid var(--bd);border-radius:var(--r-md);
+  padding:1.3rem 1.4rem;position:relative;
+}
+/* 첫 항목은 한 줄을 통째로 쓴다 — 다섯 개를 두 칸에 넣으면 마지막 하나가
+   외따로 남는데, 가장 중요한 것을 위에서 넓게 두면 그 어색함이 사라진다. */
+@media (min-width:820px){.value:first-child{grid-column:1 / -1}}
+
+.value-no{
+  font-family:var(--font-display);font-size:.7rem;font-weight:700;
+  color:var(--ac);letter-spacing:.14em;
+}
+.value h3{font-size:1rem;font-weight:700;margin-top:.3rem;letter-spacing:-.01em}
+.value p{color:var(--tx2);font-size:.88rem;margin-top:.5rem}
+
+/* ── 마크 ──────────────────────────────────────────────────────────── */
+.marks{display:grid;gap:1rem;margin-top:2.2rem}
+@media (min-width:560px){.marks{grid-template-columns:repeat(2,1fr)}}
+@media (min-width:900px){.marks{grid-template-columns:repeat(4,1fr)}}
+
+.mark{
+  background:var(--sf);border:1px solid var(--bd);border-radius:var(--r-lg);
+  padding:1.6rem 1.2rem 1.3rem;text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:.9rem;
+}
+.mark img{width:6.5rem;height:6.5rem;user-select:none;-webkit-user-drag:none}
+.mark figcaption{display:flex;flex-direction:column;gap:.35rem}
+.mark b{font-family:var(--font-display);font-size:.9rem;font-weight:600;letter-spacing:.04em}
+.mark span{font-size:.82rem;color:var(--tx2);line-height:1.55}
+
+.tokens{
+  margin-top:1.6rem;padding:1.3rem 1.4rem;
+  background:var(--sf);border:1px solid var(--bd);border-radius:var(--r-md);
+}
+.swatches{display:flex;flex-wrap:wrap;gap:.5rem}
+.sw{
+  display:inline-flex;align-items:center;gap:.5rem;
+  font-family:var(--font-display);font-size:.7rem;color:var(--tx2);
+  background:var(--sf2);border:1px solid var(--bd);border-radius:var(--r-full);
+  padding:.3rem .8rem .3rem .35rem;letter-spacing:.02em;
+}
+.sw::before{
+  content:'';width:18px;height:18px;border-radius:50%;
+  background:var(--c);border:1px solid rgba(128,128,128,.35);flex:none;
+}
+.sw b{color:var(--tx);font-weight:600;margin-right:.15rem}
+.tokens-note{font-size:.82rem;color:var(--tx2);margin-top:.9rem}
+.tokens-note b{color:var(--tx);font-weight:600}
+
+/* ── 바닥 ──────────────────────────────────────────────────────────── */
+.foot{
+  border-top:1px solid var(--bd);
+  padding:3rem 1.2rem 4rem;text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:.6rem;
+}
+.foot img{width:2rem;height:2rem;opacity:.7}
+/* 지오글 랜딩 아래의 브랜드 표기(.ld-brand)와 같은 모양 */
+.foot-brand{
+  font-family:var(--font-display);font-size:.66rem;font-weight:600;
+  letter-spacing:.34em;text-indent:.34em;color:var(--tx2);opacity:.6;
+}
+.foot-links{font-size:.82rem;color:var(--tx2);display:flex;gap:.5rem}
+.foot-links a{text-decoration:none;transition:.15s var(--ease)}
+.foot-links a:hover{color:var(--tx)}
+
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  .work{transition:none}
+  .work:hover{transform:none}
+}

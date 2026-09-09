@@ -1,46 +1,25 @@
 import type { Metadata, Viewport } from "next";
-import { Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import FigureJobsProvider from "@/components/FigureJobsProvider";
 import FigureJobsPanel from "@/components/FigureJobsPanel";
 import AppNav from "@/components/AppNav";
 
-/**
- * 표시용 글꼴 — 로고와 숫자에 쓴다. 지오글·VDIC 과 **같은 글꼴**이다.
- * 본문(Pretendard)은 구글 폰트가 아니라 next/font 로 못 받으므로 아래
- * `<head>` 에서 CDN 으로 가져온다(형제 사이트 둘도 같은 주소를 쓴다).
- */
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-  display: "swap",
-});
-
-/** 로고와 같은 모양의 파비콘. 외부 파일 없이 data URI로 넣어 404를 피한다. */
-const FAVICON_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">` +
-  `<rect x="7" y="5" width="26" height="30" rx="4" fill="#fff" stroke="#dadce0" stroke-width="2"/>` +
-  `<path d="M13 13h9M13 18h14M13 23h6" stroke="#dadce0" stroke-width="2" stroke-linecap="round"/>` +
-  `<path d="M27.5 26.5a8 8 0 1 1-2.4-9.2" stroke="#1a73e8" stroke-width="3.2" stroke-linecap="round" fill="none"/>` +
-  `<path d="M25.6 11.4v6h-6" stroke="#ea4335" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>` +
-  `</svg>`;
-
 export const metadata: Metadata = {
   title: "ReprintOCR — 오답프린트 제작",
   description:
-    "사진 속 수학 문제를 자동으로 인식해 가독성 좋은 이미지로 재구성하고, 실전모의고사별로 오답을 모아 PDF로 인쇄할 수 있게 해줍니다.",
+    "사진 속 문제를 자동으로 인식해 가독성 좋은 이미지로 재구성하고, 실전모의고사별로 오답을 모아 평가원 판형 PDF로 인쇄할 수 있게 해줍니다. NEPICA.",
+  // 파비콘은 로고와 같은 그림(종이를 문 물까치)을 쓴다. 크기별로 세 벌을 두어
+  // 탭·홈 화면 어디에서든 뭉개지지 않게 한다.
   icons: {
     icon: [
-      {
-        url: `data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}`,
-        type: "image/svg+xml",
-      },
+      { url: "/brand/magpie-paper-64.png", sizes: "64x64", type: "image/png" },
+      { url: "/brand/magpie-paper-192.png", sizes: "192x192", type: "image/png" },
     ],
+    apple: [{ url: "/brand/magpie-paper-192.png" }],
   },
 };
 
-/** 주소창까지 브랜드 바탕색으로 잇는다(형제 사이트와 같은 처리). */
+/** 주소창까지 브랜드 바탕색(지오글 `--bg`)으로 잇는다 — 형제 사이트와 같은 처리. */
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
@@ -53,14 +32,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ko" className={spaceGrotesk.variable}>
+    <html lang="ko">
+      {/* 글꼴 — 지오글(seji)과 같은 짝을 쓴다. 본문은 Pretendard, 로고·숫자
+          같은 표시용 글자는 Space Grotesk. 두 사이트가 같은 브랜드로 보이려면
+          색보다 글꼴이 먼저다. 둘 다 글꼴이 준비되기 전에는 시스템 글꼴로
+          그려지므로(font-display:swap) 첫 글자가 늦게 뜨지 않는다. */}
       <head>
-        {/* 본문 글꼴 — 지오글·VDIC 과 **같은 주소**를 쓴다. */}
         <link rel="preconnect" href="https://cdn.jsdelivr.net" crossOrigin="" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="stylesheet"
           crossOrigin=""
           href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
+        />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
         />
       </head>
       {/* UI는 Pretendard(globals.css에서 지정), 문제 카드만 font-serif로
@@ -70,16 +57,19 @@ export default function RootLayout({
           진행 상황은 화면 구석의 FigureJobsPanel에서 어디서든 볼 수 있다. */}
       <body className="flex min-h-screen flex-col antialiased">
         <FigureJobsProvider>
+          {/* 전역 내비 — 예전에는 없어서 화면마다 "← 목록으로"를 따로 만들고
+              있었다(다섯 곳). 그래서 지금 어디에 있는지·어디로 갈 수 있는지가
+              화면을 옮길 때마다 달라졌다. */}
           <AppNav />
           <div className="flex-1">{children}</div>
           {/* 만든 곳 표기 — 사이트는 ReprintOCR, 브랜드는 NEPICA.
-              형제 사이트(VDIC)와 같은 자리·같은 모양이다. */}
+              형제 사이트(VDIC)의 바닥글과 같은 자리·같은 모양이다. */}
           <footer className="flex justify-center pb-8 pt-6">
             <a
               href="https://nepica.vercel.app"
               target="_blank"
               rel="noreferrer"
-              className="nepica-brand text-slate-500"
+              className="nepica-brand"
             >
               NEPICA
             </a>

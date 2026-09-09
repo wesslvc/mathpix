@@ -1,7 +1,7 @@
 type Props = {
   /** 로고 높이(px). 글자 크기는 여기에 비례한다. */
   size?: number;
-  /** 아이콘만 쓰고 글자는 숨긴다(좁은 화면·파비콘용). */
+  /** 마크만 쓰고 글자는 숨긴다(좁은 화면·파비콘용). */
   iconOnly?: boolean;
   className?: string;
 };
@@ -9,94 +9,40 @@ type Props = {
 /**
  * ReprintOCR 로고.
  *
- * 마크는 "다시 인쇄한다"는 뜻을 담아 종이 한 장 위에 되돌림 화살표를 얹은
- * 모양이다.
+ * 마크는 **종이를 물고 나는 물까치**다. 같은 브랜드(NEPICA)의 지오글은 같은
+ * 새가 지구본을 물고 있고, 브랜드 자체는 아무것도 물지 않은 새를 쓴다 —
+ * 무엇을 물고 있느냐로 제품을 가른다.
  *
- * **색은 NEPICA 브랜드다.** 예전에는 구글 제품처럼 파랑·빨강·노랑·초록 네
- * 색이었는데, 그건 구글 상표 색이라 우리 것이 아니었고 형제 사이트
- * (지오글·VDIC)와 나란히 놓으면 남처럼 보였다. 지금은 물까치 날개색
- * 한 계열로 흘린다.
+ * 그림 파일을 쓰는 이유: 이 마크는 그라디언트가 겹겹이 들어간 그림이라
+ * 손으로 그린 SVG로는 같은 모양이 안 나온다. 대신 **투명 배경 PNG**로
+ * 만들어 두어(검은 바탕을 지우면 새의 검은 두건까지 잘려 나가므로, 가장자리
+ * 에서 시작하는 채우기로 바깥 검정만 지웠다) 밝은 화면·어두운 화면 어디에
+ * 얹어도 새만 떠 있는다.
  *
- * **워드마크는 표시용 글꼴(Space Grotesk)에 자간을 넓혀 상표처럼 둔다** —
- * 지오글의 `.g3-logo`, VDIC 의 NavBar 로고와 같은 처리다. 세 사이트가 같은
- * 브랜드로 보이게 하는 가장 강한 신호가 이 글꼴이다.
- *
- * **아직 물까치 마크가 아니다.** 브랜드 규칙은 "제품마다 물까치가 무엇을
- * 물고 있느냐로 가른다"이고(지오글=지구본, VDIC=책, 브랜드=아무것도 안 뭄)
- * ReprintOCR 은 **종이를 문 물까치**여야 하는데 그 그림 파일이 아직 없다.
- * 그라디언트가 겹겹이 든 그림이라 손으로 그린 SVG 로는 같은 모양이 안 나온다
- * (VDIC 주석이 같은 이유를 적어 두었다). 파일을 받으면 이 SVG 를
- * `/brand/magpie-paper-512.png` 로 갈아 끼우면 된다.
- *
- * SVG로 직접 그린 이유: 외부 이미지로 두면 PNG 캡처(html-to-image)나 인쇄에서
- * 불러오기 실패로 깨질 수 있고, 화면 배율마다 흐려진다.
+ * `<img>` 를 그대로 쓴다 — next/image 는 로고 하나를 위해 최적화 왕복을
+ * 더할 뿐이고, 이 파일은 이미 크기별로 세 벌을 만들어 두었다.
  */
 export default function Logo({ size = 28, iconOnly = false, className }: Props) {
-  // 그라디언트 id는 한 화면에 로고가 여러 개 있어도 충돌하지 않아야 한다.
-  const gradientId = `reprint-arc-${size}`;
-
   return (
     <span
-      className={`inline-flex items-center gap-2 ${className ?? ""}`}
+      className={`inline-flex items-center gap-2.5 ${className ?? ""}`}
       aria-label="ReprintOCR"
     >
-      <svg
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/brand/magpie-paper-512.png"
+        alt=""
         width={size}
         height={size}
-        viewBox="0 0 40 40"
-        fill="none"
-        role="img"
-        aria-hidden="true"
-      >
-        <defs>
-          <linearGradient id={gradientId} x1="6" y1="8" x2="34" y2="32">
-            <stop offset="0%" stopColor="#7fb2e6" />
-            <stop offset="50%" stopColor="#4a8cca" />
-            <stop offset="80%" stopColor="#2f74b8" />
-            <stop offset="100%" stopColor="#265f99" />
-          </linearGradient>
-        </defs>
-
-        {/* 종이 */}
-        <rect
-          x="7"
-          y="5"
-          width="26"
-          height="30"
-          rx="4"
-          fill="#fff"
-          stroke="#cbd2db"
-          strokeWidth="2"
-        />
-        {/* 문제의 텍스트 줄 */}
-        <path
-          d="M13 13h9M13 18h14M13 23h6"
-          stroke="#cbd2db"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        {/* 되돌림(다시 인쇄) 화살표 */}
-        <path
-          d="M27.5 26.5a8 8 0 1 1-2.4-9.2"
-          stroke={`url(#${gradientId})`}
-          strokeWidth="3.2"
-          strokeLinecap="round"
-          fill="none"
-        />
-        <path
-          d="M25.6 11.4v6h-6"
-          stroke="#2f74b8"
-          strokeWidth="3.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
-      </svg>
+        style={{ width: size, height: size }}
+        decoding="async"
+        draggable={false}
+      />
 
       {!iconOnly && (
         <span
-          className="font-display font-semibold tracking-[0.06em] text-ink"
-          style={{ fontSize: size * 0.62 }}
+          className="font-display font-semibold tracking-tight text-ink"
+          style={{ fontSize: size * 0.52, letterSpacing: "0.01em" }}
         >
           Reprint<span className="text-gblue">OCR</span>
         </span>
