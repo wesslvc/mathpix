@@ -22,7 +22,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 
 const BASE =
   process.env.SITE_BASE ??
-  "https://raw.githubusercontent.com/wesslvc/mathpix/2fd71137a742012c3f95f4e130354b8e39c80e51/brand-site";
+  "https://raw.githubusercontent.com/wesslvc/mathpix/aa0c2b12da9073a2ed375f528a2eaebb223e9cf5/brand-site";
 
 const FILES = [
   "index.html",
