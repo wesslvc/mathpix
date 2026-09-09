@@ -23,7 +23,7 @@ function asSubject(v: unknown): Subject | null {
 export default async function ProfilePage() {
   if (!isSupabaseConfigured()) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
+      <main className="mx-auto flex max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
         <Logo size={40} />
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Supabase 설정이 아직 완료되지 않았습니다.
@@ -38,7 +38,7 @@ export default async function ProfilePage() {
   } = await supabase.auth.getUser();
   if (!user) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 text-center">
+      <main className="mx-auto flex max-w-md flex-col items-center justify-center px-4 text-center">
         <p className="text-sm text-slate-500">
           로그인이 필요합니다.{" "}
           <Link href="/login" className="text-blue-600 underline">
@@ -85,14 +85,8 @@ export default async function ProfilePage() {
   const historyRows = [...(scores ?? [])].reverse();
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pb-10 pt-6">
       <header>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline"
-        >
-          ← 목록으로
-        </Link>
         <h1 className="mt-2 text-xl font-semibold text-ink">내 프로필</h1>
         <p className="mt-1 text-sm text-slate-500">{user.email}</p>
       </header>

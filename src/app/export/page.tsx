@@ -71,7 +71,7 @@ export default async function ExportPage({
 
   if (!isSupabaseConfigured()) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 text-center">
+      <main className="mx-auto flex max-w-md flex-col items-center justify-center px-4 text-center">
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Supabase 설정이 아직 완료되지 않았습니다.
         </p>
@@ -81,7 +81,7 @@ export default async function ExportPage({
 
   if (idList.length === 0) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-4 px-4 py-10">
+      <main className="mx-auto flex max-w-6xl flex-col gap-4 px-4 pb-10 pt-6">
         <p className="text-sm text-slate-500">
           출력할 실모를 선택하지 않았습니다.{" "}
           <Link href="/" className="text-blue-600 underline">
@@ -253,14 +253,8 @@ export default async function ExportPage({
     !multi && firstCategory?.exam_date ? firstCategory.exam_date : todayIso;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 pt-6">
       <header>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline"
-        >
-          ← 목록으로
-        </Link>
         <h1 className="mt-1 text-2xl font-bold text-ink">PDF 만들기</h1>
         <p className="text-sm text-slate-500">
           실모 {idList.length}개 · 문제 {composerProblems.length}개

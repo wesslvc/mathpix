@@ -63,7 +63,7 @@ function LoginForm() {
 
   if (!isSupabaseConfigured()) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
+      <main className="mx-auto flex max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
         <Logo size={40} />
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Supabase 설정이 아직 완료되지 않아 로그인 기능을 사용할 수 없습니다.
@@ -134,7 +134,7 @@ function LoginForm() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col items-center justify-center gap-6 px-4 text-center">
+    <main className="mx-auto flex max-w-sm flex-col items-center justify-center gap-6 px-4 text-center">
       {/* 첫 화면 — 지오글 랜딩과 같은 짜임(마크 · 워드마크 · 영문 표어 ·
           우리말 한 줄). 같은 브랜드의 두 사이트가 첫인상부터 닮게 둔다. */}
       <div className="flex flex-col items-center">

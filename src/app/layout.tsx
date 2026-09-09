@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import FigureJobsProvider from "@/components/FigureJobsProvider";
 import FigureJobsPanel from "@/components/FigureJobsPanel";
+import AppNav from "@/components/AppNav";
 
 export const metadata: Metadata = {
   title: "ReprintOCR — 오답프린트 제작",
@@ -16,6 +17,13 @@ export const metadata: Metadata = {
     ],
     apple: [{ url: "/brand/magpie-paper-192.png" }],
   },
+};
+
+/** 주소창까지 브랜드 바탕색(지오글 `--bg`)으로 잇는다 — 형제 사이트와 같은 처리. */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#f6f7f9",
 };
 
 export default function RootLayout({
@@ -47,9 +55,25 @@ export default function RootLayout({
       {/* AI 작업 큐를 **앱 전체**에 둔다. 실모 페이지 안에 두면 목록으로
           돌아가는 순간 통째로 사라져서, 그리던 것이 요금만 나가고 없어진다.
           진행 상황은 화면 구석의 FigureJobsPanel에서 어디서든 볼 수 있다. */}
-      <body className="antialiased">
+      <body className="flex min-h-screen flex-col antialiased">
         <FigureJobsProvider>
-          {children}
+          {/* 전역 내비 — 예전에는 없어서 화면마다 "← 목록으로"를 따로 만들고
+              있었다(다섯 곳). 그래서 지금 어디에 있는지·어디로 갈 수 있는지가
+              화면을 옮길 때마다 달라졌다. */}
+          <AppNav />
+          <div className="flex-1">{children}</div>
+          {/* 만든 곳 표기 — 사이트는 ReprintOCR, 브랜드는 NEPICA.
+              형제 사이트(VDIC)의 바닥글과 같은 자리·같은 모양이다. */}
+          <footer className="flex justify-center pb-8 pt-6">
+            <a
+              href="https://nepica.vercel.app"
+              target="_blank"
+              rel="noreferrer"
+              className="nepica-brand"
+            >
+              NEPICA
+            </a>
+          </footer>
           <FigureJobsPanel />
         </FigureJobsProvider>
       </body>
