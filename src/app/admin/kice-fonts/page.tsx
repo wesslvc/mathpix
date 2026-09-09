@@ -77,7 +77,7 @@ export default function KiceFontAdminPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg flex-col gap-4 px-4 py-10">
+    <main className="mx-auto flex max-w-3xl flex-col gap-4 px-4 pb-10 pt-6">
       <h1 className="text-xl font-semibold text-ink">평가원 글꼴 올리기</h1>
       <p className="text-sm text-slate-500">
         원본 TTF 파일을 그대로 고르면 서버가 필요한 글자만 잘라 올립니다.

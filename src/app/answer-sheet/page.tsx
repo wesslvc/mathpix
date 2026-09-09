@@ -114,7 +114,7 @@ export default function AnswerSheetPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-5 px-4 py-10">
+    <main className="mx-auto flex max-w-3xl flex-col gap-5 px-4 pb-10 pt-6">
       <div>
         <Link href="/" className="text-sm text-slate-500 hover:text-ink">
           ← 실모 목록

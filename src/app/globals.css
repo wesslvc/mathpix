@@ -6,23 +6,107 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 구글 계열 UI 색·형태. 문제 본문(나눔명조)과 앱 UI를 분리해서,
-   UI는 시스템 산세리프로 또렷하게 두고 문제 카드만 명조를 쓴다. */
+/* ── NEPICA 브랜드 토큰 ────────────────────────────────────────────────
+   지오글(`wesslvc/seji`)·VDIC(`wesslvc/vdic`)과 **같은 값**이다. 두 저장소를
+   붙여 실제 CSS 를 읽고 옮겼다 — 눈대중으로 비슷한 색을 고르지 않았다.
+
+   예전에는 구글 머티리얼 기본값(`#1a73e8` · Google Sans)이었다. 그건 어느
+   브랜드도 아니어서, 나란히 놓으면 형제 사이트와 남처럼 보였다.
+
+   **이름(`--g-*`)은 그대로 두고 값만 갈아 끼운다.** 아래 `.g-btn`·`.g-card`·
+   `.g-input` 이 이 이름들을 쓰고 있는데, 이름까지 바꾸면 그 클래스들을 전부
+   손대야 하고 그러다 몇 개를 빠뜨린다(팔레트를 클래스가 아니라 값으로 갈아
+   끼운 것과 같은 판단이다 — `tailwind.config.ts` 주석 참고). */
 :root {
-  --g-blue: #1a73e8;
-  --g-blue-hover: #1765cc;
-  --g-red: #d93025;
-  --g-green: #1e8e3e;
-  --g-yellow: #f9ab00;
-  --g-surface: #ffffff;
-  --g-bg: #f8f9fa;
-  --g-border: #dadce0;
-  --g-text: #202124;
-  --g-text-muted: #5f6368;
+  color-scheme: light;
+  /* 지오글 라이트 테마(`:root[data-theme="light"]`)의 값 그대로. */
+  --n-bg: #f6f7f9; /* --bg  바탕 */
+  --n-surface: #ffffff; /* --sf  표면 */
+  --n-surface-2: #eef1f5; /* --sf2 한 겹 안쪽 표면 */
+  --n-border: #e0e5ec; /* --bd  테두리 */
+  --n-text: #191c21; /* --tx  본문 */
+  --n-text-muted: #646a74; /* --tx2 흐린 글자 */
+  --n-accent: #2f74b8; /* --ac  강조(물까치 날개색) */
+  --n-accent-soft: rgba(47, 116, 184, 0.08); /* --ac2 */
+  --n-wrong: #b3453c; /* --wr  오답 */
+  --n-gold: #9a7b3c; /* --gd  즐겨찾기·경고 */
+  --n-correct: #47905d; /* 정답 초록(라이트 쪽 톤) */
+  --n-shadow: 0 1px 2px rgba(28, 25, 20, 0.05), 0 4px 14px rgba(28, 25, 20, 0.05);
+  --n-shadow-2: 0 6px 20px rgba(28, 25, 20, 0.07), 0 18px 50px rgba(28, 25, 20, 0.06);
+
+  /* 모서리 — 지오글이 다섯 단계로 모아 둔 값. */
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-full: 999px;
+
+  /* 예전 이름들. 값만 브랜드로 바뀌었다. */
+  --g-blue: var(--n-accent);
+  --g-blue-hover: #265f99;
+  --g-red: var(--n-wrong);
+  --g-green: var(--n-correct);
+  --g-yellow: var(--n-gold);
+  --g-surface: var(--n-surface);
+  --g-bg: var(--n-bg);
+  --g-border: var(--n-border);
+  --g-text: var(--n-text);
+  --g-text-muted: var(--n-text-muted);
 }
 
-/* 문제 카드는 PNG로 캡처돼 그대로 인쇄되는 면이다. 주변 UI 색을 물려받아
-   종이가 어두워지거나 글자색이 바뀌는 일이 없도록 여기서 못박아 둔다. */
+/* ── PC 에서는 글자를 키운다 ───────────────────────────────────────────
+   지오글이 쓰는 것과 **같은 방법·같은 기준점**이다(`css/main.css`).
+
+   사용자 지적이 "모바일에선 모바일이라 불편하고 PC 스럽지도 않다"였는데,
+   원인은 이 앱에 **PC 레이아웃이 아예 없다**는 것이었다(반응형 분기가
+   `md:` 0개 · `lg:` 1개 · `xl:` 0개). 좁은 한 단짜리 화면을 큰 모니터에
+   그대로 늘려 놓으니 글자만 작고 여백만 넓었다.
+
+   rem 기준을 키우면 제목·본문·버튼·여백이 **비율 그대로** 함께 커진다 —
+   화면마다 분기를 넣지 않아도 PC 에서 읽는 크기가 맞는다. 화면이 넓을수록
+   보는 거리도 멀어지므로 1400px 에서 한 단계 더 키운다. 모바일(900px 미만)은
+   지금 크기가 맞으므로 **한 픽셀도 안 바꾼다.** */
+@media (min-width: 900px) {
+  html {
+    font-size: 17px;
+  }
+}
+
+@media (min-width: 1400px) {
+  html {
+    font-size: 18px;
+  }
+}
+
+/* 브랜드 표기 — 지오글 랜딩 아래(`.ld-brand`)·VDIC 바닥(`.nepica-brand`)과
+   같은 모양이다. 넓은 자간에 작은 글씨로 조용히 두고, 닿으면 또렷해진다. */
+.nepica-brand {
+  font-family: theme("fontFamily.display");
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.nepica-brand:hover {
+  opacity: 0.9;
+}
+
+/* ── 인쇄되는 면은 브랜드 색을 따라가지 않는다 ────────────────────────
+   문제 카드는 PNG 로 캡처돼 **그대로 인쇄된다.** 주변 UI 색을 물려받아 종이가
+   어두워지거나 글자색이 바뀌면 안 된다.
+
+   **브랜드 팔레트를 갈아 끼울 때 여기가 가장 위험한 자리였다.** 확인한 것:
+   ① 캡처 대상(`DraggableCard` 의 `cardRef`) 안쪽 마크업은 `cardHtml.ts` 가
+   만드는데 거기서 나오는 클래스는 `.mmd-*` 와 `.problem-figure*` 뿐이다 —
+   Tailwind 색 클래스가 **하나도 없다.** ② 카드 겉껍데기에는 `bg-white` 가
+   붙지만, 이 규칙이 `@tailwind utilities` **뒤**에 있어 같은 특정도에서
+   나중 것이 이긴다. 그래서 램프를 무엇으로 바꾸든 인쇄물은 안 변한다.
+
+   이 파일에서 규칙 순서를 옮길 일이 있으면 **이 블록이 utilities 뒤에
+   남아 있는지** 반드시 확인할 것. */
 .problem-surface {
   background: #ffffff;
   color: #202124;
@@ -34,12 +118,15 @@
   color: #d93025;
 }
 
+/* 본문 글꼴은 Pretendard — 지오글·VDIC 과 **같은 글꼴**이다. 예전에는
+   "Google Sans"였는데 그건 구글 제품 글꼴이라 우리 것이 아니었고, 실제로는
+   설치돼 있지 않아 Roboto 로 떨어지고 있었다. 실제 파일은 `layout.tsx` 가
+   CDN 으로 받는다(구글 폰트가 아니라 next/font 로 못 받는다). */
 html,
 body {
-  background-color: var(--g-bg);
-  color: var(--g-text);
-  font-family: "Google Sans", Roboto, "Noto Sans KR", -apple-system,
-    BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+  background-color: var(--n-bg);
+  color: var(--n-text);
+  font-family: theme("fontFamily.sans");
   -webkit-font-smoothing: antialiased;
 }
 

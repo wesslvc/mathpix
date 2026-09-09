@@ -108,7 +108,7 @@ export default async function CategoryPage({
 
   if (!isSupabaseConfigured()) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 text-center">
+      <main className="mx-auto flex max-w-md flex-col items-center justify-center px-4 text-center">
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Supabase 설정이 아직 완료되지 않았습니다.
         </p>
@@ -271,15 +271,9 @@ export default async function CategoryPage({
     uploadedCountByGrade.set(p.gradeId, (uploadedCountByGrade.get(p.gradeId) ?? 0) + 1);
   }
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 pt-6">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-sm text-gblue hover:underline"
-          >
-            ← 목록으로
-          </Link>
           {/* 점수는 **제목 안이 아니라 옆에** 붙인다(사용자 요청 — "이제 제목에
               괄호치고 점수넣지마"). 만점은 연결된 채점의 과목에서 온다(탐구
               50). 연결된 채점이 없으면 알 길이 없으니 100. */}
