@@ -177,19 +177,23 @@ export default function CategoryList({
         {/* 줄 전체가 여는 자리다 — "열기 →" 를 따로 두지 않는다(누르는 자리가
             둘이면 어디를 눌러야 할지 헷갈리고 줄만 길어진다). */}
         <Link href={`/categories/${category.id}`} className="min-w-0 flex-1 py-0.5">
-          <p className="truncate font-semibold text-ink">
-            {label}
+          {/* 배지를 제목 문단 **안에** 두면 안 된다. `truncate` 는 넘치는 것을
+              통째로 잘라내므로, 이름이 긴 실모에서는 점수 배지가 "42/…" 처럼
+              반토막 나거나 화면 밖으로 밀려난다(휴대폰에서는 거의 늘 그렇다).
+              제목만 줄이고 배지는 제 크기를 지키게 가로로 나눠 놓는다. */}
+          <div className="flex items-center gap-1.5">
+            <p className="min-w-0 truncate font-semibold text-ink">{label}</p>
             {category.is_exam && (
-              <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
+              <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
                 실모
               </span>
             )}
             {score && (
-              <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">
+              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">
                 {score}
               </span>
             )}
-          </p>
+          </div>
           <p className="mt-0.5 text-xs text-slate-400">
             {folderName && <>📁 {folderName} · </>}
             {new Date(category.created_at).toLocaleDateString("ko-KR")}
@@ -247,7 +251,10 @@ export default function CategoryList({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="실모 이름으로 검색"
-          className="min-w-[12rem] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          // 좁은 화면에서는 검색칸이 한 줄을 통째로 쓰고 버튼 둘이 아랫줄에
+          // 나란히 선다. 셋을 한 줄에 욱여넣으면 버튼 하나만 아래로 떨어져
+          // 줄이 어정쩡하게 갈린다(휴대폰에서 실제로 그랬다).
+          className="w-full min-w-[12rem] rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none sm:w-auto sm:flex-1"
         />
         {!currentFolder && !creatingFolder && (
           <button

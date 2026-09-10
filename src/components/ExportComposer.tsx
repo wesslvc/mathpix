@@ -233,8 +233,10 @@ export default function ExportComposer({
       )}
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">
+        {/* 좁은 화면에서는 설명이 아랫줄로 내려간다. 한 줄에 붙여 두면 제목이
+            "인쇄 순서 (3문 / 제)" 처럼 낱말 가운데서 접힌다. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <h2 className="shrink-0 text-sm font-semibold text-slate-700">
             인쇄 순서 ({order.length}문제)
           </h2>
           <span className="text-xs text-slate-400">
