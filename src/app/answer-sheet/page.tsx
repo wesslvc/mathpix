@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { buildKicePdf } from "@/lib/kice/pdf";
 import { frameKeyFor, loadFrameImages, loadKiceFrames, type KiceArea } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
@@ -116,10 +115,7 @@ export default function AnswerSheetPage() {
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-5 px-4 pb-10 pt-6">
       <div>
-        <Link href="/" className="text-sm text-slate-500 hover:text-ink">
-          ← 실모 목록
-        </Link>
-        <h1 className="mt-2 text-xl font-semibold text-ink">정답표 생성기</h1>
+        <h1 className="text-xl font-semibold text-ink">정답표 생성기</h1>
         <p className="mt-1 text-sm text-slate-500">
           답지를 평가원 양식 정답표 한 쪽으로 뽑습니다. 문제지 본문 쪽과 같은
           머리말·쪽번호가 들어가서 뒤에 붙이면 이어져 보입니다.
@@ -163,8 +159,12 @@ export default function AnswerSheetPage() {
         </label>
       )}
 
+      {/* `min-w-0` 이 없으면 좁은 화면에서 **가로 스크롤이 생긴다** — 숫자
+          입력칸은 제 나름의 최소 폭을 갖고 있는데 flex 항목의 기본
+          `min-width:auto` 가 그 아래로 줄어드는 것을 막아, 두 칸이 화면보다
+          넓어지고 페이지 전체가 옆으로 밀린다(390px 에서 413px 이었다). */}
       <div className="flex gap-3">
-        <label className="flex flex-1 flex-col gap-1 text-sm text-slate-700">
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm text-slate-700">
           쪽번호
           <input
             type="number"
@@ -174,7 +174,7 @@ export default function AnswerSheetPage() {
             className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
           />
         </label>
-        <label className="flex flex-1 flex-col gap-1 text-sm text-slate-700">
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm text-slate-700">
           전체 쪽수
           <input
             type="number"

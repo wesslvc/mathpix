@@ -886,7 +886,9 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         <p className="text-xs text-slate-400">
           {list.length}개 · 번호 칸에 자리를 직접 적으면 그 자리로 보냅니다
         </p>
-        <div className="flex gap-1">
+        {/* `shrink-0` 이 없으면 좁은 화면에서 옆 설명 문단에 밀려 버튼이
+            찌그러지고 "카드" 가 두 줄로 쪼개진다(카/드). */}
+        <div className="flex shrink-0 gap-1">
           {(["card", "list"] as const).map((v) => (
             <button
               key={v}
@@ -1031,7 +1033,15 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
 
             {/* 넓은 화면에서는 편집기와 미리보기를 나란히 둬서 고치는 즉시
                 결과를 확인할 수 있게 한다(수식 편집이 특히 불편했던 부분). */}
-            <div className="grid gap-4 lg:grid-cols-2">
+            {/* `grid-cols-1` 을 빼면 안 된다. 안 적으면 한 줄짜리 격자의 칸
+                너비가 `auto`(= 내용의 max-content)가 되는데, 미리보기 카드가
+                640px 고정이라 **칸이 640px 로 벌어진다.** 그러면 좁은 화면에서
+                옆의 설명 글이 통째로 화면 밖으로 밀려 안 보인다(실제로 그랬다:
+                358px 자리에 642px 가 들어가 있었다). `grid-cols-1` 은
+                `minmax(0,1fr)` 이라 칸이 화면 폭을 넘지 않고, 카드는
+                `ScaledCard` 가 그 폭에 맞춰 줄여 준다. `lg:grid-cols-2` 는
+                이미 같은 `minmax(0,…)` 를 쓰고 있어 넓은 화면은 그대로다. */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <div className="flex flex-col gap-4">
                 {isImageOnly ? (
                   isPassage ? (
@@ -1088,7 +1098,10 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                       className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                     />
                   </label>
-                  <label className="flex items-center gap-2">
+                  {/* 설명 글에 `min-w-[14rem]` 을 준다 — 자리가 그만큼 없으면
+                      아랫줄로 내려간다. 안 그러면 좁은 화면에서 칸 옆 좁은
+                      틈에 끼어 한 줄에 서너 글자씩 세로로 흐른다. */}
+                  <label className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="shrink-0 text-xs font-medium text-slate-500">
                       문제 번호
                     </span>
@@ -1101,12 +1114,12 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                       placeholder="비우면 자동"
                       className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                     />
-                    <span className="text-[11px] text-slate-400">
+                    <span className="min-w-[14rem] flex-1 text-[11px] text-slate-400">
                       인쇄물에 찍히는 번호입니다. 비우면 본문에서 뽑거나
                       차례대로 매깁니다.
                     </span>
                   </label>
-                  <label className="flex items-center gap-2">
+                  <label className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="shrink-0 text-xs font-medium text-slate-500">
                       배점
                     </span>
@@ -1119,7 +1132,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                       placeholder="비우면 없음"
                       className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                     />
-                    <span className="text-[11px] text-slate-400">
+                    <span className="min-w-[14rem] flex-1 text-[11px] text-slate-400">
                       이 문제의 배점(점). 자동채점에서 못 읽었거나 나중에
                       알게 됐을 때 여기서 적어두세요.
                     </span>
