@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import FigureJobsProvider from "@/components/FigureJobsProvider";
 import FigureJobsPanel from "@/components/FigureJobsPanel";
+import NepicaFooter from "@/components/NepicaFooter";
 
 export const metadata: Metadata = {
   title: "ReprintOCR — 오답프린트 제작",
@@ -50,6 +51,9 @@ export default function RootLayout({
       <body className="antialiased">
         <FigureJobsProvider>
           {children}
+          {/* 브랜드 표기는 화면마다 달지 않고 여기 한 번만 둔다 — 어느 화면을
+              보고 있든 맨 밑에 같은 자리에 있어야 한다. */}
+          <NepicaFooter />
           <FigureJobsPanel />
         </FigureJobsProvider>
       </body>
