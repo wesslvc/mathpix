@@ -3,6 +3,7 @@ import "./globals.css";
 import FigureJobsProvider from "@/components/FigureJobsProvider";
 import FigureJobsPanel from "@/components/FigureJobsPanel";
 import AppNav from "@/components/AppNav";
+import NepicaFooter from "@/components/NepicaFooter";
 
 export const metadata: Metadata = {
   title: "ReprintOCR — 오답프린트 제작",
@@ -62,18 +63,10 @@ export default function RootLayout({
               화면을 옮길 때마다 달라졌다. */}
           <AppNav />
           <div className="flex-1">{children}</div>
-          {/* 만든 곳 표기 — 사이트는 ReprintOCR, 브랜드는 NEPICA.
-              형제 사이트(VDIC)의 바닥글과 같은 자리·같은 모양이다. */}
-          <footer className="flex justify-center pb-8 pt-6">
-            <a
-              href="https://nepica.vercel.app"
-              target="_blank"
-              rel="noreferrer"
-              className="nepica-brand"
-            >
-              NEPICA
-            </a>
-          </footer>
+          {/* 브랜드 표기는 화면마다 달지 않고 여기 한 번만 둔다 — 어느 화면을
+              보고 있든 맨 밑에 같은 자리에 있어야 한다. 형제 사이트(VDIC·지오글)의
+              바닥글과 같은 자리·같은 모양이다. */}
+          <NepicaFooter />
           <FigureJobsPanel />
         </FigureJobsProvider>
       </body>

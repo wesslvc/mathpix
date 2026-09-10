@@ -132,18 +132,6 @@ export default async function DashboardPage({
         folders={folders ?? []}
         currentFolderId={currentFolderId ?? null}
       />
-
-      {/* 만든 곳 표기 — 사이트는 ReprintOCR, 브랜드는 NEPICA. */}
-      <footer className="mt-auto flex justify-center pt-8">
-        <a
-          href="https://nepica.vercel.app"
-          target="_blank"
-          rel="noreferrer"
-          className="nepica-brand"
-        >
-          NEPICA
-        </a>
-      </footer>
     </main>
   );
 }

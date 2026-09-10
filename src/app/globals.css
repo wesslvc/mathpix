@@ -103,15 +103,32 @@ body {
 
 /* 브랜드 표기 — 지오글 랜딩의 .ld-brand 와 같은 모양(넓은 자간·작은 글씨).
    "이 사이트를 누가 만들었나"를 조용히 적어 두는 자리다. */
+/* 브랜드 표기 — 마크(아무것도 물지 않은 물까치) 위, 워드마크 아래로 세운다.
+   지오글·VDIC 도 같은 모양이라 셋을 나란히 열어 두면 바닥이 똑같다.
+   자간(text-indent)은 **글자에만** 건다 — 껍데기에 걸면 마크까지 밀린다. */
 .nepica-brand {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
   font-family: var(--font-display);
   font-size: 0.62rem;
   font-weight: 600;
   letter-spacing: 0.34em;
-  text-indent: 0.34em;
   color: var(--g-text-muted);
   opacity: 0.55;
+  text-decoration: none;
   transition: opacity 0.15s ease;
+}
+
+.nepica-brand img {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+.nepica-brand span {
+  text-indent: 0.34em;
 }
 
 .nepica-brand:hover {

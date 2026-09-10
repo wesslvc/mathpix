@@ -212,17 +212,6 @@ function LoginForm() {
           ? "계정이 없으신가요? 회원가입"
           : "이미 계정이 있으신가요? 로그인"}
       </button>
-
-      {/* 만든 곳 표기 — 사이트는 ReprintOCR, 브랜드는 NEPICA. 지오글의
-          랜딩 아래에 있는 것과 같은 표기다. */}
-      <a
-        href="https://nepica.vercel.app"
-        target="_blank"
-        rel="noreferrer"
-        className="nepica-brand mt-2"
-      >
-        NEPICA
-      </a>
     </main>
   );
 }
