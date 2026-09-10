@@ -110,10 +110,16 @@ body {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.4rem;
+  gap: 7px;
   font-family: var(--font-display);
-  font-size: 0.62rem;
+  /* **크기를 rem 이 아니라 px 로 못박는다.** 세 사이트의 rem 기준이 다르다
+     (VDIC 16 · 여기 17 · 지오글 18px) — 0.62rem 으로 두면 같은 마크 아래
+     워드마크만 사이트마다 9.9/10.5/11.2px 로 갈려 잠금 비율이 어긋난다.
+     마크를 22px 로 못박아 둔 것과 같은 이유다(자간·들여쓰기는 em 이라 따라온다). */
+  font-size: 10px;
   font-weight: 600;
+  /* 줄높이도 못박는다 — 사이트마다 기본 줄높이가 달라 워드마크 높이가 갈린다. */
+  line-height: 1.5;
   letter-spacing: 0.34em;
   color: var(--g-text-muted);
   opacity: 0.55;
