@@ -221,6 +221,40 @@ export async function loadDrawableFromFile(file: File): Promise<Drawable> {
   }
 }
 
+/**
+ * 사진을 90°씩 돌려 새 data URL 로 돌려준다.
+ *
+ * **돌린 결과를 또 돌리지 않는다.** 부르는 쪽이 회전 횟수만 세어 두고 늘
+ * **원본**과 함께 넘기면, 몇 번을 눌러도 다시 인코딩되는 것은 한 번뿐이다
+ * (JPEG 는 저장할 때마다 조금씩 뭉개진다).
+ *
+ * 사진 자체를 돌려 두면 그 뒤로는 아무것도 안 바뀐다 — 크롭 좌표도
+ * 자동 영역 감지도 돌아간 그림을 그대로 보므로 좌표를 따로 옮길 일이 없다.
+ */
+export async function rotateImageDataUrl(
+  src: string,
+  turns: number,
+): Promise<string> {
+  const t = ((Math.round(turns) % 4) + 4) % 4;
+  if (t === 0) return src;
+
+  const img = await loadImage(src);
+  const swap = t % 2 === 1; // 90°·270° 면 가로세로가 바뀐다
+  const canvas = document.createElement("canvas");
+  canvas.width = swap ? img.naturalHeight : img.naturalWidth;
+  canvas.height = swap ? img.naturalWidth : img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("이미지를 돌리지 못했습니다.");
+  // 캔버스 한가운데를 축으로 돌리고 그림도 제 가운데를 맞춰 놓는다 —
+  // 이러면 90/180/270 을 한 식으로 처리할 수 있다.
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((t * Math.PI) / 2);
+  ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+
+  return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+}
+
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();

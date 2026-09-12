@@ -1,10 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactCrop, { type Crop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import { detectContentRegion } from "@/lib/autoDetectRegion";
-import { cropImageToDataUrl } from "@/lib/cropImage";
+import { cropImageToDataUrl, rotateImageDataUrl } from "@/lib/cropImage";
 import type { CropRect } from "@/lib/types";
 
 type Props = {
@@ -40,6 +40,31 @@ export default function CropStage({
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [crop, setCrop] = useState<Crop>();
   const [autoDetected, setAutoDetected] = useState(false);
+
+  /**
+   * 사진 돌리기. 세로로 찍힌 사진이 누워서 들어오는 일이 흔하다.
+   *
+   * **횟수만 세어 두고 늘 원본을 돌린다** — 돌린 결과를 또 돌리면 누를 때마다
+   * JPEG 를 다시 저장해 글자가 조금씩 뭉개진다. 돌아간 사진 자체를 `<img>` 에
+   * 물리므로 크롭 좌표·자동 감지는 손댈 것이 없다(둘 다 지금 그림을 본다).
+   */
+  const [turns, setTurns] = useState(0);
+  const [shown, setShown] = useState(imageSrc);
+
+  useEffect(() => {
+    let alive = true;
+    rotateImageDataUrl(imageSrc, turns)
+      .then((next) => {
+        if (alive) setShown(next);
+      })
+      .catch(() => {
+        // 돌리지 못했으면 원본 그대로 둔다 — 여기서 막으면 아예 못 넣는다.
+        if (alive) setShown(imageSrc);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [imageSrc, turns]);
 
   function handleImageError() {
     onError(
@@ -79,8 +104,8 @@ export default function CropStage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold text-ink">
             문제 영역 확인 및 조정
           </h2>
@@ -90,13 +115,22 @@ export default function CropStage({
               : "이미지를 분석하는 중입니다..."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleResetToFull}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
-        >
-          전체 이미지로 리셋
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={() => setTurns((t) => t + 1)}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+          >
+            ↻ 90° 돌리기
+          </button>
+          <button
+            type="button"
+            onClick={handleResetToFull}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+          >
+            전체 이미지로 리셋
+          </button>
+        </div>
       </div>
 
       <div className="flex justify-center rounded-2xl bg-slate-100 p-4">
@@ -107,7 +141,10 @@ export default function CropStage({
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={imageSrc}
+            // 돌릴 때마다 src 가 바뀌므로 key 도 함께 바뀌어 onLoad 가 다시
+            // 불린다 — 돌아간 그림으로 자동 영역 감지를 새로 한다.
+            key={shown}
+            src={shown}
             alt="업로드한 문제 이미지"
             onLoad={handleImageLoad}
             onError={handleImageError}
