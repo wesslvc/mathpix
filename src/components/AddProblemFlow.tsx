@@ -43,7 +43,7 @@ import type { AnswerType } from "@/lib/answer";
 import type { StoredBoxRange } from "@/lib/storedFigures";
 import type { TokenStatus } from "@/app/api/tokens/route";
 import { rasterToSvg } from "@/lib/figureImage";
-import { uploadThumb } from "@/lib/cardThumb";
+import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import type { DiagramLayout } from "@/lib/diagramLayout";
@@ -109,6 +109,19 @@ export default function AddProblemFlow({
    */
   const autoNumberRef = useRef<number | null>(null);
   const savedIdRef = useRef<string | null>(null);
+  /**
+   * 이 행에 **지금 붙어 있는** 스토리지 경로. 다시 저장할 때 옛 파일을
+   * 지우려고 든다.
+   *
+   * 없으면 스토리지가 샌다 — 저장은 한 문제에 여러 번 일어난다(결과 화면의
+   * 자동 저장, AI 그림이 끝나서 다시 저장, 사용자가 손대서 다시 저장). 그때마다
+   * **새 uuid 경로로 올리고** `image_path` 만 갈아 끼우므로, 옛 파일은 아무도
+   * 안 가리키는 채 버킷에 그대로 남는다. 실제로 그렇게 쌓였다 — 2026-09-16에
+   * 재 보니 버킷의 카드 PNG 442장 중 **150장(156MB, 44%)이 고아**였다.
+   * 다른 저장 자리(`ProblemGallery.saveEdit` · `FigureJobsProvider` ·
+   * `/api/figure`)는 전부 옛 경로를 지우고 있었고 **여기만 빠져 있었다.**
+   */
+  const savedPathRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -402,6 +415,18 @@ export default function AddProblemFlow({
     // 이미 저장한 문제를 또 저장하는 건 "고쳐서 다시 저장"이다. 새 행을 만들면
     // 같은 문제가 두 개 생기므로 같은 행을 갱신한다.
     if (problemId) {
+      // 갈아 끼우기 **전에** 옛 경로를 알아 둔다. ref 에 없으면(다시 열린
+      // 화면 등) 그 값만 따로 읽어 온다 — 짧은 문자열 하나라 거의 공짜다.
+      let oldPath = savedPathRef.current;
+      if (!oldPath) {
+        const { data: prev } = await supabase
+          .from("problems")
+          .select("image_path")
+          .eq("id", problemId)
+          .maybeSingle();
+        oldPath = (prev?.image_path as string | null) ?? null;
+      }
+
       const { error: updateError } = await supabase
         .from("problems")
         .update({ ...fields, image_path: path })
@@ -410,8 +435,17 @@ export default function AddProblemFlow({
         await supabase.storage.from("problem-images").remove([path]);
         throw updateError;
       }
+      // 갈아 끼운 **뒤에** 지운다 — 먼저 지웠다가 갱신이 실패하면 행이 없는
+      // 파일을 가리켜 목록에 깨진 그림이 뜬다. 실패해도 저장은 성공이다
+      // (고아 하나가 남을 뿐이고, 여기서 막으면 저장이 안 된 것처럼 보인다).
+      if (oldPath && oldPath !== path) {
+        await supabase.storage
+          .from("problem-images")
+          .remove([oldPath, thumbPathFor(oldPath)]);
+      }
       router.refresh();
       savedIdRef.current = problemId;
+      savedPathRef.current = path;
       return problemId;
     }
 
@@ -434,6 +468,7 @@ export default function AddProblemFlow({
 
     router.refresh();
     savedIdRef.current = inserted.id as string;
+    savedPathRef.current = path;
     return inserted.id as string;
   }
 
