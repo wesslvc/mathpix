@@ -30,7 +30,7 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
  * 실패했을 때 조용히 다른 모델로 갈아타는 것보다, 실패했다고 알리고 멈추는
  * 편이 낫다. 폴백이 필요하면 OPENAI_FIGURE_IMAGE_MODELS로 명시할 것.
  */
-const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2"];
+const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5"];
 
 /**
  * 이미지 생성 모델만 통과시킨다.
@@ -82,8 +82,9 @@ export class FigureImageError extends Error {
  * input_fidelity는 "원본을 얼마나 그대로 따라갈지"라 자료 재현에는 높을수록
  * 좋지만, 받지 않는 모델이면 400이 나므로 다음 조합으로 내려간다.
  *
- * **지금 쓰는 gpt-image-2 는 input_fidelity 를 받지 않는다.** 그래서 그걸 뺀
- * 조합을 맨 앞에 둔다. 예전에는 앞에 두고 "거부당하면 다음으로" 갔는데, 그
+ * **gpt-image-2 는 input_fidelity 를 받지 않았다**(2.5 에서도 받는지는 아직
+ * 확인 못 했다). 그래서 그걸 뺀 조합을 앞에 둔다. 예전에는 앞에 두고
+ * "거부당하면 다음으로" 갔는데, 그
  * 대가가 생각보다 컸다 — 거부당하는 요청도 **이미지를 통째로 업로드한 뒤에야**
  * 거부당한다. 문제 한 장이 3MB쯤이라 매 요청마다 3MB를 헛되이 올리고 있었다.
  * 운영 로그에서 성공한 요청까지 전부 이 400을 한 번씩 맞고 있는 게 보였다.
@@ -91,8 +92,25 @@ export class FigureImageError extends Error {
  * 한 번 통한 조합을 기억해 두는 workingVariant 로는 이걸 막지 못한다. 그건
  * 모듈 수준 Map 이라 **서버리스 인스턴스마다 새로 빈다** — 실제로 매 요청이
  * 처음부터 다시 시작하고 있었다. 순서 자체를 고쳐야 하는 이유다.
+ *
+ * **`output_format: "jpeg"` 가 맨 앞에 있는 이유는 DB 용량이다.** 모델은 기본이
+ * PNG 인데, 그 PNG 를 base64 로 `box_range` 에 넣으니 그림 한 장이 평균 2MB 가
+ * 됐다 — 사람이 오려낸 JPEG 은 같은 자리에서 평균 598kB 다(실측). 무료 요금제
+ * DB 한도가 0.5GB 인데 AI 그림 96장이 285MB 를 차지해 81% 까지 찼다.
+ *
+ * **여기서 JPEG 을 받는 것이 나중에 우리가 다시 인코딩하는 것보다 낫다** —
+ * 받아서 고치면 PNG 를 한 번 디코딩했다가 다시 저장하는 셈이라 화질이 두 번
+ * 상하고, 서버에는 이미지를 열 수단도 없다(브라우저가 닫힌 경우 서버가 직접
+ * 저장하는 길이 있다). 모델이 만든 픽셀이 곧바로 JPEG 으로 온다.
+ *
+ * `output_compression` 은 JPEG 품질(%)이다. 90 은 우리가 사진을 다룰 때 이미
+ * 쓰는 값과 같다(`cropImage.ts` 의 `JPEG_QUALITY = 0.9`) — 자료는 글자와 가는
+ * 선이 살아야 하므로 더 낮추지 않는다. 받지 않는 모델이면 400 이 나고 다음
+ * 조합(품질 지정 없는 jpeg → 아예 PNG)으로 내려간다.
  */
 const PARAM_VARIANTS: Record<string, string>[] = [
+  { size: "auto", output_format: "jpeg", output_compression: "90" },
+  { size: "auto", output_format: "jpeg" },
   { size: "auto" },
   { size: "auto", input_fidelity: "high" },
   { input_fidelity: "high" },
@@ -152,6 +170,12 @@ export function pickOutputSize(width?: number, height?: number): string | null {
  *
  * 이 값으로 계산하면 실제 청구액과 **센트 단위까지 맞는다**(다른 모델이 섞이지
  * 않은 6일 전부 일치). 요금이 바뀌면 여기만 고치면 된다.
+ *
+ * ⚠️ **이 표는 `gpt-image-2` 의 요금표다.** 기본 모델을 `gpt-image-2.5` 로
+ * 올렸는데(사용자 지시) 그쪽 공표 단가는 아직 못 받았다. 단가가 다르면 화면과
+ * 로그에 찍히는 원/달러가 그만큼 틀린다 — **토큰 수는 맞고 금액만 어긋난다.**
+ * 공표된 요금표를 받으면 여기 숫자만 갈아 끼우면 된다. 청구액에서 역산해
+ * 채우지 말 것(위 참고).
  */
 const PRICE_PER_MTOK = {
   textIn: 5,
@@ -275,7 +299,7 @@ function isUnsupportedParamError(status: number, body: string): boolean {
   // 자체가 거부된 400("Invalid image file or mode")은 조합을 바꿔봐야
   // 소용없으므로 걸러낸다 — 안 그러면 같은 실패를 네 번 반복하고 시간만 쓴다.
   if (/invalid image|image file/i.test(body)) return false;
-  return /size|quality|input_fidelity|unsupported|unknown|unrecognized|invalid_value/i.test(
+  return /size|quality|input_fidelity|output_format|output_compression|unsupported|unknown|unrecognized|invalid_value/i.test(
     body,
   );
 }
@@ -403,6 +427,23 @@ colour/contrast (will be printed+solved on paper):
 - no adjacent similar pale-grey/pastel colours -> draw crisp boundaries
 
 appearance: white bg, crisp black text, like printed workbook page. comfortable text size; no overlap/cutoff.`;
+
+/**
+ * base64 앞머리(매직 넘버)를 보고 실제 형식을 알아낸다.
+ *
+ * 응답의 `b64_json` 에는 형식이 안 적혀 있다. 예전에는 무조건
+ * `data:image/png` 으로 적었는데, 이제 `output_format: "jpeg"` 를 보내므로
+ * 그대로 두면 **JPEG 바이트에 PNG 라는 이름표를 붙이게 된다.** 브라우저는
+ * 알아서 알아보지만 스토리지 `contentType` 과 DB 에 남는 값이 거짓이 되고,
+ * 나중에 형식별로 세어 보면(우리가 방금 그렇게 원인을 찾았다) 통째로 틀린다.
+ * 파라미터가 거부돼 PNG 로 돌아온 경우까지 여기서 저절로 맞는다.
+ */
+function sniffImageMime(b64: string): string {
+  if (b64.startsWith("/9j/")) return "image/jpeg";
+  if (b64.startsWith("iVBOR")) return "image/png";
+  if (b64.startsWith("UklGR")) return "image/webp";
+  return "image/png"; // 모르면 예전과 같게 둔다
+}
 
 function dataUrlToBlob(
   dataUrl: string,
@@ -714,8 +755,9 @@ export async function generateFigureImage(
       const imgRes = await fetch(url);
       if (imgRes.ok) {
         const buf = Buffer.from(await imgRes.arrayBuffer());
+        const fetched = buf.toString("base64");
         return {
-          dataUrl: `data:image/png;base64,${buf.toString("base64")}`,
+          dataUrl: `data:${sniffImageMime(fetched)};base64,${fetched}`,
           modelId,
           usage,
         };
@@ -727,5 +769,9 @@ export async function generateFigureImage(
     return null;
   }
 
-  return { dataUrl: `data:image/png;base64,${b64}`, modelId, usage };
+  return {
+    dataUrl: `data:${sniffImageMime(b64)};base64,${b64}`,
+    modelId,
+    usage,
+  };
 }

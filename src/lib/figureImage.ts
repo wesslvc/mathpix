@@ -155,12 +155,29 @@ const BLANK_LUMINANCE = 244;
  * 벌어진다. 내용이 있는 부분만 남기고 잘라낸다.
  *
  * 자를 게 없거나(이미 꽉 찬 그림) 거의 다 비어 보이면 원본을 그대로 돌려준다.
+ * 다만 **PNG 로 들어오면 자를 게 없어도 JPEG 으로 바꿔서 돌려준다** — 아래
+ * `toJpeg` 주석 참고.
  */
 export async function trimBlankBorder(dataUrl: string): Promise<string> {
   const img = await loadImage(dataUrl);
   const w = img.naturalWidth;
   const h = img.naturalHeight;
   if (w === 0 || h === 0) return dataUrl;
+
+  /**
+   * 이 그림은 `box_range` 안에 base64 로 저장된다. PNG 로 두면 한 장이 평균
+   * 2MB 인데 JPEG 은 600kB 안팎이다(실측) — 무료 DB 한도 0.5GB 를 AI 그림
+   * 96장이 285MB 로 채워 81% 까지 간 적이 있다.
+   *
+   * 보통은 서버가 모델에게 처음부터 JPEG 을 달라고 하므로(`output_format`)
+   * 여기 올 때 이미 JPEG 이다. 이건 **그게 안 통했을 때를 받는 그물**이다 —
+   * 모델이 그 파라미터를 거부했거나, 이미지를 URL 로 받아 온 경우.
+   *
+   * 이미 JPEG 인데 자를 것도 없으면 그대로 돌려준다(공연히 다시 저장하면
+   * 화질만 한 번 더 깎인다).
+   */
+  const wasJpeg = dataUrl.startsWith("data:image/jpeg");
+  const toJpeg = (c: HTMLCanvasElement) => c.toDataURL("image/jpeg", 0.9);
 
   const canvas = document.createElement("canvas");
   canvas.width = w;
@@ -191,7 +208,8 @@ export async function trimBlankBorder(dataUrl: string): Promise<string> {
     }
   }
 
-  if (top === -1 || right < left) return dataUrl; // 전부 비어 있다
+  // 전부 비어 있다 — 자를 데는 없지만 PNG 면 형식만이라도 바꿔 둔다.
+  if (top === -1 || right < left) return wasJpeg ? dataUrl : toJpeg(canvas);
 
   // 잘라낸 뒤 숨 쉴 틈을 조금 남긴다(선이 테두리에 딱 붙으면 답답하다).
   const pad = Math.round(Math.min(w, h) * 0.02);
@@ -202,8 +220,8 @@ export async function trimBlankBorder(dataUrl: string): Promise<string> {
   const cw = x1 - x0;
   const ch = y1 - y0;
 
-  // 거의 안 잘리면 굳이 다시 인코딩하지 않는다.
-  if (cw >= w * 0.98 && ch >= h * 0.98) return dataUrl;
+  // 거의 안 잘리면 굳이 다시 인코딩하지 않는다 — 단 PNG 면 형식은 바꾼다.
+  if (cw >= w * 0.98 && ch >= h * 0.98) return wasJpeg ? dataUrl : toJpeg(canvas);
 
   const out = document.createElement("canvas");
   out.width = cw;
@@ -213,7 +231,7 @@ export async function trimBlankBorder(dataUrl: string): Promise<string> {
   octx.fillStyle = "#ffffff";
   octx.fillRect(0, 0, cw, ch);
   octx.drawImage(canvas, x0, y0, cw, ch, 0, 0, cw, ch);
-  return out.toDataURL("image/png");
+  return toJpeg(out);
 }
 
 /**
