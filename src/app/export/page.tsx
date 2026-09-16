@@ -5,7 +5,7 @@ import { categoryLabel, type Category, type ExamScore } from "@/lib/supabase/typ
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { formatAnswer, toAnswerType } from "@/lib/answer";
 import { readKoreanMeta } from "@/lib/koreanSet";
-import { signCached } from "@/lib/signedUrls";
+import { cardUrl } from "@/lib/cardUrl";
 import { sortByProblemNumber } from "@/lib/problemOrder";
 import ExportComposer, {
   type ComposerProblem,
@@ -194,22 +194,15 @@ export default async function ExportPage({
     }
   }
 
-  const paths = ordered.map((p) => p.image_path);
-  const signedUrlByPath = new Map<string, string>();
-  if (paths.length > 0) {
-    // 같은 주소로 다시 준다(`signedUrls.ts`) — 안 그러면 PDF 를 뽑을 때마다
-    // 원본 PNG(평균 760kB)를 문제 수만큼 통째로 다시 받는다.
-    const signedMap = await signCached(supabase, "problem-images", paths);
-    const signed = [...signedMap].map(([path, signedUrl]) => ({ path, signedUrl }));
-    for (const s of signed ?? []) {
-      if (s.signedUrl && s.path) signedUrlByPath.set(s.path, s.signedUrl);
-    }
-  }
-
+  // **서명하지 않는다** — 경로 하나당 주소 하나로 고정된 `/api/card/…` 를 쓴다.
+  // 서명 URL 은 부를 때마다 주소가 달라 브라우저 캐시가 한 번도 안 걸렸고,
+  // 그래서 PDF 를 뽑을 때마다 원본 PNG(평균 787kB)를 문제 수만큼 통째로 다시
+  // 받았다. 지금은 두 번째 내보내기부터 Supabase 로 요청이 안 나간다
+  // (`src/app/api/card/[...path]/route.ts` 참고).
   const composerProblems: ComposerProblem[] = ordered
     .map((p): ComposerProblem | null => {
-      const imageUrl = signedUrlByPath.get(p.image_path);
-      if (!imageUrl) return null;
+      if (!p.image_path) return null;
+      const imageUrl = cardUrl(p.image_path);
       const cat = categoryById.get(p.category_id);
       return {
         id: p.id,
