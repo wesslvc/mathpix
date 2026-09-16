@@ -33,9 +33,15 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
 /**
  * **2.5 세대에는 "gpt-image-2.5" 라는 맨 이름이 없다.** 계정의 모델 목록에는
  * `gpt-image-2.5-flare` 와 `gpt-image-2.5-sunburst`(각각 `-2026-09-08` 날짜
- * 별칭도 함께)만 있다 — 맨 이름을 적으면 404 다. 둘 중 `flare` 를 쓰는 것은
- * **사용자가 고른 것**이고(2026-09-16), `sunburst` 와 무엇이 다른지는 아직
- * 모른다. 견주려면 `OPENAI_FIGURE_IMAGE_MODELS` 로 **재배포 없이** 바꾼다.
+ * 별칭도 함께)만 있다 — 맨 이름을 적으면 404 다.
+ *
+ * 둘 중 **`sunburst`** 를 쓴다(2026-09-16, 사용자 결정 — "flare 말고 상위모델인
+ * sunburst 써보자, 비용 차이가 없다면 더 나을 수도 있어"). 처음엔 flare 로
+ * 넣었다가 올렸다. **단가는 둘이 같다**(아래 `PRICE_PER_MTOK` 참고) — 토큰
+ * 단가가 같으므로 남는 변수는 요청당 출력 토큰 수뿐이고, 그건 로그의
+ * `[figureImageGen] usage` 로 곧바로 견줄 수 있다.
+ *
+ * 되돌리거나 다시 견주려면 `OPENAI_FIGURE_IMAGE_MODELS` 로 **재배포 없이** 바꾼다.
  */
 const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5-sunburst"];
 
@@ -179,7 +185,8 @@ export function pickOutputSize(width?: number, height?: number): string | null {
  * 않은 6일 전부 일치). 요금이 바뀌면 여기만 고치면 된다.
  *
  * **`gpt-image-2.5` 도 단가가 같다**(2026-09-16, 사용자 확인). 그래서 모델을
- * 2.5-flare 로 올린 뒤에도 이 표를 그대로 쓴다 — 갈아 끼울 숫자가 없다.
+ * 2.5-sunburst 로 올린 뒤에도 이 표를 그대로 쓴다 — 갈아 끼울 숫자가 없다
+ * (flare·sunburst 도 서로 같다).
  * 다만 **센트 단위까지 청구액과 맞춰 본 것은 `gpt-image-2` 때다.** 2.5 로
  * 며칠 돌린 뒤 청구서와 한 번 대조해 보면 좋다(대조는 하되, 어긋나더라도
  * 청구액에서 역산해 채우지는 말 것 — 위 참고).
@@ -365,11 +372,35 @@ const ERASE_HANDWRITING = `erase_handwriting[FIRST]:
  *
  * 사회탐구·국어에서 `밑줄 친 ㉠에 대한 설명으로…` 처럼 원문자가 곧 문제의
  * 지시 대상인 경우가 흔해서, 안쪽 글자가 하나 바뀌면 문제가 성립하지 않는다.
+ *
+ * **2026-09-16에 늘리고 앞으로 당겼다**(사용자 — "원문자 정확도가 크게 늘긴
+ * 했는데 그래도 아쉬움, 프롬프트에 명시는 해놔"). 이유가 둘이다:
+ *
+ * ① **여기 말고는 기댈 데가 없어졌다.** 참고 글에 실제로 나온 원문자를 뽑아
+ *    주던 `circledNote` 는 Mathpix 참고 글이 붙을 때만 나가는데, 이제 국어가
+ *    아니면 참고 글 자체를 안 쓴다. 탐구·사회는 원문자가 가장 많이 나오는
+ *    과목인데 그쪽이 **이 일반 지시 하나만으로** 돌게 됐다.
+ * ② **틀리는 방식이 정해져 있다.** 이웃에서 미루어 짐작하기(㉡㉣ 만 쓰는
+ *    문제를 ㉠㉡ 으로), 계열 넘나들기(㉠↔①), 같은 표지를 자리마다 다르게
+ *    그리기, 없던 표지 만들어 넣기. 그래서 "원을 그리고 안에 글자를 넣어라"
+ *    한 줄로 뭉뚱그리지 않고 **실패하는 방식마다 한 줄씩** 적었다.
+ *
+ * 표는 `circledChars.ts` 의 `insideCircle()` 과 **같은 값**이어야 한다(한쪽만
+ * 고쳐지면 프롬프트와 우리 교정이 서로 다른 글자를 말하게 된다).
+ *
+ * 길어진 값은 치렀다 — 이 저장소는 "길게 적을수록 묻힌다"고 여러 번 적어
+ * 뒀으므로, 늘리는 대신 **자리를 앞으로 당겼다**(문제 전체 프롬프트에서는
+ * `text:` 블록보다 위, 그림 프롬프트에서는 목록 속 들여쓴 줄이 아니라 제
+ * 블록으로). 토큰은 프롬프트가 70토큰쯤 느는 것이라 요청 값의 0.4% 미만이다.
  */
-const CIRCLED_CHARS = `circled_chars (㉠㉡㉢㉣㉤,①②③④⑤,ⓐⓑⓒ) = circle + inner glyph:
-- build it: thin round circle + centred inner char (not touching). don't draw one remembered shape
-- never swap inner char: ㉠㉡㉢㉣㉤㉥㉦=ㄱㄴㄷㄹㅁㅂㅅ in order; ①②③④⑤=1 2 3 4 5
-- stem's char (e.g. "밑줄 친 ㉠") must equal the printed one; mismatch breaks the question`;
+const CIRCLED_CHARS = `circled_chars [CRITICAL — your weakest spot, slow down here] ㉠㉡㉢ / ㉮㉯㉰ / ①②③ / ⓐⓑⓒ = circle + inner glyph:
+- read EVERY circle separately, zoomed in. never infer one from its neighbours: a question may use only ㉡ and ㉣, or repeat ㉠ four times
+- build it: thin round circle + centred inner char, not touching. don't reproduce one remembered shape
+- inner char table: ㉠㉡㉢㉣㉤㉥㉦㉧㉨㉩㉪㉫㉬㉭=ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ; ㉮㉯㉰㉱㉲=가나다라마; ①..⑳=1..20; ⓐⓑⓒⓓⓔ=a b c d e
+- stay in the same family: ㉠ never becomes ① or ㉮; ① never becomes ㉠
+- one marker = one identical glyph everywhere it appears (stem, boxes, <보기>, table cells, choices) and it stays exactly where it was printed. add none, drop none, renumber none
+- circle stays a circle: not a square/parenthesis/bare bold char, not filled
+- the stem points at one exact marker ("밑줄 친 ㉠"); one wrong inner char breaks the question`;
 
 /**
  * 그림 재구성 프롬프트. **하나뿐이다.**
@@ -407,7 +438,8 @@ always:
 - keep every element, drop nothing, invent nothing; exact counts (ticks,layers,particles,cells,dots,arrows)
 - copy all text (labels,symbols,numbers,units) EXACTLY as printed: no reword/translate/invented glyphs
 - ${SMALL_MARKS}
-- ${CIRCLED_CHARS.replace(/\n/g, "\n  ")}
+
+${CIRCLED_CHARS}
 
 ${COLOUR_RULES}
 
@@ -434,13 +466,13 @@ const WHOLE_PROBLEM_PROMPT = `task: this image = ONE COMPLETE QUESTION from Kore
 
 ${ERASE_HANDWRITING}
 
+${CIRCLED_CHARS}
+
 text:
 - copy every character EXACTLY as printed: no change/polish/summarise/translate, not even 1 char
 - "옳은 것" vs "옳지 않은 것", "있는 대로" vs "하나만" flip the answer -> leave as-is
 - numbers,units,symbols,years,place/personal names must match exactly
 - hard-to-read char -> do NOT invent, follow the original strokes
-
-${CIRCLED_CHARS}
 
 structure (unchanged):
 - same order/arrangement: question number, stem, condition boxes, tables, data, <보기>, choices (①②③④⑤). drop/add nothing
