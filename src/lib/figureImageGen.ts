@@ -30,7 +30,14 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
  * 실패했을 때 조용히 다른 모델로 갈아타는 것보다, 실패했다고 알리고 멈추는
  * 편이 낫다. 폴백이 필요하면 OPENAI_FIGURE_IMAGE_MODELS로 명시할 것.
  */
-const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5"];
+/**
+ * **2.5 세대에는 "gpt-image-2.5" 라는 맨 이름이 없다.** 계정의 모델 목록에는
+ * `gpt-image-2.5-flare` 와 `gpt-image-2.5-sunburst`(각각 `-2026-09-08` 날짜
+ * 별칭도 함께)만 있다 — 맨 이름을 적으면 404 다. 여기 적힌 `sunburst` 는
+ * 사용자가 플레이그라운드에서 고른 것을 그대로 옮긴 값이고, `flare` 로
+ * 바꿔 보고 싶으면 `OPENAI_FIGURE_IMAGE_MODELS` 로 **재배포 없이** 바꾼다.
+ */
+const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5-sunburst"];
 
 /**
  * 이미지 생성 모델만 통과시킨다.
