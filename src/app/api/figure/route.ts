@@ -115,11 +115,17 @@ async function persistWholeProblem(
     if (!base64) return false;
     const bytes = Buffer.from(base64, "base64");
 
+    // 모델에게 JPEG 을 달라고 하므로(`output_format`) 더 이상 PNG 라고 못박을
+    // 수 없다. 이름표와 실제 바이트가 어긋나면 스토리지가 잘못된 타입으로
+    // 내려보낸다 — 데이터 URL 에 적힌 것을 그대로 따른다.
+    const mime = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);/)?.[1] ?? "image/png";
+    const ext = mime === "image/jpeg" ? "jpg" : mime === "image/webp" ? "webp" : "png";
+
     const dir = String(row.image_path).split("/").slice(0, -1).join("/");
-    const newPath = `${dir}/${crypto.randomUUID()}.png`;
+    const newPath = `${dir}/${crypto.randomUUID()}.${ext}`;
     const { error: upErr } = await supabase.storage
       .from("problem-images")
-      .upload(newPath, bytes, { contentType: "image/png" });
+      .upload(newPath, bytes, { contentType: mime });
     if (upErr) return false;
 
     // 그림 목록에서 이 그림의 마크업만 갈아끼운다. 화면이 저장해 둔 자리·크기는
