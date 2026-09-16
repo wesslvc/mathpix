@@ -15,8 +15,7 @@ import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
-import { thumbPathFor } from "@/lib/cardThumb";
-import { signCached } from "@/lib/signedUrls";
+import { cardThumbUrl, cardUrl } from "@/lib/cardUrl";
 import type { BoxOverride } from "@/lib/renderMathText";
 import type { ExamScore } from "@/lib/supabase/types";
 import { SUBJECT_LABEL } from "@/lib/examSubjects";
@@ -208,43 +207,24 @@ export default async function CategoryPage({
     });
   }
 
-  const paths = (problems ?? []).map((p) => p.image_path);
-
-  /** 주어진 경로들을 서명해 map 으로. 실패하면 빈 map 이다. */
-  async function sign(list: string[]): Promise<Map<string, string>> {
-    // **같은 주소로 다시 준다**(`signedUrls.ts`). 부를 때마다 새 주소를 만들면
-    // 브라우저 이미지 캐시가 한 번도 안 걸려, 들어올 때마다 그림을 통째로
-    // 다시 받는다 — Supabase egress 의 대부분이 여기서 나가고 있었다.
-    return signCached(supabase, "problem-images", list);
-  }
-
   /**
-   * **목록용 작은 미리보기를 따로 서명한다.**
+   * **서명하지 않는다.** 그림은 `/api/card/<경로>` 로 내보낸다.
    *
-   * 저장된 카드 PNG 는 평균 760kB 인데 이 화면은 그걸 56×40px(목록 보기)이나
-   * 320px 안쪽(카드 보기)으로 보여 준다. 20문제짜리 실모를 한 번 여는 데
-   * 15MB 를 받고 있었고, 서명 URL 은 열 때마다 주소가 달라져 **브라우저 캐시가
-   * 한 번도 안 걸린다** — 들어갈 때마다 전부 다시 받는다.
-   *
-   * **한 번에 묶어 서명하지 않는다.** 옛 문제에는 미리보기가 없는데, 없는 경로가
-   * 섞였을 때 그 요청이 통째로 실패하는지 그 경로만 비는지에 우리 목록 전체가
-   * 걸린다(통째로 실패하면 그림이 하나도 안 뜬다). 나눠서 부르면 미리보기 쪽이
-   * 어떻게 되든 원본은 영향을 받지 않는다 — 왕복 한 번 값에 그 위험을 없앤다.
+   * 예전에는 여기서 원본과 미리보기를 각각 서명해(왕복 두 번) 그 주소를
+   * 내려보냈다. 그런데 서명 URL 은 부를 때마다 토큰이 달라 **브라우저 이미지
+   * 캐시가 한 번도 안 걸린다** — 이 화면에 들어올 때마다 그림을 통째로 다시
+   * 받았고(카드 PNG 평균 787kB × 문제 수) 그게 Supabase egress 의 대부분이었다.
+   * 지금은 경로 하나당 주소 하나라 두 번째부터는 요청이 아예 안 나간다
+   * (`src/app/api/card/[...path]/route.ts` 참고). 서명 왕복 두 번도 사라졌다.
    */
-  const [signedUrlByPath, thumbUrlByPath] = await Promise.all([
-    sign(paths),
-    sign(paths.map(thumbPathFor)),
-  ]);
-
   const galleryProblems: GalleryProblem[] = (problems ?? [])
     .map((p): GalleryProblem | null => {
-      const imageUrl = signedUrlByPath.get(p.image_path);
-      if (!imageUrl) return null;
+      if (!p.image_path) return null;
       return {
         id: p.id,
-        imageUrl,
-        // 목록·카드에 그릴 작은 그림. 없으면(옛 문제) 화면이 원본을 쓴다.
-        thumbUrl: thumbUrlByPath.get(thumbPathFor(p.image_path)) ?? null,
+        imageUrl: cardUrl(p.image_path),
+        // 목록·카드에 그릴 작은 그림. 없으면(옛 문제) 라우트가 원본을 대신 준다.
+        thumbUrl: cardThumbUrl(p.image_path),
         imagePath: p.image_path,
         text: p.text_content || p.latex || "",
         sortOrder: p.sort_order,
