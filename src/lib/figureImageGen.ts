@@ -33,11 +33,11 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
 /**
  * **2.5 세대에는 "gpt-image-2.5" 라는 맨 이름이 없다.** 계정의 모델 목록에는
  * `gpt-image-2.5-flare` 와 `gpt-image-2.5-sunburst`(각각 `-2026-09-08` 날짜
- * 별칭도 함께)만 있다 — 맨 이름을 적으면 404 다. 여기 적힌 `sunburst` 는
- * 사용자가 플레이그라운드에서 고른 것을 그대로 옮긴 값이고, `flare` 로
- * 바꿔 보고 싶으면 `OPENAI_FIGURE_IMAGE_MODELS` 로 **재배포 없이** 바꾼다.
+ * 별칭도 함께)만 있다 — 맨 이름을 적으면 404 다. 둘 중 `flare` 를 쓰는 것은
+ * **사용자가 고른 것**이고(2026-09-16), `sunburst` 와 무엇이 다른지는 아직
+ * 모른다. 견주려면 `OPENAI_FIGURE_IMAGE_MODELS` 로 **재배포 없이** 바꾼다.
  */
-const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5-sunburst"];
+const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5-flare"];
 
 /**
  * 이미지 생성 모델만 통과시킨다.
