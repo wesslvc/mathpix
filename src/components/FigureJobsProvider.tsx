@@ -420,10 +420,15 @@ export default function FigureJobsProvider({
           // 뿐이라, 이것 때문에 그림 생성을 막을 이유가 없다.
           let reference: string | undefined;
           if (mode === "problem" && !useOcr) {
-            // 사용자가 일부러 껐다. 못 읽은 것과 갈라서 보여 준다.
-            setJobs((prev) =>
-              prev.map((j) => (j.id === id ? { ...j, ocr: "off" as const } : j)),
-            );
+            // **국어에서 사용자가 일부러 껐을 때만 알린다.** 다른 과목은
+            // 참고 글을 애초에 안 쓰기로 했으므로(화면에 고를 자리도 없다)
+            // "껐다"는 줄이 뜨면 뭔가 빠진 것처럼 보이기만 한다. 못 읽은
+            // 것(`none`)과 갈라서 보여 주려던 구분은 국어 안에서만 뜻이 있다.
+            if (next.korean) {
+              setJobs((prev) =>
+                prev.map((j) => (j.id === id ? { ...j, ocr: "off" as const } : j)),
+              );
+            }
           } else if (mode === "problem") {
             setJobs((prev) =>
               prev.map((j) => (j.id === id ? { ...j, ocr: "reading" as const } : j)),
