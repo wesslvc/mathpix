@@ -416,9 +416,9 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       // 지문은 이 버튼이 아예 안 뜨지만(그쪽은 "다시 인식하기"다) 조건을
       // 그대로 적어 둔다 — 나중에 버튼이 옮겨 다녀도 안전하게.
       mode: isWholeProblemFigure(id) ? "problem" : undefined,
-      // **기본값이 과목마다 다르다** — 국어는 켜고 나머지는 끈다. 사용자가
-      // 체크박스를 건드렸으면 그 값이 이긴다(`undefined` 면 큐가 정한다).
-      useOcr: redrawOcr[id],
+      // **체크박스는 국어에만 뜬다.** 다른 과목은 참고 글을 아예 안 쓰므로
+      // 고를 값도 없다 — `undefined` 를 넘겨 큐의 기본값(국어만 켬)에 맡긴다.
+      useOcr: editing?.korean ? redrawOcr[id] : undefined,
       // 국어 문항은 거의 글자뿐이라 참고 글을 더 앞세운다(KoreanModePanel 이
       // 처음 만들 때 쓰는 것과 같은 값).
       korean: editing?.korean ? true : undefined,
@@ -1325,12 +1325,16 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                             />
                             {/* **Mathpix 참고 글을 쓸지 고른다**(사용자 요청).
                                 문제 한 장을 다시 그릴 때만 뜻이 있다 — 도형
-                                하나에는 참고 글이 애초에 안 붙는다. */}
-                            {isWholeProblemFigure(f.id) && (
+                                하나에는 참고 글이 애초에 안 붙는다.
+                                **국어에서만 보인다.** 다른 과목은 사진만 보고
+                                그리는 쪽이 더 정확하고 빨라서 참고 글을 아예
+                                안 쓰기로 했다(사용자 결정) — 쓰지 않을 것을
+                                고르게 두면 헷갈리기만 한다. */}
+                            {isWholeProblemFigure(f.id) && !!editing?.korean && (
                               <label className="flex items-start gap-1.5 text-[11px] text-slate-600">
                                 <input
                                   type="checkbox"
-                                  checked={redrawOcr[f.id] ?? !!editing?.korean}
+                                  checked={redrawOcr[f.id] ?? true}
                                   onChange={(e) =>
                                     setRedrawOcr((prev) => ({
                                       ...prev,
@@ -1343,9 +1347,9 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 <span>
                                   Mathpix로 글자를 읽어 참고로 주기 (인식 1토큰)
                                   <span className="block text-slate-400">
-                                    국어만 기본으로 켜집니다. 다른 과목은
-                                    사진만 보고 그리는 쪽이 더 정확하고 빨라서
-                                    꺼 두었어요 — 글자를 자꾸 틀리면 켜 보세요.
+                                    국어는 글이 대부분이라 읽어 준 글을 베끼는
+                                    쪽이 더 정확해서 기본으로 켭니다. 끄면
+                                    사진만 보고 그립니다.
                                   </span>
                                 </span>
                               </label>
