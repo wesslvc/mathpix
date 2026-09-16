@@ -37,7 +37,7 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
  * **사용자가 고른 것**이고(2026-09-16), `sunburst` 와 무엇이 다른지는 아직
  * 모른다. 견주려면 `OPENAI_FIGURE_IMAGE_MODELS` 로 **재배포 없이** 바꾼다.
  */
-const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5-flare"];
+const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5-sunburst"];
 
 /**
  * 이미지 생성 모델만 통과시킨다.
