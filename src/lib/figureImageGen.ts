@@ -300,8 +300,26 @@ function logUsage(
   );
 }
 
+/**
+ * 400 의 원인이 **모델 이름**인가.
+ *
+ * 이걸 따로 가려내지 않으면 조합 캐스케이드가 통째로 헛돈다. 실제로 그랬다 —
+ * 없는 이름(`gpt-image-2.5`)으로 배포된 동안 운영 로그에 이 400 이 **여섯 번씩**
+ * 찍혔다. 조합을 바꿔 봐야 모델이 생겨나지 않는데, **거부당하는 요청도 이미지를
+ * 통째로 올린 뒤에야 거부당하므로** 문제 한 장(3MB)을 여섯 번 올린 셈이다.
+ *
+ * 게다가 사용자에게 돌아가는 문구가 "파라미터 호환 실패"라 원인을 가린다 —
+ * 정작 고칠 것은 이름 하나다. 그래서 여기서 바로 멈추고 그대로 알린다.
+ */
+function isBadModelError(status: number, body: string): boolean {
+  if (status !== 400) return false;
+  return /does not exist|"param"\s*:\s*"model"|model_not_found/i.test(body);
+}
+
 function isUnsupportedParamError(status: number, body: string): boolean {
   if (status !== 400) return false;
+  // 모델 이름 문제면 조합을 바꿔도 소용없다(위 참고).
+  if (isBadModelError(status, body)) return false;
   // 파라미터 이름이 언급된 400만 "다음 조합으로"의 대상이다. 이미지 파일
   // 자체가 거부된 400("Invalid image file or mode")은 조합을 바꿔봐야
   // 소용없으므로 걸러낸다 — 안 그러면 같은 실패를 네 번 반복하고 시간만 쓴다.
@@ -329,12 +347,12 @@ const workingVariant = new Map<string, number>();
  * 지우고 끝내면 안 된다는 것도 못박는다 — 손글씨에 덮인 인쇄 내용은 그 아래에
  * 있던 대로 되살려야 한다. 안 그러면 지운 자리가 빈칸으로 남는다.
  */
-const ERASE_HANDWRITING = `erase_handwriting[FIRST STEP]:
-- remove ALL pen/pencil/highlighter marks: notes,working,calc,underline,circle,star,arrow,check,hatching,erasure,grading-mark
-- black ballpoint = handwriting too. ignore colour. detect via: uneven stroke width/slant, letterform≠printed type, spills outside ruled area
-- no faint/smudged residue -> restore clean white paper, redraw only printed content hidden underneath
-- keep: printed underline+bold (uniform thickness, aligned w/ type)
-- also remove: fold creases, stains, shadows, scan streaks, fingers, skew`;
+const ERASE_HANDWRITING = `erase_handwriting[FIRST]:
+- remove ALL pen/pencil/highlighter: notes,working,underline,circle,star,arrow,check,hatching,grading marks
+- black ballpoint counts too; ignore colour. tell by uneven stroke/slant, letterform≠type, spill outside ruled area
+- leave no smudge: restore white paper, redraw printed content hidden under it
+- KEEP printed underline+bold (uniform, aligned w/ type)
+- also remove creases,stains,shadows,scan streaks,fingers,skew`;
 
 /**
  * 원문자(㉠ ① ⓐ)를 그리는 법. 두 프롬프트가 똑같이 쓴다.
@@ -348,10 +366,10 @@ const ERASE_HANDWRITING = `erase_handwriting[FIRST STEP]:
  * 사회탐구·국어에서 `밑줄 친 ㉠에 대한 설명으로…` 처럼 원문자가 곧 문제의
  * 지시 대상인 경우가 흔해서, 안쪽 글자가 하나 바뀌면 문제가 성립하지 않는다.
  */
-const CIRCLED_CHARS = `circled_chars (㉠㉡㉢㉣㉤, ①②③④⑤, ⓐⓑⓒ) = 1 glyph inside circle:
-- don't draw from memory as single shape -> draw thin round circle + centred inner char, not touching
-- never swap inner char: ㉠㉡㉢㉣㉤㉥㉦=ㄱㄴㄷㄹㅁㅂㅅ (in order); ①②③④⑤=1 2 3 4 5
-- body reference (e.g. "밑줄 친 ㉠") and figure's printed char must be the SAME char -> mismatch breaks question`;
+const CIRCLED_CHARS = `circled_chars (㉠㉡㉢㉣㉤,①②③④⑤,ⓐⓑⓒ) = circle + inner glyph:
+- build it: thin round circle + centred inner char (not touching). don't draw one remembered shape
+- never swap inner char: ㉠㉡㉢㉣㉤㉥㉦=ㄱㄴㄷㄹㅁㅂㅅ in order; ①②③④⑤=1 2 3 4 5
+- stem's char (e.g. "밑줄 친 ㉠") must equal the printed one; mismatch breaks the question`;
 
 /**
  * 그림 재구성 프롬프트. **하나뿐이다.**
@@ -361,39 +379,48 @@ const CIRCLED_CHARS = `circled_chars (㉠㉡㉢㉣㉤, ①②③④⑤, ⓐⓑ�
  * 대신 각 항목을 "…라면"으로 조건부로 적었다 — 삼각형에 지층 순서 지시는,
  * 세포 모식도에 교점 좌표 지시는 모델이 알아서 건너뛴다.
  */
-const PROMPT = `task: redraw figure from Korean HS workbook (math/science/social-studies) as close to original as possible, clean+sharp, solvable.
+/**
+ * 두 프롬프트가 **글자 하나까지 똑같이** 쓰던 덩어리들을 따로 뺐다.
+ *
+ * 토큰이 줄어드는 것은 아니다(요청 하나는 프롬프트 하나만 쓴다). 한쪽만
+ * 고쳐져 어긋나는 것을 막으려는 것이다 — 이 저장소가 `cardHtml`·`readUsage`
+ * ·`problemOrder` 에서 되풀이해 온 판단과 같다.
+ */
+const COLOUR_RULES = `colour (printed on paper, often b&w):
+- colour-only distinctions (map regions,graph series,strata) need lightness/pattern diff too -> must read in b&w
+- keep colours, ADD tonal diff (don't remove colour)
+- legend swatch must match the mark it labels
+- no adjacent similar pastel/grey -> crisp boundaries`;
+
+const SMALL_MARKS = `keep small marks: ticks+numbers,axis names,units,legend,arrowheads,dashed/solid,angle arc,right-angle mark,equal-length hatch,sub/superscripts,decimal points,parentheses`;
+
+const GEOMETRY_RULES = `intersections matter most: crossings,axis crossings,maxima/minima,tangent points at exact original spots; lines pass exactly through (never near/grazing)
+- tangent touches at exactly 1 point; multi-line junctions meet at one point; point-on-segment stays on it
+- keep axes, origin O, tick numbers, asymptotes, shaded regions
+- point labels (A,B,P,O) beside their point, no overlap`;
+
+const PROMPT = `task: redraw this figure from a Korean HS workbook (math/science/social) as close to the original as possible: clean, sharp, solvable.
 
 ${ERASE_HANDWRITING}
 
 always:
-- keep every original element, drop nothing, invent nothing
-- copy all text (labels,symbols,numbers,units) EXACTLY as printed. no reword/translate/invented glyphs
+- keep every element, drop nothing, invent nothing; exact counts (ticks,layers,particles,cells,dots,arrows)
+- copy all text (labels,symbols,numbers,units) EXACTLY as printed: no reword/translate/invented glyphs
+- ${SMALL_MARKS}
 - ${CIRCLED_CHARS.replace(/\n/g, "\n  ")}
-- preserve exact counts (ticks,layers,particles,cells,dots,arrows)
-- keep small marks: tick+numbers, units, legend, arrowhead, dashed/solid distinction, angle arc, right-angle mark, equal-length hatch, decimal point
 
-colour/contrast (will be printed+solved on paper):
-- colour-only distinctions (map regions,graph series,strata,areas) need added lightness/pattern diff too -> must still read in b&w
-- keep original colours, ADD tonal diff (don't remove colour)
-- legend swatch must exactly match figure's mark
-- no adjacent similar pale-grey/pastel colours -> draw crisp boundaries
+${COLOUR_RULES}
 
 if geometric/graph (circles,triangles,coord planes):
-- priority: intersections at exact original position, both lines pass exactly through (never near/grazing)
-- tangent line/circle touches at exactly 1 point (not cutting in, not standing off)
-- match axis crossings, maxima/minima, vertices
-- multi-line junctions all meet at exact same point; point-on-segment stays on segment
-- keep axes, origin O, tick numbers, asymptotes, shaded regions as original
-- point labels (A,B,P,O...) beside their point, no overlap
+- ${GEOMETRY_RULES}
 
 if apparatus/schematic/cross-section (experiment setup,cell,strata,circuit):
-- preserve spatial relations exactly: above/below/inside/outside/left/right (stratum order, organelles, circuit order, atmospheric layers)
-- preserve arrow directions exactly (reversed = different diagram)
-- line/tube connections must match original endpoints exactly
+- spatial relations exactly: above/below/inside/outside/left/right (strata order, organelles, circuit order, atmospheric layers)
+- arrow directions exactly (reversed = different diagram)
+- line/tube connections keep original endpoints
 
-colour not meaningful -> render as black lines on white background.
-
-result = workbook-illustration look: white bg, crisp lines. no photo shading/drop shadow (exception: tonal-diff-for-distinction above, that one is required).`;
+colour not meaningful -> black lines on white.
+look: workbook illustration, white bg, crisp lines, no photo shading/drop shadow (the tonal diff above is the exception).`;
 
 /**
  * **문제 전체**를 다시 그릴 때 쓰는 프롬프트.
@@ -407,33 +434,26 @@ const WHOLE_PROBLEM_PROMPT = `task: this image = ONE COMPLETE QUESTION from Kore
 
 ${ERASE_HANDWRITING}
 
-text (2nd priority):
-- copy every character EXACTLY as printed. no change/polish/summarise/translate, not even 1 char
-- "옳은 것" vs "옳지 않은 것", "있는 대로" vs "하나만" flip the answer -> leave exactly as-is
-- numbers,units,symbols,years,place names,personal names must match exactly
-- hard-to-read char -> do NOT invent, follow original strokes as closely as possible
+text:
+- copy every character EXACTLY as printed: no change/polish/summarise/translate, not even 1 char
+- "옳은 것" vs "옳지 않은 것", "있는 대로" vs "하나만" flip the answer -> leave as-is
+- numbers,units,symbols,years,place/personal names must match exactly
+- hard-to-read char -> do NOT invent, follow the original strokes
 
 ${CIRCLED_CHARS}
 
 structure (unchanged):
-- keep question number, stem, condition boxes, tables, data, <보기>, choices (①②③④⑤) in same order/arrangement. drop/add nothing
+- same order/arrangement: question number, stem, condition boxes, tables, data, <보기>, choices (①②③④⑤). drop/add nothing
 - tables: same row/col count, same cell contents, crisp borders
-- text-fraction (korean words/phrase stacked above AND below a horizontal rule, e.g. 특정 원소의 함량 / 전체 함량): keep it stacked over the rule. never flatten to one line, never reorder numerator/denominator
-- figures/maps/graphs/schematics: same spatial relations, arrow directions, counts
+- text-fraction (korean words stacked above AND below a rule, e.g. 특정 원소의 함량 / 전체 함량): keep stacked, never flatten to one line, never swap numerator/denominator
+- figures/maps/graphs: same spatial relations, arrow directions, counts
 - keep any surrounding box
+- ${SMALL_MARKS}
+- ${GEOMETRY_RULES}
 
-details:
-- don't drop small marks: tick+numbers, axis names, units, legends, arrowheads, dashed/solid distinction, angle arcs, right-angle marks, super/subscripts, decimal points, parentheses
-- graph/figure -> intersections matter most: line crossings, axis crossings, maxima/minima, tangent points at exact original positions, lines pass exactly through (never near/grazing)
-- point labels (A,B,P,O...) beside their point, no overlap
+${COLOUR_RULES}
 
-colour/contrast (will be printed+solved on paper):
-- colour-only distinctions (map regions,graph series,strata,areas) need added lightness/pattern diff too -> must still read in b&w
-- keep original colours, ADD tonal diff (don't remove colour)
-- legend swatch must exactly match data's mark
-- no adjacent similar pale-grey/pastel colours -> draw crisp boundaries
-
-appearance: white bg, crisp black text, like printed workbook page. comfortable text size; no overlap/cutoff.`;
+look: white bg, crisp black text, printed-workbook page. comfortable text size, no overlap/cutoff.`;
 
 /**
  * base64 앞머리(매직 넘버)를 보고 실제 형식을 알아낸다.
@@ -719,6 +739,20 @@ export async function generateFigureImage(
     }
 
     const body = await res.text().catch(() => "");
+
+    // 이름이 없는 모델이면 **여기서 끝낸다.** 조합을 바꿔도 모델은 안 생기고,
+    // 거부당하는 요청마다 3MB 를 헛되이 올린다(로그에서 여섯 번 확인했다).
+    if (isBadModelError(res.status, body)) {
+      console.error(
+        `[figureImageGen] 모델 이름이 잘못됐다: ${modelId} — ${body.slice(0, 300)}`,
+      );
+      throw new FigureImageError(
+        `이미지 모델 "${modelId}" 이(가) 없습니다. OPENAI_FIGURE_IMAGE_MODELS 로 계정에 실제로 있는 이름을 넣어주세요.`,
+        res.status,
+        modelId,
+      );
+    }
+
     if (isUnsupportedParamError(res.status, body)) {
       console.warn(
         `[figureImageGen] ${modelId}이 ${JSON.stringify(params)}를 거부함, 다음 조합 시도: ${body.slice(0, 300)}`,

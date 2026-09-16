@@ -416,8 +416,9 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       // 지문은 이 버튼이 아예 안 뜨지만(그쪽은 "다시 인식하기"다) 조건을
       // 그대로 적어 둔다 — 나중에 버튼이 옮겨 다녀도 안전하게.
       mode: isWholeProblemFigure(id) ? "problem" : undefined,
-      // 켠 것이 기본이다. 끄면 참고 글 없이 사진만 보고 그린다.
-      useOcr: redrawOcr[id] !== false,
+      // **기본값이 과목마다 다르다** — 국어는 켜고 나머지는 끈다. 사용자가
+      // 체크박스를 건드렸으면 그 값이 이긴다(`undefined` 면 큐가 정한다).
+      useOcr: redrawOcr[id],
       // 국어 문항은 거의 글자뿐이라 참고 글을 더 앞세운다(KoreanModePanel 이
       // 처음 만들 때 쓰는 것과 같은 값).
       korean: editing?.korean ? true : undefined,
@@ -1329,7 +1330,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                               <label className="flex items-start gap-1.5 text-[11px] text-slate-600">
                                 <input
                                   type="checkbox"
-                                  checked={redrawOcr[f.id] !== false}
+                                  checked={redrawOcr[f.id] ?? !!editing?.korean}
                                   onChange={(e) =>
                                     setRedrawOcr((prev) => ({
                                       ...prev,
@@ -1342,8 +1343,9 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 <span>
                                   Mathpix로 글자를 읽어 참고로 주기 (인식 1토큰)
                                   <span className="block text-slate-400">
-                                    끄면 사진만 보고 그립니다. 글자를 잘못
-                                    베껴 썼다면 꺼 보세요.
+                                    국어만 기본으로 켜집니다. 다른 과목은
+                                    사진만 보고 그리는 쪽이 더 정확하고 빨라서
+                                    꺼 두었어요 — 글자를 자꾸 틀리면 켜 보세요.
                                   </span>
                                 </span>
                               </label>
