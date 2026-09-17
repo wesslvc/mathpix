@@ -45,6 +45,7 @@ import type { TokenStatus } from "@/app/api/tokens/route";
 import { rasterToSvg } from "@/lib/figureImage";
 import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
+import { persistFigureBlobs } from "@/lib/figureBlob";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import type { DiagramLayout } from "@/lib/diagramLayout";
@@ -385,6 +386,14 @@ export default function AddProblemFlow({
     // 그냥 진행한다 — 없으면 목록이 원본을 쓸 뿐이다.
     await uploadThumb(supabase, path, pngDataUrl);
 
+    // 그림마다 인라인 base64(markup·origin)를 스토리지로 옮긴다. DB 에 그림을
+    // base64 로 그대로 담아 두는 것이 카드 원본과는 별개의 저장 위치 문제라
+    // (figureBlob.ts 참고) 카드를 R2 로 옮긴 것과 무관하게 이 자리도 옮긴다.
+    const figures = boxRange.figures
+      ? await persistFigureBlobs(supabase, `${user.id}/${categoryId}`, boxRange.figures)
+      : boxRange.figures;
+    const persistedBoxRange = { ...boxRange, figures };
+
     // 새 오답은 목록 맨 뒤에 오도록 기존 최대 sort_order + 1을 준다.
     const { data: maxRow } = await supabase
       .from("problems")
@@ -407,8 +416,8 @@ export default function AddProblemFlow({
       // 없어 번호를 뽑을 데가 없는 문제다).
       box_range:
         autoNumberRef.current != null
-          ? { ...boxRange, number: autoNumberRef.current }
-          : boxRange,
+          ? { ...persistedBoxRange, number: autoNumberRef.current }
+          : persistedBoxRange,
     };
 
     // 이미 저장한 문제를 또 저장하는 건 "고쳐서 다시 저장"이다. 새 행을 만들면

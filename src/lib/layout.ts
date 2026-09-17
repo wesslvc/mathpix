@@ -27,3 +27,37 @@ export const CARD_CAPTURE_OPTIONS = {
   backgroundColor: "#ffffff",
   style: { borderColor: "transparent", boxShadow: "none" } as Partial<CSSStyleDeclaration>,
 };
+
+/**
+ * 캡처 전에 카드 안의 `<img>` 가 전부 실제로 로드될 때까지 기다린다.
+ *
+ * **2026-09-17 이전에는 이게 필요 없었다.** 그림 마크업이 전부 `data:` URI로
+ * 인라인돼 있어서 `<img>` 로드가 사실상 즉시(동기에 가깝게) 끝났다 — 그래서
+ * `requestAnimationFrame` 한 틱만으로 충분했다. 그런데 그림을 스토리지로
+ * 옮기면서(`figureBlob.ts`) 마크업이 `<img src="/api/card/...">` 같은 **네트워크
+ * 주소**를 가리키게 됐다 — 저장된 문제를 열 때마다 실제로 그 그림을 내려받아야
+ * 하므로, 못 기다리고 캡처하면 그 자리가 빈 채로 PNG 에 구워진다.
+ *
+ * 이미 로드됐거나(`complete`) 캐시로 즉시 끝나는 경우는 그냥 지나간다. 하나가
+ * 실패해도(404 등) 캡처 자체를 막지는 않는다 — 빈 그림 하나보다 문제 전체를
+ * 저장 못 하는 쪽이 더 나쁘다. 8초 안에 안 끝나면 그냥 진행한다(끊긴 네트워크
+ * 때문에 저장이 영영 안 되는 것보다 낫다).
+ */
+export async function waitForImages(container: HTMLElement, timeoutMs = 8000): Promise<void> {
+  const imgs = Array.from(container.querySelectorAll("img"));
+  if (imgs.length === 0) return;
+  const waits = imgs
+    .filter((img) => !img.complete)
+    .map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          img.addEventListener("load", () => resolve(), { once: true });
+          img.addEventListener("error", () => resolve(), { once: true });
+        }),
+    );
+  if (waits.length === 0) return;
+  await Promise.race([
+    Promise.all(waits),
+    new Promise((r) => setTimeout(r, timeoutMs)),
+  ]);
+}

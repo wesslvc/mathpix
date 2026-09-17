@@ -29,7 +29,7 @@ import {
 import { enhanceContrast } from "@/lib/autoContrast";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
-import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "@/lib/layout";
+import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH, waitForImages } from "@/lib/layout";
 import { DEFAULT_DIAGRAM_LAYOUT } from "./DiagramAdjuster";
 import { DEFAULT_TABLE_LAYOUT } from "@/lib/diagramLayout";
 
@@ -56,6 +56,7 @@ import { rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
 import { keepOrigin } from "@/lib/figureOrigin";
 import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
+import { persistFigureBlobs } from "@/lib/figureBlob";
 import {
   ANSWER_TYPE_LABEL,
   formatAnswer,
@@ -132,6 +133,9 @@ async function captureNode(node: HTMLElement): Promise<Blob> {
   }
   // 다음 페인트까지 기다린다.
   await new Promise((r) => requestAnimationFrame(() => r(null)));
+  // 스토리지로 옮겨진 그림은 rAF 한 틱으로 부족하다 — 실제로 내려받을 때까지
+  // 기다린다(layout.ts의 waitForImages 주석 참고).
+  await waitForImages(node);
 
   let dataUrl = "";
   // Safari 첫 렌더가 비는 문제 대비로 몇 번 반복(마지막 결과 사용).
@@ -709,6 +713,12 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       // 목록용 작은 미리보기도 같이(cardThumb.ts). 실패하면 목록이 원본을 쓴다.
       await uploadThumb(supabase, newPath, blob);
 
+      // 그림마다 인라인 base64(markup·origin)를 스토리지로 옮긴다 — 카드
+      // 원본과는 별개의 저장 위치(Postgres) 문제다(figureBlob.ts 참고).
+      // 이미 옮겨진 그림은 다시 안 올린다(재저장을 반복해도 안 늘어난다).
+      const dirPrefix = newPath.split("/").slice(0, -1).join("/");
+      const figures = await persistFigureBlobs(supabase, dirPrefix, toStoredFigures(cardFigures));
+
       const { error: dbErr } = await supabase
         .from("problems")
         .update({
@@ -720,7 +730,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
           box_range: {
             ranges: toBoxRanges(editBox),
             fontPt: editFontPt,
-            figures: toStoredFigures(cardFigures),
+            figures,
             // 빈 칸이면 "정하지 않음" — 본문에서 뽑거나 차례대로 매긴다.
             number: editNumber.trim() === "" ? null : Number(editNumber),
             points: editPoints.trim() === "" ? null : Number(editPoints),

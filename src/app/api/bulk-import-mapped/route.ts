@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { r2Configured, r2Delete, r2Put } from "@/lib/r2";
+import { cardUrl } from "@/lib/cardUrl";
 import { matchFiles, parseCsv } from "@/lib/bulkImportMatch";
 import { toStoredFigures } from "@/lib/storedFigures";
 import type { CardFigure } from "@/lib/cardHtml";
@@ -28,16 +29,6 @@ function pngSize(buffer: Buffer): { width: number; height: number } | null {
     return null;
   }
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
-}
-
-/** rasterToSvg(figureImage.ts)와 정확히 같은 형태 — 다르면 readStoredFigures가 버린다. */
-function rasterToSvgDataUrl(buffer: Buffer, width: number, height: number): string {
-  const dataUrl = `data:image/png;base64,${buffer.toString("base64")}`;
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${width} ${height}">` +
-    `<image href="${dataUrl}" xlink:href="${dataUrl}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet"/>` +
-    `</svg>`
-  );
 }
 
 /**
@@ -148,9 +139,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 방금 `path` 에 올린 바이트가 곧 이 그림이다(문제 한 장 = 그림 한 장).
+    // base64 로 한 번 더 담지 않고 그 주소를 그대로 가리킨다 — box_range 를
+    // 파일 창고로 쓰지 않는다(figureBlob.ts와 같은 이유).
     const figure: CardFigure = {
       id: randomUUID(),
-      markup: rasterToSvgDataUrl(buffer, size.width, size.height),
+      markup: `<img src="${cardUrl(path)}" alt="" />`,
       layout: WHOLE_LAYOUT,
       position: 0,
     };

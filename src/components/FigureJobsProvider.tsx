@@ -11,12 +11,14 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import {
   MODEL_INPUT_DIM,
+  ensureDataUrl,
   prepareFigureForModel,
   prepareProblemForModel,
   imageSizeOf,
   rasterToSvg,
   trimBlankBorder,
 } from "@/lib/figureImage";
+import { persistFigureValue } from "@/lib/figureBlob";
 import type { FigureMode, FigureUsage } from "@/lib/figureImageGen";
 import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
 import {
@@ -322,14 +324,20 @@ export default function FigureJobsProvider({
       const existingFigures = Array.isArray(box.figures)
         ? (box.figures as Record<string, unknown>[])
         : [];
-      const nextFigures = existingFigures.map((f) =>
-        f.id === job.id
-          ? {
-              ...keepOrigin(f, f.markup),
-              markup: svg,
-              ai: true,
-            }
-          : f,
+      // AI 결과(svg, 인라인 base64)를 스토리지로 옮긴다 — 이 길로 저장되는
+      // 것도 다른 세 자리(AddProblemFlow·ProblemGallery·서버)와 똑같이
+      // R2/Supabase 를 거쳐야 한다. 안 그러면 "탭을 닫아 둔 문제만" DB 에
+      // base64 가 그대로 남는 경로가 하나 생긴다.
+      const nextFigures = await Promise.all(
+        existingFigures.map(async (f) =>
+          f.id === job.id
+            ? {
+                ...keepOrigin(f, f.markup),
+                markup: await persistFigureValue(supabase, dir, svg),
+                ai: true,
+              }
+            : f,
+        ),
       );
 
       const { error: dbErr } = await supabase
@@ -367,14 +375,19 @@ export default function FigureJobsProvider({
 
     (async () => {
       try {
+        // **바이트로 바꿔 둔다.** `next.crop` 은 `f.origin ?? raster` 에서 온
+        // 값이라(`ProblemGallery`) 이미 스토리지로 옮겨진 그림이면 주소
+        // 문자열이다 — 아래로 그대로 흘리면 `/api/figure` 가 파싱하다 실패한다
+        // (`ensureDataUrl` 주석 참고).
+        const crop = await ensureDataUrl(next.crop);
         // 입력 토큰을 줄이려고 크기를 낮춰 보낸다. 그림 하나는 긴 변 768px이면
         // 되지만, 문제 전체는 본문 글자까지 살아야 해서 **폭**을 기준으로 맞춘다
         // (긴 변으로 줄이면 세로로 긴 문제의 폭이 무너져 글자가 뭉개진다).
         const mode: FigureMode = next.mode ?? "figure";
         const forModel =
           mode === "problem"
-            ? await prepareProblemForModel(next.crop)
-            : await prepareFigureForModel(next.crop, MODEL_INPUT_DIM);
+            ? await prepareProblemForModel(crop)
+            : await prepareFigureForModel(crop, MODEL_INPUT_DIM);
 
         // 같은 그림을 이미 그린 적이 있으면 그대로 쓴다(세트 문항 대비).
         // 모드를 키에 섞는다 — 같은 이미지라도 그림용과 문제 전체용은 결과가

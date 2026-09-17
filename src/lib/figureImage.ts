@@ -16,6 +16,30 @@ import { enhanceContrast } from "./autoContrast";
 // (막으면 기능 불능, 통과시키면 돈 낭비) 판별기의 이득보다 커서 뺐다.
 // 대신 무료 경로(rasterToSvg)를 기본으로 앞에 두고 사용자가 고르게 한다.
 
+/**
+ * 값이 이미 `data:` URL 이면 그대로, 스토리지 주소면 받아와 `data:` URL 로
+ * 바꾼다.
+ *
+ * 그림을 스토리지로 옮기면서(`figureBlob.ts`) `markup`/`origin` 이 네트워크
+ * 주소를 가리키게 됐다. 그런데 AI 재생성·재인식은 이 값을 **그대로 서버에
+ * 보낸다**(`/api/figure` · `/api/mathpix` · `/api/korean-text` 모두 "base64
+ * data URL" 을 요구한다) — 주소 문자열을 그대로 보내면 서버가 파싱하다
+ * 실패한다. `enhanceContrast()` 는 이미 충분하면 **입력을 그대로 돌려주는
+ * 경로가 있어서**(재인코딩하지 않는다) 그 안에서 자동으로 바뀌리라 기대하면
+ * 안 된다 — AI 를 다시 부르는 자리(작업 큐·국어 재인식)의 **맨 앞**에서
+ * 한 번 확실히 바꿔 둔다.
+ */
+export async function ensureDataUrl(src: string): Promise<string> {
+  if (src.startsWith("data:")) return src;
+  const blob = await (await fetch(src)).blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("이미지를 불러오지 못했습니다."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 /** 모델에 보낼 이미지의 긴 변 상한. 작을수록 입력 토큰이 싸다. */
 export const MODEL_INPUT_DIM = 768;
 
@@ -255,15 +279,23 @@ export async function rasterToSvg(dataUrl: string): Promise<string> {
 }
 
 /**
- * 그림 마크업에서 **원본 이미지를 도로 꺼낸다.**
+ * 그림 마크업에서 **원본 이미지 자리를 도로 꺼낸다.**
  *
  * 수정 화면에서 붙어 있는 그림을 다시 오려내거나 AI 로 다시 그리려면 원본
  * 픽셀이 필요한데, 저장된 것은 마크업뿐이라 거기서 되꺼낸다.
  * `rasterToSvg` 가 감싼 `<svg><image href=…>` 와 옛 형태인 `<img src=…>` 를
  * 둘 다 받는다(꺼낼 수 없으면 null — 그때는 다시 그리기 단추를 보여주지 않는다).
+ *
+ * **`data:` 만 받지 않는다.** 그림을 스토리지로 옮기면서(`figureBlob.ts`)
+ * 마크업이 `<img src="/api/card/...">` 같은 주소를 가리키게 됐다 — `data:`
+ * 만 찾으면 이미 옮겨진 그림은 전부 여기서 걸러져 "다시 오려내기"·"AI로
+ * 다시 그리기"·"원본으로 되돌리기" 버튼이 통째로 사라진다(실제로 그랬다).
+ * 돌려주는 값은 크롭 모달의 `<img src>`(같은 출처라 무엇이든 그대로 쓸 수
+ * 있다)로 쓰이거나, AI 재생성 직전에 `ensureDataUrl()`이 실제 바이트로
+ * 바꿔치기한다 — 여기서는 주소든 data: 든 가리지 않고 그대로 돌려준다.
  */
 export function rasterFromSvg(markup: string): string | null {
-  const m = markup.match(/(?:href|src)="(data:image\/[^"]+)"/);
+  const m = markup.match(/(?:href|src)="([^"]+)"/);
   return m ? m[1] : null;
 }
 

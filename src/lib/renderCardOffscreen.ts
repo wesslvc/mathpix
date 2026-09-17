@@ -1,5 +1,5 @@
 import { toPng } from "html-to-image";
-import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "./layout";
+import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH, waitForImages } from "./layout";
 import { cardHtmlFromSpec, type CardSpec } from "./cardHtml";
 
 /**
@@ -46,6 +46,10 @@ export async function renderCardOffscreen(spec: CardSpec): Promise<string> {
     }
     // 붙인 이미지(그림)가 실제로 그려질 때까지 한 번 기다린다.
     await new Promise((r) => requestAnimationFrame(() => r(null)));
+    // **스토리지로 옮겨진 그림은 이걸로 부족하다.** `<img src="/api/card/...">`
+    // 는 rAF 한 틱 안에 못 받아올 수 있다 — 못 기다리면 그 자리가 빈 채로
+    // PNG 에 구워진다(layout.ts의 waitForImages 주석 참고).
+    await waitForImages(card);
     return await toPng(card, CARD_CAPTURE_OPTIONS);
   } finally {
     host.remove();
