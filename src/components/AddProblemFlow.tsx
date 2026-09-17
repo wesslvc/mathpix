@@ -520,9 +520,9 @@ export default function AddProblemFlow({
 
       {stage === "idle" && !canAdd && (
         <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <p>토큰을 모두 사용해 오답을 더 추가할 수 없어요. 이용권을 구매하면 1000토큰이 충전돼요.</p>
+          <p>토큰을 모두 사용해 오답을 더 추가할 수 없어요. 이용권을 구매하면 5000토큰이 충전돼요.</p>
           <a
-            href="/api/checkout"
+            href="/api/checkout?plan=tokens"
             className="w-fit rounded-lg bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-700"
           >
             이용권 구매하기

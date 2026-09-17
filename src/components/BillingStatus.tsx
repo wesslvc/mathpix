@@ -39,7 +39,7 @@ export default function BillingStatus({
         {empty ? (
           <>
             토큰을 모두 사용했어요.{" "}
-            <span className="font-semibold">이용권</span>을 구매하면 1000토큰이
+            <span className="font-semibold">이용권</span>을 구매하면 5000토큰이
             충전돼요.
           </>
         ) : (
@@ -50,14 +50,14 @@ export default function BillingStatus({
       </p>
       {checkoutReady ? (
         <a
-          href="/api/checkout"
+          href="/api/checkout?plan=tokens"
           className={`shrink-0 rounded-lg px-4 py-2 text-center text-xs font-medium text-white ${
             empty
               ? "bg-amber-600 hover:bg-amber-700"
               : "bg-slate-600 hover:bg-slate-700"
           }`}
         >
-          이용권 구매하기 (+1000토큰)
+          이용권 구매하기 (+5000토큰)
         </a>
       ) : (
         empty && <span className="shrink-0 text-xs text-amber-700">결제 준비 중</span>
