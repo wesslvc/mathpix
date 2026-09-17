@@ -942,7 +942,7 @@ export default function KoreanModePanel({
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {busy ?? "모두 AI로 다시 그리기"}
-              {typeof figureCost === "number" && ` (약 ${figureCost * pieces.length}토큰)`}
+              {typeof figureCost === "number" && ` (${figureCost * pieces.length}토큰)`}
             </button>
           </div>
         </div>

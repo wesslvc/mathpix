@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { recognizeImage } from "@/lib/mathpixClient";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { OCR_TOKEN_COST } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 
@@ -36,8 +37,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
+    // **`p_amount`를 명시적으로 넘긴다.** 예전엔 안 넘겨서 DB 함수의 기본값
+    // (1)에 기대고 있었다 — `OCR_TOKEN_COST`를 5로 올려도 여기서 안 넘기면
+    // 실제 차감은 그대로 1이었을 것이다.
     const { data: remaining, error: rpcError } = await supabase.rpc(
       "consume_recognition_credit",
+      { p_amount: OCR_TOKEN_COST },
     );
     if (rpcError) {
       return NextResponse.json({ error: rpcError.message }, { status: 500 });
@@ -45,8 +50,7 @@ export async function POST(req: NextRequest) {
     if (remaining === null) {
       return NextResponse.json(
         {
-          error:
-            "토큰을 모두 사용했습니다. 이용권을 구매하면 1000토큰이 충전돼요.",
+          error: `토큰이 부족해요. 문제 인식에는 최소 ${OCR_TOKEN_COST}토큰이 필요합니다.`,
         },
         { status: 402 },
       );

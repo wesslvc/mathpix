@@ -45,50 +45,6 @@ const DEADLINE_MS = (maxDuration - 15) * 1000;
 const MAX_MODEL_ATTEMPTS = 2;
 
 /**
- * 못 낸 만큼을 그 문제에 적어 **잠근다**.
- *
- * 생성은 이미 끝났는데(=우리는 이미 돈을 냈는데) 사용자 잔액이 모자란 경우다.
- * 만든 그림을 버리지는 않되, 결제하기 전에는 그 문제를 쓰지 못하게 한다 —
- * 목록에서 가려지고 PDF 에서도 빠진다.
- *
- * 저장 위치는 `problems.box_range.debt` 다. 글자 크기·그림·번호를 거기 얹은
- * 것과 같은 이유로 **마이그레이션이 필요 없다.**
- *
- * **어느 문제인지 모르면 잠글 대상이 없다.** 그때는 초과분을 우리가 먹고 로그만
- * 남긴다 — 붙잡아 둘 대상이 없는데 조용히 빚을 지울 수는 없다.
- */
-async function lockProblem(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  problemId: string | null,
-  debt: number,
-): Promise<void> {
-  if (!problemId) {
-    console.warn(
-      `[api/figure] 잔액이 ${debt}토큰 모자라지만 대상 문제를 몰라 잠그지 못했습니다.`,
-    );
-    return;
-  }
-  try {
-    const { data: row } = await supabase
-      .from("problems")
-      .select("box_range")
-      .eq("id", problemId)
-      .maybeSingle();
-    const box = (row?.box_range ?? {}) as Record<string, unknown>;
-    const before = typeof box.debt === "number" ? box.debt : 0;
-    await supabase
-      .from("problems")
-      .update({ box_range: { ...box, debt: before + debt } })
-      .eq("id", problemId);
-    console.warn(
-      `[api/figure] ${problemId} 를 ${before + debt}토큰 미납으로 잠갔습니다.`,
-    );
-  } catch (err) {
-    console.error("[api/figure] 잠금 기록 실패:", err);
-  }
-}
-
-/**
  * 다 그린 문제 이미지를 서버가 직접 저장한다.
  *
  * **브라우저를 닫아도 결과가 남게 하려는 것이다.** 생성은 1분쯤 걸리는데,
@@ -311,9 +267,10 @@ export async function POST(req: NextRequest) {
 
   // AI 그림 생성은 실제로 돈이 나가는 유료 API라 토큰으로 과금한다.
   //
-  // **보증금을 먼저 걸고, 끝나면 실제로 쓴 값으로 정산한다.** 원가가 요청마다
-  // 1.5배까지 널뛰어서 고정 요금은 어느 쪽으로도 틀린다. 선차감을 두는 이유는
-  // 잔액이 없는 사람이 생성을 시작하지 못하게 하려는 것이다.
+  // **FIGURE_TOKEN_DEPOSIT을 고정으로 뗀다**(2026-09-17, 사용자 결정).
+  // 예전엔 원가(96~143원)에 마진을 곱해 실사용량만큼만 받았는데, 지금은
+  // 원가가 얼마든 항상 같은 금액이다 — 간단하고 예측 가능한 대신, 원가가
+  // 이 값을 넘는 요청에서는 우리가 밑질 수 있다.
   //
   // 차감은 요청당 한 번이다 — 모델을 갈아타며 재시도하는 것은 우리 사정이지
   // 사용자가 더 낼 이유가 아니다.
@@ -359,35 +316,17 @@ export async function POST(req: NextRequest) {
   }
 
   /**
-   * 보증금과 실제 값의 차이를 맞춘다. 돌려주는 것은 **실제로 물린 토큰 수**다.
+   * 최종 차감 토큰 수를 돌려준다.
    *
-   * 모자란데 잔액이 없으면 그만큼을 미납으로 적어 그 문제를 잠근다
-   * (`lockProblem`). 이미 그림은 만들어졌으므로 요청 자체는 성공으로 돌려준다 —
-   * 만든 것을 버릴 이유가 없다.
+   * **고정 차감이라(2026-09-17) 더 받거나 돌려줄 것이 없다** —
+   * `figureTokenCharge()`가 원가(`estKrw`)와 무관하게 항상
+   * `FIGURE_TOKEN_DEPOSIT`을 돌려주므로, 이미 건 보증금이 곧 최종 금액이다.
+   * 정산 왕복(RPC 호출)이 통째로 필요 없어졌다 — 실사용량 정산이던 시절엔
+   * 여기서 환불·추가 차감·미납 잠금까지 했지만 그럴 일 자체가 없다.
    */
   async function settle(estKrw: number | undefined): Promise<number | null> {
     if (!supabase || !charged) return null;
-    const want = figureTokenCharge(estKrw);
-    if (estKrw === undefined) {
-      console.warn(
-        `[api/figure] usage 를 못 받아 폴백으로 ${want}토큰을 물립니다.`,
-      );
-    }
-    const diff = want - FIGURE_TOKEN_DEPOSIT;
-    try {
-      if (diff < 0) {
-        await supabase.rpc("refund_recognition_credit", { p_amount: -diff });
-      } else if (diff > 0) {
-        const { data } = await supabase.rpc("consume_recognition_credit", {
-          p_amount: diff,
-        });
-        // null 이면 잔액이 모자란 것이다 — 미납으로 남기고 문제를 잠근다.
-        if (data === null) await lockProblem(supabase, problemId, diff);
-      }
-    } catch (err) {
-      console.error("[api/figure] 정산 실패:", err);
-    }
-    return want;
+    return figureTokenCharge(estKrw);
   }
 
   const modelIds = figureImageModelIds();
