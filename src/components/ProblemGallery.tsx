@@ -54,7 +54,7 @@ const DiagramCropModal = dynamic(() => import("./DiagramCropModal"), { ssr: fals
 import { useFigureJobs } from "./FigureJobsProvider";
 import { rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
 import { keepOrigin } from "@/lib/figureOrigin";
-import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
+import { thumbPathFor } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
 import { persistFigureBlobs } from "@/lib/figureBlob";
 import {
@@ -67,14 +67,6 @@ import {
 export type GalleryProblem = {
   id: string;
   imageUrl: string;
-  /**
-   * 목록·카드에 그릴 **작은 미리보기**. 없으면(옛 문제) `imageUrl` 을 쓴다.
-   *
-   * 원본은 평균 760kB 인데 여기서 그리는 크기는 56×40px(목록)이나 320px 안쪽
-   * (카드)이다. 미리보기는 15~30kB 라 실모 하나 여는 트래픽이 40분의 1 아래로
-   * 떨어진다. **수정·저장에는 쓰지 않는다** — 그건 원본이어야 한다.
-   */
-  thumbUrl?: string | null;
   imagePath: string;
   text: string;
   sortOrder: number | null;
@@ -710,9 +702,6 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       const up = await putBlob(supabase, newPath, blob, "image/png");
       if (!up.ok) throw new Error(up.error);
 
-      // 목록용 작은 미리보기도 같이(cardThumb.ts). 실패하면 목록이 원본을 쓴다.
-      await uploadThumb(supabase, newPath, blob);
-
       // 그림마다 인라인 base64(markup·origin)를 스토리지로 옮긴다 — 카드
       // 원본과는 별개의 저장 위치(Postgres) 문제다(figureBlob.ts 참고).
       // 이미 옮겨진 그림은 다시 안 올린다(재저장을 반복해도 안 늘어난다).
@@ -935,7 +924,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {/* 잠긴 문제는 내용을 가린다 — 결제 전에는 못 쓰는 게 요점이다. */}
               <img
-                src={problem.thumbUrl ?? problem.imageUrl}
+                src={problem.imageUrl}
                 alt=""
                 loading="lazy"
                 className={`h-10 w-14 shrink-0 rounded border border-slate-200 object-cover object-top ${
@@ -991,7 +980,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={problem.thumbUrl ?? problem.imageUrl}
+                src={problem.imageUrl}
                 alt="저장된 오답"
                 loading="lazy"
                 className={`w-full rounded object-contain ${

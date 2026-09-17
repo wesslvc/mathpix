@@ -20,7 +20,7 @@ import {
 } from "@/lib/figureImage";
 import { persistFigureValue } from "@/lib/figureBlob";
 import type { FigureMode, FigureUsage } from "@/lib/figureImageGen";
-import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
+import { thumbPathFor } from "@/lib/cardThumb";
 import {
   figureCacheKey,
   readFigureCache,
@@ -306,10 +306,6 @@ export default function FigureJobsProvider({
 
       const up = await putBlob(supabase, newPath, blob, "image/png");
       if (!up.ok) throw new Error(up.error);
-
-      // 목록용 작은 미리보기도 같이(cardThumb.ts). 이걸 빠뜨리면 이 경로로
-      // 갱신된 문제만 목록에서 원본을 받게 된다.
-      await uploadThumb(supabase, newPath, blob);
 
       // **합쳐진 PNG(image_path)만 갱신하면 안 된다.** 수정 화면은 이
       // image_path 를 안 쓰고 box_range.figures 의 markup 으로 카드를 다시
