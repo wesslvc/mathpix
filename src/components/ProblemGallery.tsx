@@ -109,6 +109,11 @@ type Props = {
   problems: GalleryProblem[];
   /** 지문 재인식 비용을 원화로 보여줄지(무제한 계정만 — 막는 자리는 서버다). */
   unlimited?: boolean;
+  /**
+   * BYOD 패스 계정인가. Mathpix가 무제한 무료라 "인식 1토큰" 같은 비용
+   * 문구가 안 맞다 — 막는 자리는 서버(`/api/mathpix`)다.
+   */
+  byod?: boolean;
 };
 
 /**
@@ -192,7 +197,7 @@ function NumberInput({
   );
 }
 
-export default function ProblemGallery({ problems, unlimited = false }: Props) {
+export default function ProblemGallery({ problems, unlimited = false, byod = false }: Props) {
   const router = useRouter();
   const [raw, setList] = useState<GalleryProblem[]>(problems);
   /**
@@ -1345,7 +1350,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                   className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300"
                                 />
                                 <span>
-                                  Mathpix로 글자를 읽어 참고로 주기 (인식 1토큰)
+                                  Mathpix로 글자를 읽어 참고로 주기
+                                  {!byod && " (인식 1토큰)"}
                                   <span className="block text-slate-400">
                                     국어는 글이 대부분이라 읽어 준 글을 베끼는
                                     쪽이 더 정확해서 기본으로 켭니다. 끄면

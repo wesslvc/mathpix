@@ -16,6 +16,13 @@ type Props = {
   onConfirm: (croppedDataUrl: string, mode: "ocr" | "problem" | "asis") => void;
   /** 문제 전체 다시 그리기에 드는 토큰. 못 불러왔으면 표시하지 않는다. */
   problemTokenCost?: number | null;
+  /** 무제한 계정인가. 토큰 비용 표시를 감춘다. */
+  unlimited?: boolean;
+  /**
+   * BYOD 패스 계정인가. 본인 키로 직접 내므로 "통째로 AI로 다시 그리기"에
+   * 토큰 비용을 붙여 보여주면 안 된다(실제로도 안 든다).
+   */
+  byod?: boolean;
   onCancel: () => void;
   onError: (message: string) => void;
 };
@@ -36,6 +43,8 @@ export default function CropStage({
   onCancel,
   onError,
   problemTokenCost,
+  unlimited = false,
+  byod = false,
 }: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [crop, setCrop] = useState<Crop>();
@@ -182,7 +191,11 @@ export default function CropStage({
           className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
         >
           통째로 AI로 다시 그리기
-          {typeof problemTokenCost === "number" && ` (${problemTokenCost}토큰)`}
+          {typeof problemTokenCost === "number" &&
+            !unlimited &&
+            !byod &&
+            ` (${problemTokenCost}토큰)`}
+          {byod && " (본인 키 사용)"}
         </button>
         <button
           type="button"

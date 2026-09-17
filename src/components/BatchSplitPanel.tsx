@@ -95,6 +95,11 @@ type Props = {
   }) => Promise<string>;
   /** 자동 영역 찾기(Gemini)를 보여줄지. 서버에서도 같은 조건으로 막는다. */
   unlimited?: boolean;
+  /**
+   * BYOD 패스 계정인가. 본인 키로 직접 내므로 "모두 AI로 재생성"에 토큰
+   * 비용을 붙여 보여주면 안 된다(실제로도 안 든다 — `/api/figure`가 건너뛴다).
+   */
+  byod?: boolean;
   /** 문제 하나를 다시 그리는 데 드는 토큰. 서버가 알려준 값을 그대로 쓴다. */
   figureCost?: number | null;
 };
@@ -124,7 +129,12 @@ async function readNumberWithMathpix(crop: string): Promise<number | null> {
   }
 }
 
-export default function BatchSplitPanel({ onSave, unlimited = false, figureCost }: Props) {
+export default function BatchSplitPanel({
+  onSave,
+  unlimited = false,
+  byod = false,
+  figureCost,
+}: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   /**
    * 고른 사진 **원본**. 자르는 재료는 이것이다.
@@ -787,7 +797,7 @@ export default function BatchSplitPanel({ onSave, unlimited = false, figureCost 
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
               모두 AI로 재생성 ({pieces.length}개
-              {totalCost !== null && !unlimited && ` · ${totalCost}토큰`})
+              {totalCost !== null && !unlimited && !byod && ` · ${totalCost}토큰`})
             </button>
           )}
         </div>

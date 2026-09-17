@@ -282,6 +282,7 @@ export default async function CategoryPage({
       <BillingStatus
         credits={access.credits}
         unlimited={access.unlimited}
+        byod={access.byod}
         checkoutReady={isCheckoutReady()}
       />
 
@@ -348,6 +349,7 @@ export default async function CategoryPage({
           .filter((p) => p.korean?.role !== "passage")
           .filter((p) => (p.number ?? parseProblemNumber(p.text)) == null)
           .map((p) => ({ id: p.id, imageUrl: p.imageUrl, text: p.text }))}
+        byod={access.byod}
       />
 
       {/* 답지 한 장으로 정답을 한꺼번에 붙인다. 문제가 있어야 붙일 데가
@@ -368,7 +370,11 @@ export default async function CategoryPage({
         />
       )}
 
-      <ProblemGallery problems={galleryProblems} unlimited={access.unlimited} />
+      <ProblemGallery
+        problems={galleryProblems}
+        unlimited={access.unlimited}
+        byod={access.byod}
+      />
     </main>
   );
 }

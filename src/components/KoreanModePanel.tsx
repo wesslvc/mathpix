@@ -80,6 +80,11 @@ type Props = {
     boxRange: StoredBoxRange;
   }) => Promise<string>;
   unlimited?: boolean;
+  /**
+   * BYOD 패스 계정인가. 본인 키로 직접 내므로 "모두 AI로 다시 그리기"에
+   * 토큰 비용을 붙여 보여주면 안 된다(실제로도 안 든다).
+   */
+  byod?: boolean;
   /** 문제 하나를 다시 그리는 데 드는 토큰. 서버가 알려준 값을 그대로 쓴다. */
   figureCost?: number | null;
   onDone?: () => void;
@@ -88,6 +93,7 @@ type Props = {
 export default function KoreanModePanel({
   onSave,
   unlimited = false,
+  byod = false,
   figureCost,
   onDone,
 }: Props) {
@@ -942,7 +948,10 @@ export default function KoreanModePanel({
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {busy ?? "모두 AI로 다시 그리기"}
-              {typeof figureCost === "number" && ` (${figureCost * pieces.length}토큰)`}
+              {typeof figureCost === "number" &&
+                !unlimited &&
+                !byod &&
+                ` (${figureCost * pieces.length}토큰)`}
             </button>
           </div>
         </div>
