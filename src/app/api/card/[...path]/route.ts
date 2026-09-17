@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { r2Configured, r2Get } from "@/lib/r2";
 
 /**
  * 저장된 카드 그림을 **우리 주소로** 내보낸다.
@@ -55,6 +56,20 @@ export async function GET(
     return NextResponse.json({ error: "권한이 없습니다." }, { status: 403 });
   }
 
+  // **R2 를 먼저 본다.** 그림은 R2 로 옮겨 가는 중이라 두 곳에 나뉘어 있다 —
+  // 여기서 한쪽씩 차례로 보면 이관이 끝나기 전에도 둘 다 정상으로 보인다.
+  // R2 가 꺼져 있으면(환경변수 없음) 이 블록은 통째로 건너뛴다.
+  if (r2Configured()) {
+    try {
+      const hit = await r2Get(path);
+      if (hit) return imageResponse(hit.body, hit.headers.get("Content-Type"), path);
+    } catch (err) {
+      // R2 가 잠깐 안 되더라도 **그림이 안 뜨는 것보다는** Supabase 에서
+      // 찾아보는 편이 낫다. 조용히 넘어가지는 않는다 — 로그에는 남긴다.
+      console.error("[card] R2 읽기 실패, Supabase 로 넘어감:", err);
+    }
+  }
+
   let file = await supabase.storage.from(BUCKET).download(path);
 
   // **미리보기가 없으면 원본을 준다.** 옛 문제에는 `.thumb.webp` 가 없는데,
@@ -66,6 +81,14 @@ export async function GET(
     // `thumbPathFor` 가 `.png` 를 떼고 `.thumb.webp` 를 붙이므로 되돌리는 것도
     // 그 반대로 한다(원본은 `.png` 하나뿐이다).
     const original = `${path.replace(/\.thumb\.webp$/, "")}.png`;
+    if (r2Configured()) {
+      try {
+        const hit = await r2Get(original);
+        if (hit) return imageResponse(hit.body, hit.headers.get("Content-Type"), path);
+      } catch (err) {
+        console.error("[card] R2 원본 읽기 실패:", err);
+      }
+    }
     file = await supabase.storage.from(BUCKET).download(original);
   }
 
@@ -73,9 +96,18 @@ export async function GET(
     return NextResponse.json({ error: "그림을 찾지 못했습니다." }, { status: 404 });
   }
 
-  return new NextResponse(file.data, {
+  return imageResponse(file.data, file.data.type, path);
+}
+
+/** 어디서 왔든 **같은 헤더로** 내보낸다 — 캐시 규칙이 갈리면 안 된다. */
+function imageResponse(
+  body: BodyInit | null,
+  contentType: string | null,
+  path: string,
+): NextResponse {
+  return new NextResponse(body, {
     headers: {
-      "Content-Type": file.data.type || "image/png",
+      "Content-Type": contentType || "image/png",
       // 경로가 곧 내용이라(수정하면 새 uuid) 절대 안 바뀐다.
       "Cache-Control": "private, max-age=31536000, immutable",
       ETag: `"${path}"`,
