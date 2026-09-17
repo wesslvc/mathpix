@@ -11,7 +11,7 @@ import ProblemGallery, {
 import BillingStatus from "@/components/BillingStatus";
 import Logo from "@/components/Logo";
 import CategoryTitleEditor from "@/components/CategoryTitleEditor";
-import { getAccessState, isCheckoutReady } from "@/lib/billing";
+import { getAccessState, isByodCheckoutReady, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
@@ -284,6 +284,7 @@ export default async function CategoryPage({
         unlimited={access.unlimited}
         byod={access.byod}
         checkoutReady={isCheckoutReady()}
+        byodCheckoutReady={isByodCheckoutReady()}
       />
 
       {linkedGrades && linkedGrades.length > 0 && (
