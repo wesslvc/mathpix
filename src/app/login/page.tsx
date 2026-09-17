@@ -61,6 +61,28 @@ function LoginForm() {
     setIsLoading(false);
   }
 
+  async function signInWithGoogle() {
+    setIsLoading(true);
+    setError(null);
+    setNotice(null);
+
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        // Supabase가 Google 인증 뒤 이 경로에 PKCE code를 전달하고,
+        // 서버가 이를 세션으로 교환한다.
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+
+    if (error) {
+      setError(error.message);
+      setIsLoading(false);
+    }
+  }
+
+
   if (!isSupabaseConfigured()) {
     return (
       <main className="mx-auto flex max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
@@ -198,6 +220,32 @@ function LoginForm() {
           {isLoading ? "처리 중..." : mode === "login" ? "로그인" : "회원가입"}
         </button>
       </form>
+
+      <div className="flex w-full items-center gap-3 text-xs text-slate-400" aria-hidden="true">
+        <span className="h-px flex-1 bg-slate-200" />
+        또는
+        <span className="h-px flex-1 bg-slate-200" />
+      </div>
+
+      <button
+        type="button"
+        onClick={() => void signInWithGoogle()}
+        disabled={isLoading}
+        className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5">
+          <path fill="#4285F4" d="M21.8 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3.2-4.4 3.2-7.3Z" />
+          <path fill="#34A853" d="M12 22c2.7 0 5-0.9 6.6-2.5l-3.2-2.5c-.9.6-2 .9-3.4.9-2.6 0-4.8-1.7-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22Z" />
+          <path fill="#FBBC05" d="M6.4 13.8a6 6 0 0 1 0-3.6V7.6H3.1a10 10 0 0 0 0 8.8l3.3-2.6Z" />
+          <path fill="#EA4335" d="M12 6.1c1.5 0 2.9.5 3.9 1.5l2.9-2.9A10 10 0 0 0 3.1 7.6l3.3 2.6C7.2 7.8 9.4 6.1 12 6.1Z" />
+        </svg>
+        Google로 계속하기
+      </button>
+
+      <p className="w-full rounded-lg bg-blue-50 px-3 py-2 text-left text-xs leading-5 text-blue-800">
+        기존 이메일 계정이 있나요? <strong>같은 이메일을 쓰는 Google 계정</strong>으로
+        계속하면 기존 계정과 저장한 데이터가 그대로 연결됩니다.
+      </p>
 
       <button
         type="button"
