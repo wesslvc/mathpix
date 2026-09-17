@@ -18,6 +18,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 const MAX_VIA_SERVER = 4 * 1024 * 1024;
 
 /**
+ * 실패한 응답에서 읽을 수 있는 이유를 꺼낸다.
+ *
+ * **이게 없어서 한참 헤맸다.** 예전에는 실패하면 아무 말 없이 Supabase 로
+ * 내려갔는데, 그러면 401(세션) · 403(경로) · 501(R2 꺼짐) · 502(R2 오류)가
+ * 전부 **똑같이 보인다** — 저장은 되는데 R2 에는 아무것도 안 쌓이고, 왜인지
+ * 알 방법이 없다. 실제로 그 상태로 하루를 보냈다.
+ */
+async function reason(res: Response): Promise<string> {
+  try {
+    return (await res.text()).slice(0, 200);
+  } catch {
+    return "(본문을 읽지 못함)";
+  }
+}
+
+/**
  * 올린다. 성공하면 어디에 저장됐는지 돌려준다.
  *
  * 던지지 않는다 — 부르는 쪽은 `ok` 만 보면 된다(예전 `upload()` 의 `error` 와
@@ -38,10 +54,14 @@ export async function putBlob(
       });
       if (res.ok) return { ok: true, store: "r2" };
       // 501 = R2 가 꺼져 있다. 그 밖의 실패도 예전 길로 내려간다 — 저장을
-      // 통째로 잃는 것보다 낫다.
-    } catch {
+      // 통째로 잃는 것보다 낫다. **다만 조용히 넘어가지는 않는다.**
+      console.warn(`[blob] R2 업로드 실패(${res.status}) → Supabase 로 갑니다.`, await reason(res));
+    } catch (err) {
       // 네트워크 오류도 마찬가지.
+      console.warn("[blob] R2 업로드 요청 자체가 실패 → Supabase 로 갑니다.", err);
     }
+  } else {
+    console.warn(`[blob] ${blob.size}바이트라 서버를 못 거칩니다 → Supabase 로 갑니다.`);
   }
 
   const { error } = await supabase.storage
@@ -61,12 +81,17 @@ export async function removeBlobs(paths: string[]): Promise<void> {
   const list = paths.filter((p) => typeof p === "string" && p.length > 0);
   if (list.length === 0) return;
   try {
-    await fetch("/api/blob", {
+    const res = await fetch("/api/blob", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paths: list }),
     });
-  } catch {
-    // 조용히 넘어간다(위 설명).
+    if (!res.ok) {
+      // 여기가 실패하면 **아무도 안 가리키는 파일이 쌓인다**(고아 150장을
+      // 만든 사고가 그것이었다). 지우기를 막지는 않되 이유는 남긴다.
+      console.warn(`[blob] 삭제 실패(${res.status})`, await reason(res));
+    }
+  } catch (err) {
+    console.warn("[blob] 삭제 요청 자체가 실패", err);
   }
 }

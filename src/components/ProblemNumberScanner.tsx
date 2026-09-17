@@ -15,10 +15,13 @@ export type NumberScanTarget = {
   text: string;
 };
 
-/** 서명 URL 의 그림을 data URL 로 바꾼다(Mathpix 에 보내려면 필요하다). */
+/** 저장된 그림을 data URL 로 바꾼다(Mathpix 에 보내려면 필요하다). */
 async function urlToDataUrl(url: string): Promise<string> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error("이미지를 내려받지 못했습니다.");
+  // **어느 단계에서 막혔는지 알 수 있어야 한다.** 사진을 못 받은 것과 사진은
+  // 받았는데 번호가 안 보인 것은 고치는 방법이 전혀 다른데, 예전에는 둘 다
+  // "번호를 못 읽었어요" 한 문구로 뭉개져 있었다.
+  if (!res.ok) throw new Error(`이미지를 내려받지 못했습니다 (${res.status})`);
   const blob = await res.blob();
   return await new Promise<string>((resolve, reject) => {
     const r = new FileReader();
@@ -70,6 +73,9 @@ export default function ProblemNumberScanner({
     setDone(null);
     const updates = [...free];
     let failed = 0;
+    /** 사진 자체를 못 받은 것. 번호가 안 보인 것과 갈라 세야 고칠 데를 안다. */
+    let imageFailed = 0;
+    let lastFetchError = "";
 
     try {
       for (let i = 0; i < needScan.length; i++) {
@@ -93,12 +99,20 @@ export default function ProblemNumberScanner({
           else failed += 1;
         } catch (err) {
           if (err instanceof Error && /토큰|로그인/.test(err.message)) throw err;
+          if (err instanceof Error && /내려받지/.test(err.message)) {
+            imageFailed += 1;
+            lastFetchError = err.message;
+          }
           failed += 1;
         }
       }
 
       if (updates.length === 0) {
-        setError("번호를 하나도 읽지 못했어요. 문제 사진에 번호가 안 보이면 \"수정\"에서 직접 적어주세요.");
+        setError(
+          imageFailed > 0
+            ? `저장된 사진을 내려받지 못했어요 (${imageFailed}개). ${lastFetchError} — 번호를 못 읽은 게 아니라 사진을 못 여는 것이라, 새로고침해도 같으면 알려주세요.`
+            : '번호를 하나도 읽지 못했어요. 문제 사진에 번호가 안 보이면 "수정"에서 직접 적어주세요.',
+        );
         return;
       }
 
@@ -112,7 +126,8 @@ export default function ProblemNumberScanner({
       const applied = typeof n === "number" ? n : updates.length;
       setDone(
         failed > 0
-          ? `${applied}개에 번호를 붙였어요. ${failed}개는 번호를 못 읽어서 "수정"에서 직접 적어야 해요.`
+          ? `${applied}개에 번호를 붙였어요. ${failed}개는 실패했어요` +
+              (imageFailed > 0 ? ` (그중 ${imageFailed}개는 사진을 못 내려받음).` : ' — "수정"에서 직접 적어주세요.')
           : `${applied}개에 번호를 붙였어요.`,
       );
       router.refresh();
