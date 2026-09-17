@@ -24,7 +24,7 @@ import Logo from "./Logo";
 const LINKS = [
   { href: "/", label: "실모" },
   { href: "/grade", label: "채점" },
-  { href: "/profile", label: "성적" },
+  { href: "/profile", label: "프로필 및 설정" },
   { href: "/answer-sheet", label: "정답표" },
 ] as const;
 
