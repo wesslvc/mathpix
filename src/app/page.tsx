@@ -78,14 +78,20 @@ export default async function DashboardPage({
 
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 pt-6">
-      <header className="flex items-start justify-between gap-4">
+      {/* **좁은 화면에서는 세로로 쌓는다**(사용자 신고 — 로고를 버튼들이
+          가리고 가로로 화면보다 길어짐). `items-start justify-between` 만
+          있으면 버튼 넷 + 로그아웃이 줄어들지 않고(`shrink-0`) 로고 옆으로
+          그대로 밀고 나가 로고 글자를 덮었다. 넓은 화면(sm 이상)에서는
+          예전처럼 한 줄로 나란히 둔다. */}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
           <Logo size={44} />
           <p className="mt-2 text-sm text-slate-500">
             실모(출처)별로 오답을 모아두고, 나중에 한 번에 PDF로 인쇄하세요.
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        {/* 한 줄에 다 못 들어가면 다음 줄로 넘긴다(가로 스크롤이나 겹침 대신). */}
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
           <Link
             href="/grade"
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
@@ -98,7 +104,7 @@ export default async function DashboardPage({
             href="/profile"
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
           >
-            채점 기록·추세
+            프로필 및 설정
           </Link>
           {/* 문제를 앱에 넣지 않고 답지만 양식대로 뽑고 싶을 때 쓴다. */}
           <Link
