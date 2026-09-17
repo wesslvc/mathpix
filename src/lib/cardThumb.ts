@@ -1,3 +1,4 @@
+import { putBlob } from "./blobClient";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -107,12 +108,10 @@ export async function uploadThumb(
 ): Promise<boolean> {
   const blob = await makeThumbBlob(source);
   if (!blob) return false;
-  const { error } = await supabase.storage
-    .from("problem-images")
-    // **덮어쓰기(upsert)는 쓰지 않는다.** 이 버킷에는 UPDATE 정책이 없어서
-    // RLS 에 막힌다(원본을 새 경로에 올리고 예전 것을 지우는 이유가 그것이다).
-    // 미리보기 경로는 원본 경로에서 나오고 원본은 늘 새 UUID 라, 여기 올 때
-    // 그 자리는 언제나 비어 있다.
-    .upload(thumbPathFor(imagePath), blob, { contentType: "image/webp" });
-  return !error;
+  // **덮어쓰기(upsert)는 쓰지 않는다.** Supabase 로 떨어졌을 때 이 버킷에는
+  // UPDATE 정책이 없어서 RLS 에 막힌다(원본을 새 경로에 올리고 예전 것을
+  // 지우는 이유가 그것이다). 미리보기 경로는 원본 경로에서 나오고 원본은 늘
+  // 새 UUID 라, 여기 올 때 그 자리는 언제나 비어 있다.
+  const res = await putBlob(supabase, thumbPathFor(imagePath), blob, "image/webp");
+  return res.ok;
 }

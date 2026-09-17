@@ -55,6 +55,7 @@ import { useFigureJobs } from "./FigureJobsProvider";
 import { rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
 import { keepOrigin } from "@/lib/figureOrigin";
 import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
+import { putBlob, removeBlobs } from "@/lib/blobClient";
 import {
   ANSWER_TYPE_LABEL,
   formatAnswer,
@@ -702,10 +703,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       // 스토리지 버킷에 UPDATE 정책이 없어 덮어쓰기(upsert)는 RLS에 막힌다.
       // 새 경로에 업로드하고 image_path를 바꾼 뒤 예전 파일을 지운다.
       const newPath = siblingPath(editing.imagePath);
-      const { error: upErr } = await supabase.storage
-        .from("problem-images")
-        .upload(newPath, blob, { contentType: "image/png" });
-      if (upErr) throw upErr;
+      const up = await putBlob(supabase, newPath, blob, "image/png");
+      if (!up.ok) throw new Error(up.error);
 
       // 목록용 작은 미리보기도 같이(cardThumb.ts). 실패하면 목록이 원본을 쓴다.
       await uploadThumb(supabase, newPath, blob);
@@ -745,17 +744,13 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         .eq("id", editing.id);
       if (dbErr) {
         // DB 갱신 실패 시 방금 올린 파일을 정리한다.
-        await supabase.storage
-          .from("problem-images")
-          .remove([newPath, thumbPathFor(newPath)]);
+        await removeBlobs([newPath, thumbPathFor(newPath)]);
         throw dbErr;
       }
 
       // 예전 이미지는 정리(실패해도 치명적이지 않으므로 무시). 미리보기도 같이
       // 지운다 — 안 지우면 아무도 안 보는 파일이 저장 용량만 차지한다.
-      await supabase.storage
-        .from("problem-images")
-        .remove([editing.imagePath, thumbPathFor(editing.imagePath)]);
+      await removeBlobs([editing.imagePath, thumbPathFor(editing.imagePath)]);
 
       setEditing(null);
       router.refresh();
@@ -773,9 +768,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     setBusyId(problem.id);
     try {
       const supabase = createClient();
-      await supabase.storage
-        .from("problem-images")
-        .remove([problem.imagePath, thumbPathFor(problem.imagePath)]);
+      await removeBlobs([problem.imagePath, thumbPathFor(problem.imagePath)]);
       const { error } = await supabase
         .from("problems")
         .delete()

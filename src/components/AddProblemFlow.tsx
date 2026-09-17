@@ -44,6 +44,7 @@ import type { StoredBoxRange } from "@/lib/storedFigures";
 import type { TokenStatus } from "@/app/api/tokens/route";
 import { rasterToSvg } from "@/lib/figureImage";
 import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
+import { putBlob, removeBlobs } from "@/lib/blobClient";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import type { DiagramLayout } from "@/lib/diagramLayout";
@@ -377,10 +378,8 @@ export default function AddProblemFlow({
     const blob = await (await fetch(pngDataUrl)).blob();
     const path = `${user.id}/${categoryId}/${crypto.randomUUID()}.png`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("problem-images")
-      .upload(path, blob, { contentType: "image/png" });
-    if (uploadError) throw uploadError;
+    const up = await putBlob(supabase, path, blob, "image/png");
+    if (!up.ok) throw new Error(up.error);
 
     // 목록에 쓸 작은 미리보기를 같이 올린다(cardThumb.ts 참고). 실패해도
     // 그냥 진행한다 — 없으면 목록이 원본을 쓸 뿐이다.
@@ -432,16 +431,14 @@ export default function AddProblemFlow({
         .update({ ...fields, image_path: path })
         .eq("id", problemId);
       if (updateError) {
-        await supabase.storage.from("problem-images").remove([path]);
+        await removeBlobs([path]);
         throw updateError;
       }
       // 갈아 끼운 **뒤에** 지운다 — 먼저 지웠다가 갱신이 실패하면 행이 없는
       // 파일을 가리켜 목록에 깨진 그림이 뜬다. 실패해도 저장은 성공이다
       // (고아 하나가 남을 뿐이고, 여기서 막으면 저장이 안 된 것처럼 보인다).
       if (oldPath && oldPath !== path) {
-        await supabase.storage
-          .from("problem-images")
-          .remove([oldPath, thumbPathFor(oldPath)]);
+        await removeBlobs([oldPath, thumbPathFor(oldPath)]);
       }
       router.refresh();
       savedIdRef.current = problemId;
@@ -462,7 +459,7 @@ export default function AddProblemFlow({
       .single();
     if (insertError || !inserted) {
       // 실패 시 업로드한 이미지도 함께 정리한다.
-      await supabase.storage.from("problem-images").remove([path]);
+      await removeBlobs([path]);
       throw insertError ?? new Error("저장에 실패했습니다.");
     }
 

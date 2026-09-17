@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { thumbPathFor } from "@/lib/cardThumb";
+import { removeBlobs } from "@/lib/blobClient";
 
 type Props = {
   categoryId: string;
@@ -37,9 +38,7 @@ export default function DeleteCategoryButton({ categoryId, label }: Props) {
       if (paths.length > 0) {
         // 목록용 미리보기도 같이 지운다 — 안 지우면 아무도 안 보는 파일이
         // 저장 용량만 차지한다(없는 것을 지우라고 해도 오류가 아니다).
-        await supabase.storage
-          .from("problem-images")
-          .remove([...paths, ...paths.map(thumbPathFor)]);
+        await removeBlobs([...paths, ...paths.map(thumbPathFor)]);
       }
 
       // problems 행은 on delete cascade로 함께 삭제된다.
