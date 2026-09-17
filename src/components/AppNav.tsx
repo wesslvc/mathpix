@@ -38,7 +38,10 @@ export default function AppNav() {
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   return (
-    <nav className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur">
+    <nav
+      data-app-nav
+      className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur"
+    >
       <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-2.5">
         <Link href="/" className="mr-1 shrink-0" aria-label="ReprintOCR 홈">
           {/* 좁은 화면에서는 마크만 — 워드마크까지 두면 링크가 밀려 잘린다. */}

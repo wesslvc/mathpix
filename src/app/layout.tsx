@@ -4,10 +4,71 @@ import FigureJobsProvider from "@/components/FigureJobsProvider";
 import FigureJobsPanel from "@/components/FigureJobsPanel";
 import AppNav from "@/components/AppNav";
 
+/**
+ * 검색·공유에 쓰이는 대표 주소.
+ *
+ * **`metadataBase` 가 없으면 OG 이미지 주소가 상대경로로 나가서** 카카오톡·
+ * 트위터·구글이 그림을 못 불러온다(미리보기가 통째로 비어 보인다). 환경변수는
+ * 이미 인증 리다이렉트가 쓰는 것과 같은 값을 재사용한다 — 두 곳에 따로 적으면
+ * 반드시 한쪽만 고쳐진다.
+ */
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "") ||
+  "https://reprintocr.vercel.app";
+
+const TITLE = "ReprintOCR — 오답노트·오답프린트 제작";
+const DESCRIPTION =
+  "문제 사진을 올리면 수식까지 인식해 오답을 정리하고, 실전모의고사별로 모아 평가원 문제지 판형 그대로 PDF로 인쇄합니다. OMR 자동채점과 성적 추세까지.";
+
 export const metadata: Metadata = {
-  title: "ReprintOCR — 오답프린트 제작",
-  description:
-    "사진 속 문제를 자동으로 인식해 가독성 좋은 이미지로 재구성하고, 실전모의고사별로 오답을 모아 평가원 판형 PDF로 인쇄할 수 있게 해줍니다. NEPICA.",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: TITLE,
+    // 하위 화면은 제목 뒤에 사이트 이름이 붙는다(검색 결과에서 어느
+    // 사이트인지 보인다).
+    template: "%s — ReprintOCR",
+  },
+  description: DESCRIPTION,
+  applicationName: "ReprintOCR",
+  keywords: [
+    "오답노트",
+    "오답 정리",
+    "오답프린트",
+    "모의고사 오답",
+    "실전모의고사",
+    "수능 오답노트",
+    "평가원 문제지 양식",
+    "문제 사진 인식",
+    "수식 OCR",
+    "OMR 자동채점",
+    "성적 추세",
+  ],
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: "ReprintOCR",
+    locale: "ko_KR",
+    url: SITE_URL,
+    title: TITLE,
+    description: DESCRIPTION,
+    // **주소를 통째로 적는다.** 상대경로로 두면 `metadataBase` 에 기대게
+    // 되는데, 개발 서버에서 실제로 `http://localhost:3111/...` 로 나가는
+    // 것을 확인했다 — 그 상태로 배포되면 공유 미리보기 그림이 안 뜬다.
+    images: [
+      {
+        url: `${SITE_URL}/brand/magpie-paper-512.png`,
+        width: 512,
+        height: 512,
+        alt: "ReprintOCR — 종이를 문 물까치",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary",
+    title: TITLE,
+    description: DESCRIPTION,
+    images: [`${SITE_URL}/brand/magpie-paper-512.png`],
+  },
   // 파비콘은 로고와 같은 그림(종이를 문 물까치)을 쓴다. 크기별로 세 벌을 두어
   // 탭·홈 화면 어디에서든 뭉개지지 않게 한다.
   icons: {

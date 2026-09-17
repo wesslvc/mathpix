@@ -7,6 +7,19 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/supabase/env";
 const PUBLIC_PATHS = ["/login", "/auth"];
 
 /**
+ * 루트(`/`)도 공개다 — 로그아웃 상태면 소개 화면을, 로그인 상태면 대시보드를
+ * 보여준다(`page.tsx` 가 가른다). 검색 엔진이 색인할 내용이 있어야 해서다.
+ *
+ * **`PUBLIC_PATHS` 에 `"/"` 를 넣으면 안 된다.** 아래 검사가 `startsWith` 라
+ * 모든 경로가 `"/"` 로 시작하므로 **앱 전체가 공개가 된다.** 그래서 루트만
+ * 따로, 정확히 같은지로 본다.
+ */
+function isPublic(pathname: string): boolean {
+  if (pathname === "/") return true;
+  return PUBLIC_PATHS.some((path) => pathname.startsWith(path));
+}
+
+/**
  * 확인 링크가 엉뚱한 자리에 떨어져도 살려낸다.
  *
  * Supabase 는 메일 링크의 `redirect_to` 가 허용목록(Authentication > URL
@@ -90,11 +103,7 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isPublicPath = PUBLIC_PATHS.some((path) =>
-    request.nextUrl.pathname.startsWith(path),
-  );
-
-  if (!user && !isPublicPath) {
+  if (!user && !isPublic(request.nextUrl.pathname)) {
     const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }
@@ -104,6 +113,10 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|fonts/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2)$).*)",
+    // **`robots.txt` · `sitemap.xml` 은 반드시 빼야 한다.** 여기 걸리면 인증
+    // 가드가 크롤러를 `/login` 으로 튕겨서 **검색 엔진이 둘 다 읽지 못한다**
+    // (실제로 그랬다 — 두 주소 모두 307 로 `/login` 을 돌려주고 있었다).
+    // 로그인과 무관한 공개 파일이므로 아예 미들웨어를 안 타게 둔다.
+    "/((?!_next/static|_next/image|favicon.ico|robots\\.txt|sitemap\\.xml|fonts/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2)$).*)",
   ],
 };

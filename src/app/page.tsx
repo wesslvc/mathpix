@@ -6,6 +6,7 @@ import { examMaxScore, type Subject } from "@/lib/gradeSummary";
 import NewCategoryForm from "@/components/NewCategoryForm";
 import LogoutButton from "@/components/LogoutButton";
 import CategoryList from "@/components/CategoryList";
+import Landing from "@/components/Landing";
 import BillingStatus from "@/components/BillingStatus";
 import Logo from "@/components/Logo";
 import { getAccessState, isCheckoutReady } from "@/lib/billing";
@@ -34,18 +35,10 @@ export default async function DashboardPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    return (
-      <main className="mx-auto flex max-w-md flex-col items-center justify-center px-4 text-center">
-        <p className="text-sm text-slate-500">
-          로그인이 필요합니다.{" "}
-          <Link href="/login" className="text-blue-600 underline">
-            로그인 페이지로 이동
-          </Link>
-        </p>
-      </main>
-    );
-  }
+  // 로그아웃 상태에서는 **공개 소개 화면**을 보여준다. 예전에는 미들웨어가
+  // 여기까지 오기 전에 `/login` 으로 보냈고, 그래서 검색 엔진이 색인할 내용이
+  // 이 사이트에 하나도 없었다(`Landing` 주석 참고).
+  if (!user) return <Landing />;
 
   // **넷을 한꺼번에 부른다.** 서로 필요로 하는 게 없는데 예전에는 `await` 를
   // 네 줄로 늘어놓아 왕복 네 번이 **차례로** 일어났다 — Vercel↔Supabase 한
