@@ -38,6 +38,30 @@ function LoginForm() {
     setCanResend(true);
   }, [params]);
 
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+
+  /**
+   * 구글로 로그인/가입한다. 이메일이 이미 비밀번호 계정으로 가입돼 있으면
+   * Supabase 가 **같은 이메일 + 확인된 상태**일 때 자동으로 같은 계정에
+   * 구글 로그인 수단을 연결해 준다(Identity Linking) — 우리가 따로 데이터를
+   * 옮길 필요가 없다. 다른 이메일로 구글 계정을 쓰면 새 계정이 된다.
+   */
+  async function signInWithGoogle() {
+    setIsGoogleLoading(true);
+    setError(null);
+    setNotice(null);
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: emailConfirmRedirect() },
+    });
+    // 성공하면 브라우저가 곧바로 구글로 이동하므로 여기서 할 일이 없다.
+    if (error) {
+      setError(error.message);
+      setIsGoogleLoading(false);
+    }
+  }
+
   /** 확인 메일을 다시 보낸다. 메일을 잃었거나 만료됐을 때 쓸 길이 필요하다. */
   async function resend() {
     if (!email) {
@@ -156,6 +180,39 @@ function LoginForm() {
         <p className="mt-1 text-sm text-slate-500">
           틀린 문제를 모아 실제 시험지 판형으로 인쇄합니다.
         </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => void signInWithGoogle()}
+        disabled={isGoogleLoading || isLoading}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+      >
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+          <path
+            fill="#4285F4"
+            d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"
+          />
+          <path
+            fill="#34A853"
+            d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.87-3.04.87-2.34 0-4.32-1.58-5.03-3.71H.96v2.33A9 9 0 0 0 9 18z"
+          />
+          <path
+            fill="#FBBC05"
+            d="M3.97 10.72A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.18.29-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.05l3.01-2.33z"
+          />
+          <path
+            fill="#EA4335"
+            d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.59-2.59C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"
+          />
+        </svg>
+        {isGoogleLoading ? "이동 중..." : "Google로 계속하기"}
+      </button>
+
+      <div className="flex w-full items-center gap-3 text-xs text-slate-400">
+        <div className="h-px flex-1 bg-slate-200" />
+        또는
+        <div className="h-px flex-1 bg-slate-200" />
       </div>
 
       <form onSubmit={handleSubmit} className="flex w-full flex-col gap-3">
