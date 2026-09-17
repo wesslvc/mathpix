@@ -74,15 +74,39 @@ export async function r2Get(path: string): Promise<Response | null> {
   return res;
 }
 
+/**
+ * **`Content-Length` 를 우리가 직접 붙인다.**
+ *
+ * R2 는 S3 와 달리 PUT 에 길이를 반드시 요구하고, 없으면
+ * `411 MissingContentLength` 로 거절한다(chunked 전송을 안 받는다). 런타임이
+ * 알아서 붙여 주리라 기대하면 안 된다 — 로컬 Node 22 에서는 Uint8Array ·
+ * ArrayBuffer · Blob 넷 다 붙었는데, **Vercel(Node 24)에서는 안 붙어서**
+ * 카드 PNG 가 전부 411 로 떨어지고 있었다. 16바이트짜리 자체 점검만 통과해서
+ * 프로브는 초록불인데 진짜 저장만 조용히 Supabase 로 내려갔다.
+ *
+ * `content-length` 는 aws4fetch 의 `UNSIGNABLE_HEADERS` 에 들어 있어서
+ * **직접 붙여도 서명이 안 바뀐다** — 그래서 안전하다.
+ */
 export async function r2Put(
   path: string,
   body: ArrayBuffer | Uint8Array | Blob,
   contentType: string,
 ): Promise<void> {
+  // 길이를 확실히 알 수 있는 모양으로 한 번 맞춘다(스트림이 되면 다시 411 이다).
+  const bytes =
+    body instanceof Uint8Array
+      ? body
+      : body instanceof ArrayBuffer
+        ? new Uint8Array(body)
+        : new Uint8Array(await body.arrayBuffer());
+
   const res = await aws().fetch(r2ObjectUrl(path), {
     method: "PUT",
-    body: body as BodyInit,
-    headers: { "Content-Type": contentType },
+    body: bytes as unknown as BodyInit,
+    headers: {
+      "Content-Type": contentType,
+      "Content-Length": String(bytes.byteLength),
+    },
   });
   if (!res.ok) {
     throw new Error(`R2 쓰기 실패 (${res.status}) ${await res.text()}`);

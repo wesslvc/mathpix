@@ -84,14 +84,24 @@ export async function GET() {
     });
   }
 
-  const path = `${user.id}/_probe/${crypto.randomUUID()}.txt`;
-  const body = `blob ok ${new Date().toISOString()}`;
+  // **실제 카드 PNG 만 한 크기로 찌른다.** 처음에는 26바이트짜리로 했다가
+  // 크게 데었다 — R2 가 길이 없는 PUT 을 411 로 거절하는데 작은 본문에는
+  // 길이가 붙고 큰 본문에는 안 붙어서, **프로브는 초록불인데 진짜 저장만
+  // 전부 실패**하고 있었다. 시험하는 모양이 실제와 다르면 프로브는 거짓말을 한다.
+  const path = `${user.id}/_probe/${crypto.randomUUID()}.bin`;
+  const body = new Uint8Array(600 * 1024);
+  body[0] = 1;
   const steps: Record<string, string> = {};
   try {
-    await r2Put(path, new TextEncoder().encode(body), "text/plain");
+    await r2Put(path, body, "application/octet-stream");
     steps.put = "ok";
     const got = await r2Get(path);
-    steps.get = !got ? "방금 올린 것을 못 읽음(404)" : (await got.text()) === body ? "ok" : "내용이 다름";
+    const back = got ? new Uint8Array(await got.arrayBuffer()) : null;
+    steps.get = !back
+      ? "방금 올린 것을 못 읽음(404)"
+      : back.byteLength === body.byteLength && back[0] === 1
+        ? "ok"
+        : `내용이 다름(${back.byteLength}바이트)`;
     await r2Delete([path]);
     steps.delete = "ok";
   } catch (err) {
