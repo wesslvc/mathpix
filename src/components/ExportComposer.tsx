@@ -213,7 +213,7 @@ export default function ExportComposer({
                     type="button"
                     onClick={() => moveSource(index, -1)}
                     disabled={index === 0}
-                    className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                   >
                     ↑
                   </button>
@@ -221,7 +221,7 @@ export default function ExportComposer({
                     type="button"
                     onClick={() => moveSource(index, 1)}
                     disabled={index === sources.length - 1}
-                    className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                   >
                     ↓
                   </button>
@@ -272,7 +272,7 @@ export default function ExportComposer({
                   type="button"
                   onClick={() => move(index, -1)}
                   disabled={index === 0}
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                 >
                   ↑
                 </button>
@@ -280,7 +280,7 @@ export default function ExportComposer({
                   type="button"
                   onClick={() => move(index, 1)}
                   disabled={index === order.length - 1}
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                 >
                   ↓
                 </button>

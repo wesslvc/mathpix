@@ -185,7 +185,7 @@ function NumberInput({
         inputMode="numeric"
         placeholder="—"
         aria-label="문제 번호"
-        className="w-10 rounded border border-slate-300 px-1 py-0.5 text-center text-xs text-ink focus:border-blue-500 focus:outline-none disabled:opacity-40"
+        className="w-11 rounded border border-slate-300 px-1 py-1.5 text-center text-xs text-ink focus:border-blue-500 focus:outline-none disabled:opacity-40"
       />
       번
     </label>
@@ -846,7 +846,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         type="button"
         onClick={() => void unlock(problem)}
         disabled={busyId === problem.id}
-        className="shrink-0 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-40"
+        className="shrink-0 rounded border border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-40"
       >
         잠금 해제
       </button>
@@ -854,7 +854,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         type="button"
         onClick={() => remove(problem)}
         disabled={busyId === problem.id}
-        className="shrink-0 rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+        className="shrink-0 rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
       >
         삭제
       </button>
@@ -866,7 +866,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       <button
         type="button"
         onClick={() => openEdit(problem)}
-        className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+        className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100"
       >
         수정
       </button>
@@ -874,7 +874,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         type="button"
         onClick={() => remove(problem)}
         disabled={busyId === problem.id}
-        className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+        className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
       >
         삭제
       </button>
@@ -895,7 +895,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
               key={v}
               type="button"
               onClick={() => pickView(v)}
-              className={`rounded-lg border px-3 py-1 text-xs font-medium ${
+              className={`rounded-lg border px-3 py-2 text-xs font-medium ${
                 view === v
                   ? "border-blue-600 bg-blue-50 text-blue-700"
                   : "border-slate-300 text-slate-600 hover:bg-slate-100"
