@@ -93,6 +93,10 @@ export async function GET(
   }
 
   if (file.error || !file.data) {
+    // **조용히 404 를 주면 안 된다.** 이걸 받는 쪽은 `<img>`(빈 자리로 보인다)
+    // 와 번호 인식(그냥 "못 읽었어요"가 된다)이라, 여기서 안 남기면 그림이
+    // 없는 것인지 인식이 안 되는 것인지 끝내 알 수 없다.
+    console.error(`[card] 그림 없음: ${path} (r2=${r2Configured()}) ${file.error?.message ?? ""}`);
     return NextResponse.json({ error: "그림을 찾지 못했습니다." }, { status: 404 });
   }
 

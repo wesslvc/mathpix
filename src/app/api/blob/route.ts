@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { r2Configured, r2Delete, r2Put } from "@/lib/r2";
+import { r2Configured, r2Delete, r2Get, r2Put } from "@/lib/r2";
 
 /**
  * 그림 파일을 올리고 지우는 한 곳. **R2 로 간다.**
@@ -40,17 +40,78 @@ async function requireOwner(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
+    console.error("[blob] 세션이 없습니다(401).");
     return { ok: false, res: NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 }) };
   }
   if (!path || path.split("/")[0] !== user.id) {
+    console.error(`[blob] 경로 임자가 다릅니다(403). 첫 조각=${path.split("/")[0] ?? "(없음)"}`);
     return { ok: false, res: NextResponse.json({ error: "권한이 없습니다." }, { status: 403 }) };
   }
   return { ok: true };
 }
 
+/**
+ * **이 라우트가 실제로 되는지 브라우저에서 확인한다.**
+ *
+ * 올리기가 실패하면 부르는 쪽이 조용히 Supabase 로 내려간다(그게 맞다 —
+ * 저장을 통째로 잃으면 안 된다). 그런데 그러면 **왜 실패했는지 아무 데도 안
+ * 남는다**: 401(세션)·403(경로)·501(R2 꺼짐)·502(R2 오류)가 전부 똑같이
+ * 보인다. 실제로 R2 로 바꾼 뒤에도 파일이 전부 Supabase 로 가고 있었는데
+ * 하루 동안 아무도 몰랐다.
+ *
+ * 그래서 로그인한 브라우저로 `/api/blob` 을 그냥 열면 **자기 경로에** 16바이트
+ * 짜리를 올리고·읽고·지워 보고 결과를 그대로 돌려준다. 남의 것은 못 건드린다
+ * (경로가 `<내 id>/_probe/…` 로 고정이다). `/api/r2/selftest` 와 다른 점은
+ * **여기가 진짜로 쓰이는 인증·경로 규칙을 그대로 지난다**는 것이다.
+ */
+export async function GET() {
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch {
+    return NextResponse.json({ error: "저장소가 설정되어 있지 않습니다." }, { status: 503 });
+  }
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+
+  if (!r2Configured()) {
+    return NextResponse.json({
+      configured: false,
+      uid: user.id,
+      hint: "R2_ACCOUNT_ID · R2_ACCESS_KEY_ID · R2_SECRET_ACCESS_KEY · R2_BUCKET 넷이 다 있어야 하고, 넣은 뒤 재배포해야 반영됩니다.",
+    });
+  }
+
+  const path = `${user.id}/_probe/${crypto.randomUUID()}.txt`;
+  const body = `blob ok ${new Date().toISOString()}`;
+  const steps: Record<string, string> = {};
+  try {
+    await r2Put(path, new TextEncoder().encode(body), "text/plain");
+    steps.put = "ok";
+    const got = await r2Get(path);
+    steps.get = !got ? "방금 올린 것을 못 읽음(404)" : (await got.text()) === body ? "ok" : "내용이 다름";
+    await r2Delete([path]);
+    steps.delete = "ok";
+  } catch (err) {
+    return NextResponse.json(
+      { configured: true, ok: false, uid: user.id, steps, error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
+  }
+  return NextResponse.json({
+    configured: true,
+    ok: Object.values(steps).every((v) => v === "ok"),
+    uid: user.id,
+    steps,
+  });
+}
+
 /** 올리기. `?path=<스토리지 경로>` 에 본문 그대로 쓴다. */
 export async function PUT(req: NextRequest) {
   if (!r2Configured()) {
+    console.error("[blob] R2 환경변수가 없습니다 — Supabase 로 내려갑니다.");
     return NextResponse.json({ error: "R2가 설정되어 있지 않습니다." }, { status: 501 });
   }
   const path = req.nextUrl.searchParams.get("path") ?? "";
