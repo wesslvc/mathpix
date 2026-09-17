@@ -15,7 +15,7 @@ import { getAccessState, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
-import { cardThumbUrl, cardUrl } from "@/lib/cardUrl";
+import { cardUrl } from "@/lib/cardUrl";
 import type { BoxOverride } from "@/lib/renderMathText";
 import type { ExamScore } from "@/lib/supabase/types";
 import { SUBJECT_LABEL } from "@/lib/examSubjects";
@@ -222,9 +222,9 @@ export default async function CategoryPage({
       if (!p.image_path) return null;
       return {
         id: p.id,
+        // 작은 미리보기(.thumb.webp)는 더 이상 만들지 않는다(cardThumb.ts
+        // 참고) — 이 규모의 트래픽에서는 원본과 차이가 체감되지 않는다.
         imageUrl: cardUrl(p.image_path),
-        // 목록·카드에 그릴 작은 그림. 없으면(옛 문제) 라우트가 원본을 대신 준다.
-        thumbUrl: cardThumbUrl(p.image_path),
         imagePath: p.image_path,
         text: p.text_content || p.latex || "",
         sortOrder: p.sort_order,

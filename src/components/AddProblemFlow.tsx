@@ -43,7 +43,7 @@ import type { AnswerType } from "@/lib/answer";
 import type { StoredBoxRange } from "@/lib/storedFigures";
 import type { TokenStatus } from "@/app/api/tokens/route";
 import { rasterToSvg } from "@/lib/figureImage";
-import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
+import { thumbPathFor } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
 import { persistFigureBlobs } from "@/lib/figureBlob";
 import { enhanceContrast } from "@/lib/autoContrast";
@@ -381,10 +381,6 @@ export default function AddProblemFlow({
 
     const up = await putBlob(supabase, path, blob, "image/png");
     if (!up.ok) throw new Error(up.error);
-
-    // 목록에 쓸 작은 미리보기를 같이 올린다(cardThumb.ts 참고). 실패해도
-    // 그냥 진행한다 — 없으면 목록이 원본을 쓸 뿐이다.
-    await uploadThumb(supabase, path, pngDataUrl);
 
     // 그림마다 인라인 base64(markup·origin)를 스토리지로 옮긴다. DB 에 그림을
     // base64 로 그대로 담아 두는 것이 카드 원본과는 별개의 저장 위치 문제라
