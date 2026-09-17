@@ -1,10 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { buildKicePdf } from "@/lib/kice/pdf";
-import { frameKeyFor, loadFrameImages, loadKiceFrames, type KiceArea } from "@/lib/kice/frames";
-import { loadKiceFonts } from "@/lib/kice/fonts";
+import type { KiceArea } from "@/lib/kice/frames";
 import { ANSWER_SHEET_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
+
+// pdf-lib(과 평가원 틀·글꼴 로더)은 **"만들기"를 누를 때만** 받는다.
+// 정적으로 가져오면 이 화면을 열기만 해도 페이지 JS 가 510kB 가 되는데
+// (다른 화면의 다섯 배였다) 정작 답을 다 적기 전에는 한 줄도 쓰이지 않는다.
+// `/export` 가 평가원 패널을 `next/dynamic` 으로 미룬 것과 같은 판단이고,
+// 여기는 컴포넌트가 아니라 함수라 `await import()` 가 맞다.
+//
+// **타입만 쓰는 import 는 그대로 둔다** — `import type` 은 컴파일 때 지워져
+// 번들에 아무것도 싣지 않는다.
 
 /**
  * **정답표 생성기** — 손에 든 답지를 평가원 양식 정답표 한 쪽으로 뽑는다.
@@ -70,6 +77,13 @@ export default function AnswerSheetPage() {
     setWarnings([]);
     const warns: string[] = [];
     try {
+      const [{ buildKicePdf }, { frameKeyFor, loadFrameImages, loadKiceFrames }, { loadKiceFonts }] =
+        await Promise.all([
+          import("@/lib/kice/pdf"),
+          import("@/lib/kice/frames"),
+          import("@/lib/kice/fonts"),
+        ]);
+
       const key = frameKeyFor(area);
       const [all, fonts] = await Promise.all([loadKiceFrames(), loadKiceFonts()]);
       const frames = all[key];
