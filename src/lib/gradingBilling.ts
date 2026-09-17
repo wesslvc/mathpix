@@ -27,6 +27,12 @@ export async function startGradingBilling(
   supabase: SupabaseClient,
   opts: {
     unlimited: boolean;
+    /**
+     * BYOD 패스 계정인가. **본인 OpenAI 키로 직접 비용을 내므로** 무제한과
+     * 똑같이 차감·정산을 건너뛴다(사용자 결정, item 5 — 공유 키를 절대
+     * 안 쓰므로 우리 토큰도 안 받는다).
+     */
+    byod?: boolean;
     deposit?: number;
     label: string;
     /**
@@ -38,7 +44,7 @@ export async function startGradingBilling(
   },
 ): Promise<GradingBilling | null> {
   const deposit = opts.deposit ?? GRADING_TOKEN_DEPOSIT;
-  if (opts.unlimited) {
+  if (opts.unlimited || opts.byod) {
     return {
       charged: false,
       async refund() {},

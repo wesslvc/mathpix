@@ -7,6 +7,7 @@ import {
 } from "@/lib/tokens";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { getBillingContext } from "@/lib/byod";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,12 +81,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json(
-      { error: "OPENAI_API_KEY가 설정되지 않아 자동채점을 쓸 수 없습니다." },
-      { status: 500 },
-    );
-  }
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
   }
@@ -98,15 +93,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
   const userId = user.id;
-  const { data: ent } = await supabase
-    .from("entitlements")
-    .select("unlimited")
-    .eq("user_id", userId)
-    .maybeSingle();
-  const unlimited = ent?.unlimited === true;
+  const { unlimited, byod, byodApiKey } = await getBillingContext(supabase, userId);
 
+  if (byod && !byodApiKey) {
+    return NextResponse.json(
+      {
+        error:
+          "BYOD 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
+      },
+      { status: 402 },
+    );
+  }
+  if (!byod && !process.env.OPENAI_API_KEY) {
+    return NextResponse.json(
+      { error: "OPENAI_API_KEY가 설정되지 않아 자동채점을 쓸 수 없습니다." },
+      { status: 500 },
+    );
+  }
+
+  // **BYOD는 차감 없이 본인 키로 직접 부른다**(item 5 — 공유 키는 절대
+  // 안 건드린다).
   let charged = false;
-  if (!unlimited) {
+  if (!unlimited && !byod) {
     const { data, error } = await supabase.rpc("consume_recognition_credit", {
       p_amount: GRADING_TOKEN_DEPOSIT,
     });
@@ -164,6 +172,7 @@ export async function POST(req: NextRequest) {
       method,
       deadline.signal,
       electiveLabel,
+      byodApiKey ?? undefined,
     );
 
     // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
@@ -176,10 +185,11 @@ export async function POST(req: NextRequest) {
       return { ...s, label: key?.label };
     });
 
-    // 금액은 무제한 계정에만 보여준다(막는 자리는 서버 — 화면 숨김은 우회 가능).
-    // estKrw는 이미 계산해 뒀으니(정산에 썼다) 그대로 얹는다 — 단가를
-    // 몰라 estKrw가 undefined면 화면도 그냥 토큰 수만 보여준다.
-    const usage = unlimited && result.usage ? { ...result.usage, estKrw } : undefined;
+    // 금액은 무제한·BYOD 계정에만 보여준다(막는 자리는 서버 — 화면 숨김은
+    // 우회 가능). estKrw는 이미 계산해 뒀으니(정산에 썼다) 그대로 얹는다 —
+    // 단가를 몰라 estKrw가 undefined면 화면도 그냥 토큰 수만 보여준다.
+    const usage =
+      (unlimited || byod) && result.usage ? { ...result.usage, estKrw } : undefined;
 
     return NextResponse.json({ slots, usage, chargedTokens, model: result.model });
   } catch (err) {

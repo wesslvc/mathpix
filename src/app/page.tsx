@@ -114,6 +114,7 @@ export default async function DashboardPage({
       <BillingStatus
         credits={access.credits}
         unlimited={access.unlimited}
+        byod={access.byod}
         checkoutReady={isCheckoutReady()}
       />
 

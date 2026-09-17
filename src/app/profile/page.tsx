@@ -6,6 +6,7 @@ import type { ExamScore } from "@/lib/supabase/types";
 import type { Subject } from "@/lib/gradeSummary";
 import { buildTrendSeries } from "@/lib/scoreTrend";
 import BillingStatus from "@/components/BillingStatus";
+import ByodSettingsForm from "@/components/ByodSettingsForm";
 import ScoreTrendChart from "@/components/ScoreTrendChart";
 import Logo from "@/components/Logo";
 import GradeHistoryList from "@/components/GradeHistoryList";
@@ -95,10 +96,15 @@ export default async function ProfilePage() {
       <BillingStatus
         credits={access.credits}
         unlimited={access.unlimited}
+        byod={access.byod}
         checkoutReady={isCheckoutReady()}
       />
 
       <LinkedAccounts initialIdentities={user.identities ?? []} />
+
+      {/* BYOD 패스를 산 사람에게만 보인다 — 안 산 사람에게 키 입력칸을
+          보여줘 봐야 서버가 어차피 entitlements.byod로 다시 막는다. */}
+      {access.byod && <ByodSettingsForm />}
 
       <GradingPrefsForm initial={gradingPrefs} />
 

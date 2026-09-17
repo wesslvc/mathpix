@@ -28,6 +28,12 @@ export type AccessState = {
   canRecognize: boolean;
   /** 한도 없이 쓸 수 있는 계정인지(운영자 등). 이때 credits는 의미가 없다. */
   unlimited: boolean;
+  /**
+   * BYOD(Bring Your Own [OpenAI] Key) 패스 계정인가. Mathpix는 무제한
+   * 무료고, OpenAI 쓰는 기능은 본인이 등록한 키로 직접 부른다 — 우리
+   * 토큰은 안 든다. `/profile`이 이 값을 보고 BYOD 설정 UI를 보여준다.
+   */
+  byod: boolean;
 };
 
 /**
@@ -40,14 +46,15 @@ export async function getAccessState(
 ): Promise<AccessState> {
   const { data } = await supabase
     .from("entitlements")
-    .select("credits, unlimited")
+    .select("credits, unlimited, byod")
     .maybeSingle();
 
   const credits =
     (data?.credits as number | undefined) ?? FREE_RECOGNITION_CREDITS;
   const unlimited = Boolean(data?.unlimited);
+  const byod = Boolean(data?.byod);
 
-  return { credits, unlimited, canRecognize: unlimited || credits > 0 };
+  return { credits, unlimited, byod, canRecognize: unlimited || byod || credits > 0 };
 }
 
 /**

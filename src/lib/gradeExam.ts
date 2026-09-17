@@ -239,8 +239,14 @@ async function callVision(
   signal?: AbortSignal,
   /** 쓸 모델. 기본은 자리·채점용(luna). 지문 옮겨 적기는 terra 를 쓴다. */
   modelName?: string,
+  /**
+   * BYOD 사용자의 본인 OpenAI 키. 있으면 공유 `OPENAI_API_KEY` 대신 이
+   * 값으로 부른다 — item 5(BYOD는 공유 키를 절대 못 건드린다)에 따라
+   * 호출부가 반드시 본인 키를 확보한 뒤에만 넘겨야 한다.
+   */
+  apiKeyOverride?: string,
 ): Promise<{ text: string; usage?: GradeUsage; model: string }> {
-  const key = process.env.OPENAI_API_KEY;
+  const key = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
   const model = modelName ?? OPENAI_DETECT_MODEL;
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
@@ -355,11 +361,20 @@ export async function gradeWithVision(
   method: GradingMethod = "omr",
   signal?: AbortSignal,
   electiveLabel?: string,
+  /** BYOD 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
+  apiKeyOverride?: string,
 ): Promise<{ slots: GradeSlot[]; usage?: GradeUsage; model: string }> {
   // images[0]은 OMR(또는 가채점표), 나머지가 정답표다 — 탐구가 정답표
   // 1장(한 과목만)인지 2장(1선택+2선택)인지로 프롬프트가 갈린다.
   const prompt = subjectPrompt(subject, images.length - 1, method, electiveLabel);
-  const { text, usage, model } = await callVision(prompt, images, "채점", signal);
+  const { text, usage, model } = await callVision(
+    prompt,
+    images,
+    "채점",
+    signal,
+    undefined,
+    apiKeyOverride,
+  );
   return { slots: parseSlots(text), usage, model };
 }
 
@@ -393,12 +408,16 @@ export type KoreanTitle = { title: string; kind: string };
 export async function readKoreanTitle(
   passageText: string,
   signal?: AbortSignal,
+  /** BYOD 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
+  apiKeyOverride?: string,
 ): Promise<{ result: KoreanTitle; usage?: GradeUsage; model: string }> {
   const { text, usage, model } = await callVision(
     KOREAN_TITLE_PROMPT + passageText,
     [],
     "제목 짓기",
     signal,
+    undefined,
+    apiKeyOverride,
   );
   let parsed: unknown;
   try {
@@ -439,8 +458,17 @@ const ANSWER_KEY_PROMPT = `task: transcribe Korean HS ANSWER KEY photo into data
 export async function readAnswerKeyWithVision(
   images: string[],
   signal?: AbortSignal,
+  /** BYOD 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
+  apiKeyOverride?: string,
 ): Promise<{ items: AnswerKeyItem[]; usage?: GradeUsage; model: string }> {
-  const { text, usage, model } = await callVision(ANSWER_KEY_PROMPT, images, "답지 인식", signal);
+  const { text, usage, model } = await callVision(
+    ANSWER_KEY_PROMPT,
+    images,
+    "답지 인식",
+    signal,
+    undefined,
+    apiKeyOverride,
+  );
   return { items: parseAnswerKey(text), usage, model };
 }
 
@@ -695,6 +723,11 @@ export async function readKoreanRichText(
   imageDataUrl: string,
   reference: string,
   signal?: AbortSignal,
+  /**
+   * BYOD 사용자의 본인 OpenAI 키. Gemini 경로에는 영향이 없다 — 이건
+   * OpenAI(terra) 예비 경로에만 쓰인다.
+   */
+  apiKeyOverride?: string,
 ): Promise<{ blocks: unknown; usage?: GradeUsage; model: string }> {
   // 조합용 자모(ᄀᄂᄃ)를 먼저 호환용(ㄱㄴㄷ)으로 바꾼다 — Mathpix 가 이 형태로
   // 주는 경우가 있는데, 그대로 두면 모델이 "참고 글을 베끼라"는 지시를 따라
@@ -760,11 +793,18 @@ ${cleanedReference}
       });
     }
   }
-  if (process.env.OPENAI_API_KEY) {
+  if (apiKeyOverride || process.env.OPENAI_API_KEY) {
     attempts.push({
       label: OPENAI_TEXT_MODEL,
       run: () =>
-        callVision(prompt, [imageDataUrl], "지문 인식", signal, OPENAI_TEXT_MODEL),
+        callVision(
+          prompt,
+          [imageDataUrl],
+          "지문 인식",
+          signal,
+          OPENAI_TEXT_MODEL,
+          apiKeyOverride,
+        ),
     });
   }
   if (attempts.length === 0) {
