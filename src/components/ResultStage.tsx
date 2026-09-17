@@ -20,6 +20,7 @@ import {
   rasterToSvg,
   trimBlankBorder,
 } from "@/lib/figureImage";
+import { keepOrigin } from "@/lib/figureOrigin";
 import {
   figureCacheKey,
   readFigureCache,
@@ -558,7 +559,7 @@ export default function ResultStage({
         changed = true;
         // 원본을 남긴다(이미 있으면 덮지 않는다) — 수정 화면에서 되돌리거나
         // 다른 지시로 다시 그릴 때 이 그림을 입력으로 쓴다.
-        return { ...f, origin: f.origin ?? f.svg, svg: j.svg, ai: true };
+        return { ...keepOrigin(f, f.svg), svg: j.svg, ai: true };
       });
       return changed ? next : prev;
     });

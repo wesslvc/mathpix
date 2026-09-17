@@ -7,6 +7,7 @@ import {
 } from "@/lib/figureImageGen";
 import { FIGURE_TOKEN_DEPOSIT, figureTokenCharge } from "@/lib/tokens";
 import { thumbPathFor } from "@/lib/cardThumb";
+import { keepOrigin } from "@/lib/figureOrigin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -143,15 +144,7 @@ async function persistWholeProblem(
       figures.length > 0
         ? figures.map((f) =>
             !figureId || f.id === figureId
-              ? {
-                  ...f,
-                  ...(typeof f.origin === "string" ||
-                  typeof f.markup !== "string"
-                    ? {}
-                    : { origin: f.markup }),
-                  markup,
-                  ai: true,
-                }
+              ? { ...keepOrigin(f, f.markup), markup, ai: true }
               : f,
           )
         : [
