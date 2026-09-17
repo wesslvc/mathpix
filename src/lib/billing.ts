@@ -65,3 +65,12 @@ export async function getAccessState(
 export function isCheckoutReady(): boolean {
   return Boolean(process.env.GROBLE_PAYMENT_URL_TOKENS || process.env.GROBLE_PAYMENT_URL);
 }
+
+/**
+ * BYOD 패스 결제창이 설정돼 있는지. 그로블 상품은 판매 중이지만
+ * `GROBLE_PAYMENT_URL_BYOD`를 Vercel에 넣기 전까지는 `/api/checkout?plan=byod`가
+ * 503을 준다 — 그 사이에는 배너에서 버튼 대신 "준비 중"을 보여준다.
+ */
+export function isByodCheckoutReady(): boolean {
+  return Boolean(process.env.GROBLE_PAYMENT_URL_BYOD);
+}

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import type { Category, Folder } from "@/lib/supabase/types";
@@ -9,7 +8,7 @@ import CategoryList from "@/components/CategoryList";
 import Landing from "@/components/Landing";
 import BillingStatus from "@/components/BillingStatus";
 import Logo from "@/components/Logo";
-import { getAccessState, isCheckoutReady } from "@/lib/billing";
+import { getAccessState, isByodCheckoutReady, isCheckoutReady } from "@/lib/billing";
 
 export default async function DashboardPage({
   searchParams,
@@ -78,43 +77,19 @@ export default async function DashboardPage({
 
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 pt-6">
-      {/* **좁은 화면에서는 세로로 쌓는다**(사용자 신고 — 로고를 버튼들이
-          가리고 가로로 화면보다 길어짐). `items-start justify-between` 만
-          있으면 버튼 넷 + 로그아웃이 줄어들지 않고(`shrink-0`) 로고 옆으로
-          그대로 밀고 나가 로고 글자를 덮었다. 넓은 화면(sm 이상)에서는
-          예전처럼 한 줄로 나란히 둔다. */}
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      {/* **자동채점·프로필 및 설정·정답표 생성기 버튼을 없앴다**(사용자
+          지적 — "중복되는 버튼들이 상단에 너무 자리차지"). 전역
+          내비게이션(`AppNav`)에 채점·프로필 및 설정·정답표 링크가 이미
+          있어서, 여기 있던 셋은 같은 곳으로 가는 버튼이 위아래로 두 번
+          찍히고 있었다. 로그아웃만 여기 고유한 동작이라 남긴다. */}
+      <header className="flex items-start justify-between gap-4">
         <div>
           <Logo size={44} />
           <p className="mt-2 text-sm text-slate-500">
             실모(출처)별로 오답을 모아두고, 나중에 한 번에 PDF로 인쇄하세요.
           </p>
         </div>
-        {/* 한 줄에 다 못 들어가면 다음 줄로 넘긴다(가로 스크롤이나 겹침 대신). */}
-        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
-          <Link
-            href="/grade"
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
-          >
-            자동채점
-          </Link>
-          {/* 채점 기록(개별 시행 검색)과 성적 추세를 한 화면(/profile)으로
-              합쳤다 — 예전엔 두 링크로 나뉘어 있었다. */}
-          <Link
-            href="/profile"
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
-          >
-            프로필 및 설정
-          </Link>
-          {/* 문제를 앱에 넣지 않고 답지만 양식대로 뽑고 싶을 때 쓴다. */}
-          <Link
-            href="/answer-sheet"
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-slate-50"
-          >
-            정답표 생성기
-          </Link>
-          <LogoutButton />
-        </div>
+        <LogoutButton />
       </header>
 
       <BillingStatus
@@ -122,6 +97,7 @@ export default async function DashboardPage({
         unlimited={access.unlimited}
         byod={access.byod}
         checkoutReady={isCheckoutReady()}
+        byodCheckoutReady={isByodCheckoutReady()}
       />
 
       <NewCategoryForm folderId={currentFolderId ?? null} />

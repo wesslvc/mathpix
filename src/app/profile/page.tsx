@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { getAccessState, isCheckoutReady } from "@/lib/billing";
+import { getAccessState, isByodCheckoutReady, isCheckoutReady } from "@/lib/billing";
 import type { ExamScore } from "@/lib/supabase/types";
 import type { Subject } from "@/lib/gradeSummary";
 import { buildTrendSeries } from "@/lib/scoreTrend";
@@ -98,6 +98,7 @@ export default async function ProfilePage() {
         unlimited={access.unlimited}
         byod={access.byod}
         checkoutReady={isCheckoutReady()}
+        byodCheckoutReady={isByodCheckoutReady()}
       />
 
       <LinkedAccounts initialIdentities={user.identities ?? []} />
