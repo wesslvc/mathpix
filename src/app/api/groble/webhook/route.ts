@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PAID_RECOGNITION_CREDITS } from "@/lib/billing";
+import { PAID_RECOGNITION_CREDITS, LEGACY_PAID_RECOGNITION_CREDITS } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -48,7 +48,30 @@ async function resolveUserId(
   return (data?.user_id as string | undefined) ?? null;
 }
 
-/** 결제 완료 → 토큰 1000개 충전(정기결제 회차도 매번 동일하게 충전). */
+type Plan = "tokens" | "byod" | "legacy";
+
+/**
+ * `ref` 문자열의 접두사로 무엇을 샀는지 가른다.
+ *
+ * 그로블 결제 이벤트 자체에는 "어느 옵션을 샀는지"를 안정적으로 읽을 필드가
+ * 없어서(상품을 옵션별로 아예 나눴다), `/api/checkout` 이 결제로 보내기 전에
+ * 심어 둔 이 접두사가 유일한 단서다(`makeRef` 참고). **접두사가 없는 옛
+ * ref**(이 배포 전에 만들어진 `ord_<hex>`)는 `legacy` 로 떨어진다 — 그게
+ * 곧 "옛 1000토큰 상품"이 계속 옳게 처리돼야 하는 이유와 같다.
+ */
+function planFromRef(ref: string | null): Plan {
+  if (ref?.startsWith("ord_tokens_")) return "tokens";
+  if (ref?.startsWith("ord_byod_")) return "byod";
+  return "legacy";
+}
+
+/**
+ * 결제 완료 → ref에 찍힌 플랜대로 충전한다(정기결제 회차도 매번 동일하게).
+ *
+ * - `tokens`(새 5000토큰 상품) → `PAID_RECOGNITION_CREDITS`(5000).
+ * - `byod` → 토큰이 아니라 `grant_byod_pass` RPC로 `entitlements.byod`를 켠다.
+ * - `legacy`(옛 1000토큰 상품·접두사 없는 옛 ref) → `LEGACY_PAID_RECOGNITION_CREDITS`(1000).
+ */
 async function grantCredits(
   admin: SupabaseClient,
   args: {
@@ -59,11 +82,19 @@ async function grantCredits(
   const userId = await resolveUserId(admin, args.sellerReference);
   if (!userId) return; // 매핑 없음(잘못된/폐기된 ref) → 조용히 무시
 
-  const { error } = await admin.rpc("grant_recognition_credits", {
-    p_user_id: userId,
-    p_amount: PAID_RECOGNITION_CREDITS,
-  });
-  if (error) throw error;
+  const plan = planFromRef(args.sellerReference);
+  if (plan === "byod") {
+    const { error } = await admin.rpc("grant_byod_pass", { p_user_id: userId });
+    if (error) throw error;
+  } else {
+    const amount =
+      plan === "tokens" ? PAID_RECOGNITION_CREDITS : LEGACY_PAID_RECOGNITION_CREDITS;
+    const { error } = await admin.rpc("grant_recognition_credits", {
+      p_user_id: userId,
+      p_amount: amount,
+    });
+    if (error) throw error;
+  }
 
   // 일반결제 취소·환불은 sellerReference가 안 오므로 merchantUid로 연결하려 매핑 저장.
   if (args.merchantUid && args.sellerReference) {
