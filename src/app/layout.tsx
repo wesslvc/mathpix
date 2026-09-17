@@ -17,6 +17,21 @@ const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "") ||
   "https://reprintocr.vercel.app";
 
+/**
+ * 구글 서치 콘솔이 준 소유 확인 토큰. **접두사가 붙어 있으면 떼어 낸다.**
+ *
+ * 구글은 같은 토큰을 자리마다 다른 모양으로 보여 준다 — 메타 태그에는 토큰만,
+ * DNS TXT 레코드에는 `google-site-verification=<토큰>` 으로. 그래서 환경변수에
+ * 접두사째 붙여 넣기 쉬운데, 그러면 태그가
+ * `content="google-site-verification=..."` 로 나가고 **구글이 확인을 거부한다**
+ * (실제로 그 상태로 배포돼 있었다). 사람이 다시 안 틀리게 여기서 받아 준다.
+ */
+function googleVerification(): string | undefined {
+  const raw = process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION?.trim();
+  if (!raw) return undefined;
+  return raw.replace(/^google-site-verification\s*=\s*/i, "").trim() || undefined;
+}
+
 const TITLE = "ReprintOCR — 오답노트·오답프린트 제작";
 const DESCRIPTION =
   "문제 사진을 올리면 수식까지 인식해 오답을 정리하고, 실전모의고사별로 모아 평가원 문제지 판형 그대로 PDF로 인쇄합니다. OMR 자동채점과 성적 추세까지.";
@@ -47,8 +62,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
   // 구글 서치 콘솔 소유 확인. 콘솔이 주는 코드를 Vercel 환경변수에 넣으면
   // **코드를 고치지 않고** 확인이 끝난다. 없으면 아무 태그도 안 나간다.
-  verification: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
-    ? { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION }
+  verification: googleVerification()
+    ? { google: googleVerification() }
     : undefined,
   openGraph: {
     type: "website",
