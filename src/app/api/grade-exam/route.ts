@@ -30,6 +30,12 @@ export async function POST(req: NextRequest) {
     omr?: string;
     keys?: { slot?: number; label?: string; image?: string }[];
     method?: string;
+    /**
+     * 학생이 고른 선택과목(수학: 미적분/기하/확률과 통계, 국어: 언어와
+     * 매체/화법과 작문). 정답표가 선택과목별 답을 한 사진에 나란히 적어
+     * 두는 경우 어느 것을 봐야 하는지 모델에 알려주는 데 쓴다.
+     */
+    electiveLabel?: string;
   };
   try {
     body = await req.json();
@@ -43,6 +49,10 @@ export async function POST(req: NextRequest) {
       : "korean";
   const method: GradingMethod = body.method === "handwritten" ? "handwritten" : "omr";
   const omr = typeof body.omr === "string" ? body.omr : null;
+  const electiveLabel =
+    typeof body.electiveLabel === "string" && body.electiveLabel.trim()
+      ? body.electiveLabel.trim()
+      : undefined;
   const keys = Array.isArray(body.keys)
     ? body.keys.filter((k): k is { slot?: number; label?: string; image: string } =>
         typeof k?.image === "string",
@@ -153,6 +163,7 @@ export async function POST(req: NextRequest) {
       [omr, ...keys.map((k) => k.image)],
       method,
       deadline.signal,
+      electiveLabel,
     );
 
     // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
