@@ -266,7 +266,16 @@ export default function GradeExamFlow() {
       const res = await fetch("/api/grade-exam", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, omr, keys, method: formalExam ? "handwritten" : "omr" }),
+        body: JSON.stringify({
+          subject,
+          omr,
+          keys,
+          method: formalExam ? "handwritten" : "omr",
+          // 정답표에 미적분/기하/확률과 통계(또는 언어와 매체/화법과 작문)
+          // 답이 나란히 적혀 있을 때 어느 것을 봐야 하는지 서버에 알려준다
+          // — 안 보내면 모델이 아무 칸이나 골라 채점한다(사용자 신고).
+          electiveLabel: electiveLabelFor(undefined),
+        }),
       });
       const json: {
         slots?: GradeSlot[];

@@ -43,7 +43,12 @@ export class GradeError extends Error {
  *  적어 둔 가채점표로 채점해야 한다. */
 export type GradingMethod = "omr" | "handwritten";
 
-function subjectPrompt(subject: Subject, keyCount: number, method: GradingMethod): string {
+function subjectPrompt(
+  subject: Subject,
+  keyCount: number,
+  method: GradingMethod,
+  electiveLabel?: string,
+): string {
   // 공통 지시는 짧게 유지한다 — 매 채점 호출마다 입력 토큰으로 나가므로,
   // 특정 과목에만 해당하는 설명(예: 수학의 격자형 표기)은 여기 넣지 않고
   // 그 과목 분기에만 붙인다.
@@ -107,11 +112,24 @@ standard 수능/mock-exam layout (fewer items -> apply as far as it goes):
 `
       : "";
 
+  // 수학(미적분/기하/확률과 통계)·국어(언어와 매체/화법과 작문)는 선택과목에
+  // 따라 정답이 갈리는 문항이 있다. 학원 정답표는 그 문항에 선택과목별 답을
+  // **나란히** 적어 둔다(예: "24. 미적분 ③ 기하 ② 확통 ①") — 학생이 고른
+  // 과목 하나만 봐야 하는데, 어느 것인지 안 알려주면 모델이 아무거나 골라
+  // 채점한다(사용자 신고 — "미적기하확통이 답지에 같이있을때는 그 선택과목을
+  // 보고 채점해야하는데 자꾸 그냥함"). 화면에서 이미 고른 선택과목을 그대로
+  // 박아 준다 — 프롬프트가 없으면 정답표에 답이 여러 개 있다는 것 자체를
+  // 모델이 모른다.
+  const electiveNote =
+    (subject === "math" || subject === "korean") && electiveLabel
+      ? `\nstudent's elective subject is "${electiveLabel}". if the answer key lists separate answers per elective for some items (e.g. "24. 미적분 ③ 기하 ② 확통 ①"), use ONLY the "${electiveLabel}" answer for those items and ignore the other electives' answers entirely.\n`
+      : "";
+
   return `${intro}
 2 images:
 1) ${sheetLabel}
 2) answer key: correct answers per item, possibly w/ marks column.
-${mathNote}
+${mathNote}${electiveNote}
 read items in number order, answer JSON only:
 {"slots":[{"items":[...]}]}
 ${common}`;
@@ -336,10 +354,11 @@ export async function gradeWithVision(
   images: string[],
   method: GradingMethod = "omr",
   signal?: AbortSignal,
+  electiveLabel?: string,
 ): Promise<{ slots: GradeSlot[]; usage?: GradeUsage; model: string }> {
   // images[0]은 OMR(또는 가채점표), 나머지가 정답표다 — 탐구가 정답표
   // 1장(한 과목만)인지 2장(1선택+2선택)인지로 프롬프트가 갈린다.
-  const prompt = subjectPrompt(subject, images.length - 1, method);
+  const prompt = subjectPrompt(subject, images.length - 1, method, electiveLabel);
   const { text, usage, model } = await callVision(prompt, images, "채점", signal);
   return { slots: parseSlots(text), usage, model };
 }
