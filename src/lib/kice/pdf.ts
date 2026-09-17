@@ -57,6 +57,37 @@ const hex = (h: string | null) => {
 const inside = (box: FrameBox, x: number, y: number) =>
   x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1;
 
+/**
+ * 문제 카드 이미지를 실제 형식에 맞춰 임베드한다.
+ *
+ * **여러 문제를 묶어 뽑을 때만 드러나던 버그였다.** 카드는 대부분
+ * `toPng()`로 캡처돼 PNG 로 저장되지만, "문제 전체를 AI로 다시 그리기"는
+ * 서버가 모델 출력(JPEG, `persistWholeProblem`)을 그대로 `image_path`에
+ * 저장한다(`/api/figure/route.ts`의 `sniffImageMime` 참고) — 그 문제 하나가
+ * `pdf.embedPng()`를 무조건 부르면 "Input data is not a PNG file"로 던지고,
+ * 자바스크립트는 이 예외를 잡던 자리가 없어 **묶음 전체**가 실패한다. 문제
+ * 하나만 뽑을 때 그게 PNG면 통과하고, 여러 개를 섞어 뽑을 때만 JPEG 하나가
+ * 껴서 터졌다 — "여러 문제가 있는 PDF만 안 된다"는 신고가 정확히 이 모양이다.
+ *
+ * 확장자나 파일 이름을 믿지 않고 **매직 넘버**로 판정한다 — `image_path`가
+ * `.png`로 끝나도 실제 바이트는 JPEG일 수 있다(옛 경로가 확장자를 안 바꾸고
+ * 덮어썼을 수 있다). PNG 서명(`89 50 4E 47`)이면 `embedPng`, JPEG 서명
+ * (`FF D8`)이면 `embedJpg`, 둘 다 아니면 일단 PNG로 시도하고 실패하면
+ * JPEG으로 한 번 더 시도한다(모르는 형식을 조용히 버리는 것보다 낫다).
+ */
+async function embedProblemImage(pdf: PDFDocument, bytes: Uint8Array): Promise<PDFImage> {
+  const isPng =
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+  if (isJpeg) return pdf.embedJpg(bytes);
+  if (isPng) return pdf.embedPng(bytes);
+  try {
+    return await pdf.embedPng(bytes);
+  } catch {
+    return pdf.embedJpg(bytes);
+  }
+}
+
 /** 지워야 할 영역 안에 들어가는 항목인지. */
 function dropped(it: FrameItem, drops?: FrameBox[]) {
   if (!drops?.length) return false;
@@ -662,7 +693,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   // ── 쪽을 짜 두고, 그 결과를 보고 그린다 ─────────────────────────────
   const images: { img: PDFImage; label: string }[] = [];
   for (const p of spec.problems) {
-    images.push({ img: await pdf.embedPng(p.png), label: p.label ?? "" });
+    images.push({ img: await embedProblemImage(pdf, p.png), label: p.label ?? "" });
   }
 
   const pattern = spec.pagePattern.filter((n) => n > 0);
