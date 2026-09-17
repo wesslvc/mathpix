@@ -3,12 +3,14 @@ import {
   FigureImageError,
   figureImageModelIds,
   generateFigureImage,
+  isValidByodImageModel,
   type FigureMode,
 } from "@/lib/figureImageGen";
 import { FIGURE_TOKEN_DEPOSIT, figureTokenCharge } from "@/lib/tokens";
 import { thumbPathFor } from "@/lib/cardThumb";
 import { cardUrl } from "@/lib/cardUrl";
 import { keepOrigin } from "@/lib/figureOrigin";
+import { getBillingContext } from "@/lib/byod";
 import { r2Configured, r2Delete, r2Put } from "@/lib/r2";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -227,26 +229,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("[api/figure] OPENAI_API_KEY not set");
-    return NextResponse.json(
-      {
-        error:
-          "OPENAI_API_KEY가 설정되지 않아 자료 재구성 기능을 쓸 수 없습니다. 원본 이미지를 그대로 붙이는 방법을 이용해주세요.",
-      },
-      { status: 500 },
-    );
-  }
-
   const supabase = isSupabaseConfigured() ? await createClient() : null;
   /**
-   * 무제한 계정인가.
+   * 무제한 계정 / BYOD 계정인가.
    *
-   * **차감도 잠금도 건너뛴다.** 예전에는 이 검사가 아예 없어서, 무제한인데
-   * 잔액이 0 이면 402 로 막혔다(consume 이 `credits >= p_amount` 를 요구한다).
-   * 무제한의 뜻과 어긋난다. 실제로 쓴 금액을 화면에 보여주는 것도 이 계정만이다.
+   * **무제한은 차감도 잠금도 건너뛴다.** 예전에는 이 검사가 아예 없어서,
+   * 무제한인데 잔액이 0 이면 402 로 막혔다(consume 이 `credits >= p_amount`
+   * 를 요구한다). 무제한의 뜻과 어긋난다.
+   *
+   * **BYOD는 차감을 건너뛰고 본인 OpenAI 키로 직접 부른다** — 공유
+   * `OPENAI_API_KEY`는 절대 건드리지 않는다(사용자 결정, item 5).
    */
   let unlimited = false;
+  let byod = false;
+  let byodApiKey: string | null = null;
+  let byodModel: string | null = null;
   if (supabase) {
     const {
       data: { user },
@@ -257,12 +254,32 @@ export async function POST(req: NextRequest) {
         { status: 401 },
       );
     }
-    const { data: ent } = await supabase
-      .from("entitlements")
-      .select("unlimited")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    unlimited = ent?.unlimited === true;
+    const billingCtx = await getBillingContext(supabase, user.id);
+    unlimited = billingCtx.unlimited;
+    byod = billingCtx.byod;
+    byodApiKey = billingCtx.byodApiKey;
+    byodModel = billingCtx.byodModel;
+  }
+
+  if (byod && !byodApiKey) {
+    return NextResponse.json(
+      {
+        error:
+          "BYOD 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
+      },
+      { status: 402 },
+    );
+  }
+
+  if (!byod && !process.env.OPENAI_API_KEY) {
+    console.error("[api/figure] OPENAI_API_KEY not set");
+    return NextResponse.json(
+      {
+        error:
+          "OPENAI_API_KEY가 설정되지 않아 자료 재구성 기능을 쓸 수 없습니다. 원본 이미지를 그대로 붙이는 방법을 이용해주세요.",
+      },
+      { status: 500 },
+    );
   }
 
   // AI 그림 생성은 실제로 돈이 나가는 유료 API라 토큰으로 과금한다.
@@ -273,9 +290,9 @@ export async function POST(req: NextRequest) {
   // 이 값을 넘는 요청에서는 우리가 밑질 수 있다.
   //
   // 차감은 요청당 한 번이다 — 모델을 갈아타며 재시도하는 것은 우리 사정이지
-  // 사용자가 더 낼 이유가 아니다.
+  // 사용자가 더 낼 이유가 아니다. **BYOD는 애초에 차감하지 않는다.**
   let charged = false;
-  if (supabase && !unlimited) {
+  if (supabase && !unlimited && !byod) {
     try {
       const { data, error } = await supabase.rpc("consume_recognition_credit", {
         p_amount: FIGURE_TOKEN_DEPOSIT,
@@ -329,7 +346,12 @@ export async function POST(req: NextRequest) {
     return figureTokenCharge(estKrw);
   }
 
-  const modelIds = figureImageModelIds();
+  // BYOD는 본인이 고른 모델 하나만 쓴다(비용이 본인 계정으로 나가므로
+  // 우리 쪽 폴백 캐스케이드가 필요 없다). 못 골랐으면 앱 기본 모델과 같은
+  // 이름을 그대로 쓰되 본인 키로 부른다.
+  const modelIds = byod
+    ? [byodModel && isValidByodImageModel(byodModel) ? byodModel : figureImageModelIds()[0]]
+    : figureImageModelIds();
   let lastError: string | null = null;
 
   // 시간이 다 되면 우리가 먼저 끊는다(위 DEADLINE_MS 주석 참고).
@@ -349,6 +371,7 @@ export async function POST(req: NextRequest) {
           deadline.signal,
           inputSize,
           instruction,
+          byodApiKey ?? undefined,
         );
         if (!result) {
           await refund();
@@ -370,9 +393,11 @@ export async function POST(req: NextRequest) {
         // 실제로 쓴 값으로 정산한다(보증금과의 차액을 맞춘다).
         const chargedTokens = await settle(result.usage?.estKrw);
 
-        // **금액은 무제한 계정에만 보여준다.** 막는 자리는 서버다 — 화면에서
-        // 숨기는 건 얼마든지 우회할 수 있다. 일반 사용자에게는 토큰 수만 준다.
-        const usage = unlimited
+        // **금액은 무제한·BYOD 계정에만 보여준다.** 막는 자리는 서버다 —
+        // 화면에서 숨기는 건 얼마든지 우회할 수 있다. 일반 사용자에게는
+        // 토큰 수만 준다. BYOD는 우리 토큰을 안 쓰지만 본인 계정에 실제
+        // 나간 비용이라 알려 주는 게 맞다.
+        const usage = unlimited || byod
           ? result.usage
           : result.usage && {
               inputText: result.usage.inputText,

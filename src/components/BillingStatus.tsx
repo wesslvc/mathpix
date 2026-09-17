@@ -6,6 +6,8 @@ type Props = {
   checkoutReady: boolean;
   /** 한도 없이 쓸 수 있는 계정인지. 이때는 잔량 대신 "무제한"만 보여준다. */
   unlimited?: boolean;
+  /** BYOD 패스 계정인지. 본인 키로 직접 내므로 토큰 잔량 자체가 의미 없다. */
+  byod?: boolean;
 };
 
 /**
@@ -16,13 +18,24 @@ export default function BillingStatus({
   credits,
   checkoutReady,
   unlimited = false,
+  byod = false,
 }: Props) {
-  const empty = !unlimited && credits <= 0;
+  const empty = !unlimited && !byod && credits <= 0;
 
   if (unlimited) {
     return (
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
         토큰 <span className="font-semibold">무제한</span> 계정입니다.
+      </div>
+    );
+  }
+
+  if (byod) {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        <span className="font-semibold">BYOD 패스</span> 계정입니다 — Mathpix
+        문제 인식은 무제한 무료, 다른 기능은 아래 등록한 본인 OpenAI 키로
+        직접 부릅니다(우리 토큰 소모 없음).
       </div>
     );
   }

@@ -4,6 +4,7 @@ import { gradingEstKrw } from "@/lib/tokens";
 import { startGradingBilling } from "@/lib/gradingBilling";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { getBillingContext } from "@/lib/byod";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,12 +41,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json(
-      { error: "OPENAI_API_KEY가 설정되지 않아 제목 짓기를 쓸 수 없습니다." },
-      { status: 500 },
-    );
-  }
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
   }
@@ -57,17 +52,29 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
-  const { data: ent } = await supabase
-    .from("entitlements")
-    .select("unlimited")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  const unlimited = ent?.unlimited === true;
+  const { unlimited, byod, byodApiKey } = await getBillingContext(supabase, user.id);
+
+  if (byod && !byodApiKey) {
+    return NextResponse.json(
+      {
+        error:
+          "BYOD 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
+      },
+      { status: 402 },
+    );
+  }
+  if (!byod && !process.env.OPENAI_API_KEY) {
+    return NextResponse.json(
+      { error: "OPENAI_API_KEY가 설정되지 않아 제목 짓기를 쓸 수 없습니다." },
+      { status: 500 },
+    );
+  }
 
   let billing;
   try {
     billing = await startGradingBilling(supabase, {
       unlimited,
+      byod,
       deposit: DEPOSIT,
       label: "api/korean-title",
     });
@@ -87,7 +94,11 @@ export async function POST(req: NextRequest) {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), (maxDuration - 10) * 1000);
   try {
-    const { result, usage, model } = await readKoreanTitle(text, deadline.signal);
+    const { result, usage, model } = await readKoreanTitle(
+      text,
+      deadline.signal,
+      byodApiKey ?? undefined,
+    );
     // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
     const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
     const chargedTokens = await billing.settle(estKrw);
@@ -104,8 +115,8 @@ export async function POST(req: NextRequest) {
     );
     return NextResponse.json({
       ...result,
-      // 금액은 무제한 계정에만 보여준다(막는 자리는 서버다).
-      usage: unlimited && usage ? { ...usage, estKrw } : undefined,
+      // 금액은 무제한·BYOD 계정에만 보여준다(막는 자리는 서버다).
+      usage: (unlimited || byod) && usage ? { ...usage, estKrw } : undefined,
       chargedTokens,
       model,
     });

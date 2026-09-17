@@ -67,6 +67,31 @@ export function figureImageModelIds(): string[] {
   return ids.length > 0 ? ids : DEFAULT_IMAGE_MODEL_IDS;
 }
 
+/**
+ * BYOD 사용자가 설정 화면에서 고를 수 있는 이미지 생성 모델 후보.
+ *
+ * **자유 입력이 아니라 목록에서 고르게 한다**(사용자 요청 — "같은 범주
+ * 내에서 모델변경가능하게 해줘, 있는것중에 선택하게끔"). 여기 적힌 이름은
+ * 전부 이 저장소가 실제로 `/api/figure/models` 프로브나 운영으로 검증한
+ * 적이 있는 이름들이다(위 `DEFAULT_IMAGE_MODEL_IDS` 주석·2026-08 프로브
+ * 기록 참고) — 모델 이름을 추측하지 않는다는 이 저장소의 원칙을 그대로
+ * 따른다. 본인 키로 쓰는 것이라 계정마다 실제 접근 권한은 다를 수 있고,
+ * 없는 조합이면 OpenAI가 그 자리에서 오류를 준다(우리 돈이 아니므로
+ * 캐스케이드로 조용히 갈아탈 필요가 없다).
+ */
+export const BYOD_IMAGE_MODEL_CHOICES = [
+  "gpt-image-2.5-sunburst",
+  "gpt-image-2.5-flare",
+  "gpt-image-1.5",
+  "gpt-image-1",
+  "gpt-image-1-mini",
+] as const;
+
+/** BYOD가 고른 모델이 실제로 이미지 모델 이름 모양인지만 확인한다. */
+export function isValidByodImageModel(id: string): boolean {
+  return isImageModel(id);
+}
+
 export class FigureImageError extends Error {
   constructor(
     message: string,
@@ -708,8 +733,13 @@ export async function generateFigureImage(
   size?: { width: number; height: number },
   /** 사용자가 적어 준 "이렇게 그려 주세요". 없으면 프롬프트가 예전과 같다. */
   instruction?: string,
+  /**
+   * BYOD 사용자의 본인 OpenAI 키. 있으면 공유 `OPENAI_API_KEY` 대신 이
+   * 값으로 부른다 — 비용이 그 사람 계정으로 직접 나가고 우리 토큰은 안 든다.
+   */
+  apiKeyOverride?: string,
 ): Promise<FigureImageResult | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
   // 호출 직전에 한 번 더 확인한다. 위에서 걸렀더라도 여기까지 이미지 모델이
