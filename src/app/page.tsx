@@ -126,17 +126,8 @@ export default async function DashboardPage({
         currentFolderId={currentFolderId ?? null}
       />
 
-      {/* 만든 곳 표기 — 사이트는 ReprintOCR, 브랜드는 NEPICA. */}
-      <footer className="mt-auto flex justify-center pt-8">
-        <a
-          href="https://nepica.vercel.app"
-          target="_blank"
-          rel="noreferrer"
-          className="nepica-brand"
-        >
-          NEPICA
-        </a>
-      </footer>
+      {/* NEPICA 표기는 **레이아웃의 전역 바닥글에만** 둔다 — 여기에도 두면
+          한 화면에 두 번 찍힌다(로그인 화면에서 실제로 그랬다). */}
     </main>
   );
 }

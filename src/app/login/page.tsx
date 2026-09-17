@@ -161,7 +161,9 @@ function LoginForm() {
   }
 
   return (
-    <main className="mx-auto flex max-w-sm flex-col items-center justify-center gap-6 px-4 text-center">
+    // `min-h` 가 있어야 세로 가운데 정렬이 실제로 걸린다. 없으면 내용이 위로
+    // 쏠리고 아래가 통째로 비어 보인다(390px 에서 확인).
+    <main className="mx-auto flex min-h-[80vh] max-w-sm flex-col items-center justify-center gap-6 px-4 text-center">
       {/* 첫 화면 — 지오글 랜딩과 같은 짜임(마크 · 워드마크 · 영문 표어 ·
           우리말 한 줄). 같은 브랜드의 두 사이트가 첫인상부터 닮게 둔다. */}
       <div className="flex flex-col items-center">
@@ -224,7 +226,7 @@ function LoginForm() {
               setError(null);
               setNotice(null);
             }}
-            className="text-sm text-slate-500 hover:text-slate-700"
+            className="rounded-lg px-4 py-3 text-sm text-slate-500 underline underline-offset-4 hover:bg-slate-100 hover:text-slate-700"
           >
             예전 이메일 계정이 있으신가요? 계정 마이그레이션
           </button>
@@ -289,16 +291,8 @@ function LoginForm() {
         </>
       )}
 
-      {/* 만든 곳 표기 — 사이트는 ReprintOCR, 브랜드는 NEPICA. 지오글의
-          랜딩 아래에 있는 것과 같은 표기다. */}
-      <a
-        href="https://nepica.vercel.app"
-        target="_blank"
-        rel="noreferrer"
-        className="nepica-brand mt-2"
-      >
-        NEPICA
-      </a>
+      {/* NEPICA 표기는 **레이아웃의 전역 바닥글에만** 둔다. 예전에는 여기에도
+          하나 더 있어서 휴대폰에서 한 화면에 두 번 찍혔다(390px 에서 확인). */}
     </main>
   );
 }
