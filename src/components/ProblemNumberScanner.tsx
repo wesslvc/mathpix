@@ -48,8 +48,11 @@ async function urlToDataUrl(url: string): Promise<string> {
  */
 export default function ProblemNumberScanner({
   targets,
+  byod = false,
 }: {
   targets: NumberScanTarget[];
+  /** BYOD 패스 계정인가. Mathpix가 무제한 무료라 "최대 N토큰" 안내가 안 맞다. */
+  byod?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -159,7 +162,8 @@ export default function ProblemNumberScanner({
         <p className="text-xs text-slate-400">
           번호가 없으면 목록·PDF 에서 저장된 차례대로 1번부터 매겨집니다.
           {needScan.length > 0
-            ? ` 본문에서 ${free.length}개는 바로 찾고, 나머지 ${needScan.length}개만 인식합니다(최대 ${needScan.length}토큰).`
+            ? ` 본문에서 ${free.length}개는 바로 찾고, 나머지 ${needScan.length}개만 인식합니다` +
+              (byod ? "." : `(최대 ${needScan.length}토큰).`)
             : ` 본문에서 전부 찾을 수 있어 토큰이 들지 않습니다.`}
         </p>
         {done && <p className="mt-1 text-sm text-emerald-700">{done}</p>}

@@ -5,6 +5,11 @@ import { TOKEN_GAUGE_FULL } from "@/lib/tokens";
 type Props = {
   tokens: number | null;
   unlimited?: boolean;
+  /**
+   * BYOD 패스 계정인가. 본인 OpenAI 키로 직접 내므로 잔량이 0이어도
+   * "부족"이 아니다 — `unlimited`와 같은 자리에서 갈린다.
+   */
+  byod?: boolean;
   /** 이번에 쓰려는 양. 주면 게이지에 "여기까지 줄어듭니다"를 같이 보여준다. */
   pending?: number;
   className?: string;
@@ -19,6 +24,7 @@ type Props = {
 export default function TokenGauge({
   tokens,
   unlimited = false,
+  byod = false,
   pending = 0,
   className,
 }: Props) {
@@ -26,6 +32,19 @@ export default function TokenGauge({
     return (
       <div className={`flex items-center gap-2 ${className ?? ""}`}>
         <span className="text-[11px] font-medium text-emerald-700">토큰 무제한</span>
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-emerald-100">
+          <div className="h-full w-full rounded-full bg-emerald-500" />
+        </div>
+      </div>
+    );
+  }
+
+  if (byod) {
+    return (
+      <div className={`flex items-center gap-2 ${className ?? ""}`}>
+        <span className="text-[11px] font-medium text-emerald-700">
+          BYOD 패스 (본인 키 사용)
+        </span>
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-emerald-100">
           <div className="h-full w-full rounded-full bg-emerald-500" />
         </div>
