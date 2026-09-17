@@ -76,6 +76,8 @@ export default function ProblemNumberScanner({
     /** 사진 자체를 못 받은 것. 번호가 안 보인 것과 갈라 세야 고칠 데를 안다. */
     let imageFailed = 0;
     let lastFetchError = "";
+    /** 번호를 못 뽑았을 때 실제로 읽힌 글. 인식 실패와 규칙 문제를 가른다. */
+    let lastRead = "";
 
     try {
       for (let i = 0; i < needScan.length; i++) {
@@ -94,9 +96,18 @@ export default function ProblemNumberScanner({
           if (res.status === 402 || res.status === 401) {
             throw new Error(json.error ?? "토큰이 부족합니다.");
           }
-          const n = res.ok ? parseProblemNumber(json.text || json.latex || "") : null;
+          const read = json.text || json.latex || "";
+          const n = res.ok ? parseProblemNumber(read) : null;
           if (n != null) updates.push({ id: t.id, number: n });
-          else failed += 1;
+          else {
+            failed += 1;
+            // **무엇을 읽었는지 남긴다.** 번호를 못 뽑았을 때 인식이 실패한
+            // 것인지 우리 규칙이 걸러낸 것인지 갈라야 고칠 데를 안다 —
+            // 실제로 `03 윗글을…`(마침표 없는 번호)이 규칙에 안 걸려
+            // "번호를 하나도 읽지 못했어요"로 끝난 적이 있고, 그때 읽은
+            // 글자가 안 보여서 원인을 짚는 데 한참 걸렸다.
+            if (!lastRead) lastRead = read.replace(/\s+/g, " ").trim().slice(0, 50);
+          }
         } catch (err) {
           if (err instanceof Error && /토큰|로그인/.test(err.message)) throw err;
           if (err instanceof Error && /내려받지/.test(err.message)) {
@@ -111,7 +122,8 @@ export default function ProblemNumberScanner({
         setError(
           imageFailed > 0
             ? `저장된 사진을 내려받지 못했어요 (${imageFailed}개). ${lastFetchError} — 번호를 못 읽은 게 아니라 사진을 못 여는 것이라, 새로고침해도 같으면 알려주세요.`
-            : '번호를 하나도 읽지 못했어요. 문제 사진에 번호가 안 보이면 "수정"에서 직접 적어주세요.',
+            : '번호를 하나도 읽지 못했어요. 문제 사진에 번호가 안 보이면 "수정"에서 직접 적어주세요.' +
+              (lastRead ? ` (읽힌 글: "${lastRead}…")` : " (인식 결과가 비어 있었어요.)"),
         );
         return;
       }
