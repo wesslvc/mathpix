@@ -45,6 +45,11 @@ export const metadata: Metadata = {
     "성적 추세",
   ],
   alternates: { canonical: "/" },
+  // 구글 서치 콘솔 소유 확인. 콘솔이 주는 코드를 Vercel 환경변수에 넣으면
+  // **코드를 고치지 않고** 확인이 끝난다. 없으면 아무 태그도 안 나간다.
+  verification: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION }
+    : undefined,
   openGraph: {
     type: "website",
     siteName: "ReprintOCR",

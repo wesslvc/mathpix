@@ -156,6 +156,30 @@ body:has(.landing-root) [data-app-nav] {
   display: none;
 }
 
+/* 한글은 낱말 가운데서 끊지 않는다.
+
+   브라우저 기본값(`word-break: normal`)은 한글을 **글자 단위로** 끊는다.
+   그래서 좁은 화면에서 "실제"가 `실` / `제` 로, "탐구"가 `탐` / `구` 로
+   갈라진다 — 실제로 소개 화면 제목이 그렇게 찍히는 것을 390px 에서 확인했다.
+   폭이 좁을수록 자주 나므로 **휴대폰에서 유독 심하게 보인다.**
+
+   `keep-all` 은 띄어쓰기에서만 끊게 한다. 다만 그것만 두면 아주 긴 영문
+   토큰(주소 같은 것)이 칸을 뚫고 나가므로 `overflow-wrap` 을 같이 준다.
+
+   **문제 카드는 예외다.** 카드는 어느 기기에서 그리든 줄바꿈이 같아야 한다
+   — 폭을 못 박아 둔 이유가 그것이고(`PROBLEM_CARD_WIDTH`), 여기서 규칙을
+   바꾸면 예전에 저장한 문제를 다시 캡처할 때 줄바꿈이 달라진다. */
+body {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.problem-surface,
+.problem-surface * {
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
 /* 알약 모양 기본 버튼 */
 .g-btn {
   display: inline-flex;
