@@ -47,6 +47,8 @@ export type StoredFigure = {
    * AI 를 돌린 그림에만 생긴다(그만큼 저장 용량이 는다). 표에는 없다.
    */
   origin?: string;
+  /** 원본을 담아 둔 때(ISO). 오래된 원본은 밤마다 지운다 — `figureOrigin.ts` 참고. */
+  originAt?: string;
 };
 
 /** 카드에 붙은 것들을 저장할 형태로. 표에서는 마크업을 뗀다. */
@@ -59,7 +61,9 @@ export function toStoredFigures(figures: CardFigure[]): StoredFigure[] {
     kind: f.kind,
     row: f.row,
     ...(f.ai ? { ai: true } : {}),
-    ...(f.kind !== "table" && f.origin ? { origin: f.origin } : {}),
+    ...(f.kind !== "table" && f.origin
+      ? { origin: f.origin, ...(f.originAt ? { originAt: f.originAt } : {}) }
+      : {}),
   }));
 }
 
@@ -113,6 +117,7 @@ export function readStoredFigures(boxRange: unknown): StoredFigure[] {
       ai: f.ai === true,
       // 원본도 카드에 그대로 붙을 수 있는 값이라 마크업과 같은 검사를 거친다.
       origin: isFigureMarkup(f.origin) ? (f.origin as string) : undefined,
+      originAt: typeof f.originAt === "string" ? f.originAt : undefined,
     });
   }
   return out;
@@ -154,6 +159,7 @@ export function restoreCardFigures(
       row: s.row ?? false,
       ai: s.ai === true,
       origin: s.origin,
+      originAt: s.originAt,
     }));
 
   return [...tables, ...figures];

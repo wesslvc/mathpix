@@ -25,6 +25,7 @@ import {
   writeFigureCache,
 } from "@/lib/figureCache";
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
+import { keepOrigin } from "@/lib/figureOrigin";
 import type { CardSpec } from "@/lib/cardHtml";
 
 /**
@@ -277,7 +278,7 @@ export default function FigureJobsProvider({
           // 원본을 남긴다. 이미 있으면 덮지 않는다 — 두 번째 AI 결과가 첫
           // 번째 AI 결과를 원본으로 만들어 버리면 안 된다.
           f.id === job.id
-            ? { ...f, origin: f.origin ?? f.markup, markup: svg, ai: true }
+            ? { ...keepOrigin(f, f.markup), markup: svg, ai: true }
             : f,
         ),
       };
@@ -325,10 +326,7 @@ export default function FigureJobsProvider({
       const nextFigures = existingFigures.map((f) =>
         f.id === job.id
           ? {
-              ...f,
-              ...(typeof f.origin === "string" || typeof f.markup !== "string"
-                ? {}
-                : { origin: f.markup }),
+              ...keepOrigin(f, f.markup),
               markup: svg,
               ai: true,
             }

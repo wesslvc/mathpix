@@ -53,6 +53,7 @@ const DraggableCard = dynamic(() => import("./DraggableCard"), { ssr: false });
 const DiagramCropModal = dynamic(() => import("./DiagramCropModal"), { ssr: false });
 import { useFigureJobs } from "./FigureJobsProvider";
 import { rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
+import { keepOrigin } from "@/lib/figureOrigin";
 import { thumbPathFor, uploadThumb } from "@/lib/cardThumb";
 import {
   ANSWER_TYPE_LABEL,
@@ -516,7 +517,14 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   function revertToOrigin(id: string) {
     const f = cardFigures.find((x) => x.id === id);
     if (!f?.origin) return;
-    updateFigure(id, { markup: f.origin, origin: undefined, ai: false });
+    // 원본과 **담은 때도 함께** 지운다 — 남겨 두면 만료 청소가 있지도 않은
+    // 원본을 보고 있는 꼴이 된다(`figureOrigin.ts`).
+    updateFigure(id, {
+      markup: f.origin,
+      origin: undefined,
+      originAt: undefined,
+      ai: false,
+    });
   }
 
   /** 오려낸 그림을 붙인다(원본 그대로). AI 는 그 뒤에 따로 요청한다. */
@@ -554,7 +562,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         changed = true;
         // 원본을 남긴다(이미 있으면 덮지 않는다). 되돌리기와 다른 지시로
         // 다시 그리기가 이 값에 달려 있다.
-        return { ...f, origin: f.origin ?? f.markup, markup: j.svg, ai: true };
+        return { ...keepOrigin(f, f.markup), markup: j.svg, ai: true };
       });
       return changed ? next : prev;
     });
