@@ -7,6 +7,7 @@ import {
 } from "@/lib/figureImageGen";
 import { FIGURE_TOKEN_DEPOSIT, figureTokenCharge } from "@/lib/tokens";
 import { thumbPathFor } from "@/lib/cardThumb";
+import { cardUrl } from "@/lib/cardUrl";
 import { keepOrigin } from "@/lib/figureOrigin";
 import { r2Configured, r2Delete, r2Put } from "@/lib/r2";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -150,7 +151,12 @@ async function persistWholeProblem(
     const figures = Array.isArray(box.figures)
       ? (box.figures as Record<string, unknown>[])
       : [];
-    const markup = `<img src="${dataUrl}" alt="" />`;
+    // **base64 를 그대로 box_range 에 넣지 않는다.** 문제 전체 모드에서는
+    // 그림 한 장이 곧 카드 전체라, 방금 `newPath` 에 올린 바이트가 이 그림의
+    // 마크업과 정확히 같다 — 다시 올릴 필요 없이 그 주소만 가리키면 된다
+    // (`figureBlob.ts`의 클라이언트 쪽과 같은 이유: box_range 를 파일 창고로
+    // 쓰지 않는다).
+    const markup = `<img src="${cardUrl(newPath)}" alt="" />`;
     // 갈아치우기 전의 그림을 원본으로 남긴다. **이미 있으면 덮지 않는다** —
     // 두 번째 AI 결과가 첫 번째 AI 결과를 원본으로 만들어 버리면 안 된다.
     // 브라우저를 닫았을 때는 이 길로 저장되므로, 여기가 빠지면 탭을 닫고

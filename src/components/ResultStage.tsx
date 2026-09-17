@@ -9,7 +9,7 @@ import {
   type BoxOverride,
 } from "@/lib/renderMathText";
 import type { RecognizeResponse } from "@/lib/types";
-import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH } from "@/lib/layout";
+import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH, waitForImages } from "@/lib/layout";
 import FigurePanel from "./FigurePanel";
 import DraggableCard from "./DraggableCard";
 import { useFigureJobs } from "./FigureJobsProvider";
@@ -535,6 +535,7 @@ export default function ResultStage({
     if (!cardRef.current) return;
     setIsExporting(true);
     try {
+      await waitForImages(cardRef.current);
       const dataUrl = await toPng(cardRef.current, CARD_CAPTURE_OPTIONS);
       const link = document.createElement("a");
       link.download = "problem.png";
@@ -615,6 +616,7 @@ export default function ResultStage({
     setIsSaving(true);
     setSaveError(null);
     try {
+      await waitForImages(cardRef.current);
       const dataUrl = await toPng(cardRef.current, CARD_CAPTURE_OPTIONS);
       const id = await onSaveToCategory({
         pngDataUrl: dataUrl,
