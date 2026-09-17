@@ -9,8 +9,16 @@
  * 바뀌었을 뿐이라 마이그레이션이 필요 없다(기존 잔액은 1:1로 토큰이 된다).
  */
 
-/** 문제 인식(Mathpix) 1회. 서버가 consume_recognition_credit(1)로 차감한다. */
-export const OCR_TOKEN_COST = 1;
+/**
+ * 문제 인식(Mathpix) 1회의 고정 차감액. `/api/mathpix`가
+ * `consume_recognition_credit({ p_amount: OCR_TOKEN_COST })`로 차감한다.
+ *
+ * **1에서 5로 올렸다**(사용자 결정, 2026-09-17). 예전에는 이 상수를 안 쓰고
+ * RPC 호출에 `p_amount`를 아예 안 넘겨 DB 함수의 기본값(1)에 기대고
+ * 있었다 — 그래서 값만 여기서 바꿔서는 실제 차감이 안 바뀐다. 라우트가
+ * 이 상수를 명시적으로 넘기도록 함께 고쳤다.
+ */
+export const OCR_TOKEN_COST = 5;
 
 /**
  * 토큰 하나의 판매가(원). 1000토큰을 3000원에 판다.
@@ -24,11 +32,9 @@ export const KRW_PER_TOKEN = (() => {
 })();
 
 /**
- * AI 그림 생성을 **원가의 몇 배**로 받을지.
- *
- * 원가는 요청마다 96~143원으로 1.5배까지 널뛴다. 고정 요금으로는 어느 쪽으로도
- * 틀리므로(싼 요청은 사용자가 더 내고, 비싼 요청은 우리가 밑진다) 실제 쓴
- * 값에 이 배수를 곱해 받는다.
+ * 자동채점·답지 인식(`gradingTokenCharge`)이 실사용량을 토큰으로 바꿀 때
+ * 쓰는 배수. AI 그림 생성은 더 이상 이 값을 쓰지 않는다(아래 참고) —
+ * 남겨 둔 이유는 채점 쪽 정산이 여전히 이 값에 기대기 때문이다.
  */
 export const FIGURE_MARGIN = (() => {
   const raw = Number(process.env.FIGURE_MARGIN);
@@ -36,37 +42,27 @@ export const FIGURE_MARGIN = (() => {
 })();
 
 /**
- * AI 그림 생성 1회의 **보증금**. 부르기 전에 이만큼 먼저 차감한다.
+ * AI 그림 생성(GPT 이미지) 1회의 **고정 차감액**.
  *
- * 선차감이 있어야 잔액이 없는 사람이 생성을 시작하지 못한다. 끝나면 실제 값과
- * 견주어 남으면 돌려주고 모자라면 더 받는다.
+ * **원가 정산 방식에서 고정 차감으로 바꿨다**(사용자 결정, 2026-09-17).
+ * 예전에는 원가(96~143원)에 마진을 곱해 실사용량만큼만 받았는데, 그러려면
+ * "보증금 → 정산" 두 단계가 필요해 코드도 복잡하고 사용자에게 보이는
+ * 금액도 매번 달랐다. 지금은 원가가 얼마든 항상 이 값만 뗀다 — 간단하고
+ * 예측 가능하지만, 원가가 이 값을 넘는 요청에서는 우리가 밑진다(사용자가
+ * 감수하기로 한 절충이다).
  */
 export const FIGURE_TOKEN_DEPOSIT = (() => {
   const raw = Number(process.env.FIGURE_TOKEN_DEPOSIT);
-  return Number.isInteger(raw) && raw > 0 ? raw : 50;
+  return Number.isInteger(raw) && raw > 0 ? raw : 120;
 })();
 
 /**
- * 응답에 usage 가 없어 실제 값을 모를 때 물릴 토큰.
- *
- * 보증금을 다 물리면 과다 청구고, 안 물리면 공짜다. 관측 중앙값(원가 120원
- * → 60토큰)을 쓴다.
+ * 이번 생성에 물릴 토큰. **고정값이라 원가(`estKrw`)는 더 이상 안 본다** —
+ * 매개변수는 호출부(`/api/figure`)와의 호환을 위해 남겨 뒀다. 실제 원가는
+ * 로그(`[figureImageGen] usage`)에서 여전히 볼 수 있다.
  */
-export const FIGURE_TOKEN_FALLBACK = (() => {
-  const raw = Number(process.env.FIGURE_TOKEN_FALLBACK);
-  return Number.isInteger(raw) && raw > 0 ? raw : 60;
-})();
-
-/**
- * 이번 생성에 물릴 토큰. 원가(원)에 마진을 곱해 토큰으로 바꾼다.
- *
- * 원가를 모르면(usage 가 안 왔으면) 폴백. 아무리 싸도 0 토큰은 아니다.
- */
-export function figureTokenCharge(estKrw: number | undefined): number {
-  if (typeof estKrw !== "number" || !Number.isFinite(estKrw) || estKrw <= 0) {
-    return FIGURE_TOKEN_FALLBACK;
-  }
-  return Math.max(1, Math.ceil((estKrw * FIGURE_MARGIN) / KRW_PER_TOKEN));
+export function figureTokenCharge(_estKrw: number | undefined): number {
+  return FIGURE_TOKEN_DEPOSIT;
 }
 
 /**

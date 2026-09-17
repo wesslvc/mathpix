@@ -25,7 +25,17 @@ export type GradingBilling = {
 /** 잔액이 모자라면 `null`. 그때는 402 로 돌려보내면 된다. */
 export async function startGradingBilling(
   supabase: SupabaseClient,
-  opts: { unlimited: boolean; deposit?: number; label: string },
+  opts: {
+    unlimited: boolean;
+    deposit?: number;
+    label: string;
+    /**
+     * 원가와 무관하게 항상 `deposit`만 뗀다(2026-09-17 도입, 국어 지문
+     * 인식이 첫 사용처). 채점(`/api/grade-exam`)·답지(`/api/answer-key`)는
+     * 이 값을 안 넘겨 예전처럼 실사용량 정산을 그대로 쓴다.
+     */
+    flat?: boolean;
+  },
 ): Promise<GradingBilling | null> {
   const deposit = opts.deposit ?? GRADING_TOKEN_DEPOSIT;
   if (opts.unlimited) {
@@ -54,7 +64,7 @@ export async function startGradingBilling(
       }
     },
     async settle(estKrw) {
-      const want = gradingTokenCharge(estKrw);
+      const want = opts.flat ? deposit : gradingTokenCharge(estKrw);
       const diff = want - deposit;
       try {
         if (diff < 0) {
