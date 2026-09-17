@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { r2Configured, r2Delete, r2Put } from "@/lib/r2";
 import { matchFiles, parseCsv } from "@/lib/bulkImportMatch";
 import { toStoredFigures } from "@/lib/storedFigures";
 import type { CardFigure } from "@/lib/cardHtml";
@@ -127,12 +128,24 @@ export async function POST(request: NextRequest) {
     }
 
     const path = `${user.id}/${categoryId}/${randomUUID()}.png`;
-    const { error: uploadError } = await supabase.storage
-      .from("problem-images")
-      .upload(path, buffer, { contentType: "image/png" });
-    if (uploadError) {
-      failed.push(`${item.name} — 업로드 실패: ${uploadError.message}`);
-      continue;
+    // R2 가 켜져 있으면 그쪽에 쓴다(실패하면 예전 길로).
+    let uploaded = false;
+    if (r2Configured()) {
+      try {
+        await r2Put(path, buffer, "image/png");
+        uploaded = true;
+      } catch (err) {
+        console.error("[bulk-import] R2 쓰기 실패, Supabase 로 넘어감:", err);
+      }
+    }
+    if (!uploaded) {
+      const { error: uploadError } = await supabase.storage
+        .from("problem-images")
+        .upload(path, buffer, { contentType: "image/png" });
+      if (uploadError) {
+        failed.push(`${item.name} — 업로드 실패: ${uploadError.message}`);
+        continue;
+      }
     }
 
     const figure: CardFigure = {
@@ -159,6 +172,9 @@ export async function POST(request: NextRequest) {
     });
     if (insertError) {
       await supabase.storage.from("problem-images").remove([path]);
+      if (r2Configured()) {
+        await r2Delete([path]).catch(() => {});
+      }
       failed.push(`${item.name} — 저장 실패: ${insertError.message}`);
       continue;
     }

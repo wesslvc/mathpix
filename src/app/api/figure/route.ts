@@ -8,6 +8,7 @@ import {
 import { FIGURE_TOKEN_DEPOSIT, figureTokenCharge } from "@/lib/tokens";
 import { thumbPathFor } from "@/lib/cardThumb";
 import { keepOrigin } from "@/lib/figureOrigin";
+import { r2Configured, r2Delete, r2Put } from "@/lib/r2";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -124,10 +125,24 @@ async function persistWholeProblem(
 
     const dir = String(row.image_path).split("/").slice(0, -1).join("/");
     const newPath = `${dir}/${crypto.randomUUID()}.${ext}`;
-    const { error: upErr } = await supabase.storage
-      .from("problem-images")
-      .upload(newPath, bytes, { contentType: mime });
-    if (upErr) return false;
+    // **R2 가 켜져 있으면 그쪽에 쓴다.** 화면 쪽(`blobClient.ts`)과 같은
+    // 판단이다 — 새 그림은 전부 R2 로 가고, 읽는 쪽(`/api/card`)이 두 곳을
+    // 다 보므로 어디에 있든 똑같이 보인다. R2 가 실패하면 예전 길로 내려간다.
+    let stored = false;
+    if (r2Configured()) {
+      try {
+        await r2Put(newPath, bytes, mime);
+        stored = true;
+      } catch (err) {
+        console.error("[figure] R2 쓰기 실패, Supabase 로 넘어감:", err);
+      }
+    }
+    if (!stored) {
+      const { error: upErr } = await supabase.storage
+        .from("problem-images")
+        .upload(newPath, bytes, { contentType: mime });
+      if (upErr) return false;
+    }
 
     // 그림 목록에서 이 그림의 마크업만 갈아끼운다. 화면이 저장해 둔 자리·크기는
     // 건드리지 않는다(사용자가 옮겨 놨을 수 있다).
@@ -166,6 +181,7 @@ async function persistWholeProblem(
       .eq("id", problemId);
     if (dbErr) {
       await supabase.storage.from("problem-images").remove([newPath]);
+      if (r2Configured()) await r2Delete([newPath]).catch(() => {});
       return false;
     }
     // 예전 원본과 그 미리보기를 함께 지운다.
@@ -178,6 +194,12 @@ async function persistWholeProblem(
     await supabase.storage
       .from("problem-images")
       .remove([String(row.image_path), thumbPathFor(String(row.image_path))]);
+    if (r2Configured()) {
+      await r2Delete([
+        String(row.image_path),
+        thumbPathFor(String(row.image_path)),
+      ]).catch((err) => console.error("[figure] R2 삭제 실패:", err));
+    }
     return true;
   } catch (err) {
     console.error("[api/figure] 결과 저장 실패:", err);

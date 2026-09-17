@@ -26,6 +26,7 @@ import {
 } from "@/lib/figureCache";
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import { keepOrigin } from "@/lib/figureOrigin";
+import { putBlob, removeBlobs } from "@/lib/blobClient";
 import type { CardSpec } from "@/lib/cardHtml";
 
 /**
@@ -301,10 +302,8 @@ export default function FigureJobsProvider({
       const dir = String(row.image_path).split("/").slice(0, -1).join("/");
       const newPath = `${dir}/${crypto.randomUUID()}.png`;
 
-      const { error: upErr } = await supabase.storage
-        .from("problem-images")
-        .upload(newPath, blob, { contentType: "image/png" });
-      if (upErr) throw upErr;
+      const up = await putBlob(supabase, newPath, blob, "image/png");
+      if (!up.ok) throw new Error(up.error);
 
       // 목록용 작은 미리보기도 같이(cardThumb.ts). 이걸 빠뜨리면 이 경로로
       // 갱신된 문제만 목록에서 원본을 받게 된다.
@@ -343,14 +342,10 @@ export default function FigureJobsProvider({
         })
         .eq("id", snap.problemId);
       if (dbErr) {
-        await supabase.storage
-          .from("problem-images")
-          .remove([newPath, thumbPathFor(newPath)]);
+        await removeBlobs([newPath, thumbPathFor(newPath)]);
         throw dbErr;
       }
-      await supabase.storage
-        .from("problem-images")
-        .remove([String(row.image_path), thumbPathFor(String(row.image_path))]);
+      await removeBlobs([String(row.image_path), thumbPathFor(String(row.image_path))]);
 
       // 다음 갱신 때도 최신 마크업을 쓰도록 스냅샷을 갱신해 둔다.
       snapshotsRef.current.set(job.problemKey, { ...snap, spec });
