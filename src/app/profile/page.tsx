@@ -11,6 +11,7 @@ import Logo from "@/components/Logo";
 import GradeHistoryList from "@/components/GradeHistoryList";
 import GradingPrefsForm, { type GradingPrefsValue } from "@/components/GradingPrefsForm";
 import ManualScoreForm from "@/components/ManualScoreForm";
+import LinkedAccounts from "@/components/LinkedAccounts";
 
 const VALID_SUBJECTS: readonly Subject[] = ["korean", "math", "english", "elective"];
 
@@ -96,6 +97,8 @@ export default async function ProfilePage() {
         unlimited={access.unlimited}
         checkoutReady={isCheckoutReady()}
       />
+
+      <LinkedAccounts initialIdentities={user.identities ?? []} />
 
       <GradingPrefsForm initial={gradingPrefs} />
 
