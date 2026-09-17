@@ -242,6 +242,11 @@ function LoginForm() {
         Google로 계속하기
       </button>
 
+      <p className="w-full rounded-lg bg-blue-50 px-3 py-2 text-left text-xs leading-5 text-blue-800">
+        기존 이메일 계정이 있나요? <strong>같은 이메일을 쓰는 Google 계정</strong>으로
+        계속하면 기존 계정과 저장한 데이터가 그대로 연결됩니다.
+      </p>
+
       <button
         type="button"
         onClick={() => {
