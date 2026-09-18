@@ -4,12 +4,12 @@ type Props = {
   credits: number;
   /** 결제창이 설정돼 실제 구매로 넘어갈 수 있는지. */
   checkoutReady: boolean;
-  /** BYOD 패스 결제창이 설정돼 있는지(GROBLE_PAYMENT_URL_BYOD). */
-  byodCheckoutReady?: boolean;
+  /** BYOK 패스 결제창이 설정돼 있는지(GROBLE_PAYMENT_URL_BYOK). */
+  byokCheckoutReady?: boolean;
   /** 한도 없이 쓸 수 있는 계정인지. 이때는 잔량 대신 "무제한"만 보여준다. */
   unlimited?: boolean;
-  /** BYOD 패스 계정인지. 본인 키로 직접 내므로 토큰 잔량 자체가 의미 없다. */
-  byod?: boolean;
+  /** BYOK 패스 계정인지. 본인 키로 직접 내므로 토큰 잔량 자체가 의미 없다. */
+  byok?: boolean;
 };
 
 /**
@@ -19,11 +19,11 @@ type Props = {
 export default function BillingStatus({
   credits,
   checkoutReady,
-  byodCheckoutReady = false,
+  byokCheckoutReady = false,
   unlimited = false,
-  byod = false,
+  byok = false,
 }: Props) {
-  const empty = !unlimited && !byod && credits <= 0;
+  const empty = !unlimited && !byok && credits <= 0;
 
   if (unlimited) {
     return (
@@ -33,10 +33,10 @@ export default function BillingStatus({
     );
   }
 
-  if (byod) {
+  if (byok) {
     return (
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-        <span className="font-semibold">BYOD 패스</span> 계정입니다 — Mathpix
+        <span className="font-semibold">BYOK 패스</span> 계정입니다 — Mathpix
         문제 인식은 무제한 무료, 다른 기능은 아래 등록한 본인 OpenAI 키로
         직접 부릅니다(우리 토큰 소모 없음).
       </div>
@@ -81,21 +81,21 @@ export default function BillingStatus({
         )}
       </div>
 
-      {/* **+5000토큰 배너 바로 밑에 BYOD를 나란히 안내한다**(사용자 요청).
-          토큰이 남아 있어도 본인 OpenAI 키가 있으면 BYOD가 더 유리할 수
+      {/* **+5000토큰 배너 바로 밑에 BYOK를 나란히 안내한다**(사용자 요청).
+          토큰이 남아 있어도 본인 OpenAI 키가 있으면 BYOK가 더 유리할 수
           있어 이용권 소진 여부와 무관하게 늘 보여준다. */}
       <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
         <p>
-          본인 OpenAI 키가 있다면 <span className="font-semibold">BYOD 패스</span>
+          본인 OpenAI 키가 있다면 <span className="font-semibold">BYOK 패스</span>
           (5,250원)로 Mathpix 문제 인식을 무제한 무료로 쓰고, 나머지 기능도
           토큰 소모 없이 본인 키로 직접 이용할 수 있어요.
         </p>
-        {byodCheckoutReady ? (
+        {byokCheckoutReady ? (
           <a
-            href="/api/checkout?plan=byod"
+            href="/api/checkout?plan=byok"
             className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
           >
-            BYOD 패스 구매하기
+            BYOK 패스 구매하기
           </a>
         ) : (
           <span className="shrink-0 text-xs text-slate-400">결제 준비 중</span>

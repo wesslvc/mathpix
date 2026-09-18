@@ -4,7 +4,7 @@ import { gradingEstKrw } from "@/lib/tokens";
 import { startGradingBilling } from "@/lib/gradingBilling";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { getBillingContext } from "@/lib/byod";
+import { getBillingContext } from "@/lib/byok";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,20 +57,20 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
-  const { unlimited, byod, byodApiKey } = await getBillingContext(supabase, user.id);
+  const { unlimited, byok, byokApiKey } = await getBillingContext(supabase, user.id);
 
-  if (byod && !byodApiKey) {
+  if (byok && !byokApiKey) {
     return NextResponse.json(
       {
         error:
-          "BYOD 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
+          "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
       },
       { status: 402 },
     );
   }
   // 지문 인식은 Gemini Flash 를 먼저 쓰고 안 되면 terra 로 내려간다 —
-  // 셋(Gemini/공유 OpenAI/BYOD 본인 키) 중 하나만 있어도 돌아간다.
-  if (!process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY && !byodApiKey) {
+  // 셋(Gemini/공유 OpenAI/BYOK 본인 키) 중 하나만 있어도 돌아간다.
+  if (!process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY && !byokApiKey) {
     return NextResponse.json(
       {
         error:
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
   try {
     billing = await startGradingBilling(supabase, {
       unlimited,
-      byod,
+      byok,
       deposit: DEPOSIT,
       label: "api/korean-text",
       flat: true,
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
       image,
       reference,
       deadline.signal,
-      byodApiKey ?? undefined,
+      byokApiKey ?? undefined,
     );
     // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
     const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       blocks,
       // 금액은 무제한 계정에만 보여준다(막는 자리는 서버다).
-      usage: (unlimited || byod) && usage ? { ...usage, estKrw } : undefined,
+      usage: (unlimited || byok) && usage ? { ...usage, estKrw } : undefined,
       chargedTokens,
       model,
     });

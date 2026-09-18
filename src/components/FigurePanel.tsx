@@ -43,10 +43,10 @@ export default function FigurePanel({
   const cost = status?.figureCost ?? 50;
   const canUseAi = status?.figureReady !== false;
   const unlimited = status?.unlimited ?? false;
-  const byod = status?.byod ?? false;
+  const byok = status?.byok ?? false;
   const tokens = status?.tokens ?? null;
-  // BYOD는 본인 키로 직접 내므로 잔량(대개 0)과 무관하게 "부족"이 아니다.
-  const notEnough = !unlimited && !byod && tokens !== null && tokens < cost;
+  // BYOK는 본인 키로 직접 내므로 잔량(대개 0)과 무관하게 "부족"이 아니다.
+  const notEnough = !unlimited && !byok && tokens !== null && tokens < cost;
 
   function choose(useAi: boolean) {
     if (!pending) return;
@@ -70,7 +70,7 @@ export default function FigurePanel({
       <TokenGauge
         tokens={tokens}
         unlimited={unlimited}
-        byod={byod}
+        byok={byok}
         pending={queuedCount * cost}
       />
 
@@ -79,7 +79,7 @@ export default function FigurePanel({
         다시 그리면{" "}
         {unlimited
           ? "무료입니다(무제한 계정)."
-          : byod
+          : byok
             ? "본인 등록한 OpenAI 키로 부릅니다(토큰이 안 듭니다)."
             : `${cost}토큰을 씁니다.`}{" "}
         Mathpix가 자동으로 잡아낸 그림은 이미 원본 그대로 붙어 있으니, 그걸로
@@ -122,7 +122,7 @@ export default function FigurePanel({
             >
               AI로 깨끗하게 다시 그리기
               {/* 2026-09-17부터 고정 차감이라 확정 금액을 그대로 적는다. */}
-              {unlimited ? " (무제한)" : byod ? " (본인 키 사용)" : ` (${cost}토큰)`}
+              {unlimited ? " (무제한)" : byok ? " (본인 키 사용)" : ` (${cost}토큰)`}
             </button>
             <p className="px-1 text-[11px] text-slate-500">
               선과 글자로 된 도식·그래프·회로도라면 이쪽이 훨씬 깨끗하게
@@ -130,7 +130,7 @@ export default function FigurePanel({
               됩니다. 다만 AI가 한글 라벨을 잘못 쓰는 경우가 있으니 완성된 그림의
               글자는 꼭 확인해주세요.
               {status?.figureReady === false &&
-                (byod
+                (byok
                   ? " (아직 본인 OpenAI 키를 등록하지 않았습니다. /profile 에서 등록해주세요.)"
                   : " (지금은 OPENAI_API_KEY가 설정되지 않아 쓸 수 없습니다.)")}
               {notEnough && ` (남은 ${tokens}토큰으로는 부족합니다.)`}

@@ -240,8 +240,8 @@ async function callVision(
   /** 쓸 모델. 기본은 자리·채점용(luna). 지문 옮겨 적기는 terra 를 쓴다. */
   modelName?: string,
   /**
-   * BYOD 사용자의 본인 OpenAI 키. 있으면 공유 `OPENAI_API_KEY` 대신 이
-   * 값으로 부른다 — item 5(BYOD는 공유 키를 절대 못 건드린다)에 따라
+   * BYOK 사용자의 본인 OpenAI 키. 있으면 공유 `OPENAI_API_KEY` 대신 이
+   * 값으로 부른다 — item 5(BYOK는 공유 키를 절대 못 건드린다)에 따라
    * 호출부가 반드시 본인 키를 확보한 뒤에만 넘겨야 한다.
    */
   apiKeyOverride?: string,
@@ -361,7 +361,7 @@ export async function gradeWithVision(
   method: GradingMethod = "omr",
   signal?: AbortSignal,
   electiveLabel?: string,
-  /** BYOD 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
+  /** BYOK 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
   apiKeyOverride?: string,
 ): Promise<{ slots: GradeSlot[]; usage?: GradeUsage; model: string }> {
   // images[0]은 OMR(또는 가채점표), 나머지가 정답표다 — 탐구가 정답표
@@ -408,7 +408,7 @@ export type KoreanTitle = { title: string; kind: string };
 export async function readKoreanTitle(
   passageText: string,
   signal?: AbortSignal,
-  /** BYOD 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
+  /** BYOK 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
   apiKeyOverride?: string,
 ): Promise<{ result: KoreanTitle; usage?: GradeUsage; model: string }> {
   const { text, usage, model } = await callVision(
@@ -458,7 +458,7 @@ const ANSWER_KEY_PROMPT = `task: transcribe Korean HS ANSWER KEY photo into data
 export async function readAnswerKeyWithVision(
   images: string[],
   signal?: AbortSignal,
-  /** BYOD 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
+  /** BYOK 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
   apiKeyOverride?: string,
 ): Promise<{ items: AnswerKeyItem[]; usage?: GradeUsage; model: string }> {
   const { text, usage, model } = await callVision(
@@ -724,7 +724,7 @@ export async function readKoreanRichText(
   reference: string,
   signal?: AbortSignal,
   /**
-   * BYOD 사용자의 본인 OpenAI 키. Gemini 경로에는 영향이 없다 — 이건
+   * BYOK 사용자의 본인 OpenAI 키. Gemini 경로에는 영향이 없다 — 이건
    * OpenAI(terra) 예비 경로에만 쓰인다.
    */
   apiKeyOverride?: string,

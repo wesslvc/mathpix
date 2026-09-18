@@ -29,11 +29,11 @@ export type AccessState = {
   /** 한도 없이 쓸 수 있는 계정인지(운영자 등). 이때 credits는 의미가 없다. */
   unlimited: boolean;
   /**
-   * BYOD(Bring Your Own [OpenAI] Key) 패스 계정인가. Mathpix는 무제한
+   * BYOK(Bring Your Own [OpenAI] Key) 패스 계정인가. Mathpix는 무제한
    * 무료고, OpenAI 쓰는 기능은 본인이 등록한 키로 직접 부른다 — 우리
-   * 토큰은 안 든다. `/profile`이 이 값을 보고 BYOD 설정 UI를 보여준다.
+   * 토큰은 안 든다. `/profile`이 이 값을 보고 BYOK 설정 UI를 보여준다.
    */
-  byod: boolean;
+  byok: boolean;
 };
 
 /**
@@ -46,15 +46,15 @@ export async function getAccessState(
 ): Promise<AccessState> {
   const { data } = await supabase
     .from("entitlements")
-    .select("credits, unlimited, byod")
+    .select("credits, unlimited, byok")
     .maybeSingle();
 
   const credits =
     (data?.credits as number | undefined) ?? FREE_RECOGNITION_CREDITS;
   const unlimited = Boolean(data?.unlimited);
-  const byod = Boolean(data?.byod);
+  const byok = Boolean(data?.byok);
 
-  return { credits, unlimited, byod, canRecognize: unlimited || byod || credits > 0 };
+  return { credits, unlimited, byok, canRecognize: unlimited || byok || credits > 0 };
 }
 
 /**
@@ -67,10 +67,18 @@ export function isCheckoutReady(): boolean {
 }
 
 /**
- * BYOD 패스 결제창이 설정돼 있는지. 그로블 상품은 판매 중이지만
- * `GROBLE_PAYMENT_URL_BYOD`를 Vercel에 넣기 전까지는 `/api/checkout?plan=byod`가
+ * BYOK 패스 결제창이 설정돼 있는지. 그로블 상품은 판매 중이지만
+ * `GROBLE_PAYMENT_URL_BYOK`를 Vercel에 넣기 전까지는 `/api/checkout?plan=byok`가
  * 503을 준다 — 그 사이에는 배너에서 버튼 대신 "준비 중"을 보여준다.
+ *
+ * **옛 이름(`GROBLE_PAYMENT_URL_BYOD`)도 받는다.** "BYOD"는 이름이 틀려서
+ * "BYOK"로 바로잡았는데(사용자 지적, 2026-09-18), Vercel에는 이미 옛 이름으로
+ * 값이 들어가 있다 — 코드만 새 이름으로 바꾸면 실제로 설정된 값을 못 찾아
+ * 배너가 조용히 "준비 중"으로 떨어진다. 새 이름을 우선하고 옛 이름은 옮겨
+ * 적을 때까지의 다리다.
  */
-export function isByodCheckoutReady(): boolean {
-  return Boolean(process.env.GROBLE_PAYMENT_URL_BYOD);
+export function isByokCheckoutReady(): boolean {
+  return Boolean(
+    process.env.GROBLE_PAYMENT_URL_BYOK || process.env.GROBLE_PAYMENT_URL_BYOD,
+  );
 }

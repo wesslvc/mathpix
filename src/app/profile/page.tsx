@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { getAccessState, isByodCheckoutReady, isCheckoutReady } from "@/lib/billing";
+import { getAccessState, isByokCheckoutReady, isCheckoutReady } from "@/lib/billing";
 import type { ExamScore } from "@/lib/supabase/types";
 import type { Subject } from "@/lib/gradeSummary";
 import { buildTrendSeries } from "@/lib/scoreTrend";
 import BillingStatus from "@/components/BillingStatus";
-import ByodSettingsForm from "@/components/ByodSettingsForm";
+import ByokSettingsForm from "@/components/ByokSettingsForm";
 import ScoreTrendChart from "@/components/ScoreTrendChart";
 import Logo from "@/components/Logo";
 import GradeHistoryList from "@/components/GradeHistoryList";
@@ -96,16 +96,16 @@ export default async function ProfilePage() {
       <BillingStatus
         credits={access.credits}
         unlimited={access.unlimited}
-        byod={access.byod}
+        byok={access.byok}
         checkoutReady={isCheckoutReady()}
-        byodCheckoutReady={isByodCheckoutReady()}
+        byokCheckoutReady={isByokCheckoutReady()}
       />
 
       <LinkedAccounts initialIdentities={user.identities ?? []} />
 
-      {/* BYOD 패스를 산 사람에게만 보인다 — 안 산 사람에게 키 입력칸을
-          보여줘 봐야 서버가 어차피 entitlements.byod로 다시 막는다. */}
-      {access.byod && <ByodSettingsForm />}
+      {/* BYOK 패스를 산 사람에게만 보인다 — 안 산 사람에게 키 입력칸을
+          보여줘 봐야 서버가 어차피 entitlements.byok로 다시 막는다. */}
+      {access.byok && <ByokSettingsForm />}
 
       <GradingPrefsForm initial={gradingPrefs} />
 
