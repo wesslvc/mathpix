@@ -81,10 +81,10 @@ type Props = {
   }) => Promise<string>;
   unlimited?: boolean;
   /**
-   * BYOD 패스 계정인가. 본인 키로 직접 내므로 "모두 AI로 다시 그리기"에
+   * BYOK 패스 계정인가. 본인 키로 직접 내므로 "모두 AI로 다시 그리기"에
    * 토큰 비용을 붙여 보여주면 안 된다(실제로도 안 든다).
    */
-  byod?: boolean;
+  byok?: boolean;
   /** 문제 하나를 다시 그리는 데 드는 토큰. 서버가 알려준 값을 그대로 쓴다. */
   figureCost?: number | null;
   onDone?: () => void;
@@ -93,7 +93,7 @@ type Props = {
 export default function KoreanModePanel({
   onSave,
   unlimited = false,
-  byod = false,
+  byok = false,
   figureCost,
   onDone,
 }: Props) {
@@ -950,7 +950,7 @@ export default function KoreanModePanel({
               {busy ?? "모두 AI로 다시 그리기"}
               {typeof figureCost === "number" &&
                 !unlimited &&
-                !byod &&
+                !byok &&
                 ` (${figureCost * pieces.length}토큰)`}
             </button>
           </div>

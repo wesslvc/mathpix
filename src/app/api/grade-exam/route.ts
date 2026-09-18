@@ -7,7 +7,7 @@ import {
 } from "@/lib/tokens";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { getBillingContext } from "@/lib/byod";
+import { getBillingContext } from "@/lib/byok";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,28 +93,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
   const userId = user.id;
-  const { unlimited, byod, byodApiKey } = await getBillingContext(supabase, userId);
+  const { unlimited, byok, byokApiKey } = await getBillingContext(supabase, userId);
 
-  if (byod && !byodApiKey) {
+  if (byok && !byokApiKey) {
     return NextResponse.json(
       {
         error:
-          "BYOD 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
+          "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
       },
       { status: 402 },
     );
   }
-  if (!byod && !process.env.OPENAI_API_KEY) {
+  if (!byok && !process.env.OPENAI_API_KEY) {
     return NextResponse.json(
       { error: "OPENAI_API_KEY가 설정되지 않아 자동채점을 쓸 수 없습니다." },
       { status: 500 },
     );
   }
 
-  // **BYOD는 차감 없이 본인 키로 직접 부른다**(item 5 — 공유 키는 절대
+  // **BYOK는 차감 없이 본인 키로 직접 부른다**(item 5 — 공유 키는 절대
   // 안 건드린다).
   let charged = false;
-  if (!unlimited && !byod) {
+  if (!unlimited && !byok) {
     const { data, error } = await supabase.rpc("consume_recognition_credit", {
       p_amount: GRADING_TOKEN_DEPOSIT,
     });
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
       method,
       deadline.signal,
       electiveLabel,
-      byodApiKey ?? undefined,
+      byokApiKey ?? undefined,
     );
 
     // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
@@ -185,11 +185,11 @@ export async function POST(req: NextRequest) {
       return { ...s, label: key?.label };
     });
 
-    // 금액은 무제한·BYOD 계정에만 보여준다(막는 자리는 서버 — 화면 숨김은
+    // 금액은 무제한·BYOK 계정에만 보여준다(막는 자리는 서버 — 화면 숨김은
     // 우회 가능). estKrw는 이미 계산해 뒀으니(정산에 썼다) 그대로 얹는다 —
     // 단가를 몰라 estKrw가 undefined면 화면도 그냥 토큰 수만 보여준다.
     const usage =
-      (unlimited || byod) && result.usage ? { ...result.usage, estKrw } : undefined;
+      (unlimited || byok) && result.usage ? { ...result.usage, estKrw } : undefined;
 
     return NextResponse.json({ slots, usage, chargedTokens, model: result.model });
   } catch (err) {

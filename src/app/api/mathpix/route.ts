@@ -3,7 +3,7 @@ import { recognizeImage } from "@/lib/mathpixClient";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { OCR_TOKEN_COST } from "@/lib/tokens";
-import { getBillingContext } from "@/lib/byod";
+import { getBillingContext } from "@/lib/byok";
 
 export const runtime = "nodejs";
 
@@ -38,11 +38,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
-    // **BYOD 패스는 Mathpix를 무제한 무료로 쓴다**(사용자 결정) — Mathpix는
+    // **BYOK 패스는 Mathpix를 무제한 무료로 쓴다**(사용자 결정) — Mathpix는
     // OpenAI와 무관한 별도 제공자라 본인 키와 상관없이, 그냥 토큰만 안 받는다
     // (무제한 계정과 같은 대우다).
-    const { unlimited, byod } = await getBillingContext(supabase, user.id);
-    if (!unlimited && !byod) {
+    const { unlimited, byok } = await getBillingContext(supabase, user.id);
+    if (!unlimited && !byok) {
       // **`p_amount`를 명시적으로 넘긴다.** 예전엔 안 넘겨서 DB 함수의 기본값
       // (1)에 기대고 있었다 — `OCR_TOKEN_COST`를 5로 올려도 여기서 안 넘기면
       // 실제 차감은 그대로 1이었을 것이다.

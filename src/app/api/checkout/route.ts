@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type Plan = "tokens" | "byod" | "legacy";
+type Plan = "tokens" | "byok" | "legacy";
 
 /**
  * `?plan=`으로 어느 그로블 상품·환경변수로 보낼지 고른다.
@@ -20,9 +20,14 @@ type Plan = "tokens" | "byod" | "legacy";
  * 3150원 내고 5000토큰을 받아 우리가 크게 밑진다.**
  */
 function resolvePlan(requested: string | null): { plan: Plan; paymentUrl: string } | null {
-  if (requested === "byod") {
-    const url = process.env.GROBLE_PAYMENT_URL_BYOD;
-    return url ? { plan: "byod", paymentUrl: url } : null;
+  // "byod"는 예전에 잘못 붙인 이름이다(사용자 지적, 2026-09-18) — 옛 링크를
+  // 아직 들고 있는 사람을 위해 같이 받는다.
+  if (requested === "byok" || requested === "byod") {
+    // **옛 환경변수 이름도 받는다.** Vercel에는 아직 `GROBLE_PAYMENT_URL_BYOD`로
+    // 값이 들어가 있다 — 코드만 새 이름으로 바꾸면 실제 값을 못 찾는다.
+    const url =
+      process.env.GROBLE_PAYMENT_URL_BYOK || process.env.GROBLE_PAYMENT_URL_BYOD;
+    return url ? { plan: "byok", paymentUrl: url } : null;
   }
   const tokensUrl = process.env.GROBLE_PAYMENT_URL_TOKENS;
   if (tokensUrl) return { plan: "tokens", paymentUrl: tokensUrl };
@@ -53,7 +58,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error:
-          "결제창이 아직 설정되지 않았습니다 (GROBLE_PAYMENT_URL_TOKENS / GROBLE_PAYMENT_URL_BYOD).",
+          "결제창이 아직 설정되지 않았습니다 (GROBLE_PAYMENT_URL_TOKENS / GROBLE_PAYMENT_URL_BYOK).",
       },
       { status: 503 },
     );

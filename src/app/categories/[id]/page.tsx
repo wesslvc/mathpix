@@ -11,7 +11,7 @@ import ProblemGallery, {
 import BillingStatus from "@/components/BillingStatus";
 import Logo from "@/components/Logo";
 import CategoryTitleEditor from "@/components/CategoryTitleEditor";
-import { getAccessState, isByodCheckoutReady, isCheckoutReady } from "@/lib/billing";
+import { getAccessState, isByokCheckoutReady, isCheckoutReady } from "@/lib/billing";
 import { toAnswerType } from "@/lib/answer";
 import { readFontPt } from "@/lib/fontSize";
 import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
@@ -282,9 +282,9 @@ export default async function CategoryPage({
       <BillingStatus
         credits={access.credits}
         unlimited={access.unlimited}
-        byod={access.byod}
+        byok={access.byok}
         checkoutReady={isCheckoutReady()}
-        byodCheckoutReady={isByodCheckoutReady()}
+        byokCheckoutReady={isByokCheckoutReady()}
       />
 
       {linkedGrades && linkedGrades.length > 0 && (
@@ -350,7 +350,7 @@ export default async function CategoryPage({
           .filter((p) => p.korean?.role !== "passage")
           .filter((p) => (p.number ?? parseProblemNumber(p.text)) == null)
           .map((p) => ({ id: p.id, imageUrl: p.imageUrl, text: p.text }))}
-        byod={access.byod}
+        byok={access.byok}
       />
 
       {/* 답지 한 장으로 정답을 한꺼번에 붙인다. 문제가 있어야 붙일 데가

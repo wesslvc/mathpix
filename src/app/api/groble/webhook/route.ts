@@ -48,7 +48,7 @@ async function resolveUserId(
   return (data?.user_id as string | undefined) ?? null;
 }
 
-type Plan = "tokens" | "byod" | "legacy";
+type Plan = "tokens" | "byok" | "legacy";
 
 /**
  * `ref` 문자열의 접두사로 무엇을 샀는지 가른다.
@@ -61,7 +61,9 @@ type Plan = "tokens" | "byod" | "legacy";
  */
 function planFromRef(ref: string | null): Plan {
   if (ref?.startsWith("ord_tokens_")) return "tokens";
-  if (ref?.startsWith("ord_byod_")) return "byod";
+  // `ord_byod_`는 이름을 바로잡기 전(2026-09-18)에 만들어졌을 수 있는 옛
+  // 접두사다 — 결제가 웹훅으로 돌아오기까지 시간이 걸릴 수 있어 함께 받는다.
+  if (ref?.startsWith("ord_byok_") || ref?.startsWith("ord_byod_")) return "byok";
   return "legacy";
 }
 
@@ -69,7 +71,7 @@ function planFromRef(ref: string | null): Plan {
  * 결제 완료 → ref에 찍힌 플랜대로 충전한다(정기결제 회차도 매번 동일하게).
  *
  * - `tokens`(새 5000토큰 상품) → `PAID_RECOGNITION_CREDITS`(5000).
- * - `byod` → 토큰이 아니라 `grant_byod_pass` RPC로 `entitlements.byod`를 켠다.
+ * - `byok` → 토큰이 아니라 `grant_byok_pass` RPC로 `entitlements.byok`를 켠다.
  * - `legacy`(옛 1000토큰 상품·접두사 없는 옛 ref) → `LEGACY_PAID_RECOGNITION_CREDITS`(1000).
  */
 async function grantCredits(
@@ -83,8 +85,8 @@ async function grantCredits(
   if (!userId) return; // 매핑 없음(잘못된/폐기된 ref) → 조용히 무시
 
   const plan = planFromRef(args.sellerReference);
-  if (plan === "byod") {
-    const { error } = await admin.rpc("grant_byod_pass", { p_user_id: userId });
+  if (plan === "byok") {
+    const { error } = await admin.rpc("grant_byok_pass", { p_user_id: userId });
     if (error) throw error;
   } else {
     const amount =

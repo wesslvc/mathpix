@@ -16,14 +16,14 @@ export type TokenStatus = {
   ocrCost: number;
   /** AI 그림 생성 1회의 고정 차감액(2026-09-17부터 실사용량과 무관하다). */
   figureCost: number;
-  /** AI 그림 생성이 가능한 상태인가(OPENAI_API_KEY 설정 여부, 또는 BYOD 본인 키). */
+  /** AI 그림 생성이 가능한 상태인가(OPENAI_API_KEY 설정 여부, 또는 BYOK 본인 키). */
   figureReady: boolean;
   /**
-   * BYOD 패스 계정인가. **화면이 "토큰 부족"·"이용권 구매" 문구를 감추는
-   * 기준**이다 — BYOD는 토큰을 아예 안 쓰므로(Mathpix 무제한 무료, 나머지는
+   * BYOK 패스 계정인가. **화면이 "토큰 부족"·"이용권 구매" 문구를 감추는
+   * 기준**이다 — BYOK는 토큰을 아예 안 쓰므로(Mathpix 무제한 무료, 나머지는
    * 본인 OpenAI 키) `tokens`가 0이어도 부족한 게 아니다.
    */
-  byod: boolean;
+  byok: boolean;
 };
 
 /**
@@ -44,7 +44,7 @@ export async function GET() {
       ...base,
       tokens: null,
       unlimited: false,
-      byod: false,
+      byok: false,
       paid: false,
     } satisfies TokenStatus);
   }
@@ -59,15 +59,15 @@ export async function GET() {
 
   const { data } = await supabase
     .from("entitlements")
-    .select("credits, active, unlimited, byod, byod_secret_id")
+    .select("credits, active, unlimited, byok, byok_secret_id")
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const byod = data?.byod === true;
-  // BYOD가 본인 키를 등록해 뒀으면 공유 OPENAI_API_KEY가 없어도 그림 생성이
+  const byok = data?.byok === true;
+  // BYOK가 본인 키를 등록해 뒀으면 공유 OPENAI_API_KEY가 없어도 그림 생성이
   // 가능하다 — `figureReady`를 여기서만 넓힌다(실제 호출은 서버가 다시
   // `getBillingContext`로 확인하니 여기는 "버튼을 눌러도 되는지" 안내용이다).
-  const figureReady = base.figureReady || (byod && data?.byod_secret_id != null);
+  const figureReady = base.figureReady || (byok && data?.byok_secret_id != null);
 
   return NextResponse.json({
     ...base,
@@ -75,7 +75,7 @@ export async function GET() {
     // 행이 아직 없으면 첫 사용 때 서버가 기본값으로 만들어 준다(0007 참고).
     tokens: data?.credits ?? null,
     unlimited: data?.unlimited ?? false,
-    byod,
+    byok,
     paid: Boolean(data?.active) || Boolean(data?.unlimited),
   } satisfies TokenStatus);
 }

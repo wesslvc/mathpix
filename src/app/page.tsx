@@ -8,7 +8,7 @@ import CategoryList from "@/components/CategoryList";
 import Landing from "@/components/Landing";
 import BillingStatus from "@/components/BillingStatus";
 import Logo from "@/components/Logo";
-import { getAccessState, isByodCheckoutReady, isCheckoutReady } from "@/lib/billing";
+import { getAccessState, isByokCheckoutReady, isCheckoutReady } from "@/lib/billing";
 
 export default async function DashboardPage({
   searchParams,
@@ -95,9 +95,9 @@ export default async function DashboardPage({
       <BillingStatus
         credits={access.credits}
         unlimited={access.unlimited}
-        byod={access.byod}
+        byok={access.byok}
         checkoutReady={isCheckoutReady()}
-        byodCheckoutReady={isByodCheckoutReady()}
+        byokCheckoutReady={isByokCheckoutReady()}
       />
 
       <NewCategoryForm folderId={currentFolderId ?? null} />

@@ -4,7 +4,7 @@ import { gradingEstKrw } from "@/lib/tokens";
 import { startGradingBilling } from "@/lib/gradingBilling";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { getBillingContext } from "@/lib/byod";
+import { getBillingContext } from "@/lib/byok";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,18 +52,18 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
-  const { unlimited, byod, byodApiKey } = await getBillingContext(supabase, user.id);
+  const { unlimited, byok, byokApiKey } = await getBillingContext(supabase, user.id);
 
-  if (byod && !byodApiKey) {
+  if (byok && !byokApiKey) {
     return NextResponse.json(
       {
         error:
-          "BYOD 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
+          "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
       },
       { status: 402 },
     );
   }
-  if (!byod && !process.env.OPENAI_API_KEY) {
+  if (!byok && !process.env.OPENAI_API_KEY) {
     return NextResponse.json(
       { error: "OPENAI_API_KEY가 설정되지 않아 제목 짓기를 쓸 수 없습니다." },
       { status: 500 },
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   try {
     billing = await startGradingBilling(supabase, {
       unlimited,
-      byod,
+      byok,
       deposit: DEPOSIT,
       label: "api/korean-title",
     });
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
     const { result, usage, model } = await readKoreanTitle(
       text,
       deadline.signal,
-      byodApiKey ?? undefined,
+      byokApiKey ?? undefined,
     );
     // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
     const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
@@ -115,8 +115,8 @@ export async function POST(req: NextRequest) {
     );
     return NextResponse.json({
       ...result,
-      // 금액은 무제한·BYOD 계정에만 보여준다(막는 자리는 서버다).
-      usage: (unlimited || byod) && usage ? { ...usage, estKrw } : undefined,
+      // 금액은 무제한·BYOK 계정에만 보여준다(막는 자리는 서버다).
+      usage: (unlimited || byok) && usage ? { ...usage, estKrw } : undefined,
       chargedTokens,
       model,
     });

@@ -19,10 +19,10 @@ type Props = {
   /** 무제한 계정인가. 토큰 비용 표시를 감춘다. */
   unlimited?: boolean;
   /**
-   * BYOD 패스 계정인가. 본인 키로 직접 내므로 "통째로 AI로 다시 그리기"에
+   * BYOK 패스 계정인가. 본인 키로 직접 내므로 "통째로 AI로 다시 그리기"에
    * 토큰 비용을 붙여 보여주면 안 된다(실제로도 안 든다).
    */
-  byod?: boolean;
+  byok?: boolean;
   onCancel: () => void;
   onError: (message: string) => void;
 };
@@ -44,7 +44,7 @@ export default function CropStage({
   onError,
   problemTokenCost,
   unlimited = false,
-  byod = false,
+  byok = false,
 }: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [crop, setCrop] = useState<Crop>();
@@ -193,9 +193,9 @@ export default function CropStage({
           통째로 AI로 다시 그리기
           {typeof problemTokenCost === "number" &&
             !unlimited &&
-            !byod &&
+            !byok &&
             ` (${problemTokenCost}토큰)`}
-          {byod && " (본인 키 사용)"}
+          {byok && " (본인 키 사용)"}
         </button>
         <button
           type="button"

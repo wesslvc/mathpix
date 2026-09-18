@@ -499,7 +499,7 @@ export default function AddProblemFlow({
         <BatchSplitPanel
           onSave={handleSaveToCategory}
           unlimited={tokenStatus?.unlimited ?? false}
-          byod={tokenStatus?.byod ?? false}
+          byok={tokenStatus?.byok ?? false}
           figureCost={tokenStatus?.figureCost ?? null}
         />
       )}
@@ -510,7 +510,7 @@ export default function AddProblemFlow({
         <KoreanModePanel
           onSave={handleSaveToCategory}
           unlimited={tokenStatus?.unlimited ?? false}
-          byod={tokenStatus?.byod ?? false}
+          byok={tokenStatus?.byok ?? false}
           figureCost={tokenStatus?.figureCost ?? null}
         />
       )}
@@ -565,7 +565,7 @@ export default function AddProblemFlow({
           onError={handleImageError}
           problemTokenCost={tokenStatus?.figureCost ?? null}
           unlimited={tokenStatus?.unlimited ?? false}
-          byod={tokenStatus?.byod ?? false}
+          byok={tokenStatus?.byok ?? false}
         />
         </div>
       )}
