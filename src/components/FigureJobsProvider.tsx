@@ -31,31 +31,6 @@ import { keepOrigin } from "@/lib/figureOrigin";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
 import type { CardSpec } from "@/lib/cardHtml";
 
-/**
- * 같은 크롭을 글자 인식기(Mathpix)에 한 번 보내 본문을 읽어 둔다.
- *
- * 실패하면 조용히 포기한다 — 참고 없이도 그림은 만들어진다. 인식 토큰이
- * 하나 들지만, 문제 전체를 다시 그리는 값에 비하면 작고
- * 글자가 틀리는 쪽이 훨씬 비싸다.
- */
-async function readTextForReference(image: string): Promise<string | undefined> {
-  try {
-    const res = await fetch("/api/mathpix", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image }),
-    });
-    if (!res.ok) return undefined;
-    const json: { text?: string; latex?: string; mock?: boolean } = await res.json();
-    // mock 응답(키 미설정)은 가짜 글자라 참고로 쓰면 오히려 해롭다.
-    if (json.mock) return undefined;
-    const text = (json.text || json.latex || "").trim();
-    return text.length > 0 ? text : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export type FigureJob = {
   id: string;
   /** 어느 문제의 그림인가. 화면이 닫힌 뒤 저장본을 갱신할 때 쓴다. */
@@ -82,43 +57,16 @@ export type FigureJob = {
    */
   instruction?: string;
   /**
-   * 국어인가. 국어는 지문·문항이 **거의 글자뿐**이라 Mathpix 가 사진보다
-   * 정확한 경우가 많다 — 그래서 참고 글을 더 앞세우라고 프롬프트에 적는다
-   * (사용자 요청). 다른 과목은 표·그림이 섞여 있어 사진이 우선이다.
+   * 국어인가. **문제 이미지를 다시 그릴 때는 이제 아무 뜻이 없다** — Mathpix
+   * 참고 글은 더 이상 여기서 안 쓴다(사용자 결정, 2026-09-18. 국어도
+   * 예외였으나 그 예외를 없앴다). 참고 글은 국어 **지문 자체**를 조판하는
+   * 자리(`readKoreanRichText`, `/api/korean-text`가 terra/Gemini를 부르기
+   * 직전)에서만 쓴다 — 그건 이 큐와 완전히 다른 코드 경로다. 이 필드는
+   * 서버가 프롬프트 톤을 고를 때(WHOLE_PROBLEM_PROMPT) 여전히 받는 값이라
+   * 남겨 둔다.
    */
   korean?: boolean;
-  /**
-   * 글자 인식(Mathpix)을 쓸지. **없으면 국어일 때만 쓴다**(`korean` 참고).
-   *
-   * 처음에는 문제 전체 모드면 무조건 썼다. 그런데 사용자가 실제로 둘을 견줘
-   * 보고 **국어 말고는 참고 글이 없는 쪽이 더 정확하고 빠르다**고 알려 왔다
-   * (2026-09-16). 그럴 만하다 — 참고 글의 값어치는 "모델이 글자를 잘 못
-   * 읽는다"는 전제에서 나오는데, 이미지 생성 모델이 좋아질수록 그 전제가
-   * 약해지고 **Mathpix 가 틀리면 모델이 그 오류를 그대로 베껴 쓰는** 손해만
-   * 남는다. 국어만 예외인 것은 지문·문항이 거의 순수한 글이라 인식기가 여전히
-   * 유리해서다.
-   *
-   * 곁들여 국어가 아닌 요청에서는 **입력 글자 토큰이 550쯤 줄고**(참고 글
-   * 블록이 통째로 빠진다) Mathpix 왕복 한 번이 사라져 눈에 띄게 빨라진다.
-   *
-   * 수정 화면의 체크박스로 문제마다 뒤집을 수 있다 — 기본값만 바뀐 것이지
-   * 고를 수 없게 된 게 아니다.
-   */
-  useOcr?: boolean;
   status: "pending" | "running" | "done" | "error";
-  /**
-   * 글자 인식(Mathpix)이 어떻게 됐는가. **문제 전체를 그릴 때만** 쓴다.
-   *   reading — 지금 읽는 중
-   *   ok      — 읽어서 프롬프트에 참고로 넣었다
-   *   none    — 못 읽었다(키가 없거나 실패). 참고 없이 그린다
-   *   off     — 사용자가 **일부러 껐다**. 못 읽은 것과 갈라 둔다 — 안 그러면
-   *             자기가 끈 것을 실패로 읽는다.
-   * 화면에 그대로 보여 준다 — 글자 정확도가 걸린 단계라 됐는지 안 됐는지
-   * 눈에 보여야 한다.
-   */
-  ocr?: "reading" | "ok" | "none" | "off";
-  /** 읽어 낸 글자의 앞부분. 무엇을 참고했는지 눈으로 확인할 수 있게. */
-  ocrPreview?: string;
   /**
    * 이 작업에 실제로 든 **추정** 비용(달러). 캐시에 걸렸으면 없다(돈이 안 났다).
    * 어느 문제가 비쌌는지 눈으로 보려는 것이다.
@@ -392,18 +340,8 @@ export default function FigureJobsProvider({
         // 캐시가 걸려 예전 그림이 그대로 나온다 — 사용자 눈에는 지시를 적었는데
         // 아무것도 안 바뀐 것으로 보인다. 지시가 없으면 빈 문자열이라 예전
         // 키와 같다.
-        // **참고 글을 끈 것도 키에 들어가야 한다.** 같은 크롭·같은 지시로
-        // "이번엔 참고 없이"를 골랐는데 캐시가 걸리면 참고를 썼던 예전 그림이
-        // 그대로 나온다 — 사용자 눈에는 껐는데 아무것도 안 바뀐 것으로 보인다
-        // (`instruction` 을 키에 넣은 것과 같은 이유). 켠 쪽은 꼬리표를
-        // 안 붙여 **예전 키를 그대로 쓴다** — 이미 쌓인 캐시를 버릴 이유가 없다.
-        //
-        // **기본값이 과목마다 다르다**: 국어는 참고 글을 쓰고 나머지는 안 쓴다
-        // (`FigureJob.useOcr` 주석 참고). 화면에서 명시적으로 고른 값이 있으면
-        // 그게 이긴다.
-        const useOcr = next.useOcr ?? next.korean === true;
         const key = await figureCacheKey(
-          `${mode}${useOcr ? "" : ":noocr"}:${next.instruction ?? ""}:${forModel}`,
+          `${mode}:${next.instruction ?? ""}:${forModel}`,
         );
         let svg = readFigureCache(key);
         /** 이 작업에 실제로 든 추정 비용. 캐시에 걸리면 끝까지 undefined 다. */
@@ -412,42 +350,12 @@ export default function FigureJobsProvider({
         let chargedTokens: number | undefined;
 
         if (!svg) {
-          // **문제 전체는 글자 인식을 함께 쓴다.**
-          // 이미지 생성 모델은 글자를 자주 틀리는데(그림은 모양만 맞으면 되지만
-          // 문제는 한 글자로 답이 뒤집힌다), Mathpix 는 반대로 글자를 읽는 일에
-          // 맞춰져 있다. 읽은 본문을 프롬프트에 함께 주면 모델이 지어내지 않고
-          // 베껴 쓴다. 둘의 잘하는 것을 겹쳐 쓰는 셈이다.
-          //
-          // **실패해도 그냥 진행한다.** 참고가 없으면 예전과 똑같이 동작할
-          // 뿐이라, 이것 때문에 그림 생성을 막을 이유가 없다.
-          let reference: string | undefined;
-          if (mode === "problem" && !useOcr) {
-            // **국어에서 사용자가 일부러 껐을 때만 알린다.** 다른 과목은
-            // 참고 글을 애초에 안 쓰기로 했으므로(화면에 고를 자리도 없다)
-            // "껐다"는 줄이 뜨면 뭔가 빠진 것처럼 보이기만 한다. 못 읽은
-            // 것(`none`)과 갈라서 보여 주려던 구분은 국어 안에서만 뜻이 있다.
-            if (next.korean) {
-              setJobs((prev) =>
-                prev.map((j) => (j.id === id ? { ...j, ocr: "off" as const } : j)),
-              );
-            }
-          } else if (mode === "problem") {
-            setJobs((prev) =>
-              prev.map((j) => (j.id === id ? { ...j, ocr: "reading" as const } : j)),
-            );
-            reference = await readTextForReference(forModel);
-            setJobs((prev) =>
-              prev.map((j) =>
-                j.id === id
-                  ? {
-                      ...j,
-                      ocr: reference ? ("ok" as const) : ("none" as const),
-                      ocrPreview: reference?.replace(/\s+/g, " ").slice(0, 60),
-                    }
-                  : j,
-              ),
-            );
-          }
+          // **문제 이미지를 다시 그릴 때 Mathpix 참고 글을 안 쓴다**(사용자
+          // 결정, 2026-09-18 — 국어도 예외였으나 그 예외를 없앴다). 참고
+          // 글은 국어 지문 자체를 조판하는 자리(`readKoreanRichText`,
+          // `/api/korean-text`가 terra/Gemini를 부르기 직전)에서만 쓴다 —
+          // 완전히 다른 코드 경로다. 여기서는 사진만 보고 그린다.
+          const reference: string | undefined = undefined;
           // 보낼 그림의 크기를 재서 함께 넘긴다. 서버가 **출력 캔버스를 이
           // 비율에 맞추는** 데 쓴다 — 비율이 어긋나면 모델이 흰 여백을 붙여
           // 돌려주는데 우리는 그걸 잘라 버리므로, 그 여백이 곧 버리는 돈이다.

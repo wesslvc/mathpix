@@ -11,50 +11,6 @@ const STATUS_TEXT = {
 } as const;
 
 /**
- * 글자 인식(Mathpix)이 어떻게 됐는지 보여 주는 줄.
- *
- * 문제 전체를 그릴 때는 **Mathpix 가 읽은 글자를 프롬프트에 참고로 넣는다**
- * (그래야 이미지 생성 모델이 글자를 지어내지 않는다). 그 단계가 됐는지 안
- * 됐는지는 결과물의 글자 정확도를 좌우하므로 눈에 보여야 한다.
- */
-function OcrLine({ ocr, preview }: { ocr?: string; preview?: string }) {
-  if (!ocr) return null;
-  if (ocr === "reading") {
-    return (
-      <p className="animate-soft-pulse text-[11px] text-slate-500">
-        Mathpix로 글자 읽는 중…
-      </p>
-    );
-  }
-  if (ocr === "none") {
-    return (
-      <p className="text-[11px] text-amber-700">
-        Mathpix 글자 참고 없음 — 그림만 보고 그립니다
-      </p>
-    );
-  }
-  // **끈 것과 못 읽은 것을 갈라 놓는다.** 자기가 끈 것을 실패로 읽으면
-  // 없는 문제를 고치려 든다.
-  if (ocr === "off") {
-    return (
-      <p className="text-[11px] text-slate-500">
-        Mathpix 참고 끔 — 사진만 보고 그립니다
-      </p>
-    );
-  }
-  return (
-    <>
-      <p className="text-[11px] text-emerald-700">Mathpix 글자 참고 ✓</p>
-      {preview && (
-        <p className="mt-0.5 truncate text-[10px] text-slate-400">
-          “{preview}…”
-        </p>
-      )}
-    </>
-  );
-}
-
-/**
  * AI 그림 작업 현황을 화면 구석에 띄우는 패널.
  *
  * 작업이 도는 동안 사용자는 다음 문제로 넘어가 계속 작업한다. 그래서 진행
@@ -141,7 +97,6 @@ export default function FigureJobsPanel() {
                   >
                     {STATUS_TEXT[j.status]}
                   </p>
-                  <OcrLine ocr={j.ocr} preview={j.ocrPreview} />
                   {/* 어느 문제가 비쌌는지 보이게 한다. 캐시에 걸린 작업에는
                       값이 없다 — 그때는 돈이 안 나갔다. */}
                   {(typeof j.costUsd === "number" ||
