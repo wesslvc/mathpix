@@ -371,11 +371,7 @@ export default async function CategoryPage({
         />
       )}
 
-      <ProblemGallery
-        problems={galleryProblems}
-        unlimited={access.unlimited}
-        byod={access.byod}
-      />
+      <ProblemGallery problems={galleryProblems} unlimited={access.unlimited} />
     </main>
   );
 }

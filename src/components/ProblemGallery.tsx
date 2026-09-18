@@ -109,11 +109,6 @@ type Props = {
   problems: GalleryProblem[];
   /** 지문 재인식 비용을 원화로 보여줄지(무제한 계정만 — 막는 자리는 서버다). */
   unlimited?: boolean;
-  /**
-   * BYOD 패스 계정인가. Mathpix가 무제한 무료라 "인식 1토큰" 같은 비용
-   * 문구가 안 맞다 — 막는 자리는 서버(`/api/mathpix`)다.
-   */
-  byod?: boolean;
 };
 
 /**
@@ -197,7 +192,7 @@ function NumberInput({
   );
 }
 
-export default function ProblemGallery({ problems, unlimited = false, byod = false }: Props) {
+export default function ProblemGallery({ problems, unlimited = false }: Props) {
   const router = useRouter();
   const [raw, setList] = useState<GalleryProblem[]>(problems);
   /**
@@ -363,17 +358,6 @@ export default function ProblemGallery({ problems, unlimited = false, byod = fal
   const [redrawNote, setRedrawNote] = useState<Record<string, string>>({});
 
   /**
-   * 다시 그릴 때 **Mathpix 참고 글을 쓸지**(사용자 요청 — "mathpix 개입 여부를
-   * 수정할 때는 선택할 수 있게 해"). 없으면 켠 것으로 본다.
-   *
-   * 참고 글이 늘 이로운 것은 아니다. Mathpix 가 잘못 읽으면 모델이 그 오류를
-   * **베껴 쓴다** — 글자 분수를 한 줄로 뭉갠 경우가 그랬다. 결과를 눈으로 본
-   * 사람이 "이번엔 참고 없이 사진만 보고 그려 봐"를 고를 수 있어야 한다.
-   * 지시(`redrawNote`)와 같은 이유로 **그림마다 따로** 들고, 한 번 쓰고 버린다.
-   */
-  const [redrawOcr, setRedrawOcr] = useState<Record<string, boolean>>({});
-
-  /**
    * 큐에 넣는다.
    *
    * **같은 id 를 두 번 넣을 수 없으므로**(중복 과금을 막는 자리다) 다시 그릴
@@ -419,11 +403,8 @@ export default function ProblemGallery({ problems, unlimited = false, byod = fal
       // 지문은 이 버튼이 아예 안 뜨지만(그쪽은 "다시 인식하기"다) 조건을
       // 그대로 적어 둔다 — 나중에 버튼이 옮겨 다녀도 안전하게.
       mode: isWholeProblemFigure(id) ? "problem" : undefined,
-      // **체크박스는 국어에만 뜬다.** 다른 과목은 참고 글을 아예 안 쓰므로
-      // 고를 값도 없다 — `undefined` 를 넘겨 큐의 기본값(국어만 켬)에 맡긴다.
-      useOcr: editing?.korean ? redrawOcr[id] : undefined,
-      // 국어 문항은 거의 글자뿐이라 참고 글을 더 앞세운다(KoreanModePanel 이
-      // 처음 만들 때 쓰는 것과 같은 값).
+      // 국어 문항은 거의 글자뿐이라 서버가 프롬프트 톤을 고를 때 참고한다
+      // (Mathpix 참고 글 자체는 더 이상 안 쓴다 — 위 FigureJobsProvider 참고).
       korean: editing?.korean ? true : undefined,
       // 정산이 모자랐을 때 **어느 문제를 잠글지** 서버가 알아야 한다.
       problemId: editing?.id ?? null,
@@ -1328,38 +1309,6 @@ export default function ProblemGallery({ problems, unlimited = false, byod = fal
                               placeholder="다시 그릴 때 요청할 것 (예: 표 테두리를 진하게)"
                               className="w-full rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-700 placeholder:text-slate-400 disabled:opacity-50"
                             />
-                            {/* **Mathpix 참고 글을 쓸지 고른다**(사용자 요청).
-                                문제 한 장을 다시 그릴 때만 뜻이 있다 — 도형
-                                하나에는 참고 글이 애초에 안 붙는다.
-                                **국어에서만 보인다.** 다른 과목은 사진만 보고
-                                그리는 쪽이 더 정확하고 빨라서 참고 글을 아예
-                                안 쓰기로 했다(사용자 결정) — 쓰지 않을 것을
-                                고르게 두면 헷갈리기만 한다. */}
-                            {isWholeProblemFigure(f.id) && !!editing?.korean && (
-                              <label className="flex items-start gap-1.5 text-[11px] text-slate-600">
-                                <input
-                                  type="checkbox"
-                                  checked={redrawOcr[f.id] ?? true}
-                                  onChange={(e) =>
-                                    setRedrawOcr((prev) => ({
-                                      ...prev,
-                                      [f.id]: e.target.checked,
-                                    }))
-                                  }
-                                  disabled={busy}
-                                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300"
-                                />
-                                <span>
-                                  Mathpix로 글자를 읽어 참고로 주기
-                                  {!byod && " (인식 1토큰)"}
-                                  <span className="block text-slate-400">
-                                    국어는 글이 대부분이라 읽어 준 글을 베끼는
-                                    쪽이 더 정확해서 기본으로 켭니다. 끄면
-                                    사진만 보고 그립니다.
-                                  </span>
-                                </span>
-                              </label>
-                            )}
                           </div>
                         )}
                       </div>
