@@ -55,6 +55,25 @@ export default function MigrateImagesPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
 
+  const [r2Only, setR2Only] = useState(false);
+
+  useEffect(() => {
+    setR2Only(document.cookie.split("; ").includes("r2only=1"));
+  }, []);
+
+  function toggleR2Only(on: boolean) {
+    // 링크를 눌러서 켜는 방식은 채팅 앱의 미리보기 봇이 쿠키 없이 먼저
+    // 그 주소를 열어버려 믿을 수 없었다(로그로 확인됨 — 항상 로그인 안 된
+    // 채로 미들웨어에서 튕겼다). 지금 이 페이지는 이미 로그인된 상태로
+    // 열려 있으니, 여기서 **직접 쿠키를 써서** 그 문제 자체를 없앤다.
+    if (on) {
+      document.cookie = "r2only=1; path=/; max-age=1800; samesite=lax";
+    } else {
+      document.cookie = "r2only=; path=/; max-age=0; samesite=lax";
+    }
+    setR2Only(on);
+  }
+
   useEffect(() => {
     (async () => {
       try {
@@ -192,6 +211,28 @@ export default function MigrateImagesPage() {
         Supabase로 내려가게 되어 있어서, 옮기는 도중에도 화면은 계속
         정상입니다. 재인코딩 없이 원본 바이트 그대로 옮깁니다.
       </p>
+
+      <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+        <p className="font-medium">R2에서만 불러오기 테스트</p>
+        <p className="text-slate-500">
+          켜면 그림 보기가 Supabase는 안 보고 R2에만 묻습니다 — 아직 안 옮겨진
+          그림만 정확히 깨져 보입니다. 30분 뒤 자동으로 꺼집니다.
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => toggleR2Only(!r2Only)}
+            className={`self-start rounded-lg px-4 py-2 text-sm font-medium text-white ${
+              r2Only ? "bg-red-600 hover:bg-red-700" : "bg-slate-600 hover:bg-slate-700"
+            }`}
+          >
+            {r2Only ? "테스트 끄기" : "테스트 켜기"}
+          </button>
+          <span className={r2Only ? "text-red-700" : "text-slate-400"}>
+            지금 {r2Only ? "켜짐 — 실모·문제 목록을 눌러 그림이 다 뜨는지 보세요" : "꺼짐"}
+          </span>
+        </div>
+      </div>
 
       {previewLoading && <p className="text-sm text-slate-400">확인하는 중...</p>}
       {previewError && <p className="text-sm text-red-600">{previewError}</p>}
