@@ -74,10 +74,17 @@ export async function GET(
   if (r2Only) {
     try {
       const hit = await r2Get(path);
-      if (hit) return imageResponse(hit.body, hit.headers.get("Content-Type"), path);
+      if (hit) {
+        // **성공해도 남긴다.** 실패만 로그에 남기면 "켜져 있었는지"를
+        // 나중에 로그만 보고는 확인할 방법이 없다 — 요청 하나하나가
+        // 실제로 이 갈래를 탔다는 증거가 필요하다.
+        console.log(`[card] r2only 히트: ${path}`);
+        return imageResponse(hit.body, hit.headers.get("Content-Type"), path);
+      }
     } catch (err) {
       console.error("[card] r2only 모드 R2 읽기 실패:", err);
     }
+    console.error(`[card] r2only 모드 — R2에 없음: ${path}`);
     return NextResponse.json(
       { error: "R2에 없습니다(r2only 테스트 모드) — 아직 이관 안 된 그림입니다." },
       { status: 404 },
