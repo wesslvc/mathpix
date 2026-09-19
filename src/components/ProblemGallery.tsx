@@ -1276,12 +1276,20 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                             >
                               다시 오려내기
                             </button>
-                            {/* 다시 그릴 때는 **원본**을 보낸다. AI 결과를 또
-                                AI 에 넣으면 원본에서 멀어지기만 한다. */}
+                            {/* **지시가 없으면 원본**을 보낸다 — AI 결과를 또
+                                AI 에 넣으면 원본에서 멀어지기만 한다. **지시가
+                                있으면 지금 보이는 그림**(AI 결과 포함)을 보낸다
+                                — "표 테두리를 진하게" 같은 요청은 원본이 아니라
+                                방금 나온 결과를 고쳐 달라는 뜻이라, 원본부터
+                                다시 그리면 사용자가 이미 확인한 결과와 동떨어진
+                                그림이 나올 수 있다(사용자 요청, 2026-09-19). */}
                             <button
                               type="button"
                               onClick={() =>
-                                requestRedraw(f.id, f.origin ?? raster)
+                                requestRedraw(
+                                  f.id,
+                                  redrawNote[f.id]?.trim() ? raster : (f.origin ?? raster),
+                                )
                               }
                               disabled={busy || (f.ai === true && !f.origin)}
                               className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
