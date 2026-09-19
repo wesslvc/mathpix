@@ -75,6 +75,21 @@ export async function r2Get(path: string): Promise<Response | null> {
 }
 
 /**
+ * 있으면 크기(바이트)를, 없으면 `null`을 돌려준다. 본문을 안 받으므로
+ * `r2Get`보다 훨씬 가볍다 — "이미 옮겨졌는지"만 알고 싶을 때 쓴다
+ * (Supabase → R2 이관 도구가 재실행해도 안전하려면 이 확인이 필요하다).
+ */
+export async function r2Head(path: string): Promise<number | null> {
+  const res = await aws().fetch(r2ObjectUrl(path), { method: "HEAD" });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`R2 HEAD 실패 (${res.status})`);
+  }
+  const len = res.headers.get("content-length");
+  return len ? Number(len) : null;
+}
+
+/**
  * **`Content-Length` 를 우리가 직접 붙인다.**
  *
  * R2 는 S3 와 달리 PUT 에 길이를 반드시 요구하고, 없으면
