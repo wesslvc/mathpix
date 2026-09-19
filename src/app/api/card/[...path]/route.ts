@@ -31,8 +31,19 @@ export const dynamic = "force-dynamic";
 
 const BUCKET = "problem-images";
 
+/** `cookie` 헤더에서 값 하나만 뽑는다(`NextRequest`로 바꾸지 않기 위해 직접 판다). */
+function getCookie(req: Request, name: string): string | null {
+  const header = req.headers.get("cookie");
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
+}
+
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path: segments } = await params;
@@ -54,6 +65,23 @@ export async function GET(
   // 규칙). 남의 경로를 받으면 내려받기 전에 끊는다.
   if (segments[0] !== user.id) {
     return NextResponse.json({ error: "권한이 없습니다." }, { status: 403 });
+  }
+
+  // **테스트 스위치**(`/api/admin/r2-only` 참고). 켜져 있으면 Supabase는
+  // 아예 안 보고 R2에만 묻는다 — 평소엔 안 뜨는 "이관이 빠진 그림"을 눈에
+  // 보이게 하려는 것이라, 여기서만 안전망(아래 Supabase 대체)을 꺼 둔다.
+  const r2Only = r2Configured() && getCookie(req, "r2only") === "1";
+  if (r2Only) {
+    try {
+      const hit = await r2Get(path);
+      if (hit) return imageResponse(hit.body, hit.headers.get("Content-Type"), path);
+    } catch (err) {
+      console.error("[card] r2only 모드 R2 읽기 실패:", err);
+    }
+    return NextResponse.json(
+      { error: "R2에 없습니다(r2only 테스트 모드) — 아직 이관 안 된 그림입니다." },
+      { status: 404 },
+    );
   }
 
   // **R2 를 먼저 본다.** 그림은 R2 로 옮겨 가는 중이라 두 곳에 나뉘어 있다 —
