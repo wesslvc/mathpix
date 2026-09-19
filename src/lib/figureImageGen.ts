@@ -46,6 +46,17 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
 const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5-sunburst"];
 
 /**
+ * **캐시 키에 넣으려고 export한다.** 화면(`FigureJobsProvider`)의 캐시는
+ * "같은 크롭·같은 지시"만 보고 예전 결과를 그대로 돌려주는데, 모델을
+ * 바꿔도(flare→sunburst 처럼) 그 키가 안 바뀌면 **몇 달 전 다른 모델이
+ * 그린 그림이 조용히 다시 나온다** — 사용자에게는 "다시 그렸는데 딴 게
+ * 나왔다"로 보인다(실제로는 반대다, 새로 안 그려지고 옛것이 나온 것).
+ * 이 값을 캐시 키에 섞어 두면 모델을 바꾸는 순간 예전 키가 전부 무효가
+ * 된다 — 상수 하나 바꾸는 것으로 끝나서 따로 손볼 곳이 없다.
+ */
+export const DEFAULT_FIGURE_MODEL = DEFAULT_IMAGE_MODEL_IDS[0];
+
+/**
  * 이미지 생성 모델만 통과시킨다.
  *
  * 환경변수에 오타가 나거나 누가 실수로 채팅 모델 이름을 넣어도 그쪽으로는

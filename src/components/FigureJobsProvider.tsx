@@ -19,7 +19,7 @@ import {
   trimBlankBorder,
 } from "@/lib/figureImage";
 import { persistFigureValue } from "@/lib/figureBlob";
-import type { FigureMode, FigureUsage } from "@/lib/figureImageGen";
+import { DEFAULT_FIGURE_MODEL, type FigureMode, type FigureUsage } from "@/lib/figureImageGen";
 import { thumbPathFor } from "@/lib/cardThumb";
 import {
   figureCacheKey,
@@ -342,8 +342,12 @@ export default function FigureJobsProvider({
         // 캐시가 걸려 예전 그림이 그대로 나온다 — 사용자 눈에는 지시를 적었는데
         // 아무것도 안 바뀐 것으로 보인다. 지시가 없으면 빈 문자열이라 예전
         // 키와 같다.
+        // **모델도 키에 넣어야 한다**(사용자 지적 — "싹다 선버스트가 만들어야
+        // 함 딴애같은데"). 안 넣으면 flare→sunburst 처럼 모델을 바꿔도 예전에
+        // 다른 모델이 그린 결과가 캐시에서 그대로 다시 나온다 — 실제로는 새로
+        // 안 그려진 것인데 "다시 그렸는데 딴 게 나왔다"로 보인다.
         const key = await figureCacheKey(
-          `${mode}:${next.instruction ?? ""}:${forModel}`,
+          `${mode}:${DEFAULT_FIGURE_MODEL}:${next.instruction ?? ""}:${forModel}`,
         );
         let svg = readFigureCache(key);
         /** 이 작업에 실제로 든 추정 비용. 캐시에 걸리면 끝까지 undefined 다. */
