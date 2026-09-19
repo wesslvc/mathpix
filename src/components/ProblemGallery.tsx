@@ -847,8 +847,24 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     </>
   );
 
+  /** 확장자는 경로 끝에서 그대로 읽는다 — PNG/JPEG이 섞여 있다. */
+  function downloadName(problem: GalleryProblem, index: number): string {
+    const ext = problem.imageUrl.split(".").pop()?.split(/[?#]/)[0] || "png";
+    return `문제${problem.number ?? index + 1}.${ext}`;
+  }
+
   const rowButtons = (problem: GalleryProblem, index: number) => (
     <>
+      {/* **PDF로 안 묶고 그림 하나만** 받고 싶을 때. `/api/card`가 같은
+          출처(same-origin)라 `download` 속성이 그대로 먹는다 — 새 탭으로
+          열리지 않고 바로 저장된다. */}
+      <a
+        href={problem.imageUrl}
+        download={downloadName(problem, index)}
+        className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100"
+      >
+        다운로드
+      </a>
       <button
         type="button"
         onClick={() => openEdit(problem)}

@@ -45,6 +45,14 @@ export default function CategoryList({
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /**
+   * **폴더째로 고른 것.** 폴더를 체크하면 그 폴더 안의 실모 전부가 대상이
+   * 된다(하나씩 들어가서 고를 필요가 없다 — 사용자 요청). 폴더 자체를
+   * `selected`에 넣지 않는 이유는, 실모 id 집합과 폴더 id 집합은 겹치는
+   * 값일 수 없어도 뜻이 다르기 때문이다 — 내보낼 때 이 폴더에 지금 속한
+   * 실모로 그때그때 풀어낸다(`resolvedIds`).
+   */
+  const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
+  /**
    * **고르는 중인가.** 예전에는 체크박스가 줄마다 늘 떠 있고 그 옆에 폴더
    * 고르는 드롭다운과 삭제 버튼까지 붙어서, 실모 하나를 여는 게 목적인
    * 화면인데 컨트롤이 넷씩 보였다. 고르는 일은 "여러 개를 PDF 로 묶을 때"만
@@ -83,10 +91,27 @@ export default function CategoryList({
     });
   }
 
+  function toggleFolder(id: string) {
+    setSelectedFolders((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** 낱개로 고른 것 + 폴더째로 고른 것 안의 실모를 합친다(중복은 자동으로 없어진다). */
+  const resolvedIds = useMemo(() => {
+    const ids = new Set(selected);
+    for (const c of categories) {
+      if (c.folder_id && selectedFolders.has(c.folder_id)) ids.add(c.id);
+    }
+    return ids;
+  }, [selected, selectedFolders, categories]);
+
   function exportSelected() {
-    const ids = categories.filter((c) => selected.has(c.id)).map((c) => c.id);
-    if (ids.length === 0) return;
-    router.push(`/export?ids=${ids.join(",")}`);
+    if (resolvedIds.size === 0) return;
+    router.push(`/export?ids=${[...resolvedIds].join(",")}`);
   }
 
   async function createFolder() {
@@ -152,6 +177,18 @@ export default function CategoryList({
     return categories.filter((c) => categoryLabel(c).toLowerCase().includes(q));
   }, [categories, search]);
 
+  /**
+   * **"전체선택"이 고를 대상.** 지금 화면에 실제로 줄로 찍혀 있는 실모만
+   * 이다 — 검색 중이면 검색 결과, 폴더 안이면 그 폴더 것, 아니면 폴더
+   * 밖(루트)의 것. 폴더 카드 자체는 여기 안 들어간다(폴더는 카드 위
+   * 체크박스로 따로 통째로 고른다).
+   */
+  const visibleCategories = useMemo(() => {
+    if (filtered !== null) return filtered;
+    if (currentFolder) return categories.filter((c) => c.folder_id === currentFolder.id);
+    return categories.filter((c) => !c.folder_id);
+  }, [filtered, currentFolder, categories]);
+
   function folderNameOf(id: string | null): string | null {
     if (!id) return null;
     return folders.find((f) => f.id === id)?.name ?? null;
@@ -163,6 +200,33 @@ export default function CategoryList({
     // 점수는 **제목 안이 아니라 옆에** 붙인다(사용자 요청). 제목은 시험 이름
     // 그대로 두고, 점수는 배지로 따로 보여 준다.
     const score = categoryScore(category, maxOf(category.id));
+
+    const content = (
+      <>
+        {/* 배지를 제목 문단 **안에** 두면 안 된다. `truncate` 는 넘치는 것을
+            통째로 잘라내므로, 이름이 긴 실모에서는 점수 배지가 "42/…" 처럼
+            반토막 나거나 화면 밖으로 밀려난다(휴대폰에서는 거의 늘 그렇다).
+            제목만 줄이고 배지는 제 크기를 지키게 가로로 나눠 놓는다. */}
+        <div className="flex items-center gap-1.5">
+          <p className="min-w-0 truncate font-semibold text-ink">{label}</p>
+          {category.is_exam && (
+            <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
+              실모
+            </span>
+          )}
+          {score && (
+            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">
+              {score}
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 text-xs text-slate-400">
+          {folderName && <>📁 {folderName} · </>}
+          {new Date(category.created_at).toLocaleDateString("ko-KR")}
+        </p>
+      </>
+    );
+
     return (
       <div className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition hover:border-blue-300 hover:shadow">
         {picking && (
@@ -174,31 +238,33 @@ export default function CategoryList({
             aria-label={`${label} 선택`}
           />
         )}
-        {/* 줄 전체가 여는 자리다 — "열기 →" 를 따로 두지 않는다(누르는 자리가
-            둘이면 어디를 눌러야 할지 헷갈리고 줄만 길어진다). */}
-        <Link href={`/categories/${category.id}`} className="min-w-0 flex-1 py-0.5">
-          {/* 배지를 제목 문단 **안에** 두면 안 된다. `truncate` 는 넘치는 것을
-              통째로 잘라내므로, 이름이 긴 실모에서는 점수 배지가 "42/…" 처럼
-              반토막 나거나 화면 밖으로 밀려난다(휴대폰에서는 거의 늘 그렇다).
-              제목만 줄이고 배지는 제 크기를 지키게 가로로 나눠 놓는다. */}
-          <div className="flex items-center gap-1.5">
-            <p className="min-w-0 truncate font-semibold text-ink">{label}</p>
-            {category.is_exam && (
-              <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600">
-                실모
-              </span>
-            )}
-            {score && (
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">
-                {score}
-              </span>
-            )}
+        {/* **고르는 중에는 링크가 아니라 토글이다.** 예전에는 `picking` 이어도
+            줄 전체가 여전히 `<Link>` 라서, 체크박스를 누르려다 살짝 빗나가면
+            안으로 들어가 버렸다(사용자 지적 — "선택 누르다가 갑자기 안으로
+            들어가지는데"). 고르는 중에는 이 영역 전체가 체크박스와 똑같이
+            토글하고, 평소에만 실제로 이동한다. */}
+        {picking ? (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => toggle(category.id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggle(category.id);
+              }
+            }}
+            className="min-w-0 flex-1 cursor-pointer py-0.5"
+          >
+            {content}
           </div>
-          <p className="mt-0.5 text-xs text-slate-400">
-            {folderName && <>📁 {folderName} · </>}
-            {new Date(category.created_at).toLocaleDateString("ko-KR")}
-          </p>
-        </Link>
+        ) : (
+          // 줄 전체가 여는 자리다 — "열기 →" 를 따로 두지 않는다(누르는 자리가
+          // 둘이면 어디를 눌러야 할지 헷갈리고 줄만 길어진다).
+          <Link href={`/categories/${category.id}`} className="min-w-0 flex-1 py-0.5">
+            {content}
+          </Link>
+        )}
 
         {/* 폴더 옮기기·삭제는 자주 쓰는 일이 아니다 — `⋯` 안으로 넣어
             평소에는 안 보이게 한다. `<details>` 를 쓰면 바깥을 눌렀을 때
@@ -270,6 +336,7 @@ export default function CategoryList({
           onClick={() => {
             setPicking((v) => !v);
             setSelected(new Set());
+            setSelectedFolders(new Set());
           }}
           className={`shrink-0 rounded-lg border px-3 py-2 text-sm ${
             picking
@@ -284,15 +351,38 @@ export default function CategoryList({
       {/* 고르는 중일 때만 나오는 띠. 몇 개 골랐는지와 만들기 버튼이 여기 있다. */}
       {picking && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-          <p className="text-xs text-blue-800">
-            {selected.size === 0
-              ? "PDF로 묶을 실모를 골라주세요."
-              : `${selected.size}개 선택됨`}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs text-blue-800">
+              {resolvedIds.size === 0
+                ? "PDF로 묶을 실모를 골라주세요."
+                : selectedFolders.size > 0
+                  ? `${resolvedIds.size}개 선택됨(폴더 ${selectedFolders.size}개 포함)`
+                  : `${resolvedIds.size}개 선택됨`}
+            </p>
+            {/* 지금 보이는 줄들만 대상이다 — 폴더 카드는 저 위 체크박스로
+                따로 통째로 고른다. */}
+            <button
+              type="button"
+              onClick={() => setSelected(new Set(visibleCategories.map((c) => c.id)))}
+              className="text-xs text-blue-700 underline hover:text-blue-900"
+            >
+              전체선택
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelected(new Set());
+                setSelectedFolders(new Set());
+              }}
+              className="text-xs text-blue-700 underline hover:text-blue-900"
+            >
+              선택 해제
+            </button>
+          </div>
           <button
             type="button"
             onClick={exportSelected}
-            disabled={selected.size === 0}
+            disabled={resolvedIds.size === 0}
             className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
           >
             PDF 만들기
@@ -450,12 +540,8 @@ export default function CategoryList({
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {folders.map((folder) => {
                 const count = categories.filter((c) => c.folder_id === folder.id).length;
-                return (
-                  <Link
-                    key={folder.id}
-                    href={`/?folder=${folder.id}`}
-                    className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
-                  >
+                const cardContent = (
+                  <>
                     <span aria-hidden className="text-lg leading-none">📁</span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-ink">
@@ -463,6 +549,48 @@ export default function CategoryList({
                       </span>
                       <span className="block text-xs text-slate-400">{count}개</span>
                     </span>
+                  </>
+                );
+                // **고르는 중에는 폴더도 통째로 담을 수 있다**(사용자 요청 —
+                // "폴더선택해서 그 폴더 통째로 pdf내보내기"). 체크하면 그
+                // 안의 실모 전부가 대상이 된다 — 하나씩 들어가서 고를 필요가
+                // 없다. 카드는 이때 열지 않고 토글만 한다(Row 와 같은 이유 —
+                // 체크박스를 누르려다 열려버리는 것을 막는다).
+                return picking ? (
+                  <div
+                    key={folder.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleFolder(folder.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleFolder(folder.id);
+                      }
+                    }}
+                    className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-3 shadow-sm transition ${
+                      selectedFolders.has(folder.id)
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedFolders.has(folder.id)}
+                      onChange={() => toggleFolder(folder.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-4 w-4 shrink-0 rounded border-slate-300"
+                      aria-label={`${folder.name} 폴더 통째로 선택`}
+                    />
+                    {cardContent}
+                  </div>
+                ) : (
+                  <Link
+                    key={folder.id}
+                    href={`/?folder=${folder.id}`}
+                    className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+                  >
+                    {cardContent}
                   </Link>
                 );
               })}
