@@ -252,12 +252,18 @@ function fitColumn(items: Shot[], x: number, top: number, bottom: number): Place
   const out: Placed[] = [];
   let y = top;
   items.forEach((it, n) => {
+    const w = it.img.width * base[n] * k;
     out.push({
       img: it.img,
       label: it.label,
-      x,
+      // **가운데로 모은다**(사용자 요청 — "좌우 여백양이 비슷하게").
+      // `base`가 1로 잡히는 문제(원본 폭이 단보다 좁은 경우)는 단을 다
+      // 채우지 못하는데, 예전에는 남는 폭을 전부 오른쪽에 몰아 왼쪽은
+      // 딱 붙고 오른쪽만 휑했다. 늘리거나 줄이지는 않는다(그러면 왜곡이다)
+      // — 자리만 가운데로 옮긴다.
+      x: x + (LAYOUT.columnWidth - w) / 2,
       y: y + heads[n],
-      w: it.img.width * base[n] * k,
+      w,
       h: hs[n],
     });
     y += heads[n] + hs[n] + gap;
