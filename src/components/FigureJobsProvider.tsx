@@ -319,7 +319,9 @@ export default function FigureJobsProvider({
 
     (async () => {
       try {
-        // **바이트로 바꿔 둔다.** `next.crop` 은 `f.origin ?? raster` 에서 온
+        // **바이트로 바꿔 둔다.** `next.crop` 은 `f.origin ?? raster`(지시
+        // 없이 다시 그릴 때) 또는 `raster`(지시가 있을 때 — 지금 보이는
+        // 그림을 고쳐 달라는 뜻이라 원본이 아니라 현재 결과를 보낸다)에서 온
         // 값이라(`ProblemGallery`) 이미 스토리지로 옮겨진 그림이면 주소
         // 문자열이다 — 아래로 그대로 흘리면 `/api/figure` 가 파싱하다 실패한다
         // (`ensureDataUrl` 주석 참고).
