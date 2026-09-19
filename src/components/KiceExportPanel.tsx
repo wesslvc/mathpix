@@ -112,6 +112,17 @@ export default function KiceExportPanel({ title, items }: Props) {
   const [layoutKey, setLayoutKey] = useState<LayoutKey>(
     DEFAULT_LAYOUT[hasKorean ? "국어" : "사회탐구"],
   );
+  /**
+   * **탐구 배치를 손으로 고칠 수 있게 한다**(사용자 요청 — "4664말고 수동으로
+   * 숫자 4개 써서 고를 수 있게"). 문자열로 들고 있는 이유는 지우고 새로
+   * 입력하는 동안(빈 칸)에도 입력을 막지 않기 위해서다 — 숫자로 들고 있으면
+   * 빈 칸이 0으로 튕겨 백스페이스가 뜻대로 안 된다. 실제 숫자는 쓸 때
+   * `Number(...)`로 바꾼다(pdf.ts가 0 이하는 알아서 거른다).
+   */
+  const [tamguPattern, setTamguPattern] = useState<string[]>(
+    (LAYOUTS.find((l) => l.key === "tamgu")?.pattern ?? [4, 6, 6, 4]).map(String),
+  );
+  const tamguSum = tamguPattern.reduce((sum, s) => sum + (Number(s) || 0), 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -211,7 +222,10 @@ export default function KiceExportPanel({ title, items }: Props) {
           label:
             showSource && items[i].korean?.role !== "passage" ? items[i].label : "",
         })),
-        pagePattern: [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
+        pagePattern:
+          layoutKey === "tamgu"
+            ? tamguPattern.map((s) => Number(s) || 0)
+            : [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
         koreanPlan: layoutKey === "korean" ? await buildKoreanPlan(pngs) : undefined,
         answers: showAnswers
           ? items.map((item) => ({
@@ -300,10 +314,40 @@ export default function KiceExportPanel({ title, items }: Props) {
                   : "border-slate-300 text-slate-600 hover:bg-slate-100"
               }`}
             >
-              {l.label}
+              {/* 탐구는 손으로 고친 값을 버튼 글자에도 그대로 보여준다 —
+                  안 그러면 고쳐 놓고도 "4·6·6·4"라고 적힌 버튼만 보여 헷갈린다. */}
+              {l.key === "tamgu" ? `탐구 기본 (${tamguPattern.join("·")})` : l.label}
             </button>
           ))}
         </div>
+
+        {/* **탐구를 손으로 고친다**(사용자 요청). 실제 수능 탐구는 20문항을
+            4쪽에 나눠 싣는데, 문제집마다 그 배분이 다를 수 있어 숫자 4개를
+            직접 적게 한다. 합계를 옆에 보여 주되 20이 아니어도 막지는
+            않는다 — 20문항이 아닌 세트(일부만 저장했거나 더 뽑은 경우)도
+            있을 수 있어서다. */}
+        {layoutKey === "tamgu" && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <span className="text-xs text-slate-500">쪽마다 문제 수(1→4쪽):</span>
+            {tamguPattern.map((value, i) => (
+              <input
+                key={i}
+                type="text"
+                inputMode="numeric"
+                value={value}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/[^0-9]/g, "");
+                  setTamguPattern((cur) => cur.map((v, idx) => (idx === i ? digits : v)));
+                }}
+                className="w-12 rounded border border-slate-300 px-2 py-1 text-center text-sm focus:border-blue-500 focus:outline-none"
+              />
+            ))}
+            <span className={`text-xs ${tamguSum === 20 ? "text-emerald-600" : "text-amber-600"}`}>
+              합 {tamguSum}
+              {tamguSum !== 20 && " (보통 20)"}
+            </span>
+          </div>
+        )}
       </div>
 
       <label className="flex items-center gap-2 text-sm text-slate-700">
