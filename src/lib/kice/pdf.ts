@@ -301,6 +301,60 @@ function layoutGroups(groups: Shot[][], frames: FrameSet, firstPage = 1) {
 }
 
 /**
+ * 왼쪽 단에 몇 개를 줄지 정한다. **문항 수를 반으로 가르지 않고 높이로
+ * 가른다**(사용자 지적 — 문제 12 처럼 그림이 큰 문항이 한쪽에 있으면
+ * 개수로 반을 갈라도 그쪽 단만 꽉 차고 반대쪽은 크게 빈다. 예: 5문항을
+ * 3·2 로 개수로만 가르면 왼쪽에 큰 그림 문항이 몰려 오른쪽 아래가 통째로
+ * 비었다 — "한 문제를 오른쪽으로 보내면 자연스럽잖아"라는 게 정확히 이
+ * 얘기다).
+ *
+ * 순서는 못 바꾼다(문제 차례가 곧 인쇄 차례다) — 그래서 "어디서 자를지"만
+ * 고른다. 각 문항이 단 폭에 맞춰 줄었을 때의 높이(`fitColumn`이 쓰는
+ * `base`와 같은 계산)를 누적해서, 왼쪽·오른쪽 합이 가장 비슷해지는 자리를
+ * 고른다 — 실제로 그리기 전에 미리 재는 것이라 이중 계산이지만, 최종
+ * 압축(`k`)이 양쪽에 비례해서 걸리므로 압축 전 높이를 맞추면 압축 후
+ * 밀도도 맞는다.
+ */
+function balancedSplit(items: Shot[]): number {
+  if (items.length <= 1) return items.length;
+  const heights = items.map((it) => {
+    const base = Math.min(LAYOUT.columnWidth / it.img.width, 1);
+    const h = it.img.height * base;
+    return it.label ? h + LABEL_SIZE + LABEL_GAP : h;
+  });
+  const total = heights.reduce((a, b) => a + b, 0);
+  const prefix: number[] = [];
+  heights.reduce((acc, h) => {
+    const next = acc + h;
+    prefix.push(next);
+    return next;
+  }, 0);
+
+  // **기본은 여전히 "홀수면 왼쪽이 하나 더"다.** 큰 그림 하나가 없으면
+  // 문항들은 대개 높이가 비슷해 어느 자리에서 잘라도 차이가 별로 안
+  // 난다 — 그럴 때(동점이거나 개선이 없을 때)까지 자리를 바꾸면 늘 같던
+  // 페이지들의 자리가 이유 없이 들쭉날쭉해진다. 그래서 기본 자리를 먼저
+  // 기준으로 두고, **그보다 확실히 나은 자리가 있을 때만** 옮긴다.
+  // 개수가 같으면(문항 높이가 다 비슷하면) 절반씩 갈랐을 때와 한 칸 옆으로
+  // 갈랐을 때의 차이가 부동소수점 오차(1e-10pt 수준) 안에서 뒤집힐 수 있다
+  // — 실제로 3문항 균등 높이에서 재현됐다. 인쇄에서 보이지도 않는 차이로
+  // 기본 자리가 흔들리면 안 되므로, **확실히(0.01pt 넘게) 나을 때만** 옮긴다.
+  const EPS = 0.01;
+  const defaultSplit = Math.ceil(items.length / 2);
+  let best = defaultSplit;
+  let bestDiff = Math.abs(prefix[defaultSplit - 1] - (total - prefix[defaultSplit - 1]));
+  for (let i = 1; i < items.length; i++) {
+    if (i === defaultSplit) continue;
+    const diff = Math.abs(prefix[i - 1] - (total - prefix[i - 1]));
+    if (diff < bestDiff - EPS) {
+      bestDiff = diff;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
  * 한 쪽을 짠다. **쪽 번호를 받아야 한다** — 표지 틀과 본문 틀은 머리말
  * 아래 가로줄 높이가 다르다(168.65 vs 99.2). 0번째 쪽으로 가정하면 본문
  * 쪽인데도 표지 기준으로 짜여 위가 통째로 빈다.
@@ -308,8 +362,7 @@ function layoutGroups(groups: Shot[][], frames: FrameSet, firstPage = 1) {
 function layoutOnePage(take: Shot[], frames: FrameSet, pageNo: number) {
   const b = frameBounds(frameFor(frames, pageNo));
   const top = b.headerBottom + LAYOUT.gap;
-  // 왼쪽 단부터 채운다. 홀수면 왼쪽이 하나 더 갖는다.
-  const half = Math.ceil(take.length / 2);
+  const half = balancedSplit(take);
   return {
     items: [
       ...fitColumn(take.slice(0, half), columnX(0), top, b.contentBottom),
