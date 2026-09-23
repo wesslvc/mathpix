@@ -75,6 +75,11 @@ export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/groble/webhook")) {
     return response;
   }
+  // AI 그림 일꾼도 세션 없이 들어온다(pg_cron·앞선 일꾼이 부른다). 라우트가
+  // DB 안의 비밀값으로 직접 인증하므로 로그인 가드를 태우지 않는다.
+  if (request.nextUrl.pathname === "/api/figure-jobs/run") {
+    return response;
+  }
 
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     // Supabase가 아직 설정되지 않았다면 인증 체크 없이 통과시키고,

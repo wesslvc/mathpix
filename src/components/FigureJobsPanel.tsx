@@ -75,6 +75,12 @@ export default function FigureJobsPanel() {
           </span>
         </button>
 
+        {open && activeCount > 0 && (
+          // 큐가 서버에 있다는 것을 알려 둔다 — 모르면 예전처럼 창을 붙들고 기다린다.
+          <p className="border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-500">
+            서버에서 그려요. 창을 닫아도 계속되고, 끝나면 문제에 저장돼요.
+          </p>
+        )}
         {open && (
           <ul className="max-h-64 overflow-auto border-t border-slate-200">
             {jobs.map((j) => (
