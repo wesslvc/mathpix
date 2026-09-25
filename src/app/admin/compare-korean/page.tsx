@@ -11,7 +11,7 @@ import {
   stitchVertically,
 } from "@/lib/figureImage";
 import BoxEditor, { type EditBox } from "@/components/BoxEditor";
-import type { DetectedKoreanRegion } from "@/lib/detectProblems";
+import type { DetectedKoreanPolygon, DetectedKoreanRegion } from "@/lib/detectProblems";
 import { buildKicePdf } from "@/lib/kice/pdf";
 import { frameKeyFor, loadFrameImages, loadKiceFrames } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
@@ -84,15 +84,20 @@ const PASSAGE_GROUP = "passage";
  * 붙인 뒤 대비를 올린다. 여기만 다르면 견준 결과가 운영에 안 맞는다.
  * 네모를 안 그렸으면 사진 전체를 같은 상한으로 보낸다.
  */
-async function passageImage(file: File, boxes: EditBox[]): Promise<string> {
+async function passageImage(
+  file: File,
+  boxes: EditBox[],
+  polys: DetectedKoreanPolygon[] | null,
+): Promise<string> {
   const url = URL.createObjectURL(file);
   try {
     const img = await loadImage(url);
     const W = img.naturalWidth;
     const H = img.naturalHeight;
     const limits = { maxWidth: PROBLEM_INPUT_DIM, maxHeight: PROBLEM_MAX_HEIGHT };
-    const parts =
-      boxes.length > 0
+    const parts = polys && polys.length > 0
+      ? polys.map((p) => cropPolygon(img, p))
+      : boxes.length > 0
         ? boxes.map((b) =>
             cropImageToDataUrl(
               img,
@@ -117,6 +122,7 @@ type ReadResponse = {
   jobId?: string;
   blocks?: unknown;
   regions?: DetectedKoreanRegion[];
+  polygons?: DetectedKoreanPolygon[];
   model?: string;
   ms?: number;
   usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
@@ -125,13 +131,17 @@ type ReadResponse = {
 };
 
 /** 백그라운드 작업이 끝날 때까지 기다린다. 30분이 넘으면 포기한다. */
-async function waitForJob(jobId: string, task: "read" | "detect" = "read"): Promise<ReadResponse> {
+async function waitForJob(
+  jobId: string,
+  task: "read" | "detect" = "read",
+  shape: "box" | "polygon" = "box",
+): Promise<ReadResponse> {
   const until = Date.now() + 30 * 60_000;
   for (;;) {
     await new Promise((r) => setTimeout(r, 4000));
     let poll: ReadResponse & { status?: string; message?: string };
     try {
-      const res = await fetch(`/api/admin/compare-korean?id=${encodeURIComponent(jobId)}&task=${task}`, {
+      const res = await fetch(`/api/admin/compare-korean?id=${encodeURIComponent(jobId)}&task=${task}&shape=${shape}`, {
         cache: "no-store",
       });
       poll = await res.json();
@@ -148,6 +158,66 @@ async function waitForJob(jobId: string, task: "read" | "detect" = "read"): Prom
 
 /** 운영 국어 모드가 자동으로 잡은 네모에 더하는 여유(`KoreanModePanel` 의 PAD 와 같다). */
 const AUTO_PAD = 0.004;
+
+/**
+ * 다각형 하나를 원본에서 떼어 낸다 — 감싸는 네모를 자르고 **다각형 바깥을 흰색으로**
+ * 지운다. 네모 상한(폭 1536·높이 3000)은 네모 자르기와 같다.
+ *
+ * 여유(`AUTO_PAD`)는 다각형을 굵게 **덧그려서** 준다: 같은 그림을 무늬로 깔고
+ * 안을 채운 뒤 테두리를 여유 두께로 한 번 더 긋는다. 꼭짓점을 바깥으로 미는
+ * 방식은 오목한 모양(ㄱ자)에서 틀리지만 이건 어느 모양에서든 고르게 넓어진다.
+ */
+function cropPolygon(img: HTMLImageElement, poly: DetectedKoreanPolygon): string {
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+  const pad = AUTO_PAD * Math.max(W, H);
+  const x0 = Math.max(0, poly.box.x * W - pad);
+  const y0 = Math.max(0, poly.box.y * H - pad);
+  const x1 = Math.min(W, (poly.box.x + poly.box.w) * W + pad);
+  const y1 = Math.min(H, (poly.box.y + poly.box.h) * H + pad);
+  const bw = Math.max(1, x1 - x0);
+  const bh = Math.max(1, y1 - y0);
+  const s = Math.min(1, PROBLEM_INPUT_DIM / bw, PROBLEM_MAX_HEIGHT / bh);
+  const cw = Math.max(1, Math.round(bw * s));
+  const ch = Math.max(1, Math.round(bh * s));
+
+  // 잘라 낸 네모(무늬로 쓸 것)와 흰 바탕의 결과 캔버스는 크기가 같아야 무늬가 제자리에 깔린다.
+  const src = document.createElement("canvas");
+  src.width = cw;
+  src.height = ch;
+  src.getContext("2d")!.drawImage(img, x0, y0, bw, bh, 0, 0, cw, ch);
+
+  const out = document.createElement("canvas");
+  out.width = cw;
+  out.height = ch;
+  const ctx = out.getContext("2d");
+  if (!ctx) throw new Error("캔버스를 만들 수 없습니다.");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, cw, ch);
+  const path = new Path2D();
+  poly.points.forEach((p, i) => {
+    const px = (p.x * W - x0) * s;
+    const py = (p.y * H - y0) * s;
+    if (i === 0) path.moveTo(px, py);
+    else path.lineTo(px, py);
+  });
+  path.closePath();
+  const pattern = ctx.createPattern(src, "no-repeat");
+  if (!pattern) throw new Error("캔버스를 만들 수 없습니다.");
+  ctx.fillStyle = pattern;
+  ctx.fill(path);
+  ctx.strokeStyle = pattern;
+  ctx.lineWidth = pad * s * 2;
+  ctx.lineJoin = "round";
+  ctx.stroke(path);
+  return out.toDataURL("image/jpeg", 0.9);
+}
+
+/** 찾은 다각형을 읽는 차례(왼쪽 단 위→아래, 그다음 오른쪽 단)로. */
+function byReadingOrder<T extends { box: { x: number; y: number; w: number } }>(list: T[]): T[] {
+  const col = (r: T) => (r.box.x + r.box.w / 2 < 0.5 ? 0 : 1);
+  return [...list].sort((a, b) => col(a) - col(b) || a.box.y - b.box.y);
+}
 
 /**
  * 위치 찾기에 보낼 지면 사진. **운영 국어 모드의 `detectImage` 와 같다** — 원본에서
@@ -190,7 +260,12 @@ function passageBoxesFrom(regions: DetectedKoreanRegion[]): EditBox[] {
     });
 }
 
-type Detector = { provider: "openai" | "gemini"; model: string; effort: string };
+type Detector = {
+  provider: "openai" | "gemini";
+  model: string;
+  effort: string;
+  shape: "box" | "polygon";
+};
 
 type DetectRun = {
   id: string;
@@ -203,7 +278,11 @@ type DetectRun = {
       ms: number;
       usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
       estKrw: number | null;
+      /** 네모로 찾았을 때의 지문 자리. */
       passages: EditBox[];
+      /** 다각형으로 찾았을 때. 둘 중 하나만 찬다. */
+      passagePolys: DetectedKoreanPolygon[];
+      questionPolys: DetectedKoreanPolygon[];
       questions: number;
     }
   | { state: "error"; ms: number; message: string }
@@ -250,7 +329,12 @@ export default function CompareKoreanPage() {
     provider: "openai",
     model: "gpt-6-luna",
     effort: "xhigh",
+    shape: "polygon",
   });
+  /** 다각형으로 잡은 지문 자리. 있으면 네모 대신 이걸로 자른다. */
+  const [polys, setPolys] = useState<DetectedKoreanPolygon[] | null>(null);
+  /** 같이 찾은 문제 자리 — 잘 찾았는지 눈으로 보라고 겹쳐 그리기만 한다. */
+  const [questionPolys, setQuestionPolys] = useState<DetectedKoreanPolygon[]>([]);
   const [detectRuns, setDetectRuns] = useState<DetectRun[]>([]);
   const [file, setFile] = useState<File | null>(null);
   /** 네모를 그릴 화면용 사진(긴 변 1600). 자르는 건 원본에서 한다. */
@@ -274,6 +358,8 @@ export default function CompareKoreanPage() {
     setFile(null);
     setPreview(null);
     setBoxes([]);
+    setPolys(null);
+    setQuestionPolys([]);
     setDetectRuns([]);
     setSent(null);
     setReference(null);
@@ -302,7 +388,9 @@ export default function CompareKoreanPage() {
     const d = detector;
     const id = crypto.randomUUID();
     const since = Date.now();
-    const label = d.provider === "openai" && d.effort ? `${d.model} · ${d.effort}` : d.model;
+    const label =
+      (d.provider === "openai" && d.effort ? `${d.model} · ${d.effort}` : d.model) +
+      (d.shape === "polygon" ? " · 다각형" : " · 네모");
     setDetectRuns((rs) => [{ id, label, since, state: "running" }, ...rs]);
     const settle = (run: DetectRun) => setDetectRuns((rs) => rs.map((r) => (r.id === id ? run : r)));
     try {
@@ -315,13 +403,17 @@ export default function CompareKoreanPage() {
           provider: d.provider,
           model: d.model,
           effort: d.provider === "openai" ? d.effort : "",
+          shape: d.shape,
         }),
       });
       let json = (await res.json().catch(() => ({}))) as ReadResponse;
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      if (json.jobId) json = await waitForJob(json.jobId, "detect");
+      if (json.jobId) json = await waitForJob(json.jobId, "detect", d.shape);
       const regions = json.regions ?? [];
       const passages = passageBoxesFrom(regions);
+      const polygons = json.polygons ?? [];
+      const passagePolys = byReadingOrder(polygons.filter((p) => p.kind === "passage"));
+      const questionPolysFound = byReadingOrder(polygons.filter((p) => p.kind === "question"));
       settle({
         id,
         label,
@@ -331,9 +423,21 @@ export default function CompareKoreanPage() {
         usage: json.usage,
         estKrw: json.estKrw ?? null,
         passages,
-        questions: regions.filter((r) => r.kind === "question").length,
+        passagePolys,
+        questionPolys: questionPolysFound,
+        questions:
+          d.shape === "polygon"
+            ? questionPolysFound.length
+            : regions.filter((r) => r.kind === "question").length,
       });
-      if (passages.length > 0) setBoxes(passages);
+      if (passagePolys.length > 0) {
+        setPolys(passagePolys);
+        setQuestionPolys(questionPolysFound);
+      } else if (passages.length > 0) {
+        setPolys(null);
+        setQuestionPolys([]);
+        setBoxes(passages);
+      }
     } catch (err) {
       settle({
         id,
@@ -409,7 +513,7 @@ export default function CompareKoreanPage() {
     try {
       // **그린 차례가 곧 이어 붙이는 차례다**(운영 국어 모드와 같다) — 단을 넘는
       // 지문은 왼쪽 단 조각부터 그리면 된다.
-      const image = await passageImage(file, boxes);
+      const image = await passageImage(file, boxes, polys);
       setSent(image);
       let ref = "";
       if (useReference) {
@@ -463,8 +567,9 @@ export default function CompareKoreanPage() {
           <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
             <p className="text-sm font-medium text-slate-700">① 지문 위치 자동으로 찾기 (선택)</p>
             <p className="text-xs text-slate-500">
-              운영 국어 모드의 자동 찾기와 같은 프롬프트예요. 모델·강도를 바꿔 여러 번 돌려
-              견줄 수 있고, 끝나면 찾은 지문 자리가 아래 네모로 들어갑니다(손으로 고칠 수 있어요).
+              모델·강도·모양을 바꿔 여러 번 돌려 견줄 수 있어요. <b>네모(운영)</b>는 지금 국어
+              모드의 자동 찾기와 같고, <b>다각형</b>은 테두리를 꺾인 모양 그대로 따라 잡습니다.
+              끝나면 찾은 자리가 아래 사진에 들어가요.
             </p>
             <div className="flex flex-wrap items-end gap-2 text-xs">
               {(["openai", "gemini"] as const).map((pv) => (
@@ -472,11 +577,12 @@ export default function CompareKoreanPage() {
                   key={pv}
                   type="button"
                   onClick={() =>
-                    setDetector({
+                    setDetector((d) => ({
+                      ...d,
                       provider: pv,
                       model: pv === "openai" ? OPENAI_PRESETS[0] : "gemini-3.8-flash",
                       effort: pv === "openai" ? "xhigh" : "",
-                    })
+                    }))
                   }
                   className={`rounded-lg border px-2 py-1 ${
                     detector.provider === pv
@@ -520,6 +626,22 @@ export default function CompareKoreanPage() {
                   />
                 </label>
               )}
+              <div className="flex gap-1">
+                {(["polygon", "box"] as const).map((sh) => (
+                  <button
+                    key={sh}
+                    type="button"
+                    onClick={() => setDetector((d) => ({ ...d, shape: sh }))}
+                    className={`rounded-lg border px-2 py-1 ${
+                      detector.shape === sh
+                        ? "border-emerald-600 bg-emerald-50 text-emerald-700"
+                        : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {sh === "polygon" ? "다각형" : "네모(운영)"}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 onClick={runDetect}
@@ -557,15 +679,25 @@ export default function CompareKoreanPage() {
                           </span>
                         )}
                         <span>
-                          지문 {run.passages.length}조각 · 문제 {run.questions}개
+                          지문 {run.passagePolys.length || run.passages.length}조각 · 문제{" "}
+                          {run.questions}개
                         </span>
-                        {run.passages.length > 0 && (
+                        {(run.passagePolys.length > 0 || run.passages.length > 0) && (
                           <button
                             type="button"
-                            onClick={() => setBoxes(run.passages)}
+                            onClick={() => {
+                              if (run.passagePolys.length > 0) {
+                                setPolys(run.passagePolys);
+                                setQuestionPolys(run.questionPolys);
+                              } else {
+                                setPolys(null);
+                                setQuestionPolys([]);
+                                setBoxes(run.passages);
+                              }
+                            }}
                             className="rounded border border-emerald-600 px-2 py-0.5 text-emerald-700"
                           >
-                            이 결과로 네모 바꾸기
+                            이 결과로 바꾸기
                           </button>
                         )}
                       </>
@@ -576,7 +708,63 @@ export default function CompareKoreanPage() {
             )}
           </div>
         )}
-        {preview && (
+        {preview && polys && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-slate-600">
+              ② 찾은 <b className="text-emerald-700">지문</b>(초록)을 테두리 모양 그대로 떼어
+              내 읽는 차례대로 이어 붙입니다. 바깥은 흰색으로 지워요.{" "}
+              <b className="text-blue-700">문제</b>(파랑)는 잘 찾았는지 보라고 겹쳐 그리기만
+              합니다.
+            </p>
+            <div className="relative max-w-xl">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={preview} alt="지면" className="block w-full rounded border" />
+              <svg
+                viewBox="0 0 1 1"
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute inset-0 h-full w-full"
+              >
+                {questionPolys.map((p, i) => (
+                  <polygon
+                    key={`q${i}`}
+                    points={p.points.map((pt) => `${pt.x},${pt.y}`).join(" ")}
+                    fill="rgba(37,99,235,0.10)"
+                    stroke="#2563eb"
+                    strokeWidth={2}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
+                {polys.map((p, i) => (
+                  <polygon
+                    key={`p${i}`}
+                    points={p.points.map((pt) => `${pt.x},${pt.y}`).join(" ")}
+                    fill="rgba(5,150,105,0.14)"
+                    stroke="#059669"
+                    strokeWidth={2}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
+              </svg>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span>
+                지문 {polys.length}조각(꼭짓점 {polys.map((p) => p.points.length).join("·")}개) ·
+                문제 {questionPolys.length}개
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setPolys(null);
+                  setQuestionPolys([]);
+                }}
+                className="rounded border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-100"
+              >
+                다각형 버리고 네모로 직접 그리기
+              </button>
+            </div>
+          </div>
+        )}
+        {preview && !polys && (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-slate-600">
               ② 사진 위에 <b>지문 영역</b>을 끌어서 네모로 그리세요(발문 줄부터 지문 끝까지,

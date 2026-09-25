@@ -9,7 +9,17 @@ import {
   startKoreanTextBackground,
   startVisionBackground,
 } from "@/lib/gradeExam";
-import { KOREAN_PROMPT, parseKorean } from "@/lib/detectProblems";
+import {
+  KOREAN_POLYGON_PROMPT,
+  KOREAN_PROMPT,
+  parseKorean,
+  parseKoreanPolygons,
+} from "@/lib/detectProblems";
+
+/** 위치 찾기 결과를 모양에 맞게 읽는다. 네모는 `regions`, 다각형은 `polygons`. */
+function readDetect(text: string, polygon: boolean) {
+  return polygon ? { polygons: parseKoreanPolygons(text) } : { regions: parseKorean(text) };
+}
 import { gradingEstKrw } from "@/lib/tokens";
 
 export const runtime = "nodejs";
@@ -43,6 +53,7 @@ export async function POST(req: NextRequest) {
     model?: unknown;
     effort?: unknown;
     task?: unknown;
+    shape?: unknown;
   };
   try {
     body = await req.json();
@@ -64,10 +75,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "effort 값이 이상합니다." }, { status: 400 });
   }
   const detect = body.task === "detect";
+  const polygon = body.shape === "polygon";
+  const detectPrompt = polygon ? KOREAN_POLYGON_PROMPT : KOREAN_PROMPT;
 
   if (detect && provider === "openai") {
     try {
-      const jobId = await startVisionBackground(KOREAN_PROMPT, image, model, effort || undefined);
+      const jobId = await startVisionBackground(detectPrompt, image, model, effort || undefined);
       console.info(`[compare-korean] 위치 찾기 시작 model=${model} effort=${effort || "-"} id=${jobId}`);
       return NextResponse.json({ jobId });
     } catch (err) {
@@ -81,10 +94,10 @@ export async function POST(req: NextRequest) {
   if (detect) {
     const t0 = Date.now();
     try {
-      const out = await callGeminiJson(KOREAN_PROMPT, image, model);
+      const out = await callGeminiJson(detectPrompt, image, model);
       const ms = Date.now() - t0;
       return NextResponse.json({
-        regions: parseKorean(out.text),
+        ...readDetect(out.text, polygon),
         usage: out.usage,
         model: out.model,
         estKrw: out.usage ? (gradingEstKrw(out.usage, out.model) ?? null) : null,
@@ -172,7 +185,7 @@ export async function GET(req: NextRequest) {
       try {
         return NextResponse.json({
           status: "done",
-          regions: parseKorean(poll.text),
+          ...readDetect(poll.text, req.nextUrl.searchParams.get("shape") === "polygon"),
           usage: poll.usage,
           model: poll.model,
           estKrw: poll.usage ? (gradingEstKrw(poll.usage, poll.model) ?? null) : null,

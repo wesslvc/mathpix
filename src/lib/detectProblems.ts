@@ -345,6 +345,110 @@ export async function detectKoreanRegions(
   return { regions: parseKorean(text), model: DETECT_OPENAI_LABEL };
 }
 
+/**
+ * **다각형으로 찾기**(비교 화면에서 시험 중, 2026-09-25 사용자 요청 — "네모로
+ * 그릴 필요 없잖아, 문제 영역에 정확히 맞게 그려도 좋아").
+ *
+ * 네모는 내용이 꺾여 있으면(지문이 단 중간에서 끝나고 그 아래 문제가 시작하는
+ * 식) 옆 내용을 같이 물거나 제 내용을 잘라 먹는다. 꼭짓점 목록으로 받으면
+ * 자를 때 그 바깥을 흰색으로 지워 **꺾인 영역을 그대로** 떼어 낼 수 있다.
+ * 규칙(무엇이 지문이고 무엇이 문제인가)은 `KOREAN_PROMPT` 와 같다 — 모양만 다르다.
+ */
+export const KOREAN_POLYGON_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find PASSAGE regions AND QUESTION regions, each traced as a POLYGON.
+
+passage:
+- whole text body shared by several questions (non-fiction/literary work, incl. any 보기 material)
+- lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." -> start FROM that line
+- several texts grouped as (가)(나) -> take TOGETHER as one region
+- literature -> include trailing attribution (- 작자, 「작품명」)
+- exclude questions (stem/choices) printed under passage
+
+question:
+- one item at a time: from its number (e.g. 12.) to last line of choices (①②③④⑤)
+- stem + <보기> box + choices = parts of one item, don't split
+- \`set\` = which passage item belongs to (passage carries same \`set\`). number passages 1,2,3... from top. 0 = no passage
+
+polygon:
+- trace the OUTER EDGE of the content itself, tightly. not the column, not the page
+- vertices clockwise starting top-left, each [y,x] normalised 0-1000
+- plain rectangle (4 points) when the content is rectangular. add vertices ONLY where the edge really steps (a passage ending mid-line beside other content, a box or figure sticking out, an indented last line)
+- never include neighbouring questions/passages, running heads, page numbers, empty margin, gutter
+- polygons must not overlap
+- 2-column page -> order: left column top-to-bottom first, then right column
+- passage continuing across columns -> one polygon per piece, same \`set\`
+
+answer: JSON only:
+{"regions":[{"polygon":[[y,x],[y,x],...],"kind":"passage"|"question","set":1,"no":"12"}]}
+\`no\` = item number (digits only), empty for passage. no explanation.`;
+
+export type DetectedKoreanPolygon = {
+  kind: "passage" | "question";
+  /** 0~1 좌표의 꼭짓점들(사진 크기 대비). */
+  points: { x: number; y: number }[];
+  /** 꼭짓점을 감싸는 네모 — 자를 때와 차례를 정할 때 쓴다. */
+  box: ProblemBox;
+  set: number;
+  no: number | null;
+};
+
+/** 다각형 응답을 읽는다. 꼭짓점이 셋 미만이거나 너무 작은 것은 버린다. */
+export function parseKoreanPolygons(text: string): DetectedKoreanPolygon[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    const a = text.indexOf("{");
+    const b = text.lastIndexOf("}");
+    if (a === -1 || b <= a) throw new DetectError("영역을 읽지 못했습니다.", 502);
+    try {
+      raw = JSON.parse(text.slice(a, b + 1));
+    } catch {
+      throw new DetectError("영역을 읽지 못했습니다.", 502);
+    }
+  }
+  const list = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { regions?: unknown })?.regions)
+      ? (raw as { regions: unknown[] }).regions
+      : [];
+
+  const clamp = (v: number) => Math.min(1, Math.max(0, v / 1000));
+  const out: DetectedKoreanPolygon[] = [];
+  for (const row of list) {
+    const o = row as { polygon?: unknown; kind?: unknown; set?: unknown; no?: unknown };
+    if (!Array.isArray(o.polygon)) continue;
+    const points: { x: number; y: number }[] = [];
+    for (const p of o.polygon) {
+      if (!Array.isArray(p) || p.length < 2) continue;
+      const y = Number(p[0]);
+      const x = Number(p[1]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      points.push({ x: clamp(x), y: clamp(y) });
+    }
+    if (points.length < 3) continue;
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    const box = {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      w: Math.max(...xs) - Math.min(...xs),
+      h: Math.max(...ys) - Math.min(...ys),
+    };
+    // 네모 찾기(`toBoxes`)와 같은 기준 — 쪽번호·머리말 조각 같은 부스러기를 버린다.
+    if (box.w < 0.05 || box.h < 0.03) continue;
+    const no = Number(String(o.no ?? "").replace(/[^\d]/g, ""));
+    out.push({
+      kind: o.kind === "passage" ? "passage" : "question",
+      points,
+      box,
+      set: Number.isFinite(Number(o.set)) ? Number(o.set) : 0,
+      no: Number.isFinite(no) && no > 0 ? no : null,
+    });
+  }
+  if (out.length === 0) throw new DetectError("영역을 하나도 찾지 못했습니다.", 502);
+  return out;
+}
+
 export function parseKorean(text: string): DetectedKoreanRegion[] {
   let raw: unknown;
   try {
