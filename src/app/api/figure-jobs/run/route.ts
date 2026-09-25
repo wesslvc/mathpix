@@ -58,11 +58,31 @@ export async function POST(req: NextRequest) {
   }
 
   let preferUser: string | null = null;
+  let probe: string | null = null;
   try {
-    const body = (await req.json()) as { preferUser?: unknown };
+    const body = (await req.json()) as { preferUser?: unknown; probe?: unknown };
     if (typeof body.preferUser === "string") preferUser = body.preferUser;
+    if (typeof body.probe === "string") probe = body.probe;
   } catch {
     // 본문이 없어도 된다(pg_cron 은 빈 객체를 보낸다).
+  }
+
+  // **모델 이름 확인용.** 이 계정이 실제로 부를 수 있는 gpt 이름 목록을 준다
+  // (`/v1/models` 조회는 무료). 모델 이름을 짐작해서 바꿨다가 기능이 통째로
+  // 죽은 적이 있어서, 바꾸기 전에 여기서 먼저 확인한다. 이름만 돌려주고 키는
+  // 절대 내보내지 않는다. 같은 비밀값으로만 열린다.
+  if (probe === "models") {
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) return NextResponse.json({ error: "no key" }, { status: 500 });
+    const res = await fetch("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (!res.ok) return NextResponse.json({ error: `HTTP ${res.status}` }, { status: 502 });
+    const ids: string[] = ((await res.json())?.data ?? [])
+      .map((m: { id?: string }) => String(m.id ?? ""))
+      .filter((id: string) => id.startsWith("gpt"))
+      .sort();
+    return NextResponse.json({ models: ids });
   }
 
   const { data: claimed, error: claimErr } = await admin.rpc("claim_figure_job", {
