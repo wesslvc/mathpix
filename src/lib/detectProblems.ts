@@ -437,6 +437,8 @@ export async function callOpenAIVision(
   dataUrl: string,
   prompt: string,
   model: string = OPENAI_DETECT_MODEL,
+  /** 추론 강도(`reasoning.effort`). 없으면 모델 기본값. 확인용 probe 만 넘긴다. */
+  effort?: string,
 ): Promise<string> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new DetectError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
@@ -461,12 +463,15 @@ export async function callOpenAIVision(
         },
       ],
       text: { format: { type: "json_object" } },
+      ...(effort ? { reasoning: { effort } } : {}),
     }),
   });
   let body = await res.text();
   let viaResponses = true;
 
-  if (!res.ok && res.status !== 404) {
+  // 추론 강도를 확인하는 중이면 거부된 이유를 그대로 봐야 한다 — Chat 으로
+  // 내려가면 그 파라미터 없이 성공해 버려 "받는다"로 잘못 읽힌다.
+  if (!res.ok && res.status !== 404 && !effort) {
     // 파라미터를 안 받는 경우 등. 같은 모델을 옛 길로 한 번 더 불러 본다.
     res = await fetch(OPENAI_CHAT, {
       method: "POST",

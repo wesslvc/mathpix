@@ -65,8 +65,15 @@ export async function POST(req: NextRequest) {
   let preferUser: string | null = null;
   let probe: string | null = null;
   let probeModel = "";
+  let probeEffort = "";
   try {
-    const body = (await req.json()) as { preferUser?: unknown; probe?: unknown; model?: unknown };
+    const body = (await req.json()) as {
+      preferUser?: unknown;
+      probe?: unknown;
+      model?: unknown;
+      effort?: unknown;
+    };
+    if (typeof body.effort === "string") probeEffort = body.effort;
     if (typeof body.preferUser === "string") preferUser = body.preferUser;
     if (typeof body.probe === "string") probe = body.probe;
     if (typeof body.model === "string") probeModel = body.model;
@@ -91,6 +98,34 @@ export async function POST(req: NextRequest) {
       .sort();
     return NextResponse.json({ models: ids });
   }
+  // Gemini 쪽 이름 확인용. 이 키로 부를 수 있는 모델 이름과 지원하는 호출
+  // 방식만 준다(ListModels 는 무료). 키는 내보내지 않는다.
+  if (probe === "gemini-models") {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) return NextResponse.json({ error: "no key" }, { status: 500 });
+    const names: string[] = [];
+    let pageToken = "";
+    for (let i = 0; i < 5; i++) {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000${
+          pageToken ? `&pageToken=${pageToken}` : ""
+        }&key=${key}`,
+      );
+      if (!res.ok) return NextResponse.json({ error: `HTTP ${res.status}` }, { status: 502 });
+      const json = (await res.json()) as {
+        models?: { name?: string; supportedGenerationMethods?: string[] }[];
+        nextPageToken?: string;
+      };
+      for (const m of json.models ?? []) {
+        if (m.supportedGenerationMethods?.includes("generateContent")) {
+          names.push(String(m.name ?? "").replace(/^models\//, ""));
+        }
+      }
+      if (!json.nextPageToken) break;
+      pageToken = json.nextPageToken;
+    }
+    return NextResponse.json({ models: names.sort() });
+  }
   // 모델을 바꾸기 전에 **그 모델이 우리 요청 모양(사진 + JSON 응답)을 받는지**
   // 64×64 그림 한 장으로 확인한다(100토큰 안쪽). 목록에 이름이 있어도 받는
   // 파라미터가 다르면 채점·영역 찾기가 통째로 죽기 때문이다.
@@ -105,8 +140,15 @@ export async function POST(req: NextRequest) {
         `data:image/png;base64,${PROBE_PNG}`,
         'Reply ONLY with a JSON object: {"ok": true, "shape": "<what you see>"}',
         model,
+        /^[a-z]{1,16}$/.test(probeEffort) ? probeEffort : undefined,
       );
-      return NextResponse.json({ ok: true, model, ms: Date.now() - t0, text: text.slice(0, 300) });
+      return NextResponse.json({
+        ok: true,
+        model,
+        effort: probeEffort || null,
+        ms: Date.now() - t0,
+        text: text.slice(0, 300),
+      });
     } catch (err) {
       return NextResponse.json({
         ok: false,
