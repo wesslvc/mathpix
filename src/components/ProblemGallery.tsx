@@ -21,9 +21,7 @@ import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import { sortByProblemNumber } from "@/lib/problemOrder";
 import type { KoreanMeta } from "@/lib/koreanSet";
-import { readRichBlocks, type RichBlock } from "@/lib/kice/richText";
-import { applyReference, describeMerge } from "@/lib/kice/referenceMerge";
-import { transcribePassage } from "@/lib/passageTranscribe";
+import { describeMarks, emptyMarkStats, readRichBlocks, type RichBlock } from "@/lib/kice/richText";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
@@ -410,58 +408,38 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   }
 
   /**
-   * 저장된 국어 지문을 다시 읽는다 — `KoreanModePanel` 과 같은 두 단계다:
-   * ① 1차 글자 읽기(GPT, 예전에는 Mathpix) ② 모양 읽기(`/api/korean-text`).
-   * **이미지 재생성이 아니다** — 그림을 그리는 게 아니라 글자를 다시 읽어
-   * 구조화된 블록을 돌려주고, 그걸로 평가원 글꼴 조판을 다시 만든다.
-   *
-   * ①을 빼면 처음 만들 때보다 정확도가 떨어지는 경로가 하나 더 생기므로 여기서도
-   * 부른다. 두 단계의 진행 상황과 비용을 `PassageProgress` 로 그대로 보여 준다.
+   * 저장된 국어 지문을 다시 읽는다 — `KoreanModePanel` 과 같은 한 번의 호출
+   * (`/api/korean-text`, 글자와 서식 구간을 함께 읽는다). **이미지 재생성이
+   * 아니다** — 글자를 다시 읽어 구조화된 블록을 돌려주고, 그걸로 평가원 글꼴
+   * 조판을 다시 만든다. 진행 상황과 비용은 `PassageProgress` 로 보여 준다.
    */
   async function reReadPassage(crop: string) {
     setPassageBusy(true);
     setEditError(null);
-    setPassageStatus({ reader: "running", terra: "pending" });
-    let reference = "";
-    let reader: Partial<PassageStatus> = {};
+    setPassageStatus({ state: "running" });
     try {
-      const enhanced = await enhanceContrast(crop);
-      try {
-        const t = await transcribePassage(enhanced);
-        reference = t.text;
-        reader = { readerModel: t.model, readerCostKrw: t.costKrw, readerTokens: t.chargedTokens };
-      } catch {
-        // 1차 읽기가 실패해도 진행한다 — 모양 읽기만으로 읽는 길로 내려간다.
-      }
-      setPassageStatus({ reader: reference ? "ok" : "failed", ...reader, terra: "running" });
-
       const res = await fetch("/api/korean-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: enhanced, reference }),
+        body: JSON.stringify({ image: await enhanceContrast(crop) }),
       });
       const json = (await res.json()) as {
         blocks?: unknown;
         error?: string;
         chargedTokens?: number;
         usage?: { estKrw?: number };
-        /** 실제로 답한 모델(Gemini Flash 또는 terra). 화면에 그대로 보여 준다. */
+        /** 실제로 답한 모델. 화면에 그대로 보여 준다. */
         model?: string;
       };
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
-      const raw = readRichBlocks(json.blocks);
-      if (raw.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      // **글자와 원문자는 1차 읽기를 따른다**(KoreanModePanel 과 같은 규칙 — 두 경로가
-      // 달라지면 안 된다).
-      const { blocks, replaced, matched, letters } = applyReference(raw, reference);
+      // KoreanModePanel 과 같은 규칙 — 두 경로가 달라지면 안 된다.
+      const stats = emptyMarkStats();
+      const blocks = readRichBlocks(json.blocks, 0, stats);
+      if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
       setEditKoreanBlocks(blocks);
       setPassageStatus({
-        reader: reference ? "ok" : "failed",
-        ...reader,
-        terra: "done",
-        circledFixed: replaced,
-        circledMismatch: !matched,
-        lettersNote: describeMerge(letters),
+        state: "done",
+        marksNote: describeMarks(stats),
         model: json.model,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
@@ -469,12 +447,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.";
-      setPassageStatus({
-        reader: reference ? "ok" : "failed",
-        ...reader,
-        terra: "error",
-        errorMessage: message,
-      });
+      setPassageStatus({ state: "error", errorMessage: message });
       setEditError(message);
     } finally {
       setPassageBusy(false);

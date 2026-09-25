@@ -15,42 +15,41 @@ import type { DetectedKoreanPolygon, DetectedKoreanRegion } from "@/lib/detectPr
 import { buildKicePdf } from "@/lib/kice/pdf";
 import { frameKeyFor, loadFrameImages, loadKiceFrames } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
-import { readRichBlocks, richToPlainText, type RichBlock } from "@/lib/kice/richText";
-import { applyReference, describeMerge } from "@/lib/kice/referenceMerge";
+import {
+  describeMarks,
+  emptyMarkStats,
+  readRichBlocks,
+  richToPlainText,
+  type RichBlock,
+} from "@/lib/kice/richText";
 
 /**
- * **국어 지문 인식 모델 비교** — 무제한 계정 전용 시험 화면.
+ * **국어 지문 인식 비교** — 무제한 계정 전용 시험 화면.
  *
- * 한 지문 사진을 두 모델에 **똑같이**(같은 프롬프트·같은 1차 읽기 참고 글·같은
- * 원문자 교정) 보내 평가원 양식 PDF 를 각각 뽑는다. 무엇이 더 잘 보는지는
- * 짐작으로 못 정한다 — 실제 지문으로 나란히 놓고 본다.
- *
- * 모델 이름은 **확인한 것만** 기본값으로 둔다(`/api/figure-jobs/run` 의
- * probe 로 이름과 추론 강도를 실제로 불러 봤다). 칸을 고쳐 다른 이름도 견줄
- * 수 있지만, 없는 이름이면 그대로 실패로 뜬다 — 다른 모델로 몰래 갈아타지 않는다.
+ * 한 지문 사진을 **운영과 같은 한 번의 호출**(글자와 서식 구간을 함께 읽는다,
+ * `KOREAN_TEXT_PROMPT`)로 두 번 보내 평가원 양식 PDF 를 각각 뽑는다. 2026-09-25
+ * 사용자 지시로 **모델은 운영 값(gpt-6-sol)으로 고정하고 추론 강도만** 칸마다
+ * 바꿔 견준다 — OpenAI 만 된다.
  */
 
-type Reader = {
-  key: "a" | "b";
-  provider: "openai" | "gemini";
-  model: string;
-  effort: string;
-};
+/** 운영 지문 인식 모델(`OPENAI_TEXT_MODEL` 기본값과 같다). */
+const READ_MODEL = "gpt-6-sol";
 
-// 둘 다 2026-09-25 probe 로 확인했다: `gemini-3.8-flash` 는 이 키의 ListModels 에
-// 있고, gpt-6-luna 의 추론 강도는 none·minimal·low·medium·high·xhigh·max 를 받는다.
+/** 눌러서 고르는 추론 강도 — 2026-09-25 probe 로 받는 값을 확인했다. */
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
 /**
- * 눌러서 고르는 OpenAI 모델. 둘 다 이 계정의 `/v1/models` 에 있고, 사진 +
- * `reasoning.effort: "max"` 요청이 실제로 통한 것만 둔다(2026-09-25 probe).
- * 다른 이름은 칸에 직접 적으면 된다.
+ * 지문 위치 찾기 칸에서 눌러 고르는 OpenAI 모델. 둘 다 이 계정의 `/v1/models`
+ * 에 있고 사진 요청이 실제로 통한 것만 둔다(2026-09-25 probe).
  */
 const OPENAI_PRESETS = ["gpt-6-luna", "gpt-6-sol"];
 
-// 기본은 OpenAI 두 칸(luna max vs sol max). gemini-3.8-flash 는 첫 실행에서
-// 503(자리 없음)만 받아 기본에서 뺐다 — 카드의 Gemini 버튼으로 언제든 되돌린다.
+type Reader = { key: "a" | "b"; effort: string };
+
+// 기본은 운영 강도(medium)와 한 단계 위(high).
 const DEFAULT_READERS: Reader[] = [
-  { key: "a", provider: "openai", model: "gpt-6-luna", effort: "max" },
-  { key: "b", provider: "openai", model: "gpt-6-sol", effort: "max" },
+  { key: "a", effort: "medium" },
+  { key: "b", effort: "high" },
 ];
 
 type Result =
@@ -64,10 +63,10 @@ type Result =
       usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
       /** 공표 단가로 계산한 원가(원). 단가를 모르는 모델이면 null. */
       estKrw: number | null;
-      circledFixed: number;
-      circledMismatch: boolean;
-      /** 글자 맞춤 요약(`describeMerge`). */
-      lettersNote: string;
+      /** 서식 표시를 제자리에 붙인 결과(`describeMarks`). */
+      marksNote: string;
+      /** 모델이 준 그대로의 블록(JSON) — 서식 구간을 어떻게 짚었는지 본다. */
+      raw: string;
       pdfUrl: string;
       chars: number;
     }
@@ -118,8 +117,6 @@ async function passageImage(
 
 type ReadResponse = {
   jobId?: string;
-  /** 1차 글자 읽기 결과(`task: "transcribe"`). */
-  text?: string;
   blocks?: unknown;
   regions?: DetectedKoreanRegion[];
   polygons?: DetectedKoreanPolygon[];
@@ -133,7 +130,7 @@ type ReadResponse = {
 /** 백그라운드 작업이 끝날 때까지 기다린다. 30분이 넘으면 포기한다. */
 async function waitForJob(
   jobId: string,
-  task: "read" | "detect" | "transcribe" = "read",
+  task: "read" | "detect" = "read",
   shape: "box" | "polygon" = "box",
 ): Promise<ReadResponse> {
   const until = Date.now() + 30 * 60_000;
@@ -288,49 +285,6 @@ type DetectRun = {
   | { state: "error"; ms: number; message: string }
 );
 
-/** 1차 글자 읽기를 할 모델(운영의 `OPENAI_TRANSCRIBE_MODEL` 자리). */
-type Transcriber = { model: string; effort: string };
-
-type ReferenceRead = {
-  /** 이 글을 읽은 그림과 모델 — 둘 중 하나라도 바뀌면 다시 읽는다. */
-  image: string;
-  key: string;
-  text: string;
-  model: string;
-  ms: number;
-  estKrw: number | null;
-  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
-};
-
-const transcriberKey = (t: Transcriber) => `${t.model}|${t.effort}`;
-
-/**
- * **1차 글자 읽기**(예전 Mathpix 자리) — 운영과 같은 프롬프트(`KOREAN_TRANSCRIBE_PROMPT`)
- * 를 고른 모델로 돌린다. OpenAI 라 백그라운드로 걸고 끝날 때까지 기다린다.
- */
-async function readReference(image: string, t: Transcriber): Promise<ReferenceRead> {
-  const since = Date.now();
-  const res = await fetch("/api/admin/compare-korean", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image, task: "transcribe", provider: "openai", model: t.model, effort: t.effort }),
-  });
-  let json = (await res.json().catch(() => ({}))) as ReadResponse;
-  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-  if (json.jobId) json = await waitForJob(json.jobId, "transcribe");
-  const text = (json.text ?? "").trim();
-  if (!text) throw new Error("글자를 하나도 읽지 못했습니다.");
-  return {
-    image,
-    key: transcriberKey(t),
-    text,
-    model: json.model ?? t.model,
-    ms: Date.now() - since,
-    estKrw: json.estKrw ?? null,
-    usage: json.usage,
-  };
-}
-
 async function makePdf(blocks: RichBlock[], title: string, tocLine: string): Promise<string> {
   const [all, fonts] = await Promise.all([loadKiceFrames(), loadKiceFonts()]);
   const frames = all[frameKeyFor("국어")];
@@ -349,9 +303,9 @@ async function makePdf(blocks: RichBlock[], title: string, tocLine: string): Pro
   return URL.createObjectURL(new Blob([bytes.slice().buffer], { type: "application/pdf" }));
 }
 
-/** 칸 머리글·PDF 제목. 고른 모델을 그대로 따라간다(칸에서 바꿀 수 있어서). */
+/** 칸 머리글·PDF 제목. */
 function readerTitle(r: Reader): string {
-  return r.provider === "openai" && r.effort ? `${r.model} · ${r.effort}` : r.model;
+  return `${READ_MODEL} · ${r.effort || "기본"}`;
 }
 
 export default function CompareKoreanPage() {
@@ -374,13 +328,6 @@ export default function CompareKoreanPage() {
   const [boxes, setBoxes] = useState<EditBox[]>([]);
   /** 실제로 두 모델에 보낸 그림 — 무엇을 견줬는지 눈으로 확인한다. */
   const [sent, setSent] = useState<string | null>(null);
-  const [useReference, setUseReference] = useState(true);
-  /** 1차 읽기 결과. **보낸 그림·모델과 짝으로** 든다 — 네모나 모델을 바꾸면 다시 읽는다. */
-  const [reference, setReference] = useState<ReferenceRead | null>(null);
-  const [refError, setRefError] = useState<string | null>(null);
-  // 1차 읽기 기본은 sol medium — 글자 정확도가 목적이라 상위 모델, 강도는 중간.
-  const [transcriber, setTranscriber] = useState<Transcriber>({ model: "gpt-6-sol", effort: "medium" });
-  const [refState, setRefState] = useState<"idle" | "running" | "ok" | "failed" | "off">("idle");
   const [results, setResults] = useState<Record<string, Result>>({ a: { state: "idle" }, b: { state: "idle" } });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -397,8 +344,6 @@ export default function CompareKoreanPage() {
     setQuestionPolys([]);
     setDetectRuns([]);
     setSent(null);
-    setReference(null);
-    setRefState("idle");
     setResults({ a: { state: "idle" }, b: { state: "idle" } });
     setError(null);
     if (!f) return;
@@ -485,34 +430,28 @@ export default function CompareKoreanPage() {
     }
   }
 
-  async function runOne(reader: Reader, image: string, ref: string) {
+  async function runOne(reader: Reader, image: string) {
     const since = Date.now();
     setResults((r) => ({ ...r, [reader.key]: { state: "running", since } }));
     try {
       const res = await fetch("/api/admin/compare-korean", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image,
-          reference: ref,
-          provider: reader.provider,
-          model: reader.model,
-          effort: reader.provider === "openai" ? reader.effort : "",
-        }),
+        body: JSON.stringify({ image, provider: "openai", model: READ_MODEL, effort: reader.effort }),
       });
       let json = (await res.json().catch(() => ({}))) as ReadResponse;
       if (!res.ok) {
         throw Object.assign(new Error(json.error ?? `HTTP ${res.status}`), { ms: json.ms });
       }
-      // OpenAI 는 백그라운드로 걸려 id 만 온다 — 끝날 때까지 몇 초마다 물어본다.
-      // 함수 한도(300초)에 안 묶이므로 max 강도도 끝까지 기다릴 수 있다.
+      // 백그라운드로 걸려 id 만 온다 — 끝날 때까지 몇 초마다 물어본다.
+      // 함수 한도(300초)에 안 묶이므로 높은 강도도 끝까지 기다릴 수 있다.
       if (json.jobId) json = await waitForJob(json.jobId);
-      const raw = readRichBlocks(json.blocks);
-      if (raw.length === 0) throw new Error("문단을 하나도 읽지 못했습니다.");
-      // 운영과 똑같이 글자·원문자를 참고 글에 맞춘다 — 여기만 다르면 견준 결과가 운영과 어긋난다.
-      const { blocks, replaced, matched, letters } = applyReference(raw, ref);
-      const model = json.model ?? reader.model;
-      const tag = reader.provider === "openai" && reader.effort ? `${model} (${reader.effort})` : model;
+      // 운영과 똑같이 읽는다(`text` + `marks` → 토막) — 여기만 다르면 견준 결과가 어긋난다.
+      const stats = emptyMarkStats();
+      const blocks = readRichBlocks(json.blocks, 0, stats);
+      if (blocks.length === 0) throw new Error("문단을 하나도 읽지 못했습니다.");
+      const model = json.model ?? READ_MODEL;
+      const tag = reader.effort ? `${model} (${reader.effort})` : model;
       const pdfUrl = await makePdf(blocks, `지문 비교 — ${readerTitle(reader)}`, `2p, ${tag}`);
       setResults((r) => ({
         ...r,
@@ -523,9 +462,8 @@ export default function CompareKoreanPage() {
           ms: Date.now() - since,
           usage: json.usage,
           estKrw: json.estKrw ?? null,
-          circledFixed: replaced,
-          circledMismatch: !matched,
-          lettersNote: describeMerge(letters) || "참고 글 없음 — AI 글자 그대로",
+          marksNote: describeMarks(stats) || "굵게·밑줄·네모 표시 없음",
+          raw: JSON.stringify(json.blocks, null, 1),
           pdfUrl,
           chars: richToPlainText(blocks).length,
         },
@@ -551,29 +489,8 @@ export default function CompareKoreanPage() {
       // 지문은 왼쪽 단 조각부터 그리면 된다.
       const image = await passageImage(file, boxes, polys);
       setSent(image);
-      let ref = "";
-      if (useReference) {
-        if (reference?.image === image && reference.key === transcriberKey(transcriber)) {
-          ref = reference.text;
-          setRefState("ok");
-        } else {
-          setRefState("running");
-          setRefError(null);
-          try {
-            const read = await readReference(image, transcriber);
-            ref = read.text;
-            setReference(read);
-            setRefState("ok");
-          } catch (err) {
-            setRefError(err instanceof Error ? err.message : String(err));
-            setRefState("failed");
-          }
-        }
-      } else {
-        setRefState("off");
-      }
-      // 두 모델을 동시에 — 각자 제 요청이라 한쪽이 늦어도 다른 쪽을 막지 않는다.
-      await Promise.all(readers.map((r) => runOne(r, image, ref)));
+      // 두 칸을 동시에 — 각자 제 요청이라 한쪽이 늦어도 다른 쪽을 막지 않는다.
+      await Promise.all(readers.map((r) => runOne(r, image)));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -584,12 +501,11 @@ export default function CompareKoreanPage() {
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-900">국어 지문 인식 모델 비교</h1>
+        <h1 className="text-xl font-bold text-slate-900">국어 지문 인식 비교</h1>
         <p className="mt-1 text-sm text-slate-600">
-          같은 지문 사진을 두 모델에 똑같이 보내고 평가원 양식 PDF 를 각각 뽑습니다. 운영과
-          같게 ① GPT 가 글자만 먼저 옮겨 적고(1차 읽기) ② 두 모델이 그 글을 참고해 줄바꿈·
-          굵게·밑줄·기호 자리를 읽은 뒤 ③ 글자를 1차 읽기 것으로 맞춥니다. 토큰은 차감하지 않습니다
-          (무제한 계정 전용).
+          같은 지문 사진을 운영과 같은 한 번의 호출({READ_MODEL})로 두 번 보내 평가원 양식 PDF 를
+          각각 뽑습니다. 모델이 글자와 함께 굵게·밑줄·네모가 정확히 어디부터 어디까지인지 짚어
+          줍니다. 칸마다 추론 강도만 바꿔 견줍니다. 토큰은 차감하지 않습니다(무제한 계정 전용).
         </p>
       </div>
 
@@ -829,81 +745,11 @@ export default function CompareKoreanPage() {
         {sent && (
           <details className="text-xs">
             <summary className="cursor-pointer text-slate-500">
-              두 모델에 실제로 보낸 그림 보기
+              실제로 보낸 그림 보기
             </summary>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={sent} alt="보낸 지문" className="mt-2 max-h-[32rem] w-auto rounded border" />
           </details>
-        )}
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            checked={useReference}
-            onChange={(e) => setUseReference(e.target.checked)}
-          />
-          1차 글자 읽기(운영과 같음, 1회만 읽어 두 모델에 같이 줌)
-        </label>
-        {useReference && (
-          <div className="flex flex-wrap items-end gap-2 text-xs">
-            {OPENAI_PRESETS.map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setTranscriber((t) => ({ ...t, model: m }))}
-                className={`rounded-lg border px-2 py-1 font-mono ${
-                  transcriber.model === m
-                    ? "border-blue-600 bg-blue-50 text-blue-700"
-                    : "border-slate-300 text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-            <label className="flex min-w-0 flex-col gap-1 text-slate-600">
-              모델
-              <input
-                value={transcriber.model}
-                onChange={(e) => setTranscriber((t) => ({ ...t, model: e.target.value }))}
-                className="w-36 rounded border border-slate-300 px-2 py-1 font-mono"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-slate-600">
-              추론 강도
-              <input
-                value={transcriber.effort}
-                onChange={(e) => setTranscriber((t) => ({ ...t, effort: e.target.value }))}
-                className="w-24 rounded border border-slate-300 px-2 py-1 font-mono"
-              />
-            </label>
-          </div>
-        )}
-        {refState !== "idle" && (
-          <div className="text-xs text-slate-500">
-            <p>
-              1차 읽기:{" "}
-              {refState === "running"
-                ? "글자만 옮겨 적는 중…"
-                : refState === "ok" && reference
-                  ? `✓ ${reference.text.length.toLocaleString()}자 · ${reference.model}${
-                      transcriber.effort ? ` (${transcriber.effort})` : ""
-                    } · ${(reference.ms / 1000).toFixed(1)}초 · ${
-                      reference.estKrw != null
-                        ? `약 ${reference.estKrw < 10 ? reference.estKrw.toFixed(1) : Math.round(reference.estKrw).toLocaleString()}원`
-                        : "단가 모름"
-                    }`
-                  : refState === "off"
-                    ? "끔 — 모양 읽기 모델이 사진만 보고 읽음"
-                    : `실패 — 사진만 보고 읽음${refError ? ` (${refError})` : ""}`}
-            </p>
-            {refState === "ok" && reference && (
-              <details className="mt-1">
-                <summary className="cursor-pointer">1차로 읽은 글 보기</summary>
-                <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-slate-700">
-                  {reference.text}
-                </pre>
-              </details>
-            )}
-          </div>
         )}
       </section>
 
@@ -916,65 +762,29 @@ export default function CompareKoreanPage() {
               className="flex min-w-0 flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4"
             >
               <h2 className="font-semibold text-slate-900">{readerTitle(reader)}</h2>
-              <div className="flex flex-wrap gap-2 text-xs">
-                <div className="flex w-full gap-1">
-                  {(["openai", "gemini"] as const).map((pv) => (
-                    <button
-                      key={pv}
-                      type="button"
-                      onClick={() =>
-                        patchReader(reader.key, {
-                          provider: pv,
-                          model: pv === "openai" ? OPENAI_PRESETS[0] : "gemini-3.8-flash",
-                          effort: pv === "openai" ? "max" : "",
-                        })
-                      }
-                      className={`rounded-lg border px-2 py-1 ${
-                        reader.provider === pv
-                          ? "border-slate-800 bg-slate-800 text-white"
-                          : "border-slate-300 text-slate-600 hover:bg-slate-100"
-                      }`}
-                    >
-                      {pv === "openai" ? "OpenAI" : "Gemini"}
-                    </button>
-                  ))}
-                </div>
-                <label className="flex min-w-0 flex-1 flex-col gap-1 text-slate-600">
-                  모델 ({reader.provider === "openai" ? "OpenAI" : "Gemini"})
+              <div className="flex flex-wrap items-end gap-1 text-xs">
+                {EFFORTS.map((e) => (
+                  <button
+                    key={e}
+                    type="button"
+                    onClick={() => patchReader(reader.key, { effort: e })}
+                    className={`rounded-lg border px-2 py-1 font-mono ${
+                      reader.effort === e
+                        ? "border-blue-600 bg-blue-50 text-blue-700"
+                        : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {e}
+                  </button>
+                ))}
+                <label className="ml-1 flex w-24 flex-col gap-1 text-slate-600">
+                  추론 강도
                   <input
-                    value={reader.model}
-                    onChange={(e) => patchReader(reader.key, { model: e.target.value })}
+                    value={reader.effort}
+                    onChange={(e) => patchReader(reader.key, { effort: e.target.value.trim() })}
                     className="rounded border border-slate-300 px-2 py-1 font-mono"
                   />
                 </label>
-                {reader.provider === "openai" && (
-                  <div className="flex w-full flex-wrap gap-1">
-                    {OPENAI_PRESETS.map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => patchReader(reader.key, { model: m })}
-                        className={`rounded-lg border px-2 py-1 font-mono ${
-                          reader.model === m
-                            ? "border-blue-600 bg-blue-50 text-blue-700"
-                            : "border-slate-300 text-slate-600 hover:bg-slate-100"
-                        }`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {reader.provider === "openai" && (
-                  <label className="flex w-28 flex-col gap-1 text-slate-600">
-                    추론 강도
-                    <input
-                      value={reader.effort}
-                      onChange={(e) => patchReader(reader.key, { effort: e.target.value })}
-                      className="rounded border border-slate-300 px-2 py-1 font-mono"
-                    />
-                  </label>
-                )}
               </div>
 
               <ResultView result={result} />
@@ -989,7 +799,7 @@ export default function CompareKoreanPage() {
         onClick={run}
         className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
       >
-        {busy ? "읽는 중…" : "둘 다 읽고 PDF 만들기"}
+        {busy ? "읽는 중…" : "두 강도로 읽고 PDF 만들기"}
       </button>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </main>
@@ -1032,13 +842,7 @@ function ResultView({ result }: { result: Result }) {
         <li>
           블록 {result.blocks.length}개 · 글자 {result.chars.toLocaleString()}자
         </li>
-        <li>
-          원문자:{" "}
-          {result.circledMismatch
-            ? "참고 글과 개수가 달라 일부 그대로 둠"
-            : `참고 글에 맞춰 ${result.circledFixed}자 고침`}
-        </li>
-        <li>{result.lettersNote}</li>
+        <li>{result.marksNote}</li>
       </ul>
       <a
         href={result.pdfUrl}
@@ -1051,6 +855,12 @@ function ResultView({ result }: { result: Result }) {
         <summary className="cursor-pointer text-slate-500">읽은 글 보기</summary>
         <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-50 p-2">
           {richToPlainText(result.blocks)}
+        </pre>
+      </details>
+      <details className="text-xs">
+        <summary className="cursor-pointer text-slate-500">모델이 준 그대로 보기 (서식 구간)</summary>
+        <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-50 p-2 font-mono">
+          {result.raw}
         </pre>
       </details>
     </div>

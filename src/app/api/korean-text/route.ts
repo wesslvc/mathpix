@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GradeError, readKoreanRichText, transcribeKoreanPassage } from "@/lib/gradeExam";
+import { GradeError, readKoreanRichText } from "@/lib/gradeExam";
 import { gradingEstKrw } from "@/lib/tokens";
 import { startGradingBilling } from "@/lib/gradingBilling";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -9,39 +9,27 @@ import { getBillingContext } from "@/lib/byok";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // 지문 한 편을 통째로 옮겨 적는 일이라 채점보다 출력이 길다.
-export const maxDuration = 180;
+// sol medium 으로 지문 한 편의 글자와 모양을 한 번에 읽는다 — 오래 걸릴 수 있다.
+export const maxDuration = 300;
 
 /**
  * 지문 인식(국어) 1회의 **고정 차감액**.
  *
- * **실사용량 정산에서 고정 차감으로 바꿨다**(사용자 결정, 2026-09-17).
- * 그전에는 terra 단가(입력 $2.00 / 출력 $12.00 per 1M)로 원가를 재
- * (지문 한 편 약 70원) 마진을 붙인 실제 차감(약 35토큰)만큼만 정산했는데,
- * 이제는 원가가 얼마든 항상 100토큰을 뗀다 — `startGradingBilling`에
- * `flat: true`를 넘겨 정산 단계를 건너뛴다.
+ * **실사용량 정산이 아니라 고정 차감이다**(사용자 결정, 2026-09-17). 원가가
+ * 얼마든 항상 100토큰을 뗀다 — `startGradingBilling`에 `flat: true`를 넘겨
+ * 정산 단계를 건너뛴다.
  */
 const DEPOSIT = 100;
 
 /**
- * 1차 글자 읽기(`task: "transcribe"`)의 보증금. 이건 **실사용량으로 정산**한다 —
- * 예전 Mathpix 자리(1토큰)를 GPT 가 이어받은 것이라 원가가 모델·강도에 따라
- * 크게 달라진다. 모자라면 정산에서 더 받고 남으면 돌려준다.
- */
-const TRANSCRIBE_DEPOSIT = 30;
-
-/**
  * 국어 지문 사진을 **구조화된 글자**로 옮긴다.
  *
- * 지금까지 지문은 오려낸 사진 한 장이었다. 그러면 확대하면 흐려지고, 단을
- * 따라 흘릴 수도 없고, 평가원 판형의 글꼴과 어긋난다. 모델이 문단·상자·강조를
- * 구분해 주면 **우리가 평가원 글꼴로 조판**한다(`textFlow.ts`).
- *
- * **Mathpix 가 읽은 글을 함께 준다.** 글자를 정확히 읽는 일은 Mathpix 가 낫고,
- * 무엇이 문단이고 무엇이 상자인지 가리는 일은 vision 모델이 낫다 — 둘의
- * 잘하는 것을 겹쳐 쓴다(문제 전체 다시 그리기에서 쓰던 방식과 같다).
+ * 모델이 문단·상자·서식 구간을 구분해 주면 **우리가 평가원 글꼴로 조판**한다
+ * (`textFlow.ts`). 글자와 모양을 **한 번의 호출로** 읽는다(`readKoreanRichText`,
+ * 2026-09-25) — 예전의 "글자 먼저 읽고 참고 글로 넘기기"는 걷어냈다.
  */
 export async function POST(req: NextRequest) {
-  let body: { image?: unknown; reference?: unknown; task?: unknown };
+  let body: { image?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -51,8 +39,6 @@ export async function POST(req: NextRequest) {
   if (!image) {
     return NextResponse.json({ error: "지문 사진이 필요합니다." }, { status: 400 });
   }
-  const reference = typeof body.reference === "string" ? body.reference.slice(0, 12000) : "";
-  const transcribe = body.task === "transcribe";
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
@@ -76,20 +62,9 @@ export async function POST(req: NextRequest) {
       { status: 402 },
     );
   }
-  if (transcribe && !process.env.OPENAI_API_KEY && !byokApiKey) {
+  if (!process.env.OPENAI_API_KEY && !byokApiKey) {
     return NextResponse.json(
-      { error: "OPENAI_API_KEY 가 설정되지 않아 지문 글자를 읽을 수 없습니다." },
-      { status: 500 },
-    );
-  }
-  // 지문 인식은 Gemini Flash 를 먼저 쓰고 안 되면 terra 로 내려간다 —
-  // 셋(Gemini/공유 OpenAI/BYOK 본인 키) 중 하나만 있어도 돌아간다.
-  if (!process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY && !byokApiKey) {
-    return NextResponse.json(
-      {
-        error:
-          "GEMINI_API_KEY 도 OPENAI_API_KEY 도 설정되지 않아 지문 인식을 쓸 수 없습니다.",
-      },
+      { error: "OPENAI_API_KEY 가 설정되지 않아 지문 인식을 쓸 수 없습니다." },
       { status: 500 },
     );
   }
@@ -99,9 +74,9 @@ export async function POST(req: NextRequest) {
     billing = await startGradingBilling(supabase, {
       unlimited,
       byok,
-      deposit: transcribe ? TRANSCRIBE_DEPOSIT : DEPOSIT,
-      label: transcribe ? "api/korean-text:transcribe" : "api/korean-text",
-      flat: !transcribe,
+      deposit: DEPOSIT,
+      label: "api/korean-text",
+      flat: true,
     });
   } catch (err) {
     return NextResponse.json(
@@ -112,7 +87,7 @@ export async function POST(req: NextRequest) {
   if (!billing) {
     return NextResponse.json(
       {
-        error: `토큰이 부족해요. 지문 인식에는 최소 ${transcribe ? TRANSCRIBE_DEPOSIT : DEPOSIT}토큰이 필요합니다.`,
+        error: `토큰이 부족해요. 지문 인식에는 최소 ${DEPOSIT}토큰이 필요합니다.`,
       },
       { status: 402 },
     );
@@ -121,30 +96,8 @@ export async function POST(req: NextRequest) {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), (maxDuration - 15) * 1000);
   try {
-    if (transcribe) {
-      const { text, usage, model } = await transcribeKoreanPassage(
-        image,
-        deadline.signal,
-        byokApiKey ?? undefined,
-      );
-      const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
-      const chargedTokens = await billing.settle(estKrw);
-      console.info(
-        `[korean-text] transcribe model=${model} 글자=${text.length}자 ` +
-          `in=${usage?.inputTokens ?? "?"} out=${usage?.outputTokens ?? "?"} ` +
-          `est=${estKrw != null ? `${Math.round(estKrw)}원` : "단가미설정"} ` +
-          `차감=${chargedTokens == null ? "없음(무제한)" : `${chargedTokens}토큰`}`,
-      );
-      return NextResponse.json({
-        text,
-        usage: (unlimited || byok) && usage ? { ...usage, estKrw } : undefined,
-        chargedTokens,
-        model,
-      });
-    }
     const { blocks, usage, model } = await readKoreanRichText(
       image,
-      reference,
       deadline.signal,
       byokApiKey ?? undefined,
     );
@@ -152,23 +105,10 @@ export async function POST(req: NextRequest) {
     const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
     const chargedTokens = await billing.settle(estKrw);
 
-    /**
-     * **요청마다 usage 를 찍는다**(`figureImageGen` 과 같은 이유).
-     *
-     * 사용자가 "terra 는 천 토큰 초반밖에 안 드는데 정상이냐, luna 는 제목
-     * 하나에 몇천 토큰 드는데" 라고 물었을 때, 우리 쪽에 남는 기록이 하나도
-     * 없어서 **짐작밖에 할 수 없었다.** 그림 생성에서 똑같은 일을 겪고
-     * (청구서가 하루 단위로만 나와 무엇이 비용을 끌어올리는지 끝내 단정하지
-     * 못했다) 로그를 남기기로 한 자리인데, 지문 인식에는 그게 안 들어가 있었다.
-     *
-     * 입력·출력을 갈라 찍는 게 중요하다 — 이 일은 입력이 사진 + 참고 글이고
-     * 출력이 지문 전체 JSON 이라, 어느 쪽이 큰지 알아야 값이 이상할 때
-     * (참고 글이 안 붙었나? 출력이 잘렸나?) 짚을 수 있다. 참고 글 길이도
-     * 함께 남긴다 — 0 이면 Mathpix 가 실패했다는 뜻이고, 그러면 글자 정확도가
-     * 떨어지는 이유가 바로 설명된다.
-     */
+    // **요청마다 usage 를 찍는다**(`figureImageGen` 과 같은 이유 — 청구서만으로는
+    // 무엇이 비용을 끌어올리는지 알 수 없다). 입력·출력을 갈라 찍는다.
     console.info(
-      `[korean-text] usage model=${model} 참고글=${reference.length}자 ` +
+      `[korean-text] usage model=${model} ` +
         `in=${usage?.inputTokens ?? "?"} out=${usage?.outputTokens ?? "?"} ` +
         `est=${estKrw != null ? `${Math.round(estKrw)}원` : "단가미설정"} ` +
         // 무제한 계정은 차감 자체가 없어 null 이 온다 — 그대로 찍으면

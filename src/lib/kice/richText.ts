@@ -73,8 +73,118 @@ function readRuns(raw: unknown): RichRun[] {
   return out;
 }
 
-/** 모델이 준 블록 목록을 확인하고 받는다. 모양이 이상한 것은 조용히 버린다. */
-export function readRichBlocks(raw: unknown, depth = 0): RichBlock[] {
+/** 서식 표시(`marks`)를 얼마나 제자리에 붙였는지. 화면에 그대로 보여 준다. */
+export type MarkStats = { total: number; missed: number; missedTexts: string[] };
+
+type Mark = { type: "b" | "u" | "sq"; text: string; nth: number };
+
+function readMarks(raw: unknown): Mark[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Mark[] = [];
+  for (const item of raw.slice(0, MAX_RUNS)) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as { type?: unknown; text?: unknown; nth?: unknown };
+    const type = o.type === "b" || o.type === "u" || o.type === "sq" ? o.type : null;
+    const text = typeof o.text === "string" ? o.text : "";
+    if (!type || !text.trim()) continue;
+    const nth = Math.floor(Number(o.nth));
+    out.push({ type, text, nth: Number.isFinite(nth) && nth >= 1 ? nth : 1 });
+  }
+  return out;
+}
+
+/** 표시 글에서 찾을 정규식 — 띄어쓰기·줄바꿈 차이는 봐 준다. */
+function markPattern(text: string): RegExp | null {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+  const esc = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(esc.join("\\s*"), "g");
+}
+
+/**
+ * **문단 글 + 서식 구간 → 토막**(2026-09-25, 사용자 요청 — "어느 줄 말고 어디서부터
+ * 어디까지 볼드, 어디서부터 어디까지 밑줄").
+ *
+ * 예전에는 모델이 글을 토막(`runs`)으로 잘라 서식을 달았는데, 그러면 글자와
+ * 서식이 한꺼번에 흔들렸다 — 토막을 나누다 글자를 빠뜨리거나 밑줄을 줄 통째로
+ * 긋는 일이 잦았다. 이제 모델은 **글을 한 번 통째로** 적고, 서식은 "이 문단에서
+ * 정확히 이 글자들(`text`), 같은 글이 여러 번이면 몇 번째(`nth`)" 로 따로 짚는다.
+ * 글자 수를 세라고 하지 않는 이유: 모델은 글자 위치를 세는 데 약하고, 부분
+ * 문자열은 틀려도 어디가 틀렸는지 눈에 보인다.
+ *
+ * 못 찾은 표시는 버리고 센다(`stats.missed`) — 엉뚱한 자리에 긋는 것보다 낫다.
+ * `nth` 번째가 없으면 첫 번째에 붙인다(같은 글이 한 번뿐인데 번호만 틀린 경우).
+ */
+export function applyMarks(text: string, rawMarks: unknown, stats?: MarkStats): RichRun[] {
+  if (!text) return [];
+  const marks = readMarks(rawMarks);
+  const chars = [...text];
+  // 코드포인트 자리 ↔ UTF-16 자리(정규식은 UTF-16 으로 준다).
+  const cpAt: number[] = [];
+  let cp = 0;
+  for (const ch of chars) {
+    for (let k = 0; k < ch.length; k++) cpAt.push(cp);
+    cp++;
+  }
+  cpAt.push(cp);
+  const flags = chars.map(() => ({ b: false, u: false, sq: false }));
+
+  for (const m of marks) {
+    if (stats) stats.total++;
+    const re = markPattern(m.text);
+    const hits = re ? [...text.matchAll(re)] : [];
+    const hit = hits[m.nth - 1] ?? hits[0];
+    if (!hit || hit.index == null) {
+      if (stats) {
+        stats.missed++;
+        if (stats.missedTexts.length < 20) stats.missedTexts.push(m.text);
+      }
+      continue;
+    }
+    const from = cpAt[hit.index];
+    const to = cpAt[hit.index + hit[0].length];
+    for (let i = from; i < to; i++) flags[i][m.type] = true;
+  }
+
+  const runs: RichRun[] = [];
+  let cur: RichRun | null = null;
+  chars.forEach((ch, i) => {
+    const f = flags[i];
+    if (cur && !!cur.b === f.b && !!cur.u === f.u && !!cur.sq === f.sq) {
+      cur.t += ch;
+      return;
+    }
+    cur = {
+      t: ch,
+      ...(f.b ? { b: true } : {}),
+      ...(f.u ? { u: true } : {}),
+      ...(f.sq ? { sq: true } : {}),
+    };
+    runs.push(cur);
+  });
+  return runs;
+}
+
+/** 서식 표시 결과를 한 줄로. 표시가 하나도 없으면 빈 글자다. */
+export function describeMarks(stats: MarkStats): string {
+  if (stats.total === 0) return "";
+  const placed = stats.total - stats.missed;
+  if (stats.missed === 0) return `굵게·밑줄·네모 ${placed}곳 표시`;
+  const shown = stats.missedTexts.slice(0, 3).map((t) => `"${t.slice(0, 12)}"`).join(", ");
+  return `굵게·밑줄·네모 ${placed}곳 표시 · ${stats.missed}곳은 본문에서 못 찾아 뺐어요(${shown}) — 확인해 주세요`;
+}
+
+export function emptyMarkStats(): MarkStats {
+  return { total: 0, missed: 0, missedTexts: [] };
+}
+
+/**
+ * 모델이 준 블록 목록을 확인하고 받는다. 모양이 이상한 것은 조용히 버린다.
+ *
+ * 문단은 두 모양을 받는다 — 저장된 옛 모양(`runs`)과 지금 모델이 주는 모양
+ * (`text` + `marks`, `applyMarks`). `stats` 를 주면 서식 표시를 몇 개 못 붙였는지 센다.
+ */
+export function readRichBlocks(raw: unknown, depth = 0, stats?: MarkStats): RichBlock[] {
   if (!Array.isArray(raw) || depth > MAX_DEPTH) return [];
   const out: RichBlock[] = [];
   for (const item of raw.slice(0, MAX_BLOCKS)) {
@@ -82,7 +192,7 @@ export function readRichBlocks(raw: unknown, depth = 0): RichBlock[] {
     const o = item as Record<string, unknown>;
     const kind = o.kind;
     if (kind === "box") {
-      const blocks = readRichBlocks(o.blocks, depth + 1);
+      const blocks = readRichBlocks(o.blocks, depth + 1, stats);
       // 빈 상자는 그리지 않는다 — 테두리만 남은 네모는 상자가 아니다
       // (조건 박스 감지에서 이미 겪은 규칙과 같다).
       if (blocks.length > 0) out.push({ kind: "box", blocks });
@@ -97,7 +207,10 @@ export function readRichBlocks(raw: unknown, depth = 0): RichBlock[] {
       continue;
     }
     // 나머지는 전부 문단으로 본다(kind 를 빠뜨린 응답도 받아 준다).
-    const runs = readRuns(o.runs ?? o.text ?? o.t);
+    const runs =
+      o.runs === undefined && typeof o.text === "string" && Array.isArray(o.marks)
+        ? applyMarks(o.text, o.marks, stats)
+        : readRuns(o.runs ?? o.text ?? o.t);
     if (runs.length === 0) continue;
     out.push({
       kind: "para",

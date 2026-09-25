@@ -12,9 +12,7 @@ import {
 } from "@/lib/figureImage";
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import { toStoredFigures, type StoredBoxRange } from "@/lib/storedFigures";
-import { readRichBlocks } from "@/lib/kice/richText";
-import { applyReference, describeMerge } from "@/lib/kice/referenceMerge";
-import { transcribePassage, type PassageTranscript } from "@/lib/passageTranscribe";
+import { describeMarks, emptyMarkStats, readRichBlocks } from "@/lib/kice/richText";
 import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
@@ -121,40 +119,11 @@ export default function KoreanModePanel({
   const [titling, setTitling] = useState(false);
   /** 제목을 지을 재료(지문 크롭). 다시 짓기 버튼이 쓴다. */
   const passageCropRef = useRef<string | null>(null);
-  /**
-   * **1차로 읽은 지문 글자**(GPT, 예전에는 Mathpix). 제목 짓기와 지문 구조화
-   * 인식이 **같은 글**을 나눠 쓴다 — 따로 부르면 1차 읽기가 두 번 나간다.
-   *
-   * **글자가 아니라 약속(Promise)을 들고 있다.** 예전에는 `makeTitle` 이
-   * 다 읽은 뒤에야 채워지는 `string | null` 이었는데, 그 `makeTitle` 은
-   * 크롭이 끝나자마자 **기다리지 않고**(`void makeTitle(...)`) 던져진다.
-   * 그래서 사용자가 그 사이에 저장을 누르면 참고 글이 아직 `null` 이고,
-   * 지문 인식이 "건너뜀"으로 떨어졌다(정확도가 가장 나쁜 조합이다).
-   *
-   * 약속으로 들면 **읽는 중이면 그걸 기다리고, 아직 안 읽었으면 그때 읽는다.**
-   * 크롭을 함께 들고 있어서, 저장 전에 네모를 다시 잡아 크롭이 달라졌으면
-   * 엉뚱한 글을 재사용하지 않고 새로 읽는다.
-   */
-  const passageOcrRef = useRef<{ crop: string; text: Promise<PassageTranscript> } | null>(
-    null,
-  );
-
-  /** 이 크롭의 1차 읽기 결과. 이미 읽었거나 읽는 중이면 그것을 쓴다. */
-  function readPassageOcr(crop: string): Promise<PassageTranscript> {
-    if (passageOcrRef.current?.crop === crop) return passageOcrRef.current.text;
-    const text = (async () => transcribePassage(await enhanceContrast(crop)))();
-    passageOcrRef.current = { crop, text };
-    // 실패한 약속을 붙들고 있으면 다시 시도해도 같은 실패가 나온다.
-    text.catch(() => {
-      if (passageOcrRef.current?.text === text) passageOcrRef.current = null;
-    });
-    return text;
-  }
   const [noPassage, setNoPassage] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  /** 지문 인식 진행 상황(1차 글자 읽기 → 모양 읽기). 지문이 없거나 아직 안 돌면 null. */
+  /** 지문 인식 진행 상황. 지문이 없거나 아직 안 돌면 null. */
   const [passageStatus, setPassageStatus] = useState<PassageStatus | null>(null);
 
   function reset() {
@@ -424,20 +393,20 @@ export default function KoreanModePanel({
     }
   }
 
-  /** 1차로 읽은 지문의 **글자만** 보내 제목을 짓는다. */
+  /**
+   * 지문 **사진**으로 제목을 짓는다(luna). 예전에는 따로 읽어 둔 글자를 보냈는데,
+   * 지문 인식이 한 번의 호출로 합쳐지면서(2026-09-25) 글자를 먼저 읽는 단계가
+   * 없어졌다 — 제목 짓기가 지문 인식을 기다리게 하면 저장 전까지 제목이 안 나온다.
+   */
   async function makeTitle(passageCrop: string) {
     passageCropRef.current = passageCrop;
     setTitling(true);
     setTitleNote("제목을 짓는 중...");
     try {
-      // 지문 인식과 **같은 약속**을 쓴다 — 둘 중 누가 먼저 부르든 1차 읽기는
-      // 한 번만 나간다.
-      const { text } = await readPassageOcr(passageCrop);
-
       const res = await fetch("/api/korean-title", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ image: await enhanceContrast(passageCrop) }),
       });
       const json = (await res.json()) as { title?: string; kind?: string; error?: string };
       if (!res.ok || !json.title) throw new Error(json.error ?? "제목을 짓지 못했습니다.");
@@ -471,7 +440,7 @@ export default function KoreanModePanel({
   }
 
   /**
-   * 지문을 **평가원 글꼴로 조판할 구조화된 글자**로 옮긴다(terra).
+   * 지문을 **평가원 글꼴로 조판할 구조화된 글자**로 옮긴다(한 번의 호출).
    *
    * **지문은 그림이 아니다.** 문제(선지·자료가 섞인 그림)와 달리 지문은
    * 표도 그림도 거의 없는 순수한 글이라, 이미지 생성 모델로 "다시 그리면"
@@ -485,49 +454,29 @@ export default function KoreanModePanel({
    */
   async function readPassageBlocks(crop: string) {
     setBusy("지문을 글자로 옮기는 중... (평가원 글꼴로 조판됩니다)");
-    /**
-     * **참고 글은 여기서 반드시 확보한다**(1차 글자 읽기). `makeTitle` 이 이미
-     * 읽는 중이면 그걸 기다리고, 안 읽었으면 지금 읽는다 — 경쟁 상태가 없다.
-     * 그래도 실패하면 모양 읽기만으로 진행한다(참고가 없다고 막을 이유는 없다).
-     */
-    setPassageStatus({ reader: "running", terra: "pending" });
-    let reference = "";
-    let reader: Partial<PassageStatus> = {};
-    try {
-      const t = await readPassageOcr(crop);
-      reference = t.text;
-      reader = { readerModel: t.model, readerCostKrw: t.costKrw, readerTokens: t.chargedTokens };
-    } catch {
-      // 모양 읽기만으로 내려간다.
-    }
-    setPassageStatus({ reader: reference ? "ok" : "failed", ...reader, terra: "running" });
+    setPassageStatus({ state: "running" });
     try {
       const res = await fetch("/api/korean-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await enhanceContrast(crop), reference }),
+        body: JSON.stringify({ image: await enhanceContrast(crop) }),
       });
       const json = (await res.json()) as {
         blocks?: unknown;
         error?: string;
         chargedTokens?: number;
         usage?: { estKrw?: number };
-        /** 실제로 답한 모델(Gemini Flash 또는 terra). 화면에 그대로 보여 준다. */
+        /** 실제로 답한 모델. 화면에 그대로 보여 준다. */
         model?: string;
       };
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
-      const raw = readRichBlocks(json.blocks);
-      if (raw.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      // **글자와 원문자는 1차 읽기를 따른다 — 프롬프트가 아니라 코드로 맞춘다.**
-      // 모델 결과에서는 줄바꿈·띄어쓰기·맞춤·굵게·밑줄·기호 자리만 남는다.
-      const { blocks, replaced, matched, letters } = applyReference(raw, reference);
+      // 모델은 문단마다 글 전체와 서식 구간(`marks`)을 준다 — 여기서 토막으로 바꾼다.
+      const stats = emptyMarkStats();
+      const blocks = readRichBlocks(json.blocks, 0, stats);
+      if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
       setPassageStatus({
-        reader: reference ? "ok" : "failed",
-        ...reader,
-        terra: "done",
-        circledFixed: replaced,
-        circledMismatch: !matched,
-        lettersNote: describeMerge(letters),
+        state: "done",
+        marksNote: describeMarks(stats),
         model: json.model,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
@@ -537,12 +486,7 @@ export default function KoreanModePanel({
       const message =
         (err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.") +
         " 이 지문은 사진으로 대신 저장했어요.";
-      setPassageStatus({
-        reader: reference ? "ok" : "failed",
-        ...reader,
-        terra: "error",
-        errorMessage: message,
-      });
+      setPassageStatus({ state: "error", errorMessage: message });
       setError(message);
       return undefined;
     }

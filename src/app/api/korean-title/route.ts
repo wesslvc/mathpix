@@ -8,35 +8,38 @@ import { getBillingContext } from "@/lib/byok";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// 글자만 보내므로 사진을 보내는 채점보다 훨씬 가볍다.
+// luna 에 사진 한 장(또는 글자)만 보내는 가벼운 호출이다.
 export const maxDuration = 60;
 
 /** 보내는 글자 수 상한. 지문 한 편은 넉넉히 들어가고, 통째로 보내는 사고는 막는다. */
 const MAX_CHARS = 12000;
 
-/** 이 일에 걸어 두는 보증금. 글자만 보내는 호출이라 아주 싸다. */
+/** 이 일에 걸어 두는 보증금. luna 라 사진을 붙여도 아주 싸다(모자라면 정산에서 더 받는다). */
 const DEPOSIT = 1;
 
 /**
  * 국어 지문 제목 짓기.
  *
- * Mathpix 가 읽어 둔 **글자만** 보낸다 — 사진을 다시 보내면 입력 그림 토큰이
- * 붙어 값이 몇 배가 된다. 제목은 첫 장 목차와 지문 카드에 쓰인다.
+ * 지문 **사진**(`image`)을 받는다. 예전에는 따로 읽어 둔 글자(`text`)만 받았는데
+ * 지문 인식이 한 번의 호출로 합쳐지면서(2026-09-25) 글자를 먼저 읽는 단계가
+ * 없어졌다. 글자를 넘기면 예전처럼 글만 보낸다. 제목은 첫 장 목차와 지문 카드에 쓰인다.
  *
  * 과금은 다른 vision 라우트와 같은 모양(보증금 → 실사용량 정산)이고
  * `gradingBilling.ts` 한 곳을 쓴다.
  */
 export async function POST(req: NextRequest) {
-  let body: { text?: unknown };
+  let body: { text?: unknown; image?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "잘못된 요청 본문입니다." }, { status: 400 });
   }
   const text = typeof body.text === "string" ? body.text.trim().slice(0, MAX_CHARS) : "";
-  if (text.length < 20) {
+  const image =
+    typeof body.image === "string" && body.image.startsWith("data:image/") ? body.image : "";
+  if (!image && text.length < 20) {
     return NextResponse.json(
-      { error: "제목을 지을 만큼 글자가 인식되지 않았습니다." },
+      { error: "제목을 지을 지문 사진이나 글이 필요합니다." },
       { status: 400 },
     );
   }
@@ -95,7 +98,7 @@ export async function POST(req: NextRequest) {
   const timer = setTimeout(() => deadline.abort(), (maxDuration - 10) * 1000);
   try {
     const { result, usage, model } = await readKoreanTitle(
-      text,
+      text.length >= 20 ? { text } : { image },
       deadline.signal,
       byokApiKey ?? undefined,
     );
@@ -106,9 +109,9 @@ export async function POST(req: NextRequest) {
     // 지문 인식(`/api/korean-text`)과 **같은 모양으로** 찍는다. 사용자가
     // 견준 것이 바로 이 둘("루나는 제목 하나에 몇천 토큰, 테라는 천 토큰
     // 초반")이라, 둘이 같은 형식으로 남아야 로그에서 바로 견줄 수 있다.
-    // 이쪽은 **사진을 안 보내고 글자만** 보낸다는 게 핵심 차이다.
     console.info(
-      `[korean-title] usage model=${model} 입력글=${text.length}자(사진 없음) ` +
+      `[korean-title] usage model=${model} ` +
+        (text.length >= 20 ? `입력글=${text.length}자 ` : "입력=사진 ") +
         `in=${usage?.inputTokens ?? "?"} out=${usage?.outputTokens ?? "?"} ` +
         `est=${estKrw != null ? `${Math.round(estKrw)}원` : "단가미설정"} ` +
         `차감=${chargedTokens}토큰`,

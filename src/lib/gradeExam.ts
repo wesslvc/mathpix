@@ -9,10 +9,8 @@
  * 값이다. 이름을 또 하나 만들면 모델을 추측하는 셈이 된다.
  */
 
-import { circledCharsIn, circledPairs } from "./circledChars";
 import { OPENAI_DETECT_MODEL } from "./detectProblems";
 import type { GradedItem, GradeSlot, Subject } from "./gradeSummary";
-import { normalizeJamo } from "./renderMathText";
 
 export type { Subject, GradedItem, GradeSlot } from "./gradeSummary";
 export { computeSummary } from "./gradeSummary";
@@ -384,9 +382,12 @@ export async function gradeWithVision(
 }
 
 /**
- * 국어 지문에 붙일 제목을 짓는다. **글자만 보낸다**(사진이 아니다) —
- * 지문은 Mathpix 가 이미 읽어 두었고, 사진을 다시 보내면 입력 그림 토큰이
- * 붙어 값이 몇 배가 된다. 글자만 보내면 지문 한 편이 1,000토큰 안쪽이다.
+ * 국어 지문에 붙일 제목을 짓는다.
+ *
+ * 예전에는 따로 읽어 둔 지문 글자만 보냈다(그림 토큰을 아끼려고). 글자만 따로
+ * 읽는 호출이 없어진 뒤로는(2026-09-25, 지문 인식을 한 번으로 합침) **사진을
+ * 그대로** 보낸다 — luna 라 사진 한 장을 붙여도 몇 원이다. 글자가 이미 있으면
+ * (`text`) 예전처럼 글만 보낸다.
  *
  * 규칙은 사용자가 정한 것이다:
  * - 독서(비문학): 글이 하나면 그 글의 주제. 둘 이상 묶인 복합지문이면
@@ -404,21 +405,21 @@ rules:
 - unsure -> kind="기타", give short topic
 - JSON only, no explanation
 
-passage:
+passage (text below, or the attached image):
 `;
 
 export type KoreanTitle = { title: string; kind: string };
 
-/** Mathpix 가 읽은 지문 글자로 제목을 짓는다. */
+/** 지문 사진(또는 이미 읽어 둔 글)으로 제목을 짓는다. */
 export async function readKoreanTitle(
-  passageText: string,
+  input: { text?: string; image?: string },
   signal?: AbortSignal,
   /** BYOK 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
   apiKeyOverride?: string,
 ): Promise<{ result: KoreanTitle; usage?: GradeUsage; model: string }> {
   const { text, usage, model } = await callVision(
-    KOREAN_TITLE_PROMPT + passageText,
-    [],
+    KOREAN_TITLE_PROMPT + (input.text ?? ""),
+    input.text ? [] : input.image ? [input.image] : [],
     "제목 짓기",
     signal,
     undefined,
@@ -515,49 +516,28 @@ function parseAnswerKey(text: string): AnswerKeyItem[] {
 }
 
 /**
- * 국어 지문 사진을 **구조화된 글자**로 옮긴다(terra).
+ * 국어 지문 사진을 **구조화된 글자**로 옮긴다.
  *
  * 그림으로 다시 그리는 것과 다르다 — 결과가 글자라 우리가 평가원 글꼴로
  * 조판할 수 있다(`textFlow.ts`). 확대해도 또렷하고 단을 따라 흐른다.
  *
- * **모델을 따로 둔다**(`OPENAI_TEXT_MODEL`, 기본 `gpt-5.6-terra`). 사용자가
- * 이 일을 terra 에 맡기라고 정했다 — 자리를 재는 luna 와 갈라 두면 한쪽을
- * 바꿔도 다른 쪽이 흔들리지 않는다.
+ * **한 번의 호출로 글자와 모양을 함께 읽는다**(2026-09-25, 사용자 지시 — "sol
+ * medium 으로 통합한 다음에 지문 텍스트 인식과 요소 인식을 통합해 버리자").
+ * 한때는 ① 글자만 옮겨 적는 호출(처음엔 Mathpix, 그다음 GPT) ② 모양을 읽는
+ * 호출 ③ ①의 글자를 ②의 뼈대에 갈아 끼우는 코드로 셋을 나눴는데, 갈아 끼우는
+ * 자리에서 글자 줄을 맞추느라 서식 경계가 흔들렸고 호출도 두 번 나갔다.
+ * 지금은 모델이 문단마다 **글 전체**와 **서식 구간**(`marks`: 정확히 어디부터
+ * 어디까지가 굵게·밑줄·네모인지)을 함께 준다(`applyMarks`, richText.ts).
  *
- * **1차로 읽어 둔 글을 함께 준다**(`transcribeKoreanPassage`, 예전에는 Mathpix).
- * 글자만 따로 옮겨 적은 쪽이 글자가 정확하고, 무엇이 문단이고 무엇이 상자인지
- * 가리는 일은 모양을 보는 호출이 맡는다.
+ * 모델은 `OPENAI_TEXT_MODEL`(기본 `gpt-6-sol`), 추론 강도는 `OPENAI_TEXT_EFFORT`
+ * (기본 `medium`) — 둘 다 재배포 없이 바꾼다. 강도를 비우려면 `none` 이 아니라
+ * `default` 를 적는다(모델 기본값으로 부른다). OpenAI 하나뿐이다 — 예전의
+ * Gemini Flash 먼저 시도하기는 걷어냈다(같은 지시).
  */
-export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.6-terra";
-
-/**
- * **지문 인식은 Gemini Flash 를 먼저 쓰고, 안 되면 terra 로 내려간다**
- * (사용자 지시 — "terra 를 gemini flash latest 로 바꿔 봐, flash 써 보고 안
- * 되면 테라로 넘어가게").
- *
- * 값이 훨씬 싸다 — terra 는 입력 $2.00 · 출력 $12.00 (100만 토큰당)이고
- * 지문 한 편이 약 7,000토큰이라 원가가 70원쯤 든다. 이 일은 "사진을 보고
- * 글자와 구조를 옮겨 적기"라 Flash 가 못 할 이유도 없다.
- *
- * **이 저장소의 "조용히 다른 모델로 갈아타지 않는다" 원칙의 예외다.**
- * 그 원칙은 *고른 적 없는* 모델에 요금이 나가는 것을 막으려던 것인데, 여기서는
- * 두 모델을 **사용자가 직접 골라 순서까지 정했다.** 그래서 갈아타되 **숨기지
- * 않는다** — 어느 모델이 실제로 답했는지 응답(`model`)과 로그에 그대로 찍히고,
- * 갈아탄 이유도 로그에 남는다.
- *
- * `GEMINI_API_KEY` 가 없으면 이 갈래는 아예 건너뛰고 예전처럼 terra 만 쓴다.
- * 이름은 못박아 두고 `KOREAN_TEXT_GEMINI_MODEL` 로 바꾼다(자동으로 고르지
- * 않는다 — 고른 적 없는 모델이 왜 실패하는지 알 수 없게 된다). **쉼표로 여러
- * 개를 적으면 앞에서부터 시도한다** — `gemini-flash-latest` 가 503(자리 없음)을
- * 자주 내는 것을 겪고 나서, 재배포 없이 예비 이름을 둘 수 있게 열어 뒀다.
- * 그래도 이름을 지어내는 건 우리가 아니라 **사용자**다.
- */
-export const KOREAN_TEXT_GEMINI_MODELS = (
-  process.env.KOREAN_TEXT_GEMINI_MODEL ?? "gemini-flash-latest"
-)
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-6-sol";
+const TEXT_EFFORT_ENV = process.env.OPENAI_TEXT_EFFORT?.trim() || "medium";
+export const OPENAI_TEXT_EFFORT: string | undefined =
+  TEXT_EFFORT_ENV === "default" ? undefined : TEXT_EFFORT_ENV;
 
 const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -588,8 +568,8 @@ async function callGeminiVision(
   prompt: string,
   imageDataUrl: string,
   what: string,
-  signal?: AbortSignal,
-  modelName: string = KOREAN_TEXT_GEMINI_MODELS[0],
+  signal: AbortSignal | undefined,
+  modelName: string,
   /** 출력 상한. 생각(thinking) 토큰도 여기에 든다 — 비교 화면은 넉넉히 준다. */
   maxOutputTokens = 8192,
 ): Promise<{ text: string; usage?: GradeUsage; model: string }> {
@@ -647,7 +627,7 @@ async function callGeminiVision(
 
     throw new GradeError(
       res.status === 404
-        ? `모델 "${modelName}"을 찾을 수 없습니다. KOREAN_TEXT_GEMINI_MODEL 로 바꿔 주세요.`
+        ? `모델 "${modelName}"을 찾을 수 없습니다.`
         : `${what}에 실패했습니다 (${modelName}, HTTP ${res.status}). ${body.slice(0, 200)}`,
       res.status,
     );
@@ -701,273 +681,82 @@ async function callGeminiVision(
   return { text, usage, model: modelName };
 }
 
-const KOREAN_TEXT_PROMPT = `task: transcribe Korean SAT (수능) 국어 passage image into structured text for re-typesetting.
-reproduce EXACTLY — copying, not editing.
-your main job is the LAYOUT and MARKS, which only the image shows: where lines break, spacing, alignment, bold, printed underline, small boxes, circled chars, list markers, symbols and special characters — each at its exact position. still write out every word in full (the letters get checked against a text recogniser afterwards, but only your output says where things go).
+export const KOREAN_TEXT_PROMPT = `task: read a Korean SAT (수능) 국어 passage image and write it out for re-typesetting — every printed character exactly, AND the layout and printed marks exactly where the image shows them. copying, not editing.
 
 answer JSON only: {"blocks":[ ... ]}
 
 block = one of:
-- {"kind":"para","runs":[{"t":"text","b":true,"u":true,"sq":true}],"indent":true,"center":true,"right":true}
-  \`center\`=line printed centred (a title). \`right\`=line pushed to the right edge (typically the trailing attribution "- 작자 미상, 「적벽가」 -"). omit both for normal left-aligned text.
-  \`b\`=printed bold, \`u\`=printed underline, \`sq\`=printed small box/rectangle drawn tightly around this word or phrase — a DIFFERENT mark from underline, used the same way (points at the expression a question refers to). omit each when absent. \`indent\`=paragraph's first line indented (usual for body paragraphs). split \`runs\` only where styling changes, else 1 run.
-- {"kind":"box","blocks":[ ... ]} — a bordered frame actually drawn in the image (조건 박스, <보기>, or a frame enclosing several lettered sections like (가)(나) together). one continuous border = exactly ONE box block containing every paragraph inside it, from where the border starts to where it ends — never split one border into multiple box blocks, never leave a paragraph that is visually inside the border sitting outside as a top-level para.
-  a box is the EXCEPTION, not the default. rules:
-  - the passage body itself is NEVER in a box. 수능 국어 지문 본문(독서·문학·판소리 사설·고전소설) has no frame around it — plain paragraphs, even when it carries markers like [중모리], (가)(나), or 「」.
-  - if your candidate box would hold most of the passage, it is wrong — emit those paragraphs as top-level para blocks instead.
-  - a real box is small (a few lines), sits apart from the body, and you can see all four ruled sides.
-  - the column rule / page frame printed on every exam page is NOT a box.
-  - when unsure, do NOT emit a box. a missed box costs a border; an invented box swallows the whole passage.
-- {"kind":"figure","id":"f1","ratio":0.6} — picture/table not expressible as text. \`ratio\`=height/width.
+- {"kind":"para","text":"...","marks":[{"type":"u","text":"...","nth":1}],"indent":true,"center":true,"right":true}
+  text = the WHOLE paragraph exactly as printed, as one string.
+  marks = every printed styling span in this paragraph ("marks":[] if none):
+    type "b" = printed bold · "u" = printed underline · "sq" = small printed box drawn tightly around a word/phrase (a different mark from underline, used the same way).
+    text = the EXACT characters the mark covers, copied verbatim from this paragraph's text — from the first marked character to the last one, nothing more, nothing less. never stretch a mark to the whole line or paragraph unless the print really covers all of it.
+    nth = which occurrence inside this paragraph's text when the same characters appear more than once (1 = first). omit when they appear once.
+    a span with two styles (e.g. bold + underline) = two marks with the same text.
+  indent = first line indented (usual for body paragraphs). center = line printed centred (a title). right = line pushed to the right edge (typically the trailing attribution "- 작자 미상, 「적벽가」 -"). omit each when absent.
+- {"kind":"box","blocks":[ ... ]} — a bordered frame actually drawn in the image (조건 박스, <보기>, or a frame enclosing several lettered sections like (가)(나) together). one continuous border = exactly ONE box block containing every paragraph inside it — never split one border into several boxes, never leave a paragraph that is inside the border outside it.
+  a box is the EXCEPTION, not the default:
+  - the passage body itself is NEVER in a box. 수능 국어 지문 본문(독서·문학·판소리 사설·고전소설) has no frame — plain paragraphs, even with markers like [중모리], (가)(나), 「」.
+  - a candidate box holding most of the passage is wrong — emit those paragraphs as top-level para blocks.
+  - a real box is small (a few lines), sits apart from the body, all four ruled sides visible. the column rule / page frame is NOT a box.
+  - unsure -> no box. a missed box costs a border; an invented box swallows the whole passage.
+- {"kind":"figure","id":"f1","ratio":0.6} — picture/table not expressible as text. ratio = height/width.
 
-rules:
-- copy every character exactly, reading the IMAGE itself for these (the reference text below can be wrong here): 「」『』()·, ㄱ/ㄴ/ㄷ list markers, markers like (가)(나), [중모리]-style tags, ※ ○ ◎ ● □ ▲ → ~ …, literary work's trailing attribution line — each exactly where it sits
-- circled chars (㉠㉡㉢, ①②③) are the ONE exception: take them from the reference text, never from your own reading of the image (see the circled-chars line below) — but put each one at the position where the image shows it
-- no summarise/modernise/translate/fix-spelling/add anything
-- keep original paragraph breaks: 1 printed paragraph = 1 "para" block
-- line breaks: in verse (시·시조·가사·민요, a play's lines) every printed line ends with "\n" inside the run text, and a blank line between stanzas = a new para. in prose, never put "\n" inside a paragraph — the typesetter wraps it
-- spacing: keep the printed word spacing, including a wide gap inside a verse line (write it as two spaces)
-- lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." = own para block
-- bold/underline/sq only where PRINT shows it. printed underline = a crisp, straight, even, dark rule of the same ink as the text. a faint, wobbly, pencil/pen line under words is a student's HANDWRITTEN mark — never \`u\`. same for handwritten circles, ticks and notes: ignore them entirely
-- exclude running heads, page numbers, questions printed below passage
+characters:
+- copy exactly: every Hangul syllable, Hanja in its original character (never convert 漢字 to Hangul or the reverse), Latin, digits, punctuation/symbols 「」『』〈〉《》()[]·~…—‘’“” ※ ○ ◎ ● □ ▲ →
+- circled chars: identify each one individually by its inner character — ㉠㉡㉢㉣㉤㉥㉦ (ㄱㄴㄷㄹㅁㅂㅅ), ㉮㉯㉰㉱ (가나다라), ①②③④⑤ (1-5), ⓐⓑⓒⓓⓔ (a-e). look at each closely; never guess from neighbours or alphabetical order, never switch families, never add one that is not printed
+- list markers ㄱ. ㄴ. ㄷ., section markers (가)(나)(다), [A][B], [중모리] — exactly as printed, at their position
+- no summarise/modernise/translate/fix-spelling/add anything. hard to read -> best reading, never drop text
+- reading order: two columns -> the whole left column top to bottom, then the right
+
+layout:
+- 1 printed paragraph = 1 para block. lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." = its own para
+- verse (시·시조·가사·민요, a play's lines): every printed line ends with "\\n" inside text; a blank line between stanzas = a new para. prose: never put "\\n" inside a paragraph — the typesetter wraps it
+- keep printed word spacing, including a wide gap inside a verse line (two spaces)
+- exclude running heads, page numbers, questions/answer choices printed below the passage
+
+printed vs handwritten marks:
+- printed underline = crisp, straight, even, same dark ink as the text, sitting right under the characters. a faint, wobbly, pencil/pen line, uneven in thickness, overshooting the words or in another colour is a student's HANDWRITTEN mark — never a mark. ignore handwritten circles, ticks and notes entirely too
+- an underline that begins right after a circled marker (㉠ ⓐ ① …) — "㉠ 표현을 밑줄로" style — is almost always PRINTED: questions ask about "밑줄 친 ㉠". mark it as "u" covering exactly the underlined words (the circled char itself only if the rule clearly runs under it too)
 - JSON only, no explanation`;
 
-/**
- * **1차 글자 읽기 — Mathpix 자리를 GPT 가 맡는다**(2026-09-25, 사용자 지시 —
- * "매쓰픽스 하는 일을 없애자, gpt 가 정확하게 텍스트 1차 스캔 → 그다음에 아까
- * 말했던 일을").
- *
- * 지문 인식이 두 번에 나뉜다: ① 이 호출이 **글자만** 한 자씩 옮겨 적고(구조·
- * 서식은 안 본다) ② 구조 호출(`koreanTextPrompt`)이 그 글을 참고로 문단·줄바꿈·
- * 굵게·밑줄·기호 자리를 읽는다. 그 뒤 `applyReference` 가 ①의 글자를 ②의
- * 뼈대에 갈아 끼운다 — 예전에 Mathpix 가 하던 자리를 그대로 이어받는다.
- *
- * 한 번에 다 시키지 않는 이유: 글자와 모양을 한꺼번에 옮기라고 하면 어느
- * 한쪽이 흐트러진다. 글자만 보는 호출은 모양을 신경 쓸 일이 없어 글자에만
- * 힘을 쓴다.
- */
-export const OPENAI_TRANSCRIBE_MODEL =
-  process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || OPENAI_TEXT_MODEL;
-/** 1차 읽기의 추론 강도. 비워 두면 모델 기본값이다. */
-export const OPENAI_TRANSCRIBE_EFFORT =
-  process.env.OPENAI_TRANSCRIBE_EFFORT?.trim() || undefined;
-
-export const KOREAN_TRANSCRIBE_PROMPT = `task: OCR a Korean SAT (수능) 국어 passage image — transcribe every printed character exactly. accuracy of each character is the ONLY goal; layout and styling are handled elsewhere.
-
-answer JSON only: {"text":"..."}
-
-rules:
-- copy exactly what is printed: every Hangul syllable, Hanja in its original character (never convert 漢字 to Hangul or the reverse), Latin letters, digits, and punctuation/symbols such as 「」『』〈〉《》()[]·~…—‘’“” ※ ○ □ →
-- circled characters: identify each one individually by its inner character — ㉠㉡㉢㉣㉤㉥㉦ (ㄱㄴㄷㄹㅁㅂㅅ), ㉮㉯㉰㉱ (가나다라), ①②③④⑤ (1-5), ⓐⓑⓒⓓⓔ (a-e). never guess from neighbours or from alphabetical order, never switch between families, never add one that is not printed
-- list markers ㄱ. ㄴ. ㄷ. and section markers (가)(나)(다), [A][B], [중모리] etc. exactly as printed
-- keep printed word spacing; never fix spelling or modernise wording
-- reading order: natural order of the passage; if it runs in two columns, the whole left column top to bottom, then the right
-- separate printed paragraphs with a blank line. in verse (시·시조·가사), put each printed line on its own line. inside a prose paragraph do not insert line breaks
-- include the lead-in line (e.g. "[1~3] 다음 글을 읽고 물음에 답하시오.") and a trailing source/attribution line if printed
-- exclude running heads, page numbers, questions and answer choices printed below the passage, and anything handwritten (pen/pencil notes, underlines, circles, ticks)
-- if a character is hard to read, give your best reading — never drop text, never summarise
-- JSON only, no explanation`;
-
-/** 1차 읽기 응답에서 글을 꺼낸다. JSON 이 깨졌으면 실패다. */
-export function parseTranscript(text: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    const a = text.indexOf("{");
-    const b = text.lastIndexOf("}");
-    if (a === -1 || b <= a) throw new GradeError("지문 글자를 읽지 못했습니다.", 502);
-    try {
-      parsed = JSON.parse(text.slice(a, b + 1));
-    } catch {
-      throw new GradeError("지문 글자를 읽지 못했습니다.", 502);
-    }
-  }
-  const t = (parsed as { text?: unknown })?.text;
-  if (typeof t !== "string" || t.trim().length < 20) {
-    throw new GradeError("지문 글자가 거의 읽히지 않았습니다.", 502);
-  }
-  return t.trim();
-}
-
-/** 지문 사진 → 글자만(1차 읽기). 정해 준 모델 하나로만 읽는다. */
-export async function transcribeKoreanPassage(
-  imageDataUrl: string,
-  signal?: AbortSignal,
-  apiKeyOverride?: string,
-  target: { model?: string; effort?: string } = {},
-): Promise<{ text: string; usage?: GradeUsage; model: string }> {
-  const model = target.model ?? OPENAI_TRANSCRIBE_MODEL;
-  const effort = target.model ? target.effort : (target.effort ?? OPENAI_TRANSCRIBE_EFFORT);
-  const out = await callVision(
-    KOREAN_TRANSCRIBE_PROMPT,
-    [imageDataUrl],
-    "지문 글자 읽기",
-    signal,
-    model,
-    apiKeyOverride,
-    effort,
-  );
-  return { text: parseTranscript(out.text), usage: out.usage, model: out.model };
-}
-
-/** 지문 인식 프롬프트(참고 글·원문자 목록까지 붙인 것). 비교 화면도 같은 것을 쓴다. */
-function koreanTextPrompt(reference: string): string {
-  // 조합용 자모(ᄀᄂᄃ)를 먼저 호환용(ㄱㄴㄷ)으로 바꾼다 — 인식기가 이 형태로
-  // 주는 경우가 있는데, 그대로 두면 모델이 "참고 글을 베끼라"는 지시를 따라
-  // 이 깨진 코드를 그대로 옮겨 적는다(renderMathText.ts 와 같은 사고).
-  const cleanedReference = normalizeJamo(reference.trim());
-
-  /**
-   * **원문자는 무조건 Mathpix 를 따른다**(사용자 지시, 실제 결과물을 보고 정함).
-   *
-   * 한때는 반대로 적어 뒀다 — "Mathpix 가 기호를 자주 놓치니 원문자도 사진을
-   * 보라". 그런데 사용자가 실제로 조판된 지문을 보고 **원문자만 유독 틀린다**고
-   * 알려 왔다. 생각해 보면 당연하다: ㉠ 은 사람 눈에도 작은 동그라미 안의 획
-   * 하나라, **사진을 눈으로 읽는 쪽(terra)이 가장 불리한 글자**다. 반대로
-   * Mathpix 는 인쇄물의 글자를 코드포인트로 집어내는 일에 맞춰진 엔진이라
-   * 이 자리에서는 더 낫다. "기호는 사진이 낫다"는 일반론을 원문자에까지
-   * 밀어붙인 것이 잘못이었다.
-   *
-   * 두 겹으로 못박는다 — ① 프롬프트 규칙에서 원문자만 예외로 빼 두고,
-   * ② 참고 글에 **실제로 나온 원문자를 우리가 뽑아 목록으로 준다**
-   * (`circledCharsIn`). 목록을 주는 쪽이 결정적이다: 문장 안에 섞여 있으면
-   * 모델이 사진 쪽 읽기로 덮어쓰지만, "이 지문의 원문자는 정확히 이것들이다"
-   * 라고 따로 뽑아 주면 그대로 쓴다(그림 프롬프트의 `circledNote` 가 이미
-   * 같은 방식으로 효과를 봤다).
-   *
-   * (2026-09-25부터 참고 글은 Mathpix 가 아니라 GPT 1차 읽기다 —
-   * `transcribeKoreanPassage`. 글자만 보는 호출이라 원문자를 가리는 일도 그쪽이
-   * 맡고, 규칙은 그대로다: 참고 글에 있는 원문자를 코드로 맞춘다.)
-   *
-   * **대가**: 1차 읽기가 아예 못 읽은 원문자는 우리도 못 살린다. 그건 받아들인
-   * 선택이다 — 틀린 글자가 찍히는 것보다 낫고(㉠ 이 ㉡ 으로 바뀌면 문제가
-   * 성립하지 않는다), 참고 글이 없을 때는 예전처럼 사진을 본다.
-   */
-  const circled = circledCharsIn(cleanedReference);
-  const circledLine = circled.length
-    ? `
-circled chars — this passage contains EXACTLY these, in this order: ${circledPairs(circled)}.
-use these exact characters from the reference. never substitute a different inner char, never reorder, never add or drop one based on the image.`
-    : "";
-
-  // **글자는 참고 글, 모양은 사진**(2026-09-25). 모델이 준 글자는 어차피
-  // `mergeTextFromReference` 가 참고 글 것으로 갈아 끼우므로, 모델에게는 줄바꿈·
-  // 띄어쓰기·맞춤·굵게·밑줄·네모·기호 자리를 사진에서 읽는 데 힘을 쓰게 한다.
-  const prompt = cleanedReference
-    ? `${KOREAN_TEXT_PROMPT}${circledLine}
-
-reference — same passage transcribed letter-by-letter in a separate OCR pass. its LETTERS (Hangul, Hanja, Latin, digits) are what gets printed: use its spelling over your own reading when they differ. it can drop ㄱ/ㄴ/ㄷ list markers and other symbols, it mangles line breaks and spacing, and it carries no marks at all — for those (line breaks, spacing, alignment, paragraph breaks, boxes, bold, underline, sq, symbol positions), trust the IMAGE instead:
-"""
-${cleanedReference}
-"""`
-    : KOREAN_TEXT_PROMPT;
-  return prompt;
-}
-
-/** 지문 사진 → 구조화된 블록. `reference` 는 1차로 읽어 둔 글(있으면 더 정확하다). */
+/** 지문 사진 → 구조화된 블록(`text` + `marks` 모양, `readRichBlocks` 가 토막으로 바꾼다). */
 export async function readKoreanRichText(
   imageDataUrl: string,
-  reference: string,
   signal?: AbortSignal,
-  /**
-   * BYOK 사용자의 본인 OpenAI 키. Gemini 경로에는 영향이 없다 — 이건
-   * OpenAI(terra) 예비 경로에만 쓰인다.
-   */
+  /** BYOK 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
   apiKeyOverride?: string,
 ): Promise<{ blocks: unknown; usage?: GradeUsage; model: string }> {
-  const prompt = koreanTextPrompt(reference);
-
-  /**
-   * **Flash 를 먼저, 안 되면 terra**(사용자 지시). 갈아타는 이유가 무엇이든
-   * 로그에 남긴다 — 조용히 내려가면 Flash 가 왜 안 되는지 영영 모른다.
-   *
-   * **읽기와 파싱을 한 묶음으로 시도한다.** 응답이 오더라도 JSON 이 깨져
-   * 있으면(잘림·군더더기) 쓸 수 없으므로 그것도 실패로 보고 다음으로 내려가야
-   * 한다. 파싱까지 해 봐야 그 판단이 선다.
-   */
-  const attempts: { label: string; run: () => Promise<{ text: string; usage?: GradeUsage; model: string }> }[] = [];
-  if (process.env.GEMINI_API_KEY) {
-    // 여러 이름을 적어 두면 앞에서부터 시도한다(`KOREAN_TEXT_GEMINI_MODEL` 에
-    // 쉼표로). **우리가 이름을 지어내지는 않는다** — 사용자가 적은 것만 쓴다.
-    for (const name of KOREAN_TEXT_GEMINI_MODELS) {
-      attempts.push({
-        label: name,
-        run: () => callGeminiVision(prompt, imageDataUrl, "지문 인식", signal, name),
-      });
-    }
-  }
-  if (apiKeyOverride || process.env.OPENAI_API_KEY) {
-    attempts.push({
-      label: OPENAI_TEXT_MODEL,
-      run: () =>
-        callVision(
-          prompt,
-          [imageDataUrl],
-          "지문 인식",
-          signal,
-          OPENAI_TEXT_MODEL,
-          apiKeyOverride,
-        ),
-    });
-  }
-  if (attempts.length === 0) {
-    throw new GradeError(
-      "GEMINI_API_KEY 도 OPENAI_API_KEY 도 설정되지 않아 지문 인식을 쓸 수 없습니다.",
-      500,
-    );
-  }
-
-  let lastError: unknown;
-  for (const [i, attempt] of attempts.entries()) {
-    try {
-      const { text, usage, model } = await attempt.run();
-      return { blocks: parseBlocks(text), usage, model };
-    } catch (err) {
-      lastError = err;
-      // **시간이 다 됐으면 갈아타지 않는다.** 어차피 다음 호출도 곧바로
-      // 끊기는데 요금만 한 번 더 나간다.
-      if (signal?.aborted) throw err;
-      const isLast = i === attempts.length - 1;
-      if (isLast) throw err;
-      console.warn(
-        `[korean-text] ${attempt.label} 실패 → ${attempts[i + 1].label} 로 넘어감: ` +
-          (err instanceof Error ? err.message : String(err)),
-      );
-    }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new GradeError("지문을 읽지 못했습니다.", 502);
+  const { text, usage, model } = await callVision(
+    KOREAN_TEXT_PROMPT,
+    [imageDataUrl],
+    "지문 인식",
+    signal,
+    OPENAI_TEXT_MODEL,
+    apiKeyOverride,
+    OPENAI_TEXT_EFFORT,
+  );
+  return { blocks: parseBlocks(text), usage, model };
 }
 
 /**
- * **모델 비교용** — 정해 준 모델 하나로만 읽는다(갈아타지 않는다).
- *
- * 운영의 `readKoreanRichText` 는 Flash → terra 로 내려가지만, 두 모델을 견주는
- * 자리에서 조용히 다른 모델이 답하면 비교가 통째로 틀린다. 그래서 실패하면
- * 그대로 실패로 돌려준다. 프롬프트·파싱은 운영과 **같은 것**을 쓴다 — 다르면
- * 견준 결과가 운영에 안 맞는다.
+ * **비교용** — 정해 준 모델·강도로만 읽는다. 프롬프트·파싱은 운영과 **같은 것**을
+ * 쓴다(다르면 견준 결과가 운영에 안 맞는다).
  */
 export async function readKoreanRichTextWith(
   imageDataUrl: string,
-  reference: string,
-  target: { provider: "openai" | "gemini"; model: string; effort?: string },
+  target: { model: string; effort?: string },
   signal?: AbortSignal,
 ): Promise<{ blocks: unknown; usage?: GradeUsage; model: string; raw: string }> {
-  const prompt = koreanTextPrompt(reference);
-  const { text, usage, model } =
-    target.provider === "gemini"
-      ? await callGeminiVision(prompt, imageDataUrl, "지문 인식", signal, target.model, 65536)
-      : await callVision(
-          prompt,
-          [imageDataUrl],
-          "지문 인식",
-          signal,
-          target.model,
-          undefined,
-          target.effort,
-        );
+  const { text, usage, model } = await callVision(
+    KOREAN_TEXT_PROMPT,
+    [imageDataUrl],
+    "지문 인식",
+    signal,
+    target.model,
+    undefined,
+    target.effort,
+  );
   return { blocks: parseBlocks(text), usage, model, raw: text };
 }
 
@@ -984,11 +773,10 @@ export async function readKoreanRichTextWith(
  */
 export async function startKoreanTextBackground(
   imageDataUrl: string,
-  reference: string,
   model: string,
   effort?: string,
 ): Promise<string> {
-  return startVisionBackground(koreanTextPrompt(reference), imageDataUrl, model, effort);
+  return startVisionBackground(KOREAN_TEXT_PROMPT, imageDataUrl, model, effort);
 }
 
 /**

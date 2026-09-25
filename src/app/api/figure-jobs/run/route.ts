@@ -111,7 +111,6 @@ export async function POST(req: NextRequest) {
     try {
       const id = await startKoreanTextBackground(
         `data:image/png;base64,${PROBE_PNG}`,
-        "",
         probeModel,
         /^[a-z]{1,16}$/.test(probeEffort) ? probeEffort : undefined,
       );
