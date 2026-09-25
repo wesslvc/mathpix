@@ -48,9 +48,11 @@ type Reader = {
  */
 const OPENAI_PRESETS = ["gpt-6-luna", "gpt-6-sol"];
 
+// 기본은 OpenAI 두 칸(luna max vs sol max). gemini-3.8-flash 는 첫 실행에서
+// 503(자리 없음)만 받아 기본에서 뺐다 — 카드의 Gemini 버튼으로 언제든 되돌린다.
 const DEFAULT_READERS: Reader[] = [
   { key: "a", provider: "openai", model: "gpt-6-luna", effort: "max" },
-  { key: "b", provider: "gemini", model: "gemini-3.8-flash", effort: "" },
+  { key: "b", provider: "openai", model: "gpt-6-sol", effort: "max" },
 ];
 
 type Result =
