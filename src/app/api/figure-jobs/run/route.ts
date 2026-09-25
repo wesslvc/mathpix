@@ -13,6 +13,11 @@ import {
   visibleUsage,
 } from "@/lib/figureRun";
 import { kickWorker, workerToken } from "@/lib/figureJobsServer";
+import { callOpenAIVision } from "@/lib/detectProblems";
+
+/** 확인용 64×64 PNG(청크 CRC 까지 검사한 것 — `/api/figure/models` 와 같은 파일). */
+const PROBE_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAYElEQVR42u3QAQ0AAAwCIPuX1hzfIQLpcxEgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQLuG0bQw7Ko2TvAAAAAAElFTkSuQmCC";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -59,10 +64,12 @@ export async function POST(req: NextRequest) {
 
   let preferUser: string | null = null;
   let probe: string | null = null;
+  let probeModel = "";
   try {
-    const body = (await req.json()) as { preferUser?: unknown; probe?: unknown };
+    const body = (await req.json()) as { preferUser?: unknown; probe?: unknown; model?: unknown };
     if (typeof body.preferUser === "string") preferUser = body.preferUser;
     if (typeof body.probe === "string") probe = body.probe;
+    if (typeof body.model === "string") probeModel = body.model;
   } catch {
     // 본문이 없어도 된다(pg_cron 은 빈 객체를 보낸다).
   }
@@ -83,6 +90,31 @@ export async function POST(req: NextRequest) {
       .filter((id: string) => id.startsWith("gpt"))
       .sort();
     return NextResponse.json({ models: ids });
+  }
+  // 모델을 바꾸기 전에 **그 모델이 우리 요청 모양(사진 + JSON 응답)을 받는지**
+  // 64×64 그림 한 장으로 확인한다(100토큰 안쪽). 목록에 이름이 있어도 받는
+  // 파라미터가 다르면 채점·영역 찾기가 통째로 죽기 때문이다.
+  if (probe === "vision") {
+    const model = probeModel;
+    if (!/^gpt-[\w.-]+$/.test(model)) {
+      return NextResponse.json({ error: "model 이 필요합니다." }, { status: 400 });
+    }
+    const t0 = Date.now();
+    try {
+      const text = await callOpenAIVision(
+        `data:image/png;base64,${PROBE_PNG}`,
+        'Reply ONLY with a JSON object: {"ok": true, "shape": "<what you see>"}',
+        model,
+      );
+      return NextResponse.json({ ok: true, model, ms: Date.now() - t0, text: text.slice(0, 300) });
+    } catch (err) {
+      return NextResponse.json({
+        ok: false,
+        model,
+        ms: Date.now() - t0,
+        error: err instanceof Error ? err.message.slice(0, 500) : String(err),
+      });
+    }
   }
 
   const { data: claimed, error: claimErr } = await admin.rpc("claim_figure_job", {

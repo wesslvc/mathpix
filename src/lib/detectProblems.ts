@@ -5,8 +5,8 @@
  * `[ymin, xmin, ymax, xmax]`)를 쓴다. 문제 하나를 "물체"로 보는 셈이다.
  *
  * **모델은 두 갈래를 고를 수 있다**(`DETECT_PROVIDER`):
- *   gemini — 기본. 자리를 재는 일에 맞춰 훈련돼 있고 값이 싸다.
- *   openai — 같은 프롬프트를 GPT 비전 모델에 보낸다. 견줘 보려고 열어 뒀다.
+ *   openai — 기본(2026-09-25부터). GPT 비전 모델(luna)에 보낸다.
+ *   gemini — 예전 기본. 자리를 재는 일에 맞춰 훈련된 규격이 있다.
  * 어느 쪽이든 **응답 형식과 뒤처리(묶기·합치기)는 완전히 같다** — 갈리는 것은
  * 호출 방법뿐이라, 바꿔 가며 결과만 비교하면 된다.
  *
@@ -330,8 +330,14 @@ export type DetectedKoreanRegion = {
 export async function detectKoreanRegions(
   dataUrl: string,
 ): Promise<{ regions: DetectedKoreanRegion[]; model: string }> {
-  const text = await callGemini(dataUrl, KOREAN_PROMPT);
-  return { regions: parseKorean(text), model: DETECT_MODEL };
+  // 문제 영역 찾기와 같은 갈래를 탄다(`DETECT_PROVIDER`). 프롬프트가 이미
+  // JSON 객체({"regions": [...]})를 달라고 하므로 GPT 쪽에도 그대로 보낸다.
+  if (DETECT_PROVIDER === "gemini") {
+    const text = await callGemini(dataUrl, KOREAN_PROMPT);
+    return { regions: parseKorean(text), model: DETECT_MODEL };
+  }
+  const text = await callOpenAIVision(dataUrl, KOREAN_PROMPT);
+  return { regions: parseKorean(text), model: OPENAI_DETECT_MODEL };
 }
 
 function parseKorean(text: string): DetectedKoreanRegion[] {
@@ -376,13 +382,15 @@ const OPENAI_RESPONSES = "https://api.openai.com/v1/responses";
 const OPENAI_CHAT = "https://api.openai.com/v1/chat/completions";
 
 /**
- * 쓸 GPT 모델.
+ * 쓸 GPT 모델 — 앱이 "luna" 라고 부르는 것 전부(영역 찾기·채점·답지 읽기·
+ * 제목 짓기)가 이 값 하나를 쓴다.
  *
- * 이 저장소가 예전에 쓰던 비전 모델이 `gpt-5.6-terra` 였으니 같은 계열의
- * 이름 규칙을 따른다. 틀렸으면 **404 에 이 계정이 가진 gpt 이름들이 함께
- * 찍혀 나오므로**(아래 `explain404`) 거기서 골라 `OPENAI_DETECT_MODEL` 로
- * 못박으면 된다. 비슷해 보이는 다른 모델로 몰래 갈아타지는 않는다 — 고른 적
- * 없는 모델에 요금이 나간 적이 있다.
+ * `gpt-6-luna`(2026-09-25, 사용자 지시 — "루나 쓰는 거 다 gpt 6 luna 로").
+ * **이름은 짐작하지 않고 계정의 `/v1/models` 목록에서 확인했다** — 일꾼
+ * 라우트의 `probe: "models"` 로 봤고 `gpt-6-luna`·`gpt-6-sol`·`gpt-6-astra` 가
+ * 있었다. 예전 값은 `gpt-5.6-luna` 다. 되돌리려면 재배포 없이
+ * `OPENAI_DETECT_MODEL` 을 넣는다. 비슷해 보이는 다른 모델로 몰래 갈아타지는
+ * 않는다 — 고른 적 없는 모델에 요금이 나간 적이 있다.
  */
 export const OPENAI_DETECT_MODEL = process.env.OPENAI_DETECT_MODEL ?? "gpt-5.6-luna";
 
@@ -420,12 +428,18 @@ function harvest(json: unknown): string {
   return out.join("");
 }
 
-async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[]; model: string }> {
+/**
+ * GPT 비전 모델을 한 번 부르고 글자만 돌려준다. 프롬프트만 갈아 끼우면 영역
+ * 찾기(문제)와 국어(지문+문제)에 똑같이 쓴다 — `callGemini` 와 같은 모양이다.
+ */
+export async function callOpenAIVision(
+  dataUrl: string,
+  prompt: string,
+  model: string = OPENAI_DETECT_MODEL,
+): Promise<string> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new DetectError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
-  const model = OPENAI_DETECT_MODEL;
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
-  const text = `${PROMPT}\n\nanswer as JSON object: {"problems": [...]}`;
 
   // **먼저 Responses API 로 부른다.** 요즘 모델은 이쪽만 받는 경우가 있다.
   // 안 받으면 Chat Completions 로 내려간다 — 이건 **같은 모델을 다른 길로**
@@ -439,7 +453,7 @@ async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[
         {
           role: "user",
           content: [
-            { type: "input_text", text },
+            { type: "input_text", text: prompt },
             // 좌표를 재야 하므로 이미지를 흐리게 보면 안 된다.
             { type: "input_image", image_url: dataUrl, detail: "high" },
           ],
@@ -462,7 +476,7 @@ async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[
           {
             role: "user",
             content: [
-              { type: "text", text },
+              { type: "text", text: prompt },
               { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
             ],
           },
@@ -484,20 +498,28 @@ async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[
     );
   }
 
-  let out: string;
   try {
     const json = JSON.parse(body);
-    out = viaResponses ? harvest(json) : (json?.choices?.[0]?.message?.content ?? "");
+    return viaResponses ? harvest(json) : (json?.choices?.[0]?.message?.content ?? "");
   } catch {
     throw new DetectError("모델이 정상적인 응답을 주지 않았습니다.", 502);
   }
-  return { problems: parse(out), model };
+}
+
+async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[]; model: string }> {
+  const text = await callOpenAIVision(
+    dataUrl,
+    `${PROMPT}\n\nanswer as JSON object: {"problems": [...]}`,
+  );
+  return { problems: parse(text), model: OPENAI_DETECT_MODEL };
 }
 
 /**
- * 어느 갈래로 부를지. **기본은 Gemini** 다 — 좌표를 재는 일에 맞춰 훈련된
- * `box_2d` 규격이 있어 이 일에는 이쪽이 낫다. GPT 로 견주고 싶으면
- * `DETECT_PROVIDER=openai` 로 바꾼다(모델은 `OPENAI_DETECT_MODEL`).
+ * 어느 갈래로 부를지. **기본은 GPT(luna)** 다(2026-09-25, 사용자 지시 — "자리
+ * 잡는 것도 이제 얘가 하게 해 줘"). 예전 기본은 Gemini 였다 — 좌표를 재는 일에
+ * 맞춰 훈련된 `box_2d` 규격이 있어서다. 되돌리려면 재배포 없이
+ * `DETECT_PROVIDER=gemini` 를 넣으면 된다(모델은 `GEMINI_DETECT_MODEL`).
+ * 응답 형식과 뒤처리는 두 갈래가 완전히 같다.
  */
 export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "openai" ? "openai" : "gemini";
 
