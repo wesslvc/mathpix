@@ -687,11 +687,12 @@ export const KOREAN_TEXT_PROMPT = `task: read a Korean SAT (수능) 국어 passa
 answer JSON only: {"blocks":[ ... ]}
 
 block = one of:
-- {"kind":"para","text":"...","marks":[{"type":"u","text":"...","nth":1}],"indent":true,"center":true,"right":true}
+- {"kind":"para","text":"...","marks":[{"type":"u","before":"...","text":"...","after":"...","nth":1}],"indent":true,"center":true,"right":true}
   text = the WHOLE paragraph exactly as printed, as one string.
   marks = every printed styling span in this paragraph ("marks":[] if none):
     type "b" = printed bold · "u" = printed underline · "sq" = small printed box drawn tightly around a word/phrase (a different mark from underline, used the same way).
     text = the EXACT characters the mark covers, copied verbatim from this paragraph's text — from the first marked character to the last one, nothing more, nothing less. never stretch a mark to the whole line or paragraph unless the print really covers all of it.
+    before / after = the 1-4 characters immediately before / after the mark (NOT marked), copied from the text — they pin where an underline starts and stops. empty at the start/end of the text.
     nth = which occurrence inside this paragraph's text when the same characters appear more than once (1 = first). omit when they appear once.
     a span with two styles (e.g. bold + underline) = two marks with the same text.
   indent = first line indented (usual for body paragraphs). center = line printed centred (a title). right = line pushed to the right edge (typically the trailing attribution "- 작자 미상, 「적벽가」 -"). omit each when absent.

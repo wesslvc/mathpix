@@ -28,6 +28,9 @@ const DEPOSIT = 100;
  */
 const MARKS_DEPOSIT = 30;
 
+/** 서식 검수에 받는 띠 수 상한(`passageMarks.ts` 의 MAX_STRIPS 보다 넉넉히). */
+const MAX_STRIPS = 12;
+
 /** 한 지문에 붙여 보낼 그림 수 상한. */
 const MAX_FIGURES = 8;
 
@@ -60,7 +63,7 @@ export async function POST(req: NextRequest) {
   const strips = Array.isArray(body.strips)
     ? body.strips
         .filter((f): f is string => typeof f === "string" && f.startsWith("data:image/"))
-        .slice(0, 8)
+        .slice(0, MAX_STRIPS)
     : [];
   const paragraphs = Array.isArray(body.paragraphs)
     ? body.paragraphs

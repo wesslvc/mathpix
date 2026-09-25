@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
   // **서식 검수**(두 번째 호출) — 운영과 같은 프롬프트, 칸의 모델·강도로.
   if (body.task === "marks") {
     const strips = Array.isArray(body.strips)
-      ? body.strips.filter((f): f is string => typeof f === "string" && f.startsWith("data:image/")).slice(0, 8)
+      ? body.strips.filter((f): f is string => typeof f === "string" && f.startsWith("data:image/")).slice(0, 12)
       : [];
     const paragraphs = Array.isArray(body.paragraphs)
       ? body.paragraphs.filter((t): t is string => typeof t === "string").slice(0, 300)

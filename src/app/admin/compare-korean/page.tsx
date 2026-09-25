@@ -298,8 +298,6 @@ export default function CompareKoreanPage() {
   const [drawKind, setDrawKind] = useState<"passage" | "figure">("passage");
   /** 그림을 sunburst 로 다시 그려 붙일까(끄면 원본 크롭을 붙인다 — 돈이 안 든다). */
   const [redrawFigures, setRedrawFigures] = useState(true);
-  /** 서식 검수(두 번째 호출)를 할까 — 운영은 늘 한다. 끄면 첫 결과 그대로. */
-  const [reviewMarks, setReviewMarks] = useState(true);
   /** 그림 준비 진행(두 칸이 같은 그림을 나눠 쓴다). */
   const [figureNote, setFigureNote] = useState<string | null>(null);
   const [detectRuns, setDetectRuns] = useState<DetectRun[]>([]);
@@ -429,7 +427,7 @@ export default function CompareKoreanPage() {
       let reviewMs: number | undefined;
       let reviewKrw: number | null | undefined;
       let review: MarksReviewPara[] | undefined;
-      if (reviewMarks) {
+      {
         const t0 = Date.now();
         setResults((r) => ({ ...r, [reader.key]: { state: "running", since, note: "서식 검수 중…" } }));
         try {
@@ -733,15 +731,10 @@ export default function CompareKoreanPage() {
               그림을 sunburst 로 다시 그려 붙이기 (끄면 원본 크롭을 붙임 · 한 번만 그려 두 칸이
               나눠 씀)
             </label>
-            <label className="flex items-center gap-2 text-xs text-slate-700">
-              <input
-                type="checkbox"
-                checked={reviewMarks}
-                onChange={(e) => setReviewMarks(e.target.checked)}
-              />
-              서식 검수(2차 호출 — 확대한 띠로 원문자·밑줄·네모·굵게만 다시 봄, 운영과 같음 · 칸의
-              강도로)
-            </label>
+            <p className="text-xs text-slate-500">
+              서식 검수(2차 호출 — 확대한 띠로 원문자·밑줄 길이·네모·굵게만 다시 봄)는 운영과 같이
+              늘 돕니다. 칸의 강도로 겁니다.
+            </p>
             {figureNote && <p className="text-xs text-slate-500">{figureNote}</p>}
           </div>
         )}

@@ -90,29 +90,111 @@ function readRuns(raw: unknown): RichRun[] {
 /** 서식 표시(`marks`)를 얼마나 제자리에 붙였는지. 화면에 그대로 보여 준다. */
 export type MarkStats = { total: number; missed: number; missedTexts: string[] };
 
-type Mark = { type: "b" | "u" | "sq"; text: string; nth: number };
+/**
+ * `before`/`after` = 표시 **바로 바깥**의 몇 글자(표시되지 않은 것). 밑줄 길이를
+ * 정확히 맞추려고 받는다(2026-09-25, 사용자 — "밑줄 길이도 정확하게"). 모델에게
+ * 끝점 양옆을 한 번 더 보게 하는 효과가 있고, 우리는 그 글자로 **경계를 고정**한다 —
+ * `text` 가 한두 글자 길거나 짧아도 앞뒤 글자가 맞는 자리가 있으면 그 사이만 긋는다.
+ */
+type Mark = { type: "b" | "u" | "sq"; text: string; nth: number; before: string; after: string };
+
+const CONTEXT_MAX = 12;
 
 function readMarks(raw: unknown): Mark[] {
   if (!Array.isArray(raw)) return [];
   const out: Mark[] = [];
   for (const item of raw.slice(0, MAX_RUNS)) {
     if (!item || typeof item !== "object") continue;
-    const o = item as { type?: unknown; text?: unknown; nth?: unknown };
+    const o = item as { type?: unknown; text?: unknown; nth?: unknown; before?: unknown; after?: unknown };
     const type = o.type === "b" || o.type === "u" || o.type === "sq" ? o.type : null;
     const text = typeof o.text === "string" ? o.text : "";
     if (!type || !text.trim()) continue;
     const nth = Math.floor(Number(o.nth));
-    out.push({ type, text, nth: Number.isFinite(nth) && nth >= 1 ? nth : 1 });
+    const ctx = (v: unknown) => (typeof v === "string" ? v.slice(-CONTEXT_MAX) : "");
+    out.push({
+      type,
+      text,
+      nth: Number.isFinite(nth) && nth >= 1 ? nth : 1,
+      before: ctx(o.before),
+      after: typeof o.after === "string" ? o.after.slice(0, CONTEXT_MAX) : "",
+    });
   }
   return out;
 }
 
-/** 표시 글에서 찾을 정규식 — 띄어쓰기·줄바꿈 차이는 봐 준다. */
-function markPattern(text: string): RegExp | null {
+/** 띄어쓰기·줄바꿈 차이를 봐 주는 정규식 조각. 비면 빈 글자. */
+function loosePart(text: string): string {
   const words = text.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return null;
   const esc = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return new RegExp(esc.join("\\s*"), "g");
+  return esc.join("\\s*");
+}
+
+/**
+ * 표시가 덮는 자리를 찾는다(UTF-16 [시작, 끝)). 앞뒤 글자가 있으면 **먼저 그것으로**
+ * 경계를 고정하고(둘 다 → 앞만 → 뒤만), 안 맞으면 표시 글만으로 찾는다.
+ */
+function findMark(text: string, m: Mark): [number, number] | null {
+  const body = loosePart(m.text);
+  if (!body) return null;
+  const pre = loosePart(m.before);
+  const post = loosePart(m.after);
+  const all = (src: string) => [...text.matchAll(new RegExp(src, "g"))];
+  const pick = <T,>(list: T[]) => list[m.nth - 1] ?? list[0];
+
+  // ① 앞 글자 + 표시 + 뒤 글자가 그대로 이어진 자리.
+  if (pre && post) {
+    const re = `(${pre}\\s*)(${body})(\\s*${post})`;
+    const hit = pick(all(re));
+    if (hit && hit.index != null) {
+      const start = hit.index + hit[1].length;
+      return [start, start + hit[2].length];
+    }
+  }
+
+  const bodyHits = all(body);
+  // ② 표시 글이 끝에서 몇 글자 어긋났는데 앞뒤 글자는 맞는 경우 — 모델이 밑줄
+  // 끝점을 한두 글자 길게/짧게 적는 게 가장 흔한 실수다. 표시 글 자리 근처
+  // (±SLACK)에서 앞 글자가 끝나고 뒤 글자가 시작하면 **그 사이**를 긋는다.
+  if (pre && post && bodyHits.length > 0) {
+    const SLACK = 4;
+    const preEnds = all(pre).map((h) => (h.index ?? 0) + h[0].length);
+    const postStarts = all(post).map((h) => h.index ?? 0);
+    const snapped: [number, number][] = [];
+    for (const h of bodyHits) {
+      const s0 = h.index ?? 0;
+      const e0 = s0 + h[0].length;
+      const a = preEnds
+        .filter((x) => Math.abs(x - s0) <= SLACK)
+        .sort((x, y) => Math.abs(x - s0) - Math.abs(y - s0))[0];
+      const b = postStarts
+        .filter((x) => Math.abs(x - e0) <= SLACK)
+        .sort((x, y) => Math.abs(x - e0) - Math.abs(y - e0))[0];
+      if (a == null || b == null) continue;
+      let from = a;
+      let to = b;
+      while (from < to && /\s/.test(text[from])) from++;
+      while (to > from && /\s/.test(text[to - 1])) to--;
+      if (to > from) snapped.push([from, to]);
+    }
+    const got = pick(snapped);
+    if (got) return got;
+  }
+
+  // ③ 한쪽 글자만 맞는 자리, ④ 표시 글만.
+  for (const [a, b] of [
+    [pre, ""],
+    ["", post],
+  ] as const) {
+    if (!a && !b) continue;
+    const re = `(${a ? `${a}\\s*` : ""})(${body})(${b ? `\\s*${b}` : ""})`;
+    const hit = pick(all(re));
+    if (hit && hit.index != null) {
+      const start = hit.index + hit[1].length;
+      return [start, start + hit[2].length];
+    }
+  }
+  const hit = pick(bodyHits);
+  return hit && hit.index != null ? [hit.index, hit.index + hit[0].length] : null;
 }
 
 /**
@@ -145,18 +227,16 @@ export function applyMarks(text: string, rawMarks: unknown, stats?: MarkStats): 
 
   for (const m of marks) {
     if (stats) stats.total++;
-    const re = markPattern(m.text);
-    const hits = re ? [...text.matchAll(re)] : [];
-    const hit = hits[m.nth - 1] ?? hits[0];
-    if (!hit || hit.index == null) {
+    const found = findMark(text, m);
+    if (!found) {
       if (stats) {
         stats.missed++;
         if (stats.missedTexts.length < 20) stats.missedTexts.push(m.text);
       }
       continue;
     }
-    const from = cpAt[hit.index];
-    const to = cpAt[hit.index + hit[0].length];
+    const from = cpAt[found[0]];
+    const to = cpAt[found[1]];
     for (let i = from; i < to; i++) flags[i][m.type] = true;
   }
 

@@ -36,25 +36,42 @@ export function reviewParagraphs(blocks: RichBlock[]): string[] {
 
 const MARKS_REVIEW_PROMPT = `task: proofread the PRINTED MARKS of a Korean SAT (수능) 국어 passage. the text was already transcribed correctly (listed at the end, one line per paragraph: p1, p2, …). do NOT retype or fix the text. your ONLY job: find every bold span, every printed underline, every small printed box, and identify every circled character — exactly, character by character.
 
-images: the FIRST image is the whole passage. the following images are ZOOMED horizontal strips of the same passage, top to bottom, overlapping slightly. read thin rules, stroke weight and small glyphs in the strips.
+images: the FIRST image is the whole passage. the following images are ZOOMED horizontal strips of the same passage (enlarged), top to bottom, overlapping slightly. read rules, stroke weight and small glyphs in the strips — an underline split across two strips is ONE underline.
 
 answer JSON only:
-{"paras":[{"p":1,"circled":["㉠","㉡"],"marks":[{"type":"u","text":"exact span","nth":1}]}]}
+{"paras":[{"p":1,"circled":["㉠","㉡"],"marks":[{"type":"u","before":"을 ","text":"exact span","after":"하였","nth":1}]}]}
 - list EVERY paragraph p1…pN in order, even when it has nothing: {"p":3,"circled":[],"marks":[]}
 
 circled — every circled character printed in that paragraph, in reading order, one entry per occurrence (a paragraph may repeat ㉠):
 - identify each one by the glyph INSIDE its circle, looking at it in the zoomed strip: ㉠㉡㉢㉣㉤㉥㉦㉧㉨㉩㉪㉫㉬㉭ = ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ · ㉮㉯㉰㉱㉲㉳ = 가나다라마바 · ①②③④⑤⑥ = 1-6 · ⓐⓑⓒⓓⓔ = a-e · Ⓐ Ⓑ Ⓒ = A-C
 - never infer from alphabetical order or from neighbours — a passage may use only ㉡ and ㉣. never switch families (㉠ vs ⓐ vs ①). the transcription may have one wrong or missing: your list is what counts
 - a range like "㉠~㉢" = two entries ㉠, ㉢
+- a circle drawn BY HAND around printed text is not a circled character
 
 marks — printed styling only:
-- text = the EXACT characters the mark covers, copied from that paragraph's line (write circled characters as you identified them). start at the first marked character, stop at the last one. nothing more, nothing less
-- "u" printed underline = a thin, straight, crisp rule of the same dark ink as the print, sitting right under the characters. follow it and note exactly where it starts and stops: it usually covers a phrase, not the whole line. an underline beginning right after a circled marker (㉠ 표현, ⓐ 부분) is ALWAYS printed — the question asks about "밑줄 친 ㉠"; the circled char itself is outside the underline unless the rule clearly runs under it. an underline running over a line break = ONE mark covering the whole phrase
-- "sq" = a small printed rectangle drawn tightly around a word or phrase (a boxed expression pointed at by a question, e.g. 「 」 is not a box). not a bordered frame around whole paragraphs
+- text = the EXACT characters the mark covers, copied from that paragraph's line (write circled characters as you identified them)
+- before = the 1-4 characters immediately BEFORE the first marked character (NOT marked), after = the 1-4 characters immediately AFTER the last marked character (NOT marked), copied from the line including spaces. empty string at the start/end of the line. these pin the ends — get them right
+
+UNDERLINE LENGTH — the most important part. for every underline, find its left end and its right end in the zoomed strip and read which characters sit directly above them:
+- the first underlined character is the one above the rule's left end; the last is the one above its right end. a character is underlined only if the rule runs under most of its width
+- do not round to whole words or phrases: a printed underline often stops mid-phrase, before a particle (조사) or ending (어미), or before punctuation — copy exactly what is above the rule, no more, no less
+- the circled marker (㉠, ⓐ) before an underline is usually NOT under the rule; include it only if the rule clearly starts under it
+- spaces at either end are never part of the mark
+- one rule that continues onto the next printed line = ONE mark covering the whole span (the text runs across the line break)
+- two separate rules = two marks, even if close
+
+PRINTED vs HANDWRITTEN — only printed marks count:
+- a printed underline is perfectly straight and horizontal, parallel to the text baseline, the same uniform thickness and the same solid black as the printed letters, and it starts and stops cleanly at character edges
+- a handwritten line (student's pen or pencil) is slightly wavy or slanted, uneven in thickness or pressure, often grey (pencil) or coloured (blue/red pen), starts or stops mid-character or overshoots into spaces/margins, may be doubled or cross the letters → NOT a mark, ignore it completely
+- when a student has traced over a printed underline, report only the printed rule's exact extent
+- an underline beginning right after a circled marker (㉠ 표현, ⓐ 부분) is ALWAYS printed — the question asks about "밑줄 친 ㉠"
+- hand-drawn circles, boxes, ticks, stars, notes and highlighter are never marks
+
+other marks:
+- "sq" = a small printed rectangle drawn tightly around a word or phrase (a boxed expression pointed at by a question; 「 」 is not a box). not a bordered frame around whole paragraphs. same before/after/length rules as underline
 - "b" = bold: strokes clearly heavier than the surrounding print (key terms, headings, [A]-style labels). compare stroke weight with the neighbouring characters in the strip; ordinary text is not bold
-- handwritten marks are NOT marks: faint, wobbly, pencil/pen lines, uneven width, overshooting the words, a different colour, hand-drawn circles/boxes/ticks/notes → ignore completely
 - two styles on the same span (bold + underline) → two marks with the same text
-- nth = which occurrence in that paragraph's line when the same characters appear more than once (1 = first). omit when once
+- nth = which occurrence in that paragraph's line when the same before+text+after appears more than once (1 = first). omit when once
 - nothing marked → "marks":[]
 - JSON only, no explanation
 
