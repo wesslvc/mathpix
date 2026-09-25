@@ -5,7 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 영역 찾기를 luna xhigh 로 돌린다(`OPENAI_DETECT_EFFORT`) — 오래 생각하면
+// 지면 한 장에 1분을 넘길 수 있어 한도를 넉넉히 둔다.
+export const maxDuration = 300;
 
 /**
  * 지면 한 장에서 문제마다의 영역을 찾아 돌려준다.
