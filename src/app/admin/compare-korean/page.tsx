@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage } from "@/lib/cropImage";
 import {
+  DETECT_INPUT_DIM,
   MAX_UPLOAD_CHARS,
   PROBLEM_INPUT_DIM,
   PROBLEM_MAX_HEIGHT,
   stitchVertically,
 } from "@/lib/figureImage";
 import BoxEditor, { type EditBox } from "@/components/BoxEditor";
+import type { DetectedKoreanRegion } from "@/lib/detectProblems";
 import { buildKicePdf } from "@/lib/kice/pdf";
 import { frameKeyFor, loadFrameImages, loadKiceFrames } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
@@ -114,6 +116,7 @@ async function passageImage(file: File, boxes: EditBox[]): Promise<string> {
 type ReadResponse = {
   jobId?: string;
   blocks?: unknown;
+  regions?: DetectedKoreanRegion[];
   model?: string;
   ms?: number;
   usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
@@ -122,13 +125,13 @@ type ReadResponse = {
 };
 
 /** 백그라운드 작업이 끝날 때까지 기다린다. 30분이 넘으면 포기한다. */
-async function waitForJob(jobId: string): Promise<ReadResponse> {
+async function waitForJob(jobId: string, task: "read" | "detect" = "read"): Promise<ReadResponse> {
   const until = Date.now() + 30 * 60_000;
   for (;;) {
     await new Promise((r) => setTimeout(r, 4000));
     let poll: ReadResponse & { status?: string; message?: string };
     try {
-      const res = await fetch(`/api/admin/compare-korean?id=${encodeURIComponent(jobId)}`, {
+      const res = await fetch(`/api/admin/compare-korean?id=${encodeURIComponent(jobId)}&task=${task}`, {
         cache: "no-store",
       });
       poll = await res.json();
@@ -142,6 +145,69 @@ async function waitForJob(jobId: string): Promise<ReadResponse> {
     if (Date.now() > until) throw new Error("30분이 지나도 끝나지 않았습니다.");
   }
 }
+
+/** 운영 국어 모드가 자동으로 잡은 네모에 더하는 여유(`KoreanModePanel` 의 PAD 와 같다). */
+const AUTO_PAD = 0.004;
+
+/**
+ * 위치 찾기에 보낼 지면 사진. **운영 국어 모드의 `detectImage` 와 같다** — 원본에서
+ * 긴 변 3000px 부터 요청 상한에 들어갈 때까지 줄이고 대비를 올린다.
+ */
+async function detectImage(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await loadImage(url);
+    const whole = { x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight };
+    let last = "";
+    for (const dim of [DETECT_INPUT_DIM, 2400, 2000, 1600, 1200]) {
+      last = cropImageToDataUrl(img, whole, { maxWidth: dim, maxHeight: dim });
+      if (last.length <= MAX_UPLOAD_CHARS) break;
+    }
+    const enhanced = await enhanceContrast(last);
+    return enhanced.length <= MAX_UPLOAD_CHARS ? enhanced : last;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** 찾은 지문 조각을 네모로. 읽는 차례(왼쪽 단 위→아래, 그다음 오른쪽 단)로 늘어놓는다. */
+function passageBoxesFrom(regions: DetectedKoreanRegion[]): EditBox[] {
+  const col = (r: DetectedKoreanRegion) => (r.box.x + r.box.w / 2 < 0.5 ? 0 : 1);
+  return regions
+    .filter((r) => r.kind === "passage")
+    .sort((a, b) => col(a) - col(b) || a.box.y - b.box.y)
+    .map((r) => {
+      const x = Math.max(0, r.box.x - AUTO_PAD);
+      const y = Math.max(0, r.box.y - AUTO_PAD);
+      return {
+        id: crypto.randomUUID(),
+        x,
+        y,
+        w: Math.min(1 - x, r.box.w + AUTO_PAD * 2),
+        h: Math.min(1 - y, r.box.h + AUTO_PAD * 2),
+        group: PASSAGE_GROUP,
+      };
+    });
+}
+
+type Detector = { provider: "openai" | "gemini"; model: string; effort: string };
+
+type DetectRun = {
+  id: string;
+  label: string;
+  since: number;
+} & (
+  | { state: "running" }
+  | {
+      state: "done";
+      ms: number;
+      usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
+      estKrw: number | null;
+      passages: EditBox[];
+      questions: number;
+    }
+  | { state: "error"; ms: number; message: string }
+);
 
 async function readReference(image: string): Promise<string> {
   const res = await fetch("/api/mathpix", {
@@ -179,6 +245,13 @@ function readerTitle(r: Reader): string {
 
 export default function CompareKoreanPage() {
   const [readers, setReaders] = useState<Reader[]>(DEFAULT_READERS);
+  // 기본은 운영과 같은 값(gpt-6-luna xhigh, `OPENAI_DETECT_EFFORT`).
+  const [detector, setDetector] = useState<Detector>({
+    provider: "openai",
+    model: "gpt-6-luna",
+    effort: "xhigh",
+  });
+  const [detectRuns, setDetectRuns] = useState<DetectRun[]>([]);
   const [file, setFile] = useState<File | null>(null);
   /** 네모를 그릴 화면용 사진(긴 변 1600). 자르는 건 원본에서 한다. */
   const [preview, setPreview] = useState<string | null>(null);
@@ -201,6 +274,7 @@ export default function CompareKoreanPage() {
     setFile(null);
     setPreview(null);
     setBoxes([]);
+    setDetectRuns([]);
     setSent(null);
     setReference(null);
     setRefState("idle");
@@ -216,6 +290,59 @@ export default function CompareKoreanPage() {
       setFile(f);
     } catch (err) {
       setError(err instanceof Error ? err.message : "사진을 열지 못했습니다.");
+    }
+  }
+
+  /**
+   * 지문 위치를 찾는다. 여러 번 돌려 모델·강도끼리 견줄 수 있게 **기록을 쌓고**,
+   * 끝난 결과는 곧바로 지문 네모로 옮긴다(다른 결과의 "이걸로" 로 바꿀 수 있다).
+   */
+  async function runDetect() {
+    if (!file) return;
+    const d = detector;
+    const id = crypto.randomUUID();
+    const since = Date.now();
+    const label = d.provider === "openai" && d.effort ? `${d.model} · ${d.effort}` : d.model;
+    setDetectRuns((rs) => [{ id, label, since, state: "running" }, ...rs]);
+    const settle = (run: DetectRun) => setDetectRuns((rs) => rs.map((r) => (r.id === id ? run : r)));
+    try {
+      const res = await fetch("/api/admin/compare-korean", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task: "detect",
+          image: await detectImage(file),
+          provider: d.provider,
+          model: d.model,
+          effort: d.provider === "openai" ? d.effort : "",
+        }),
+      });
+      let json = (await res.json().catch(() => ({}))) as ReadResponse;
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      if (json.jobId) json = await waitForJob(json.jobId, "detect");
+      const regions = json.regions ?? [];
+      const passages = passageBoxesFrom(regions);
+      settle({
+        id,
+        label,
+        since,
+        state: "done",
+        ms: Date.now() - since,
+        usage: json.usage,
+        estKrw: json.estKrw ?? null,
+        passages,
+        questions: regions.filter((r) => r.kind === "question").length,
+      });
+      if (passages.length > 0) setBoxes(passages);
+    } catch (err) {
+      settle({
+        id,
+        label,
+        since,
+        state: "error",
+        ms: Date.now() - since,
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -333,9 +460,126 @@ export default function CompareKoreanPage() {
           />
         </label>
         {preview && (
+          <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
+            <p className="text-sm font-medium text-slate-700">① 지문 위치 자동으로 찾기 (선택)</p>
+            <p className="text-xs text-slate-500">
+              운영 국어 모드의 자동 찾기와 같은 프롬프트예요. 모델·강도를 바꿔 여러 번 돌려
+              견줄 수 있고, 끝나면 찾은 지문 자리가 아래 네모로 들어갑니다(손으로 고칠 수 있어요).
+            </p>
+            <div className="flex flex-wrap items-end gap-2 text-xs">
+              {(["openai", "gemini"] as const).map((pv) => (
+                <button
+                  key={pv}
+                  type="button"
+                  onClick={() =>
+                    setDetector({
+                      provider: pv,
+                      model: pv === "openai" ? OPENAI_PRESETS[0] : "gemini-3.8-flash",
+                      effort: pv === "openai" ? "xhigh" : "",
+                    })
+                  }
+                  className={`rounded-lg border px-2 py-1 ${
+                    detector.provider === pv
+                      ? "border-slate-800 bg-slate-800 text-white"
+                      : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {pv === "openai" ? "OpenAI" : "Gemini"}
+                </button>
+              ))}
+              {detector.provider === "openai" &&
+                OPENAI_PRESETS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setDetector((d) => ({ ...d, model: m }))}
+                    className={`rounded-lg border px-2 py-1 font-mono ${
+                      detector.model === m
+                        ? "border-blue-600 bg-blue-50 text-blue-700"
+                        : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-slate-600">
+                모델
+                <input
+                  value={detector.model}
+                  onChange={(e) => setDetector((d) => ({ ...d, model: e.target.value }))}
+                  className="rounded border border-slate-300 px-2 py-1 font-mono"
+                />
+              </label>
+              {detector.provider === "openai" && (
+                <label className="flex w-24 flex-col gap-1 text-slate-600">
+                  추론 강도
+                  <input
+                    value={detector.effort}
+                    onChange={(e) => setDetector((d) => ({ ...d, effort: e.target.value }))}
+                    className="rounded border border-slate-300 px-2 py-1 font-mono"
+                  />
+                </label>
+              )}
+              <button
+                type="button"
+                onClick={runDetect}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white"
+              >
+                위치 찾기
+              </button>
+            </div>
+            {detectRuns.length > 0 && (
+              <ul className="flex flex-col gap-1 text-xs">
+                {detectRuns.map((run) => (
+                  <li
+                    key={run.id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-slate-50 px-2 py-1"
+                  >
+                    <span className="font-mono text-slate-800">{run.label}</span>
+                    {run.state === "running" && <Elapsed since={run.since} />}
+                    {run.state === "error" && (
+                      <span className="break-words text-red-600">
+                        실패 ({(run.ms / 1000).toFixed(1)}초) — {run.message}
+                      </span>
+                    )}
+                    {run.state === "done" && (
+                      <>
+                        <span>{(run.ms / 1000).toFixed(1)}초</span>
+                        <span>
+                          {run.estKrw != null
+                            ? `약 ${run.estKrw < 10 ? run.estKrw.toFixed(1) : Math.round(run.estKrw)}원`
+                            : "단가 모름"}
+                        </span>
+                        {run.usage && (
+                          <span className="text-slate-500">
+                            입력 {run.usage.inputTokens.toLocaleString()} · 출력{" "}
+                            {run.usage.outputTokens.toLocaleString()}
+                          </span>
+                        )}
+                        <span>
+                          지문 {run.passages.length}조각 · 문제 {run.questions}개
+                        </span>
+                        {run.passages.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setBoxes(run.passages)}
+                            className="rounded border border-emerald-600 px-2 py-0.5 text-emerald-700"
+                          >
+                            이 결과로 네모 바꾸기
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {preview && (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-slate-600">
-              사진 위에 <b>지문 영역</b>을 끌어서 네모로 그리세요(발문 줄부터 지문 끝까지,
+              ② 사진 위에 <b>지문 영역</b>을 끌어서 네모로 그리세요(발문 줄부터 지문 끝까지,
               문항은 빼고). 단이나 쪽을 넘는 지문은 조각마다 그리면 <b>그린 차례대로</b>{" "}
               세로로 이어 붙입니다. 안 그리면 사진 전체를 보냅니다.
             </p>
@@ -502,7 +746,9 @@ function ResultView({ result }: { result: Result }) {
         <li>
           원가:{" "}
           {result.estKrw != null
-            ? `약 ${Math.round(result.estKrw).toLocaleString()}원 (공표 단가 기준)`
+            ? `약 ${
+                result.estKrw < 10 ? result.estKrw.toFixed(1) : Math.round(result.estKrw).toLocaleString()
+              }원 (공표 단가 기준)`
             : "단가 모름"}
         </li>
         <li>

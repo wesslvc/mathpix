@@ -295,7 +295,7 @@ async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[
  * 같은 문제를 알아본다"는 규칙에 기대는 것인데, 지문에는 번호가 없어서 그
  * 규칙이 통째로 어긋난다.
  */
-const KOREAN_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find PASSAGE regions AND QUESTION regions.
+export const KOREAN_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find PASSAGE regions AND QUESTION regions.
 
 passage:
 - whole text body shared by several questions (non-fiction/literary work, incl. any 보기 material)
@@ -345,7 +345,7 @@ export async function detectKoreanRegions(
   return { regions: parseKorean(text), model: DETECT_OPENAI_LABEL };
 }
 
-function parseKorean(text: string): DetectedKoreanRegion[] {
+export function parseKorean(text: string): DetectedKoreanRegion[] {
   let raw: unknown;
   try {
     raw = JSON.parse(text);

@@ -899,6 +899,19 @@ export async function startKoreanTextBackground(
   model: string,
   effort?: string,
 ): Promise<string> {
+  return startVisionBackground(koreanTextPrompt(reference), imageDataUrl, model, effort);
+}
+
+/**
+ * 사진 한 장 + 프롬프트를 **백그라운드로** 건다(JSON 응답). 지문 읽기와 지문
+ * 위치 찾기(비교 화면)가 같이 쓴다 — 프롬프트와 결과 해석만 다르다.
+ */
+export async function startVisionBackground(
+  prompt: string,
+  imageDataUrl: string,
+  model: string,
+  effort?: string,
+): Promise<string> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
   const res = await fetch(OPENAI_RESPONSES, {
@@ -913,7 +926,7 @@ export async function startKoreanTextBackground(
         {
           role: "user",
           content: [
-            { type: "input_text", text: koreanTextPrompt(reference) },
+            { type: "input_text", text: prompt },
             { type: "input_image", image_url: imageDataUrl, detail: "high" },
           ],
         },
@@ -941,8 +954,24 @@ export type BackgroundPoll =
   | { status: "done"; blocks: unknown; usage?: GradeUsage; model: string }
   | { status: "error"; message: string };
 
-/** 백그라운드 작업이 어떻게 됐는지 한 번 묻는다. */
+/** 백그라운드 작업이 어떻게 됐는지 한 번 묻는다(지문 읽기 — 블록까지 꺼낸다). */
 export async function pollKoreanTextBackground(id: string): Promise<BackgroundPoll> {
+  const poll = await pollVisionBackground(id);
+  if (poll.status !== "done") return poll;
+  try {
+    return { status: "done", blocks: parseBlocks(poll.text), usage: poll.usage, model: poll.model };
+  } catch (err) {
+    return { status: "error", message: err instanceof Error ? err.message : "지문을 읽지 못했습니다." };
+  }
+}
+
+export type VisionPoll =
+  | { status: "running"; openaiStatus: string }
+  | { status: "done"; text: string; usage?: GradeUsage; model: string }
+  | { status: "error"; message: string };
+
+/** 백그라운드 작업을 한 번 묻고, 끝났으면 **글자 그대로** 돌려준다. */
+export async function pollVisionBackground(id: string): Promise<VisionPoll> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
   const res = await fetch(`${OPENAI_RESPONSES}/${encodeURIComponent(id)}`, {
@@ -978,11 +1007,20 @@ export async function pollKoreanTextBackground(id: string): Promise<BackgroundPo
         ...(typeof cached === "number" && cached > 0 ? { cachedInputTokens: cached } : {}),
       }
     : undefined;
-  try {
-    return { status: "done", blocks: parseBlocks(harvest(json)), usage, model: json.model ?? "" };
-  } catch (err) {
-    return { status: "error", message: err instanceof Error ? err.message : "지문을 읽지 못했습니다." };
-  }
+  return { status: "done", text: harvest(json), usage, model: json.model ?? "" };
+}
+
+/**
+ * Gemini 로 사진 한 장 + 프롬프트를 보내 JSON 글과 usage 를 받는다(비교 화면의
+ * 지문 위치 찾기용). 요청 모양은 지문 읽기와 같은 `callGeminiVision` 이다.
+ */
+export async function callGeminiJson(
+  prompt: string,
+  imageDataUrl: string,
+  model: string,
+  signal?: AbortSignal,
+): Promise<{ text: string; usage?: GradeUsage; model: string }> {
+  return callGeminiVision(prompt, imageDataUrl, "지문 위치 찾기", signal, model, 65536);
 }
 
 /**
