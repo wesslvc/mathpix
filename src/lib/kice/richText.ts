@@ -43,8 +43,22 @@ export type RichBlock =
     }
   /** 네모 상자(조건 박스·<보기>). 단을 넘어가면 잘리고 다음 단에서 이어진다. */
   | { kind: "box"; blocks: RichBlock[] }
-  /** 그림 자리. 지문 안에 삽화가 있을 때 그 자리를 비워 둔다. */
-  | { kind: "figure"; id: string; ratio: number };
+  /**
+   * 그림. 지문 안에 그림이 있으면 sol 이 그 자리를 짚고(`id`), 우리가 잘라 낸
+   * 그림(sunburst 로 다시 그린 것, 안 되면 원본)을 `src` 로 붙인다.
+   * `ratio` = 높이/폭, `scale` = 단 폭 대비 그림 폭(원본 지면에서 잰 값, 0~1).
+   * `src` 가 없으면 자리만 비워 둔다(옛 데이터).
+   */
+  | { kind: "figure"; id: string; ratio: number; src?: string; scale?: number };
+
+/** 그림 `src` 로 받는 값 — 우리 저장소 주소나 data URL 만. */
+export function isFigureSrc(v: unknown): v is string {
+  return (
+    typeof v === "string" &&
+    v.length < 6_000_000 &&
+    (/^\/api\/card\/[\w./-]+$/.test(v) || /^data:image\/(png|jpeg|jpg|webp);base64,/.test(v))
+  );
+}
 
 const MAX_RUNS = 400;
 const MAX_BLOCKS = 300;
@@ -201,8 +215,15 @@ export function readRichBlocks(raw: unknown, depth = 0, stats?: MarkStats): Rich
     if (kind === "figure") {
       const id = typeof o.id === "string" ? o.id : "";
       const ratio = Number(o.ratio);
+      const scale = Number(o.scale);
       if (id) {
-        out.push({ kind: "figure", id, ratio: Number.isFinite(ratio) && ratio > 0 ? ratio : 1 });
+        out.push({
+          kind: "figure",
+          id,
+          ratio: Number.isFinite(ratio) && ratio > 0 ? Math.min(ratio, 5) : 1,
+          ...(isFigureSrc(o.src) ? { src: o.src } : {}),
+          ...(Number.isFinite(scale) && scale > 0.05 && scale <= 1 ? { scale } : {}),
+        });
       }
       continue;
     }

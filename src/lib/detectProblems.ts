@@ -284,205 +284,171 @@ async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[
 }
 
 /**
- * 국어 지면에서 **지문 영역과 문제 영역을 함께** 찾는다.
+ * 국어 지면에서 **지문 먼저, 문제는 따로** 찾는다(2026-09-25, 사용자 지시 —
+ * "luna 가 네모 그릴 때 지문 먼저 인식하고 문제 인식해, 지문이랑 문제 같이 보지
+ * 말고").
  *
- * 국어는 지문 하나에 문항 여러 개가 딸린다. 다른 과목처럼 문제만 잡으면
- * 지문이 어느 문제 것인지 알 수 없어 인쇄할 때 지문과 문제가 갈라진다.
- * 그래서 **한 번의 호출로** 둘을 함께 잡고 어느 지문에 딸린 문제인지도
- * 받는다 — 호출을 나누면 그만큼 돈이 더 든다.
+ * 예전에는 한 번의 호출로 둘을 함께 잡았다(값이 반이다). 그런데 한꺼번에 보면
+ * 모델이 둘의 경계를 서로 나눠 가지느라 지문 아래를 잘라 먹거나 선지 한 줄을
+ * 지문에 붙이는 일이 잦았다. 지금은 ① 지문(과 그 안의 그림)만 보는 호출,
+ * ② 문제만 보는 호출로 나눈다. ②에는 ①이 찾은 지문 자리를 알려 주어 그 자리를
+ * 비켜 가게 한다.
  *
- * 여기서는 **조각을 합치지 않는다**(`group` 을 쓰지 않는다). 그건 "번호로
- * 같은 문제를 알아본다"는 규칙에 기대는 것인데, 지문에는 번호가 없어서 그
- * 규칙이 통째로 어긋난다.
+ * **지문 안의 그림도 ①이 함께 찾는다**(같은 날 사용자 지시 — "luna 가 지문
+ * 영역에 그림이 있어요라고 sol 에게 알려 줘"). 그 자리를 잘라 지문 인식(sol)에
+ * 함께 보내고, sol 이 그림이 들어갈 자리를 짚으면 sunburst 가 다시 그려 붙인다.
+ *
+ * 다각형으로 찾기는 걷어냈다(같은 지시 — "다각형은 없애").
  */
-export const KOREAN_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find PASSAGE regions AND QUESTION regions.
+export const KOREAN_PASSAGE_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find ONLY the PASSAGE regions (지문), plus every PICTURE printed inside a passage. ignore the questions completely.
 
 passage:
-- whole text body shared by several questions (non-fiction/literary work, incl. any 보기 material)
+- whole text body shared by several questions (non-fiction/literary work, incl. any 보기 material belonging to the passage)
 - lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." -> start FROM that line
 - several texts grouped as (가)(나) -> take TOGETHER as one region
 - literature -> include trailing attribution (- 작자, 「작품명」)
-- exclude questions (stem/choices) printed under passage
+- stop where the first question (its number, e.g. "1.") begins — never include question stems or choices
+- passage continuing across columns -> one region per piece
 
-question:
-- one item at a time: from its number (e.g. 12.) to last line of choices (①②③④⑤)
-- stem + <보기> box + choices = parts of one item, don't split
-- \`set\` = which passage item belongs to (passage carries same \`set\`). number passages 1,2,3... from top. 0 = no passage
+figure (inside a passage only):
+- a picture, diagram, graph, chart, map, photo, drawing, or a table printed as a graphic — anything that is not running text
+- NOT a figure: plain text, a bordered text box / <보기> made only of text, section markers, underlines
+- box hugs the picture including its own labels, legend and caption
+- none -> "figures":[]
 
 both:
-- hug outer content edge. exclude empty margin, gutter, running heads, page numbers
+- hug the outer content edge tightly. exclude empty margin, gutter, running heads, page numbers
+- 2-column page -> order: left column top-to-bottom first, then right column
+
+answer JSON only:
+{"passages":[{"box_2d":[ymin,xmin,ymax,xmax]}],"figures":[{"box_2d":[ymin,xmin,ymax,xmax]}]}
+coords normalised 0-1000. no explanation.`;
+
+export const KOREAN_QUESTION_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find ONLY the QUESTION regions (문항). passages (지문) are handled separately — ignore them.
+
+question:
+- one item at a time: from its number (e.g. 12.) to the last line of its choices (①②③④⑤)
+- stem + <보기> box + choices = parts of one item, don't split
+- an item continuing across columns -> one region per piece, same \`no\`
+
+both:
+- hug the outer content edge tightly. exclude empty margin, gutter, running heads, page numbers
 - regions must not overlap
 - 2-column page -> order: left column top-to-bottom first, then right column
-- passage continuing across columns -> one region per piece, same \`set\`
 
-answer: JSON only:
-{"regions":[{"box_2d":[ymin,xmin,ymax,xmax],"kind":"passage"|"question","set":1,"no":"12"}]}
-coords normalised 0-1000. \`no\` = item number (digits only), empty for passage. no explanation.`;
+answer JSON only:
+{"questions":[{"box_2d":[ymin,xmin,ymax,xmax],"no":"12"}]}
+coords normalised 0-1000. \`no\` = item number (digits only). no explanation.`;
+
+/** 문제 찾기 프롬프트 — 앞서 찾은 지문 자리를 알려 주어 비켜 가게 한다. */
+export function koreanQuestionPrompt(passages: ProblemBox[]): string {
+  if (passages.length === 0) return KOREAN_QUESTION_PROMPT;
+  const r = (v: number) => Math.round(v * 1000);
+  const list = passages
+    .map((b) => `[${r(b.y)},${r(b.x)},${r(b.y + b.h)},${r(b.x + b.w)}]`)
+    .join(", ");
+  return `${KOREAN_QUESTION_PROMPT}
+
+already-identified PASSAGE regions on this page (box_2d) — never include any part of these: ${list}`;
+}
 
 export type DetectedKoreanRegion = {
   kind: "passage" | "question";
   box: ProblemBox;
-  /** 어느 지문에 딸렸는지. 0 이면 딸린 지문이 없다. */
+  /** 어느 지문에 딸렸는지. 지금은 따로 찾으므로 늘 0 이다(옛 모양을 위해 남긴다). */
   set: number;
   no: number | null;
 };
 
-export async function detectKoreanRegions(
-  dataUrl: string,
-): Promise<{ regions: DetectedKoreanRegion[]; model: string }> {
-  // 문제 영역 찾기와 같은 갈래를 탄다(`DETECT_PROVIDER`). 프롬프트가 이미
-  // JSON 객체({"regions": [...]})를 달라고 하므로 GPT 쪽에도 그대로 보낸다.
+/** 지문 찾기 결과. 그림은 지면 좌표(0~1)다. */
+export type DetectedKoreanPassages = {
+  passages: DetectedKoreanRegion[];
+  figures: ProblemBox[];
+};
+
+async function callDetect(dataUrl: string, prompt: string) {
   if (DETECT_PROVIDER === "gemini") {
-    const text = await callGemini(dataUrl, KOREAN_PROMPT);
-    return { regions: parseKorean(text), model: DETECT_MODEL };
+    return { text: await callGemini(dataUrl, prompt), model: DETECT_MODEL };
   }
-  const text = await callOpenAIVision(
-    dataUrl,
-    KOREAN_PROMPT,
-    OPENAI_DETECT_MODEL,
-    OPENAI_DETECT_EFFORT,
-  );
-  return { regions: parseKorean(text), model: DETECT_OPENAI_LABEL };
+  return {
+    text: await callOpenAIVision(dataUrl, prompt, OPENAI_DETECT_MODEL, OPENAI_DETECT_EFFORT),
+    model: DETECT_OPENAI_LABEL,
+  };
 }
 
-/**
- * **다각형으로 찾기**(비교 화면에서 시험 중, 2026-09-25 사용자 요청 — "네모로
- * 그릴 필요 없잖아, 문제 영역에 정확히 맞게 그려도 좋아").
- *
- * 네모는 내용이 꺾여 있으면(지문이 단 중간에서 끝나고 그 아래 문제가 시작하는
- * 식) 옆 내용을 같이 물거나 제 내용을 잘라 먹는다. 꼭짓점 목록으로 받으면
- * 자를 때 그 바깥을 흰색으로 지워 **꺾인 영역을 그대로** 떼어 낼 수 있다.
- * 규칙(무엇이 지문이고 무엇이 문제인가)은 `KOREAN_PROMPT` 와 같다 — 모양만 다르다.
- */
-export const KOREAN_POLYGON_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find PASSAGE regions AND QUESTION regions, each traced as a POLYGON.
+export async function detectKoreanPassages(
+  dataUrl: string,
+): Promise<DetectedKoreanPassages & { model: string }> {
+  const { text, model } = await callDetect(dataUrl, KOREAN_PASSAGE_PROMPT);
+  return { ...parseKoreanPassages(text), model };
+}
 
-passage:
-- whole text body shared by several questions (non-fiction/literary work, incl. any 보기 material)
-- lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." -> start FROM that line
-- several texts grouped as (가)(나) -> take TOGETHER as one region
-- literature -> include trailing attribution (- 작자, 「작품명」)
-- exclude questions (stem/choices) printed under passage
+export async function detectKoreanQuestions(
+  dataUrl: string,
+  passages: ProblemBox[] = [],
+): Promise<{ regions: DetectedKoreanRegion[]; model: string }> {
+  const { text, model } = await callDetect(dataUrl, koreanQuestionPrompt(passages));
+  return { regions: parseKoreanQuestions(text), model };
+}
 
-question:
-- one item at a time: from its number (e.g. 12.) to last line of choices (①②③④⑤)
-- stem + <보기> box + choices = parts of one item, don't split
-- \`set\` = which passage item belongs to (passage carries same \`set\`). number passages 1,2,3... from top. 0 = no passage
-
-polygon:
-- trace the OUTER EDGE of the content itself, tightly. not the column, not the page
-- vertices clockwise starting top-left, each [y,x] normalised 0-1000
-- plain rectangle (4 points) when the content is rectangular. add vertices ONLY where the edge really steps (a passage ending mid-line beside other content, a box or figure sticking out, an indented last line)
-- never include neighbouring questions/passages, running heads, page numbers, empty margin, gutter
-- polygons must not overlap
-- 2-column page -> order: left column top-to-bottom first, then right column
-- passage continuing across columns -> one polygon per piece, same \`set\`
-
-answer: JSON only:
-{"regions":[{"polygon":[[y,x],[y,x],...],"kind":"passage"|"question","set":1,"no":"12"}]}
-\`no\` = item number (digits only), empty for passage. no explanation.`;
-
-export type DetectedKoreanPolygon = {
-  kind: "passage" | "question";
-  /** 0~1 좌표의 꼭짓점들(사진 크기 대비). */
-  points: { x: number; y: number }[];
-  /** 꼭짓점을 감싸는 네모 — 자를 때와 차례를 정할 때 쓴다. */
-  box: ProblemBox;
-  set: number;
-  no: number | null;
-};
-
-/** 다각형 응답을 읽는다. 꼭짓점이 셋 미만이거나 너무 작은 것은 버린다. */
-export function parseKoreanPolygons(text: string): DetectedKoreanPolygon[] {
-  let raw: unknown;
+function readJsonObject(text: string): Record<string, unknown> {
   try {
-    raw = JSON.parse(text);
+    return JSON.parse(text) as Record<string, unknown>;
   } catch {
     const a = text.indexOf("{");
     const b = text.lastIndexOf("}");
     if (a === -1 || b <= a) throw new DetectError("영역을 읽지 못했습니다.", 502);
     try {
-      raw = JSON.parse(text.slice(a, b + 1));
+      return JSON.parse(text.slice(a, b + 1)) as Record<string, unknown>;
     } catch {
       throw new DetectError("영역을 읽지 못했습니다.", 502);
     }
   }
-  const list = Array.isArray(raw)
-    ? raw
-    : Array.isArray((raw as { regions?: unknown })?.regions)
-      ? (raw as { regions: unknown[] }).regions
-      : [];
+}
 
+/** 그림 네모. 지문·문제보다 작을 수 있어 부스러기 기준을 낮춰 읽는다. */
+function toFigureBox(raw: unknown): ProblemBox | null {
+  if (!Array.isArray(raw) || raw.length !== 4) return null;
+  const [ymin, xmin, ymax, xmax] = raw.map((n) => Number(n));
+  if (![ymin, xmin, ymax, xmax].every(Number.isFinite)) return null;
   const clamp = (v: number) => Math.min(1, Math.max(0, v / 1000));
-  const out: DetectedKoreanPolygon[] = [];
-  for (const row of list) {
-    const o = row as { polygon?: unknown; kind?: unknown; set?: unknown; no?: unknown };
-    if (!Array.isArray(o.polygon)) continue;
-    const points: { x: number; y: number }[] = [];
-    for (const p of o.polygon) {
-      if (!Array.isArray(p) || p.length < 2) continue;
-      const y = Number(p[0]);
-      const x = Number(p[1]);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      points.push({ x: clamp(x), y: clamp(y) });
-    }
-    if (points.length < 3) continue;
-    const xs = points.map((p) => p.x);
-    const ys = points.map((p) => p.y);
-    const box = {
-      x: Math.min(...xs),
-      y: Math.min(...ys),
-      w: Math.max(...xs) - Math.min(...xs),
-      h: Math.max(...ys) - Math.min(...ys),
-    };
-    // 네모 찾기(`toBoxes`)와 같은 기준 — 쪽번호·머리말 조각 같은 부스러기를 버린다.
-    if (box.w < 0.05 || box.h < 0.03) continue;
-    const no = Number(String(o.no ?? "").replace(/[^\d]/g, ""));
-    out.push({
-      kind: o.kind === "passage" ? "passage" : "question",
-      points,
-      box,
-      set: Number.isFinite(Number(o.set)) ? Number(o.set) : 0,
-      no: Number.isFinite(no) && no > 0 ? no : null,
-    });
-  }
-  if (out.length === 0) throw new DetectError("영역을 하나도 찾지 못했습니다.", 502);
-  return out;
+  const x = clamp(Math.min(xmin, xmax));
+  const y = clamp(Math.min(ymin, ymax));
+  const w = clamp(Math.max(xmin, xmax)) - x;
+  const h = clamp(Math.max(ymin, ymax)) - y;
+  if (w < 0.02 || h < 0.015) return null;
+  return { x, y, w, h };
 }
 
-export function parseKorean(text: string): DetectedKoreanRegion[] {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    const a = text.indexOf("{");
-    const b = text.lastIndexOf("}");
-    if (a === -1 || b <= a) throw new DetectError("영역을 읽지 못했습니다.", 502);
-    try {
-      raw = JSON.parse(text.slice(a, b + 1));
-    } catch {
-      throw new DetectError("영역을 읽지 못했습니다.", 502);
-    }
+export function parseKoreanPassages(text: string): DetectedKoreanPassages {
+  const o = readJsonObject(text);
+  const list = Array.isArray(o.passages) ? o.passages : Array.isArray(o.regions) ? o.regions : [];
+  const passages: DetectedKoreanRegion[] = [];
+  for (const row of list) {
+    const box = toBox((row as { box_2d?: unknown })?.box_2d);
+    if (box) passages.push({ kind: "passage", box, set: 0, no: null });
   }
-  const list = Array.isArray(raw)
-    ? raw
-    : Array.isArray((raw as { regions?: unknown })?.regions)
-      ? (raw as { regions: unknown[] }).regions
-      : [];
+  const figures: ProblemBox[] = [];
+  for (const row of Array.isArray(o.figures) ? o.figures : []) {
+    const box = toFigureBox((row as { box_2d?: unknown })?.box_2d);
+    if (box) figures.push(box);
+  }
+  if (passages.length === 0) throw new DetectError("지문을 찾지 못했습니다.", 502);
+  return { passages, figures };
+}
 
+export function parseKoreanQuestions(text: string): DetectedKoreanRegion[] {
+  const o = readJsonObject(text);
+  const list = Array.isArray(o.questions) ? o.questions : Array.isArray(o.regions) ? o.regions : [];
   const out: DetectedKoreanRegion[] = [];
   for (const row of list) {
-    const o = row as { box_2d?: unknown; kind?: unknown; set?: unknown; no?: unknown };
-    const box = toBox(o.box_2d);
+    const r = row as { box_2d?: unknown; no?: unknown };
+    const box = toBox(r.box_2d);
     if (!box) continue;
-    const no = Number(String(o.no ?? "").replace(/[^\d]/g, ""));
-    out.push({
-      kind: o.kind === "passage" ? "passage" : "question",
-      box,
-      set: Number.isFinite(Number(o.set)) ? Number(o.set) : 0,
-      no: Number.isFinite(no) && no > 0 ? no : null,
-    });
+    const no = Number(String(r.no ?? "").replace(/[^\d]/g, ""));
+    out.push({ kind: "question", box, set: 0, no: Number.isFinite(no) && no > 0 ? no : null });
   }
-  if (out.length === 0) throw new DetectError("영역을 하나도 찾지 못했습니다.", 502);
+  if (out.length === 0) throw new DetectError("문제를 찾지 못했습니다.", 502);
   return out;
 }
 

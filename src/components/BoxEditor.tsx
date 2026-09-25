@@ -56,6 +56,7 @@ export default function BoxEditor({
   boxes,
   onChange,
   color = "#2563eb",
+  colorOf,
   labelOf,
   picked,
   onPick,
@@ -65,6 +66,8 @@ export default function BoxEditor({
   boxes: EditBox[];
   onChange: (boxes: EditBox[]) => void;
   color?: string;
+  /** 묶음마다 다른 색(지문 단계의 지문/그림 구분). 없으면 `color`. */
+  colorOf?: (groupId: string) => string;
   /** 네모 위에 찍을 글자. 묶음 id 를 받는다. */
   labelOf?: (groupId: string) => string;
   /** 고른 묶음들. 이름표를 눌러 고른다(합치기·풀기에 쓴다). */
@@ -247,8 +250,8 @@ export default function BoxEditor({
             top: pct(b.y),
             width: pct(b.w),
             height: pct(b.h),
-            border: `2px solid ${color}`,
-            background: `${color}18`,
+            border: `2px solid ${colorOf?.(b.group) ?? color}`,
+            background: `${colorOf?.(b.group) ?? color}18`,
           }}
         >
           {/* 이름표와 지우기를 **한 줄로 묶어 네모 위에** 둔다.
@@ -257,7 +260,7 @@ export default function BoxEditor({
           <span
             className="absolute -top-0.5 left-0 z-10 flex -translate-y-full items-center gap-1 whitespace-nowrap rounded px-1 text-[11px] font-medium text-white"
             style={{
-              background: color,
+              background: colorOf?.(b.group) ?? color,
               // 고른 묶음은 테두리로 표시한다(색을 바꾸면 지문/문제 구분과 섞인다).
               outline: picked?.has(b.group) ? "2px solid #f59e0b" : undefined,
             }}

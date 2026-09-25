@@ -1,5 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { DetectError, detectKoreanRegions, detectProblems } from "@/lib/detectProblems";
+import {
+  DetectError,
+  detectKoreanPassages,
+  detectKoreanQuestions,
+  detectProblems,
+} from "@/lib/detectProblems";
+import type { ProblemBox } from "@/lib/problemBoxes";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -17,7 +23,7 @@ export const maxDuration = 300;
  * 화면에서도 감추지만 막는 자리는 여기다 — 화면은 얼마든지 우회할 수 있다.
  */
 export async function POST(req: NextRequest) {
-  let body: { image?: string; mode?: string };
+  let body: { image?: string; mode?: string; passages?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -53,10 +59,15 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 국어는 지문과 문제를 **한 번의 호출로 함께** 잡는다 — 나누면 그만큼
-    // 돈이 더 든다. 뒤처리(묶기·이어 붙이기)가 달라서 함수만 갈린다.
-    if (body.mode === "korean") {
-      const { regions, model } = await detectKoreanRegions(body.image);
+    // 국어는 **지문 먼저, 문제는 따로**(2026-09-25, 사용자 지시). 지문 호출은
+    // 지문 안의 그림 자리도 함께 돌려주고, 문제 호출은 앞서 찾은 지문 자리를
+    // 받아 비켜 간다(`detectProblems.ts` 주석 참고).
+    if (body.mode === "korean-passage") {
+      const { passages, figures, model } = await detectKoreanPassages(body.image);
+      return NextResponse.json({ regions: passages, figures, model });
+    }
+    if (body.mode === "korean-question") {
+      const { regions, model } = await detectKoreanQuestions(body.image, readBoxes(body.passages));
       return NextResponse.json({ regions, model });
     }
     const { problems, model } = await detectProblems(body.image);
@@ -68,4 +79,17 @@ export async function POST(req: NextRequest) {
       { status: status >= 400 && status < 600 ? status : 500 },
     );
   }
+}
+
+/** 화면이 보낸 지문 자리(0~1). 모양이 이상한 것은 버린다. */
+function readBoxes(raw: unknown): ProblemBox[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ProblemBox[] = [];
+  for (const b of raw.slice(0, 20)) {
+    const o = b as Partial<ProblemBox>;
+    const vals = [o.x, o.y, o.w, o.h].map(Number);
+    if (!vals.every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) continue;
+    out.push({ x: vals[0], y: vals[1], w: vals[2], h: vals[3] });
+  }
+  return out;
 }

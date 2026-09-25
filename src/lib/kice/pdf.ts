@@ -88,6 +88,39 @@ async function embedProblemImage(pdf: PDFDocument, bytes: Uint8Array): Promise<P
   }
 }
 
+/**
+ * 지문 안 그림(`figure` 블록의 `src`)을 받아 임베드한다. 상자 안까지 훑는다.
+ *
+ * 못 받은 그림은 자리만 비워 두고 알린다 — 그림 하나 때문에 PDF 전체가
+ * 실패하면 안 된다(`embedProblemImage` 주석과 같은 판단).
+ */
+async function loadPassageFigures(
+  pdf: PDFDocument,
+  blocks: RichBlock[],
+  onWarn?: (m: string) => void,
+): Promise<Map<string, PDFImage>> {
+  const out = new Map<string, PDFImage>();
+  const walk = async (list: RichBlock[]) => {
+    for (const b of list) {
+      if (b.kind === "box") await walk(b.blocks);
+      else if (b.kind === "figure" && b.src && !out.has(b.id)) {
+        try {
+          const res = await fetch(b.src);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          out.set(b.id, await embedProblemImage(pdf, new Uint8Array(await res.arrayBuffer())));
+        } catch (err) {
+          onWarn?.(
+            `지문 그림(${b.id})을 불러오지 못해 자리만 비워 뒀습니다: ` +
+              (err instanceof Error ? err.message : String(err)),
+          );
+        }
+      }
+    }
+  };
+  await walk(blocks);
+  return out;
+}
+
 /** 지워야 할 영역 안에 들어가는 항목인지. */
 function dropped(it: FrameItem, drops?: FrameBox[]) {
   if (!drops?.length) return false;
@@ -845,8 +878,9 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
         body.font.widthOfTextAtSize(t, size) * (bold ? 1.02 : 1);
       // 안내 줄([N~M] …)만 밖에 두고 지문 본문을 상자 하나로 두른다.
       const flowed = flowBlocks(framePassage(planned.blocks), cols, measure, DEFAULT_FLOW_STYLE);
+      const passageFigures = await loadPassageFigures(pdf, planned.blocks, spec.onWarn);
       for (const r of flowed.results) {
-        await drawFlow(page, r.items, fontForText, flip, new Map());
+        await drawFlow(page, r.items, fontForText, flip, passageFigures);
       }
       if (flowed.rest.length > 0 && spec.onWarn) {
         spec.onWarn("지문이 한 쪽에 다 들어가지 않아 뒷부분이 잘렸습니다.");

@@ -700,7 +700,7 @@ block = one of:
   - a candidate box holding most of the passage is wrong — emit those paragraphs as top-level para blocks.
   - a real box is small (a few lines), sits apart from the body, all four ruled sides visible. the column rule / page frame is NOT a box.
   - unsure -> no box. a missed box costs a border; an invented box swallows the whole passage.
-- {"kind":"figure","id":"f1","ratio":0.6} — picture/table not expressible as text. ratio = height/width.
+- {"kind":"figure","id":"f1"} — the place where a picture sits. ONLY as told in the "pictures" section at the end.
 
 characters:
 - copy exactly: every Hangul syllable, Hanja in its original character (never convert 漢字 to Hangul or the reverse), Latin, digits, punctuation/symbols 「」『』〈〉《》()[]·~…—‘’“” ※ ○ ◎ ● □ ▲ →
@@ -720,16 +720,44 @@ printed vs handwritten marks:
 - an underline that begins right after a circled marker (㉠ ⓐ ① …) — "㉠ 표현을 밑줄로" style — is almost always PRINTED: questions ask about "밑줄 친 ㉠". mark it as "u" covering exactly the underlined words (the circled char itself only if the rule clearly runs under it too)
 - JSON only, no explanation`;
 
+/**
+ * 지문 인식 프롬프트 — 그림 안내까지 붙인 것.
+ *
+ * **그림이 있는지는 luna 가 먼저 알려 준다**(지문 찾기, `KOREAN_PASSAGE_PROMPT`).
+ * 우리가 그 자리를 잘라 사진 뒤에 붙여 보내고, sol 은 각 그림이 지문의 어디에
+ * 들어가는지만 짚는다(`figure` 블록). 그림 안의 글자(축 이름·범례)는 옮겨 적지
+ * 않게 한다 — 그림은 이미지로 붙는다.
+ *
+ * 그림이 없으면 figure 블록을 **아예 못 쓰게** 한다. 짚은 자리에 붙일 그림이
+ * 없으면 조판에 빈 네모만 남는다.
+ */
+export function koreanTextPrompt(figureCount: number): string {
+  if (figureCount <= 0) {
+    return `${KOREAN_TEXT_PROMPT}
+
+pictures: this passage has none — never emit a figure block.`;
+  }
+  const ids = Array.from({ length: figureCount }, (_, i) => `f${i + 1}`).join(", ");
+  return `${KOREAN_TEXT_PROMPT}
+
+pictures: this passage contains exactly ${figureCount} picture(s), found beforehand. the first image is the passage; the next ${figureCount} image(s) are those pictures cropped out of it, in reading order, named ${ids}.
+- at the exact place each picture sits in the passage (between the paragraphs around it), emit {"kind":"figure","id":"fK"}. emit every id exactly once, in the order the pictures appear
+- never transcribe text that is inside a picture (labels, legends, axis numbers, captions printed within it) — the picture is pasted as an image
+- never emit a figure block with any other id`;
+}
+
 /** 지문 사진 → 구조화된 블록(`text` + `marks` 모양, `readRichBlocks` 가 토막으로 바꾼다). */
 export async function readKoreanRichText(
   imageDataUrl: string,
   signal?: AbortSignal,
   /** BYOK 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
   apiKeyOverride?: string,
+  /** luna 가 찾은 지문 안 그림들(잘라 낸 것, 읽는 차례). */
+  figures: string[] = [],
 ): Promise<{ blocks: unknown; usage?: GradeUsage; model: string }> {
   const { text, usage, model } = await callVision(
-    KOREAN_TEXT_PROMPT,
-    [imageDataUrl],
+    koreanTextPrompt(figures.length),
+    [imageDataUrl, ...figures],
     "지문 인식",
     signal,
     OPENAI_TEXT_MODEL,
@@ -747,10 +775,11 @@ export async function readKoreanRichTextWith(
   imageDataUrl: string,
   target: { model: string; effort?: string },
   signal?: AbortSignal,
+  figures: string[] = [],
 ): Promise<{ blocks: unknown; usage?: GradeUsage; model: string; raw: string }> {
   const { text, usage, model } = await callVision(
-    KOREAN_TEXT_PROMPT,
-    [imageDataUrl],
+    koreanTextPrompt(figures.length),
+    [imageDataUrl, ...figures],
     "지문 인식",
     signal,
     target.model,
@@ -775,8 +804,14 @@ export async function startKoreanTextBackground(
   imageDataUrl: string,
   model: string,
   effort?: string,
+  figures: string[] = [],
 ): Promise<string> {
-  return startVisionBackground(KOREAN_TEXT_PROMPT, imageDataUrl, model, effort);
+  return startVisionBackground(
+    koreanTextPrompt(figures.length),
+    [imageDataUrl, ...figures],
+    model,
+    effort,
+  );
 }
 
 /**
@@ -785,7 +820,8 @@ export async function startKoreanTextBackground(
  */
 export async function startVisionBackground(
   prompt: string,
-  imageDataUrl: string,
+  /** 사진 한 장 또는 여러 장(지문 + 그림들). */
+  images: string | string[],
   model: string,
   effort?: string,
 ): Promise<string> {
@@ -804,7 +840,11 @@ export async function startVisionBackground(
           role: "user",
           content: [
             { type: "input_text", text: prompt },
-            { type: "input_image", image_url: imageDataUrl, detail: "high" },
+            ...(Array.isArray(images) ? images : [images]).map((url) => ({
+              type: "input_image",
+              image_url: url,
+              detail: "high",
+            })),
           ],
         },
       ],

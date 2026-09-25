@@ -20,6 +20,8 @@ export type PassageStatus = {
    * 가리키는 자리라 빠졌는지가 눈에 보여야 한다.
    */
   marksNote?: string;
+  /** 지문 안 그림을 붙인 진행·결과(`attachPassageFigures`). */
+  figuresNote?: string;
   /** 일반 계정에 보여줄 차감 토큰. */
   chargedTokens?: number;
   /** 무제한 계정에만 보여줄 원화 추정치(막는 자리는 서버다). */
@@ -44,17 +46,27 @@ export function PassageProgress({
     <div className="flex flex-col gap-0.5 text-[11px]">
       <p
         className={
-          status.state === "running"
+          status.state === "running" && !status.figuresNote
             ? "animate-soft-pulse text-slate-500"
-            : status.state === "done"
-              ? "text-emerald-700"
-              : "text-red-600"
+            : status.state === "error"
+              ? "text-red-600"
+              : "text-emerald-700"
         }
       >
-        {status.model ?? "AI"}: {LABEL[status.state]}
+        {status.model ?? "AI"}:{" "}
+        {status.state === "running" && status.figuresNote ? "읽기 완료" : LABEL[status.state]}
       </p>
-      {status.state === "done" && status.marksNote ? (
+      {status.state !== "error" && status.marksNote ? (
         <p className="text-slate-500">{status.marksNote}</p>
+      ) : null}
+      {status.state !== "error" && status.figuresNote ? (
+        <p
+          className={
+            status.state === "running" ? "animate-soft-pulse text-slate-500" : "text-slate-500"
+          }
+        >
+          {status.figuresNote}
+        </p>
       ) : null}
       {status.state === "done" &&
         (unlimited && typeof status.costKrw === "number" ? (

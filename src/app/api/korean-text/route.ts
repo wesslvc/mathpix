@@ -21,6 +21,9 @@ export const maxDuration = 300;
  */
 const DEPOSIT = 100;
 
+/** 한 지문에 붙여 보낼 그림 수 상한. */
+const MAX_FIGURES = 8;
+
 /**
  * 국어 지문 사진을 **구조화된 글자**로 옮긴다.
  *
@@ -29,7 +32,7 @@ const DEPOSIT = 100;
  * 2026-09-25) — 예전의 "글자 먼저 읽고 참고 글로 넘기기"는 걷어냈다.
  */
 export async function POST(req: NextRequest) {
-  let body: { image?: unknown };
+  let body: { image?: unknown; figures?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -39,6 +42,12 @@ export async function POST(req: NextRequest) {
   if (!image) {
     return NextResponse.json({ error: "지문 사진이 필요합니다." }, { status: 400 });
   }
+  // luna 가 찾은 지문 안 그림들(잘라 낸 것). sol 이 그 자리를 짚는다.
+  const figures = Array.isArray(body.figures)
+    ? body.figures
+        .filter((f): f is string => typeof f === "string" && f.startsWith("data:image/"))
+        .slice(0, MAX_FIGURES)
+    : [];
 
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
@@ -100,6 +109,7 @@ export async function POST(req: NextRequest) {
       image,
       deadline.signal,
       byokApiKey ?? undefined,
+      figures,
     );
     // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
     const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
@@ -108,7 +118,7 @@ export async function POST(req: NextRequest) {
     // **요청마다 usage 를 찍는다**(`figureImageGen` 과 같은 이유 — 청구서만으로는
     // 무엇이 비용을 끌어올리는지 알 수 없다). 입력·출력을 갈라 찍는다.
     console.info(
-      `[korean-text] usage model=${model} ` +
+      `[korean-text] usage model=${model} 그림=${figures.length} ` +
         `in=${usage?.inputTokens ?? "?"} out=${usage?.outputTokens ?? "?"} ` +
         `est=${estKrw != null ? `${Math.round(estKrw)}원` : "단가미설정"} ` +
         // 무제한 계정은 차감 자체가 없어 null 이 온다 — 그대로 찍으면

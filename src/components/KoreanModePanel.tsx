@@ -19,6 +19,11 @@ import type { DiagramLayout } from "@/lib/diagramLayout";
 import type { DetectedKoreanRegion } from "@/lib/detectProblems";
 import type { ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
+import {
+  attachPassageFigures,
+  figuresForReader,
+  type PassageFigureInput,
+} from "@/lib/passageFigures";
 import { useFigureJobs } from "./FigureJobsProvider";
 import BoxEditor, { type EditBox } from "./BoxEditor";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
@@ -64,11 +69,32 @@ const PAD = 0.004;
 /** 지문 네모는 전부 이 묶음에 들어간다(그린 것이 곧 한 지문이다). */
 const PASSAGE_GROUP = "passage";
 
+/**
+ * 지문 안 **그림** 네모. 지문 단계에서 함께 그린다(luna 가 자동으로 찾아 주기도
+ * 한다). 네모마다 따로 잘라 sol 에게 알려 주고 sunburst 로 다시 그려 붙인다
+ * (`passageFigures.ts`).
+ */
+const FIGURE_GROUP = "figure";
+
 type Step = "pick" | "passage" | "questions" | "review";
 
 type Page = { id: string; file: File | null; dataUrl: string };
 
-type Piece = { id: string; kind: "passage" | "question"; crop: string; parts: number };
+type Piece = {
+  id: string;
+  kind: "passage" | "question";
+  crop: string;
+  parts: number;
+  /** 지문 안 그림들(읽는 차례). 지문 조각에만 있다. */
+  figures?: PassageFigureInput[];
+};
+
+/** 쪽마다 자동으로 찾은 결과. 지문과 문제를 **따로** 부르므로 따로 든다. */
+type Detected = {
+  passages?: DetectedKoreanRegion[];
+  figures?: ProblemBox[];
+  questions?: DetectedKoreanRegion[];
+};
 
 type Props = {
   /** 문제 하나를 저장하고 그 행 id를 돌려준다(AddProblemFlow가 준다). */
@@ -107,8 +133,10 @@ export default function KoreanModePanel({
   const [questionBoxes, setQuestionBoxes] = useState<Record<string, EditBox[]>>({});
   /** 합치기용으로 고른 묶음들. */
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  /** 자동으로 찾은 결과(쪽마다). 한 번만 부르고 두 단계가 나눠 쓴다. */
-  const detectedRef = useRef<Record<string, DetectedKoreanRegion[]>>({});
+  /** 자동으로 찾은 결과(쪽마다). 지문·문제를 따로 부르고 각자 한 번만 부른다. */
+  const detectedRef = useRef<Record<string, Detected>>({});
+  /** 지문 단계에서 새로 그리는 네모가 지문인가 그림인가. */
+  const [drawKind, setDrawKind] = useState<"passage" | "figure">("passage");
   /** 자동으로 찾은 자리를 사람이 안 건드렸으면 여유(PAD)를 준다. */
   const autoIdsRef = useRef<Set<string>>(new Set());
 
@@ -204,15 +232,24 @@ export default function KoreanModePanel({
   /**
    * 자동으로 찾아 네모를 채워 준다.
    *
-   * **사진 한 장에 한 번만 부르고 결과를 들고 있는다** — 지문 단계와 문제
-   * 단계가 같은 결과를 나눠 쓴다(따로 부르면 값이 두 배다).
+   * **지문 먼저, 문제는 따로**(2026-09-25, 사용자 지시 — "지문이랑 문제 같이
+   * 보지 말고"). 지문 단계에서는 지문 자리와 그 안의 그림 자리를, 문제 단계에서는
+   * 문제 자리만 찾는다. 문제를 찾을 때는 **지문 단계에서 정해진 네모**(사람이
+   * 고친 것까지)를 함께 보내 그 자리를 비켜 가게 한다. 쪽마다 단계마다 한 번만 부른다.
    */
   async function autoFill(kind: "passage" | "question") {
     setError(null);
     let failed = 0;
+    const byOrder = (a: { box: ProblemBox }, b: { box: ProblemBox }) => {
+      const col = (r: { box: ProblemBox }) => (r.box.x + r.box.w / 2 < 0.5 ? 0 : 1);
+      return col(a) - col(b) || a.box.y - b.box.y;
+    };
     for (const page of pages) {
-      if (detectedRef.current[page.id]) continue;
-      setBusy(`자리를 찾는 중... (${pages.indexOf(page) + 1}/${pages.length})`);
+      const cached = detectedRef.current[page.id];
+      if (kind === "passage" ? cached?.passages : cached?.questions) continue;
+      setBusy(
+        `${kind === "passage" ? "지문" : "문제"} 자리를 찾는 중... (${pages.indexOf(page) + 1}/${pages.length})`,
+      );
       let source: { img: HTMLImageElement; revoke: () => void };
       try {
         source = await openSource(page);
@@ -221,14 +258,30 @@ export default function KoreanModePanel({
         continue;
       }
       try {
+        const passagesHere = (passageBoxes[page.id] ?? [])
+          .filter((b) => b.group === PASSAGE_GROUP)
+          .map(({ x, y, w, h }) => ({ x, y, w, h }));
         const res = await fetch("/api/detect-problems", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: await detectImage(source.img), mode: "korean" }),
+          body: JSON.stringify({
+            image: await detectImage(source.img),
+            mode: kind === "passage" ? "korean-passage" : "korean-question",
+            ...(kind === "question" ? { passages: passagesHere } : {}),
+          }),
         });
-        const json = (await res.json()) as { regions?: DetectedKoreanRegion[]; error?: string };
+        const json = (await res.json()) as {
+          regions?: DetectedKoreanRegion[];
+          figures?: ProblemBox[];
+          error?: string;
+        };
         if (!res.ok) throw new Error(json.error ?? "자리 인식에 실패했습니다.");
-        detectedRef.current[page.id] = json.regions ?? [];
+        detectedRef.current[page.id] = {
+          ...cached,
+          ...(kind === "passage"
+            ? { passages: json.regions ?? [], figures: json.figures ?? [] }
+            : { questions: json.regions ?? [] }),
+        };
       } catch (err) {
         setError(err instanceof Error ? err.message : "자리 인식에 실패했습니다.");
         setBusy(null);
@@ -246,15 +299,13 @@ export default function KoreanModePanel({
 
     const next: Record<string, EditBox[]> = {};
     let any = false;
+    let figureCount = 0;
     for (const page of pages) {
-      const found = (detectedRef.current[page.id] ?? []).filter((r) => r.kind === kind);
+      const d = detectedRef.current[page.id] ?? {};
       // 읽는 차례로 늘어놓는다 — 모델이 순서를 지키지 않는 경우가 있는데,
       // 잡은 차례가 곧 문제 차례다.
-      const sorted = [...found].sort((a, b) => {
-        const col = (r: DetectedKoreanRegion) => (r.box.x + r.box.w / 2 < 0.5 ? 0 : 1);
-        return col(a) - col(b) || a.box.y - b.box.y;
-      });
-      const boxes = sorted.map((r) => ({
+      const found = [...((kind === "passage" ? d.passages : d.questions) ?? [])].sort(byOrder);
+      const boxes: EditBox[] = found.map((r) => ({
         id: crypto.randomUUID(),
         ...r.box,
         // 지문은 그린 것이 전부 한 덩어리다. 문제는 조각마다 따로 잡고
@@ -262,8 +313,16 @@ export default function KoreanModePanel({
         // 하나로 삼켜 문제가 사라진다(지면 분할에서 실제로 겪은 사고다).
         group: kind === "passage" ? PASSAGE_GROUP : crypto.randomUUID(),
       }));
+      if (kind === "passage") {
+        const figs = [...(d.figures ?? [])]
+          .map((box) => ({ box }))
+          .sort(byOrder)
+          .map(({ box }) => ({ id: crypto.randomUUID(), ...box, group: FIGURE_GROUP }));
+        figureCount += figs.length;
+        boxes.push(...figs);
+      }
       for (const b of boxes) autoIdsRef.current.add(b.id);
-      if (boxes.length > 0) any = true;
+      if (boxes.some((b) => b.group !== FIGURE_GROUP)) any = true;
       next[page.id] = boxes;
     }
     if (!any) {
@@ -274,8 +333,12 @@ export default function KoreanModePanel({
       );
       return;
     }
-    if (kind === "passage") setPassageBoxes(next);
-    else setQuestionBoxes(next);
+    if (kind === "passage") {
+      setPassageBoxes(next);
+      if (figureCount > 0) {
+        setNote(`지문 안에서 그림 ${figureCount}개를 찾았어요(주황 네모). 넣을 때 AI 로 다시 그려 붙입니다.`);
+      }
+    } else setQuestionBoxes(next);
   }
 
   /** 문제 단계의 묶음들을 **그린 차례**로 늘어놓는다. */
@@ -354,9 +417,25 @@ export default function KoreanModePanel({
         // 지문은 그린 것 전부가 한 덩어리다. 단을 넘든 쪽을 넘든 어차피 글이라
         // 이어 붙여도 티가 안 난다.
         const parts: string[] = [];
+        const figures: PassageFigureInput[] = [];
         for (const page of pages) {
-          for (const b of passageBoxes[page.id] ?? []) {
+          const list = passageBoxes[page.id] ?? [];
+          const passagesHere = list.filter((b) => b.group === PASSAGE_GROUP);
+          for (const b of passagesHere) {
             parts.push(cutBox(imgOf.get(page.id)!, b, pad(b)));
+          }
+          // 그림은 따로 잘라 둔다. 폭 비율은 그림을 품은 지문 네모에 견준다 —
+          // 조판할 때 원본과 같은 크기로 놓으려는 것이다.
+          for (const f of list.filter((b) => b.group === FIGURE_GROUP)) {
+            const cx = f.x + f.w / 2;
+            const cy = f.y + f.h / 2;
+            const host = passagesHere.find(
+              (p) => cx >= p.x && cx <= p.x + p.w && cy >= p.y && cy <= p.y + p.h,
+            );
+            figures.push({
+              crop: cutBox(imgOf.get(page.id)!, f, pad(f)),
+              scale: host ? Math.min(1, Math.max(0.15, f.w / host.w)) : 0.8,
+            });
           }
         }
         if (parts.length > 0) {
@@ -365,6 +444,7 @@ export default function KoreanModePanel({
             kind: "passage",
             crop: await stitchVertically(parts),
             parts: parts.length,
+            figures,
           });
         }
       }
@@ -452,14 +532,18 @@ export default function KoreanModePanel({
    * 실패하면 `undefined` 를 돌려준다 — 그때는 예전처럼 오려낸 사진으로
    * 저장된다(아무것도 못 하는 것보다 낫다).
    */
-  async function readPassageBlocks(crop: string) {
+  async function readPassageBlocks(crop: string, figures: PassageFigureInput[] = []) {
     setBusy("지문을 글자로 옮기는 중... (평가원 글꼴로 조판됩니다)");
     setPassageStatus({ state: "running" });
     try {
       const res = await fetch("/api/korean-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await enhanceContrast(crop) }),
+        body: JSON.stringify({
+          image: await enhanceContrast(crop),
+          // luna 가 찾은 그림들 — sol 이 지문의 어디에 들어가는지 짚는다.
+          figures: await figuresForReader(figures),
+        }),
       });
       const json = (await res.json()) as {
         blocks?: unknown;
@@ -472,16 +556,33 @@ export default function KoreanModePanel({
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
       // 모델은 문단마다 글 전체와 서식 구간(`marks`)을 준다 — 여기서 토막으로 바꾼다.
       const stats = emptyMarkStats();
-      const blocks = readRichBlocks(json.blocks, 0, stats);
-      if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      setPassageStatus({
+      const read = readRichBlocks(json.blocks, 0, stats);
+      if (read.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
+      const base: PassageStatus = {
         state: "done",
         marksNote: describeMarks(stats),
         model: json.model,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
+      };
+      if (figures.length === 0) {
+        setPassageStatus(base);
+        return read;
+      }
+      // sol 이 짚은 자리에 그림을 sunburst 로 다시 그려 붙인다.
+      setPassageStatus({ ...base, state: "running", figuresNote: "그림을 붙이는 중…" });
+      const attached = await attachPassageFigures(read, figures, (t) => {
+        setBusy(t);
+        setPassageStatus({ ...base, state: "running", figuresNote: t });
       });
-      return blocks;
+      setPassageStatus({
+        ...base,
+        figuresNote: attached.note,
+        chargedTokens: (base.chargedTokens ?? 0) + attached.tokens || base.chargedTokens,
+        costKrw:
+          typeof base.costKrw === "number" ? base.costKrw + attached.krw : base.costKrw,
+      });
+      return attached.blocks;
     } catch (err) {
       const message =
         (err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.") +
@@ -518,7 +619,7 @@ export default function KoreanModePanel({
 
         const blocks =
           regenerate && !noPassage && piece.kind === "passage"
-            ? await readPassageBlocks(piece.crop)
+            ? await readPassageBlocks(piece.crop, piece.figures)
             : undefined;
         if (blocks) textified = true;
         setBusy(`넣는 중... (${done + 1}/${pieces.length})`);
@@ -595,7 +696,14 @@ export default function KoreanModePanel({
 
   const groups = step === "questions" ? questionGroups() : [];
   const groupNo = new Map(groups.map((g, i) => [g.group, i + 1] as const));
-  const passageCount = pages.reduce((n, p) => n + (passageBoxes[p.id]?.length ?? 0), 0);
+  const passageCount = pages.reduce(
+    (n, p) => n + (passageBoxes[p.id]?.filter((b) => b.group === PASSAGE_GROUP).length ?? 0),
+    0,
+  );
+  const figureCount = pages.reduce(
+    (n, p) => n + (passageBoxes[p.id]?.filter((b) => b.group === FIGURE_GROUP).length ?? 0),
+    0,
+  );
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
@@ -681,6 +789,8 @@ export default function KoreanModePanel({
               <>
                 지문을 감싸는 네모를 그리세요. 단이나 쪽을 넘어가면 조각마다
                 그리면 됩니다 — <b>그린 것 전부가 한 지문</b>으로 이어 붙습니다.
+                지문 안에 <b>그림</b>(도표·삽화·그래프)이 있으면 &quot;그림&quot;으로
+                바꿔 따로 감싸세요 — 넣을 때 AI 로 다시 그려 그 자리에 붙입니다.
               </>
             ) : (
               <>
@@ -690,6 +800,28 @@ export default function KoreanModePanel({
               </>
             )}
           </p>
+
+          {step === "passage" && (
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-slate-500">새로 그리는 네모:</span>
+              {(["passage", "figure"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setDrawKind(k)}
+                  className={`rounded-lg border px-2 py-1 ${
+                    drawKind === k
+                      ? k === "passage"
+                        ? "border-emerald-600 bg-emerald-600 text-white"
+                        : "border-orange-500 bg-orange-500 text-white"
+                      : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {k === "passage" ? "지문" : "그림"}
+                </button>
+              ))}
+            </div>
+          )}
 
           {pages.map((page, i) => (
             <div key={page.id} className="flex flex-col gap-1">
@@ -705,10 +837,21 @@ export default function KoreanModePanel({
                     : setQuestionBoxes((prev) => ({ ...prev, [page.id]: next }))
                 }
                 color={step === "passage" ? "#059669" : "#2563eb"}
-                newGroup={step === "passage" ? PASSAGE_GROUP : undefined}
+                colorOf={
+                  step === "passage"
+                    ? (g) => (g === FIGURE_GROUP ? "#f97316" : "#059669")
+                    : undefined
+                }
+                newGroup={
+                  step === "passage"
+                    ? drawKind === "figure"
+                      ? FIGURE_GROUP
+                      : PASSAGE_GROUP
+                    : undefined
+                }
                 labelOf={
                   step === "passage"
-                    ? () => "지문"
+                    ? (g) => (g === FIGURE_GROUP ? "그림" : "지문")
                     : (g) => {
                         const n = groupNo.get(g);
                         const size = groups.find((x) => x.group === g)?.boxes.length ?? 1;
@@ -761,7 +904,9 @@ export default function KoreanModePanel({
               </>
             )}
             <span className="text-xs text-slate-400">
-              {step === "passage" ? `조각 ${passageCount}개` : `문항 ${groups.length}개`}
+              {step === "passage"
+                ? `조각 ${passageCount}개${figureCount ? ` · 그림 ${figureCount}개` : ""}`
+                : `문항 ${groups.length}개`}
               {!unlimited && " · 자동 찾기는 무제한 계정 전용"}
             </span>
           </div>
@@ -846,6 +991,7 @@ export default function KoreanModePanel({
                 <p className="mt-1 text-center text-xs text-slate-500">
                   {p.kind === "passage" ? "지문" : `${i + (noPassage ? 1 : 0)}번째 문제`}
                   {p.parts > 1 && ` · ${p.parts}조각 합침`}
+                  {p.figures?.length ? ` · 그림 ${p.figures.length}개` : ""}
                 </p>
               </div>
             ))}
@@ -878,7 +1024,11 @@ export default function KoreanModePanel({
               {typeof figureCost === "number" &&
                 !unlimited &&
                 !byok &&
-                ` (${figureCost * pieces.length}토큰)`}
+                ` (${
+                  figureCost *
+                  (pieces.length +
+                    pieces.reduce((n, p) => n + (p.figures?.length ?? 0), 0))
+                }토큰)`}
             </button>
           </div>
         </div>

@@ -8,16 +8,15 @@ import {
   startKoreanTextBackground,
   startVisionBackground,
 } from "@/lib/gradeExam";
-import {
-  KOREAN_POLYGON_PROMPT,
-  KOREAN_PROMPT,
-  parseKorean,
-  parseKoreanPolygons,
-} from "@/lib/detectProblems";
+import { KOREAN_PASSAGE_PROMPT, parseKoreanPassages } from "@/lib/detectProblems";
 
-/** 위치 찾기 결과를 모양에 맞게 읽는다. 네모는 `regions`, 다각형은 `polygons`. */
-function readDetect(text: string, polygon: boolean) {
-  return polygon ? { polygons: parseKoreanPolygons(text) } : { regions: parseKorean(text) };
+/**
+ * 위치 찾기 결과를 읽는다 — 운영 국어 모드의 **지문 찾기**와 같다(지문 자리 +
+ * 지문 안 그림 자리). 문제는 따로 찾으므로 여기서는 안 본다.
+ */
+function readDetect(text: string) {
+  const { passages, figures } = parseKoreanPassages(text);
+  return { regions: passages, figures };
 }
 import { gradingEstKrw } from "@/lib/tokens";
 
@@ -35,7 +34,7 @@ export const maxDuration = 300;
  *
  * `task` 가 둘이다 — `read`(지문 옮겨 적기, 기본 · OpenAI 만)와 `detect`(지면에서 지문·문제
  * 위치 찾기). `detect` 는 운영 국어 모드의 자동 찾기와 **같은 프롬프트**
- * (`KOREAN_PROMPT`)·같은 해석(`parseKorean`)을 쓰고 모델만 바꿔 본다.
+ * (`KOREAN_PASSAGE_PROMPT`, 지문 + 지문 안 그림)·같은 해석(`parseKoreanPassages`)을 쓰고 모델만 바꿔 본다.
  *
  * 무제한 계정만 쓴다(`requireFontAdmin`). 시험용이라 토큰을 차감하지 않는다.
  * 모델 이름은 모양만 확인한다 — 이름을 지어내지 않고, 화면에 적힌 것(=확인해
@@ -51,7 +50,7 @@ export async function POST(req: NextRequest) {
     model?: unknown;
     effort?: unknown;
     task?: unknown;
-    shape?: unknown;
+    figures?: unknown;
   };
   try {
     body = await req.json();
@@ -72,8 +71,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "effort 값이 이상합니다." }, { status: 400 });
   }
   const detect = body.task === "detect";
-  const polygon = body.shape === "polygon";
-  const detectPrompt = polygon ? KOREAN_POLYGON_PROMPT : KOREAN_PROMPT;
+  const detectPrompt = KOREAN_PASSAGE_PROMPT;
+  // luna 가 찾은 지문 안 그림들(잘라 낸 것) — sol 이 자리를 짚는다(운영과 같다).
+  const figures = Array.isArray(body.figures)
+    ? body.figures
+        .filter((f): f is string => typeof f === "string" && f.startsWith("data:image/"))
+        .slice(0, 8)
+    : [];
 
   if (detect && provider === "openai") {
     try {
@@ -94,7 +98,7 @@ export async function POST(req: NextRequest) {
       const out = await callGeminiJson(detectPrompt, image, model);
       const ms = Date.now() - t0;
       return NextResponse.json({
-        ...readDetect(out.text, polygon),
+        ...readDetect(out.text),
         usage: out.usage,
         model: out.model,
         estKrw: out.usage ? (gradingEstKrw(out.usage, out.model) ?? null) : null,
@@ -116,7 +120,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "지문 읽기는 OpenAI 모델만 견줍니다." }, { status: 400 });
   }
   try {
-    const jobId = await startKoreanTextBackground(image, model, effort || undefined);
+    const jobId = await startKoreanTextBackground(image, model, effort || undefined, figures);
     console.info(`[compare-korean] 백그라운드 시작 model=${model} effort=${effort || "-"} id=${jobId}`);
     return NextResponse.json({ jobId });
   } catch (err) {
@@ -143,7 +147,7 @@ export async function GET(req: NextRequest) {
       try {
         return NextResponse.json({
           status: "done",
-          ...readDetect(poll.text, req.nextUrl.searchParams.get("shape") === "polygon"),
+          ...readDetect(poll.text),
           usage: poll.usage,
           model: poll.model,
           estKrw: poll.usage ? (gradingEstKrw(poll.usage, poll.model) ?? null) : null,

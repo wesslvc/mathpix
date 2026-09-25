@@ -257,11 +257,17 @@ export function flowBlocks(
     const inset = left - columns[baseCol].x;
 
     if (block.kind === "figure") {
-      const h = width * block.ratio;
+      // 원본 지면에서 잰 폭 비율(`scale`)대로 줄여 가운데에 놓는다. 단보다 길면
+      // 단 높이에 맞춰 더 줄인다(한 단에 통째로 안 들어가는 그림은 없어야 한다).
+      const colH = columns[col].bottom - columns[col].top;
+      let w = width * (block.scale ?? 1);
+      if (w * block.ratio > colH) w = colH / block.ratio;
+      const h = w * block.ratio;
       if (y + h > columns[col].bottom && !(y === columns[col].top)) {
         if (!nextColumn()) return block;
       }
-      results[col].items.push({ kind: "figure", id: block.id, x: columns[col].x + inset, y, w: width, h });
+      const x = columns[col].x + inset + (width - w) / 2;
+      results[col].items.push({ kind: "figure", id: block.id, x, y, w, h });
       y += h + style.paraGap;
       return null;
     }

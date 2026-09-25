@@ -22,6 +22,11 @@ import { parseProblemNumber } from "@/lib/problemNumber";
 import { sortByProblemNumber } from "@/lib/problemOrder";
 import type { KoreanMeta } from "@/lib/koreanSet";
 import { describeMarks, emptyMarkStats, readRichBlocks, type RichBlock } from "@/lib/kice/richText";
+import {
+  attachPassageFigures,
+  existingPassageFigures,
+  figuresForReader,
+} from "@/lib/passageFigures";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
@@ -412,16 +417,23 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
    * (`/api/korean-text`, 글자와 서식 구간을 함께 읽는다). **이미지 재생성이
    * 아니다** — 글자를 다시 읽어 구조화된 블록을 돌려주고, 그걸로 평가원 글꼴
    * 조판을 다시 만든다. 진행 상황과 비용은 `PassageProgress` 로 보여 준다.
+   *
+   * **이미 붙어 있던 지문 그림은 지킨다** — sol 에게 다시 알려 주어 자리만 새로
+   * 짚게 하고, 그림은 다시 그리지 않고 그대로 붙인다(돈이 안 든다).
    */
   async function reReadPassage(crop: string) {
     setPassageBusy(true);
     setEditError(null);
     setPassageStatus({ state: "running" });
+    const figures = existingPassageFigures(editKoreanBlocks ?? editing?.korean?.blocks);
     try {
       const res = await fetch("/api/korean-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await enhanceContrast(crop) }),
+        body: JSON.stringify({
+          image: await enhanceContrast(crop),
+          figures: await figuresForReader(figures),
+        }),
       });
       const json = (await res.json()) as {
         blocks?: unknown;
@@ -434,12 +446,14 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
       // KoreanModePanel 과 같은 규칙 — 두 경로가 달라지면 안 된다.
       const stats = emptyMarkStats();
-      const blocks = readRichBlocks(json.blocks, 0, stats);
-      if (blocks.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      setEditKoreanBlocks(blocks);
+      const read = readRichBlocks(json.blocks, 0, stats);
+      if (read.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
+      const attached = await attachPassageFigures(read, figures);
+      setEditKoreanBlocks(attached.blocks);
       setPassageStatus({
         state: "done",
         marksNote: describeMarks(stats),
+        figuresNote: attached.note,
         model: json.model,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
