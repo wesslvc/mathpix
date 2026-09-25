@@ -2812,6 +2812,13 @@ latest 로 바꿔 봐 ... flash 써 보고 안 되면 테라로 넘어가게")
   빼고 성공해 버려 고른 강도로 돈 것처럼 보인다.
 - Gemini 의 생각 토큰(`thoughtsTokenCount`)을 이제 출력에 더한다(출력 단가로
   청구된다). 비교 호출은 출력 상한을 65536 으로 둔다 — 생각 토큰도 상한에 든다.
+- **OpenAI 는 백그라운드로 건다**(`startKoreanTextBackground` /
+  `pollKoreanTextBackground`). gpt-6-luna **max** 로 지문 한 편을 읽혔더니 285초
+  안에 안 끝나 우리 마감에 걸려 504 로 끝났다(운영 로그). Vercel 함수 한도가
+  300초라 기다리는 방식으로는 못 받는다 — Responses API `background: true` 로
+  걸고 화면이 4초마다 `GET ?id=` 로 물어본다(30분까지).
+- 첫 실행에서 `gemini-3.8-flash` 는 **503**(자리 없음)이었다 — 429(분당 한도)가
+  아니다. 재시도 두 번 뒤에도 같았다.
 
 #### 단가는 모델마다 다르다 — 한 쌍으로 뭉뚱그리면 안 된다
 
