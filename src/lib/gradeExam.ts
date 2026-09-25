@@ -10,6 +10,7 @@
  */
 
 import { OPENAI_DETECT_MODEL } from "./detectProblems";
+import { marksReviewPrompt, parseMarksReview, type MarksReviewPara } from "./kice/marksReview";
 import type { GradedItem, GradeSlot, Subject } from "./gradeSummary";
 
 export type { Subject, GradedItem, GradeSlot } from "./gradeSummary";
@@ -765,6 +766,39 @@ export async function readKoreanRichText(
     OPENAI_TEXT_EFFORT,
   );
   return { blocks: parseBlocks(text), usage, model };
+}
+
+/**
+ * **서식 검수 — 두 번째 호출**(`marksReview.ts` 주석 참고). 글자는 이미 읽었으니
+ * 원문자·굵게·밑줄·네모만 다시 본다. 사진은 전체 한 장 + 확대한 가로 띠들이다.
+ *
+ * 모델·강도는 `OPENAI_MARKS_MODEL` / `OPENAI_MARKS_EFFORT`(비우면 지문 인식과 같은
+ * 값). 재배포 없이 바꾼다 — 서식만 보는 일이라 강도를 따로 올려 볼 수 있게 열어 뒀다.
+ */
+export const OPENAI_MARKS_MODEL = process.env.OPENAI_MARKS_MODEL?.trim() || OPENAI_TEXT_MODEL;
+const MARKS_EFFORT_ENV = process.env.OPENAI_MARKS_EFFORT?.trim();
+export const OPENAI_MARKS_EFFORT: string | undefined =
+  MARKS_EFFORT_ENV === "default" ? undefined : (MARKS_EFFORT_ENV || OPENAI_TEXT_EFFORT);
+
+export async function readKoreanMarks(
+  images: string[],
+  paragraphs: string[],
+  signal?: AbortSignal,
+  apiKeyOverride?: string,
+  target: { model?: string; effort?: string } = {},
+): Promise<{ review: MarksReviewPara[]; usage?: GradeUsage; model: string }> {
+  const { text, usage, model } = await callVision(
+    marksReviewPrompt(paragraphs),
+    images,
+    "서식 검수",
+    signal,
+    target.model ?? OPENAI_MARKS_MODEL,
+    apiKeyOverride,
+    target.model ? target.effort : OPENAI_MARKS_EFFORT,
+  );
+  const review = parseMarksReview(text);
+  if (review.length === 0) throw new GradeError("서식 검수 결과를 읽지 못했습니다.", 502);
+  return { review, usage, model };
 }
 
 /**

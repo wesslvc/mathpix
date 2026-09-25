@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GradeError, readKoreanRichText } from "@/lib/gradeExam";
+import { GradeError, readKoreanMarks, readKoreanRichText } from "@/lib/gradeExam";
 import { gradingEstKrw } from "@/lib/tokens";
 import { startGradingBilling } from "@/lib/gradingBilling";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -21,6 +21,13 @@ export const maxDuration = 300;
  */
 const DEPOSIT = 100;
 
+/**
+ * 서식 검수(`task: "marks"`, 두 번째 호출)의 보증금. **실사용량으로 정산**한다 —
+ * 글자는 이미 읽었고 서식만 다시 보는 일이라 지문 인식보다 훨씬 싸다(띠 사진
+ * 몇 장 + 짧은 JSON). 남으면 돌려주고 모자라면 더 받는다.
+ */
+const MARKS_DEPOSIT = 30;
+
 /** 한 지문에 붙여 보낼 그림 수 상한. */
 const MAX_FIGURES = 8;
 
@@ -32,7 +39,13 @@ const MAX_FIGURES = 8;
  * 2026-09-25) — 예전의 "글자 먼저 읽고 참고 글로 넘기기"는 걷어냈다.
  */
 export async function POST(req: NextRequest) {
-  let body: { image?: unknown; figures?: unknown };
+  let body: {
+    image?: unknown;
+    figures?: unknown;
+    task?: unknown;
+    strips?: unknown;
+    paragraphs?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -41,6 +54,22 @@ export async function POST(req: NextRequest) {
   const image = typeof body.image === "string" ? body.image : "";
   if (!image) {
     return NextResponse.json({ error: "지문 사진이 필요합니다." }, { status: 400 });
+  }
+  const marks = body.task === "marks";
+  // 서식 검수: 확대한 가로 띠들과 첫 번째 호출이 읽은 문단 글.
+  const strips = Array.isArray(body.strips)
+    ? body.strips
+        .filter((f): f is string => typeof f === "string" && f.startsWith("data:image/"))
+        .slice(0, 8)
+    : [];
+  const paragraphs = Array.isArray(body.paragraphs)
+    ? body.paragraphs
+        .filter((t): t is string => typeof t === "string")
+        .slice(0, 300)
+        .map((t) => t.slice(0, 4000))
+    : [];
+  if (marks && paragraphs.length === 0) {
+    return NextResponse.json({ error: "검수할 문단이 없습니다." }, { status: 400 });
   }
   // luna 가 찾은 지문 안 그림들(잘라 낸 것). sol 이 그 자리를 짚는다.
   const figures = Array.isArray(body.figures)
@@ -83,9 +112,9 @@ export async function POST(req: NextRequest) {
     billing = await startGradingBilling(supabase, {
       unlimited,
       byok,
-      deposit: DEPOSIT,
-      label: "api/korean-text",
-      flat: true,
+      deposit: marks ? MARKS_DEPOSIT : DEPOSIT,
+      label: marks ? "api/korean-text:marks" : "api/korean-text",
+      flat: !marks,
     });
   } catch (err) {
     return NextResponse.json(
@@ -96,7 +125,7 @@ export async function POST(req: NextRequest) {
   if (!billing) {
     return NextResponse.json(
       {
-        error: `토큰이 부족해요. 지문 인식에는 최소 ${DEPOSIT}토큰이 필요합니다.`,
+        error: `토큰이 부족해요. ${marks ? "서식 검수" : "지문 인식"}에는 최소 ${marks ? MARKS_DEPOSIT : DEPOSIT}토큰이 필요합니다.`,
       },
       { status: 402 },
     );
@@ -105,6 +134,28 @@ export async function POST(req: NextRequest) {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), (maxDuration - 15) * 1000);
   try {
+    if (marks) {
+      const { review, usage, model } = await readKoreanMarks(
+        [image, ...strips],
+        paragraphs,
+        deadline.signal,
+        byokApiKey ?? undefined,
+      );
+      const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
+      const chargedTokens = await billing.settle(estKrw);
+      console.info(
+        `[korean-text] marks model=${model} 띠=${strips.length} 문단=${paragraphs.length} ` +
+          `in=${usage?.inputTokens ?? "?"} out=${usage?.outputTokens ?? "?"} ` +
+          `est=${estKrw != null ? `${Math.round(estKrw)}원` : "단가미설정"} ` +
+          `차감=${chargedTokens == null ? "없음(무제한)" : `${chargedTokens}토큰`}`,
+      );
+      return NextResponse.json({
+        review,
+        usage: (unlimited || byok) && usage ? { ...usage, estKrw } : undefined,
+        chargedTokens,
+        model,
+      });
+    }
     const { blocks, usage, model } = await readKoreanRichText(
       image,
       deadline.signal,

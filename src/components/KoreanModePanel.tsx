@@ -24,6 +24,8 @@ import {
   figuresForReader,
   type PassageFigureInput,
 } from "@/lib/passageFigures";
+import { reviewPassageMarks } from "@/lib/passageMarks";
+import { applyMarksReview } from "@/lib/kice/marksReview";
 import { useFigureJobs } from "./FigureJobsProvider";
 import BoxEditor, { type EditBox } from "./BoxEditor";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
@@ -565,24 +567,48 @@ export default function KoreanModePanel({
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,
       };
-      if (figures.length === 0) {
-        setPassageStatus(base);
-        return read;
-      }
-      // sol 이 짚은 자리에 그림을 sunburst 로 다시 그려 붙인다.
-      setPassageStatus({ ...base, state: "running", figuresNote: "그림을 붙이는 중…" });
-      const attached = await attachPassageFigures(read, figures, (t) => {
-        setBusy(t);
-        setPassageStatus({ ...base, state: "running", figuresNote: t });
-      });
+      // **서식 검수**(두 번째 호출)와 **그림 붙이기**를 함께 돌린다 — 서로 기다릴
+      // 이유가 없다. 검수는 문단의 서식·원문자만, 그림은 figure 블록만 건드린다.
+      const running = { ...base, state: "running" as const };
+      const notes = { marks: "서식(원문자·밑줄·네모·굵게) 검수 중…", figures: "" };
+      const show = () =>
+        setPassageStatus({
+          ...running,
+          marksNote: notes.marks,
+          figuresNote: notes.figures || undefined,
+        });
+      if (figures.length > 0) notes.figures = "그림을 붙이는 중…";
+      show();
+      setBusy("서식을 검수하는 중...");
+      const [reviewed, attached] = await Promise.all([
+        reviewPassageMarks(await enhanceContrast(crop), read).then((r) => {
+          notes.marks = r.ok ? "서식 검수 완료 — 그림을 기다리는 중…" : r.note;
+          show();
+          return r;
+        }),
+        figures.length > 0
+          ? attachPassageFigures(read, figures, (t) => {
+              notes.figures = t;
+              show();
+            })
+          : Promise.resolve(null),
+      ]);
+      const withFigures = attached?.blocks ?? read;
+      const final = reviewed.review
+        ? applyMarksReview(withFigures, reviewed.review).blocks
+        : withFigures;
+      const extraTokens = (reviewed.chargedTokens ?? 0) + (attached?.tokens ?? 0);
+      const extraKrw = (reviewed.costKrw ?? 0) + (attached?.krw ?? 0);
       setPassageStatus({
         ...base,
-        figuresNote: attached.note,
-        chargedTokens: (base.chargedTokens ?? 0) + attached.tokens || base.chargedTokens,
-        costKrw:
-          typeof base.costKrw === "number" ? base.costKrw + attached.krw : base.costKrw,
+        // 검수에 실패했으면 첫 결과의 서식 요약을 그대로 둔다.
+        marksNote: reviewed.ok ? reviewed.note : `${reviewed.note} · ${base.marksNote ?? ""}`,
+        figuresNote: attached?.note || undefined,
+        chargedTokens:
+          typeof base.chargedTokens === "number" ? base.chargedTokens + extraTokens : undefined,
+        costKrw: typeof base.costKrw === "number" ? base.costKrw + extraKrw : undefined,
       });
-      return attached.blocks;
+      return final;
     } catch (err) {
       const message =
         (err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.") +

@@ -27,6 +27,8 @@ import {
   existingPassageFigures,
   figuresForReader,
 } from "@/lib/passageFigures";
+import { reviewPassageMarks } from "@/lib/passageMarks";
+import { applyMarksReview } from "@/lib/kice/marksReview";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
@@ -448,15 +450,33 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       const stats = emptyMarkStats();
       const read = readRichBlocks(json.blocks, 0, stats);
       if (read.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      const attached = await attachPassageFigures(read, figures);
-      setEditKoreanBlocks(attached.blocks);
+      // 서식 검수(두 번째 호출)와 그림 붙이기를 함께 — KoreanModePanel 과 같다.
+      setPassageStatus({
+        state: "running",
+        model: json.model,
+        marksNote: "서식(원문자·밑줄·네모·굵게) 검수 중…",
+      });
+      const [reviewed, attached] = await Promise.all([
+        reviewPassageMarks(await enhanceContrast(crop), read),
+        attachPassageFigures(read, figures),
+      ]);
+      const final = reviewed.review
+        ? applyMarksReview(attached.blocks, reviewed.review).blocks
+        : attached.blocks;
+      setEditKoreanBlocks(final);
       setPassageStatus({
         state: "done",
-        marksNote: describeMarks(stats),
-        figuresNote: attached.note,
+        marksNote: reviewed.ok ? reviewed.note : `${reviewed.note} · ${describeMarks(stats)}`,
+        figuresNote: attached.note || undefined,
         model: json.model,
-        chargedTokens: json.chargedTokens,
-        costKrw: json.usage?.estKrw,
+        chargedTokens:
+          typeof json.chargedTokens === "number"
+            ? json.chargedTokens + (reviewed.chargedTokens ?? 0) + attached.tokens
+            : undefined,
+        costKrw:
+          typeof json.usage?.estKrw === "number"
+            ? json.usage.estKrw + (reviewed.costKrw ?? 0) + attached.krw
+            : undefined,
       });
     } catch (err) {
       const message =

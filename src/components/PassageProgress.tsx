@@ -46,7 +46,7 @@ export function PassageProgress({
     <div className="flex flex-col gap-0.5 text-[11px]">
       <p
         className={
-          status.state === "running" && !status.figuresNote
+          status.state === "running" && !status.figuresNote && !status.marksNote
             ? "animate-soft-pulse text-slate-500"
             : status.state === "error"
               ? "text-red-600"
@@ -54,10 +54,18 @@ export function PassageProgress({
         }
       >
         {status.model ?? "AI"}:{" "}
-        {status.state === "running" && status.figuresNote ? "읽기 완료" : LABEL[status.state]}
+        {status.state === "running" && (status.figuresNote || status.marksNote)
+          ? "읽기 완료"
+          : LABEL[status.state]}
       </p>
       {status.state !== "error" && status.marksNote ? (
-        <p className="text-slate-500">{status.marksNote}</p>
+        <p
+          className={
+            status.state === "running" ? "animate-soft-pulse text-slate-500" : "text-slate-500"
+          }
+        >
+          {status.marksNote}
+        </p>
       ) : null}
       {status.state !== "error" && status.figuresNote ? (
         <p

@@ -49,6 +49,13 @@ export type Measure = (text: string, size: number, bold: boolean) => number;
 /** 한 줄에 놓인 토막 하나. `dx` 는 줄 왼쪽 끝에서의 거리. */
 export type FlowPiece = { t: string; dx: number; w: number; b?: boolean; u?: boolean; sq?: boolean };
 
+/**
+ * 네모(`sq`) 토막 양옆에 비워 두는 자리(글자 크기 대비). 예전에는 자리를 안 비우고
+ * 네모만 조금 넓게 그려서 **네모가 옆 글자에 닿았다**(실제 PDF 로 확인). 실제
+ * 문제지도 네모 친 말 양옆이 살짝 벌어져 있다. 그리는 쪽(`pdf.ts`)은 이 안에 네모를 긋는다.
+ */
+export const SQ_PAD = 0.18;
+
 export type FlowItem =
   | { kind: "line"; x: number; y: number; size: number; pieces: FlowPiece[] }
   /**
@@ -102,7 +109,7 @@ function breakRuns(
         ...(run.u ? { u: true } : {}),
         ...(run.sq ? { sq: true } : {}),
       });
-      used += measure(buf, size, run.b === true);
+      used += measure(buf, size, run.b === true) + (run.sq ? 2 * SQ_PAD * size : 0);
       buf = "";
     };
 
@@ -122,7 +129,8 @@ function breakRuns(
       }
       const w = measure(ch, size, run.b === true);
       const next = chars[i + 1] ?? "";
-      if (used + measure(buf, size, run.b === true) + w > limit && (buf || line.length)) {
+      const sqPad = run.sq ? 2 * SQ_PAD * size : 0;
+      if (used + measure(buf, size, run.b === true) + w + sqPad > limit && (buf || line.length)) {
         // 닫는 부호는 줄 첫머리에 올 수 없다 — 한 글자 더 넣어 매달아 둔다.
         if (NO_LINE_START.includes(ch)) {
           buf += ch;
@@ -183,6 +191,7 @@ function placeLine(
   let dx = indent;
   for (const c of chunks) {
     const w = measure(c.t, size, c.b === true);
+    if (c.sq) dx += SQ_PAD * size;
     pieces.push({
       t: c.t,
       dx,
@@ -191,7 +200,7 @@ function placeLine(
       ...(c.u ? { u: true } : {}),
       ...(c.sq ? { sq: true } : {}),
     });
-    dx += w;
+    dx += w + (c.sq ? SQ_PAD * size : 0);
   }
   if (center != null && dx < center) {
     const shift = (center - dx) / 2;

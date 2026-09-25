@@ -9,6 +9,7 @@ import {
   startVisionBackground,
 } from "@/lib/gradeExam";
 import { KOREAN_PASSAGE_PROMPT, parseKoreanPassages } from "@/lib/detectProblems";
+import { marksReviewPrompt, parseMarksReview } from "@/lib/kice/marksReview";
 
 /**
  * 위치 찾기 결과를 읽는다 — 운영 국어 모드의 **지문 찾기**와 같다(지문 자리 +
@@ -51,6 +52,8 @@ export async function POST(req: NextRequest) {
     effort?: unknown;
     task?: unknown;
     figures?: unknown;
+    strips?: unknown;
+    paragraphs?: unknown;
   };
   try {
     body = await req.json();
@@ -71,6 +74,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "effort 값이 이상합니다." }, { status: 400 });
   }
   const detect = body.task === "detect";
+  // **서식 검수**(두 번째 호출) — 운영과 같은 프롬프트, 칸의 모델·강도로.
+  if (body.task === "marks") {
+    const strips = Array.isArray(body.strips)
+      ? body.strips.filter((f): f is string => typeof f === "string" && f.startsWith("data:image/")).slice(0, 8)
+      : [];
+    const paragraphs = Array.isArray(body.paragraphs)
+      ? body.paragraphs.filter((t): t is string => typeof t === "string").slice(0, 300)
+      : [];
+    if (paragraphs.length === 0) {
+      return NextResponse.json({ error: "검수할 문단이 없습니다." }, { status: 400 });
+    }
+    try {
+      const jobId = await startVisionBackground(
+        marksReviewPrompt(paragraphs),
+        [image, ...strips],
+        model,
+        effort || undefined,
+      );
+      return NextResponse.json({ jobId });
+    } catch (err) {
+      const status = err instanceof GradeError ? err.status : 500;
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "서식 검수를 시작하지 못했습니다." },
+        { status: status >= 400 && status < 600 ? status : 500 },
+      );
+    }
+  }
   const detectPrompt = KOREAN_PASSAGE_PROMPT;
   // luna 가 찾은 지문 안 그림들(잘라 낸 것) — sol 이 자리를 짚는다(운영과 같다).
   const figures = Array.isArray(body.figures)
@@ -141,6 +171,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "id 가 이상합니다." }, { status: 400 });
   }
   try {
+    if (req.nextUrl.searchParams.get("task") === "marks") {
+      const poll = await pollVisionBackground(id);
+      if (poll.status !== "done") return NextResponse.json(poll);
+      const review = parseMarksReview(poll.text);
+      if (review.length === 0) {
+        return NextResponse.json({ status: "error", message: "서식 검수 결과를 읽지 못했습니다." });
+      }
+      return NextResponse.json({
+        status: "done",
+        review,
+        usage: poll.usage,
+        model: poll.model,
+        estKrw: poll.usage ? (gradingEstKrw(poll.usage, poll.model) ?? null) : null,
+      });
+    }
     if (req.nextUrl.searchParams.get("task") === "detect") {
       const poll = await pollVisionBackground(id);
       if (poll.status !== "done") return NextResponse.json(poll);

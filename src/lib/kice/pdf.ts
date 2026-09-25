@@ -1011,10 +1011,11 @@ async function drawFlow(
       if (piece.sq) {
         // 밑줄과 같은 용도로 쓰이는 작은 네모 — 글자 잉크가 아니라 대략의
         // 오름/내림 폭으로 그린다(정확한 글리프 경계일 필요는 없다).
-        const bx0 = x - it.size * 0.06;
-        const bx1 = x + piece.w + it.size * 0.06;
-        const by0 = baseline - it.size * 0.22;
-        const by1 = baseline + it.size * 0.82;
+        // 조판이 양옆에 `SQ_PAD` 만큼 자리를 비워 두었다 — 그 안쪽에 긋는다.
+        const bx0 = x - it.size * 0.12;
+        const bx1 = x + piece.w + it.size * 0.12;
+        const by0 = baseline - it.size * 0.26;
+        const by1 = baseline + it.size * 0.9;
         const rectLine = (ax: number, ay: number, bx: number, by: number) =>
           page.drawLine({
             start: { x: ax, y: ay },

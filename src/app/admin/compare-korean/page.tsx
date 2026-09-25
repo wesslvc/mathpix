@@ -20,6 +20,13 @@ import {
   figuresForReader,
   type PassageFigureInput,
 } from "@/lib/passageFigures";
+import { passageStrips } from "@/lib/passageMarks";
+import {
+  applyMarksReview,
+  describeMarksReview,
+  reviewParagraphs,
+  type MarksReviewPara,
+} from "@/lib/kice/marksReview";
 import { buildKicePdf } from "@/lib/kice/pdf";
 import { frameKeyFor, loadFrameImages, loadKiceFrames } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
@@ -62,7 +69,7 @@ const DEFAULT_READERS: Reader[] = [
 
 type Result =
   | { state: "idle" }
-  | { state: "running"; since: number }
+  | { state: "running"; since: number; note?: string }
   | {
       state: "done";
       blocks: RichBlock[];
@@ -75,6 +82,11 @@ type Result =
       marksNote: string;
       /** 그림을 붙인 결과(`attachPassageFigures`). */
       figuresNote: string;
+      /** 서식 검수(두 번째 호출) 결과 한 줄. 끄면 빈 글자. */
+      reviewNote: string;
+      /** 검수에 든 시간(ms)·원가. */
+      reviewMs?: number;
+      reviewKrw?: number | null;
       /** 모델이 준 그대로의 블록(JSON) — 서식 구간을 어떻게 짚었는지 본다. */
       raw: string;
       pdfUrl: string;
@@ -141,6 +153,7 @@ type ReadResponse = {
   blocks?: unknown;
   regions?: DetectedKoreanRegion[];
   figures?: ProblemBox[];
+  review?: MarksReviewPara[];
   model?: string;
   ms?: number;
   usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
@@ -151,7 +164,7 @@ type ReadResponse = {
 /** 백그라운드 작업이 끝날 때까지 기다린다. 30분이 넘으면 포기한다. */
 async function waitForJob(
   jobId: string,
-  task: "read" | "detect" = "read",
+  task: "read" | "detect" | "marks" = "read",
 ): Promise<ReadResponse> {
   const until = Date.now() + 30 * 60_000;
   for (;;) {
@@ -285,6 +298,8 @@ export default function CompareKoreanPage() {
   const [drawKind, setDrawKind] = useState<"passage" | "figure">("passage");
   /** 그림을 sunburst 로 다시 그려 붙일까(끄면 원본 크롭을 붙인다 — 돈이 안 든다). */
   const [redrawFigures, setRedrawFigures] = useState(true);
+  /** 서식 검수(두 번째 호출)를 할까 — 운영은 늘 한다. 끄면 첫 결과 그대로. */
+  const [reviewMarks, setReviewMarks] = useState(true);
   /** 그림 준비 진행(두 칸이 같은 그림을 나눠 쓴다). */
   const [figureNote, setFigureNote] = useState<string | null>(null);
   const [detectRuns, setDetectRuns] = useState<DetectRun[]>([]);
@@ -409,8 +424,46 @@ export default function CompareKoreanPage() {
       const stats = emptyMarkStats();
       const read = readRichBlocks(json.blocks, 0, stats);
       if (read.length === 0) throw new Error("문단을 하나도 읽지 못했습니다.");
+      // 서식 검수 — 운영과 같은 두 번째 호출을 **이 칸의 강도로** 건다.
+      let reviewNote = "";
+      let reviewMs: number | undefined;
+      let reviewKrw: number | null | undefined;
+      let review: MarksReviewPara[] | undefined;
+      if (reviewMarks) {
+        const t0 = Date.now();
+        setResults((r) => ({ ...r, [reader.key]: { state: "running", since, note: "서식 검수 중…" } }));
+        try {
+          const { overview, strips } = await passageStrips(image);
+          const mres = await fetch("/api/admin/compare-korean", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              task: "marks",
+              image: overview,
+              strips,
+              paragraphs: reviewParagraphs(read),
+              provider: "openai",
+              model: READ_MODEL,
+              effort: reader.effort,
+            }),
+          });
+          let mj = (await mres.json().catch(() => ({}))) as ReadResponse;
+          if (!mres.ok) throw new Error(mj.error ?? `HTTP ${mres.status}`);
+          if (mj.jobId) mj = await waitForJob(mj.jobId, "marks");
+          review = mj.review;
+          reviewKrw = mj.estKrw ?? null;
+        } catch (err) {
+          reviewNote = `서식 검수 실패 — 첫 결과 그대로 (${err instanceof Error ? err.message : String(err)})`;
+        }
+        reviewMs = Date.now() - t0;
+      }
       const attached = await attachPassageFigures(read, await ready);
-      const blocks = attached.blocks;
+      let blocks = attached.blocks;
+      if (review) {
+        const applied = applyMarksReview(blocks, review);
+        blocks = applied.blocks;
+        reviewNote = describeMarksReview(applied.stats);
+      }
       const model = json.model ?? READ_MODEL;
       const tag = reader.effort ? `${model} (${reader.effort})` : model;
       const pdfUrl = await makePdf(blocks, `지문 비교 — ${readerTitle(reader)}`, `2p, ${tag}`);
@@ -425,6 +478,9 @@ export default function CompareKoreanPage() {
           estKrw: json.estKrw ?? null,
           marksNote: describeMarks(stats) || "굵게·밑줄·네모 표시 없음",
           figuresNote: attached.note,
+          reviewNote,
+          reviewMs,
+          reviewKrw,
           raw: JSON.stringify(json.blocks, null, 1),
           pdfUrl,
           chars: richToPlainText(blocks).length,
@@ -677,6 +733,15 @@ export default function CompareKoreanPage() {
               그림을 sunburst 로 다시 그려 붙이기 (끄면 원본 크롭을 붙임 · 한 번만 그려 두 칸이
               나눠 씀)
             </label>
+            <label className="flex items-center gap-2 text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={reviewMarks}
+                onChange={(e) => setReviewMarks(e.target.checked)}
+              />
+              서식 검수(2차 호출 — 확대한 띠로 원문자·밑줄·네모·굵게만 다시 봄, 운영과 같음 · 칸의
+              강도로)
+            </label>
             {figureNote && <p className="text-xs text-slate-500">{figureNote}</p>}
           </div>
         )}
@@ -746,7 +811,7 @@ export default function CompareKoreanPage() {
 
 function ResultView({ result }: { result: Result }) {
   if (result.state === "idle") return <p className="text-xs text-slate-400">아직 안 돌렸어요.</p>;
-  if (result.state === "running") return <Elapsed since={result.since} />;
+  if (result.state === "running") return <Elapsed since={result.since} note={result.note} />;
   if (result.state === "error") {
     return (
       <p className="break-words text-sm text-red-600">
@@ -780,7 +845,16 @@ function ResultView({ result }: { result: Result }) {
         <li>
           블록 {result.blocks.length}개 · 글자 {result.chars.toLocaleString()}자
         </li>
-        <li>{result.marksNote}</li>
+        <li>1차(읽기) 서식: {result.marksNote}</li>
+        {result.reviewNote && (
+          <li>
+            2차 {result.reviewNote}
+            {result.reviewMs != null ? ` · ${(result.reviewMs / 1000).toFixed(1)}초` : ""}
+            {result.reviewKrw != null
+              ? ` · 약 ${result.reviewKrw < 10 ? result.reviewKrw.toFixed(1) : Math.round(result.reviewKrw)}원`
+              : ""}
+          </li>
+        )}
         {result.figuresNote && <li>{result.figuresNote}</li>}
       </ul>
       <a
@@ -806,7 +880,7 @@ function ResultView({ result }: { result: Result }) {
   );
 }
 
-function Elapsed({ since }: { since: number }) {
+function Elapsed({ since, note }: { since: number; note?: string }) {
   const [, tick] = useState(0);
   // 1초마다 다시 그려 경과 시간을 보여 준다.
   useEffect(() => {
@@ -814,6 +888,8 @@ function Elapsed({ since }: { since: number }) {
     return () => clearInterval(id);
   }, []);
   return (
-    <p className="text-sm text-slate-500">읽는 중… {Math.round((Date.now() - since) / 1000)}초</p>
+    <p className="text-sm text-slate-500">
+      {note ?? "읽는 중…"} {Math.round((Date.now() - since) / 1000)}초
+    </p>
   );
 }
