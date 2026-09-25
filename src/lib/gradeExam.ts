@@ -245,6 +245,8 @@ async function callVision(
    * 호출부가 반드시 본인 키를 확보한 뒤에만 넘겨야 한다.
    */
   apiKeyOverride?: string,
+  /** 추론 강도(`reasoning.effort`). 없으면 모델 기본값 — 지금은 비교 화면만 넘긴다. */
+  effort?: string,
 ): Promise<{ text: string; usage?: GradeUsage; model: string }> {
   const key = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
@@ -271,12 +273,15 @@ async function callVision(
         },
       ],
       text: { format: { type: "json_object" } },
+      ...(effort ? { reasoning: { effort } } : {}),
     }),
   });
   let body = await res.text();
   let viaResponses = true;
 
-  if (!res.ok && res.status !== 404) {
+  // 추론 강도를 정해 부른 것이면 Chat 으로 내려가지 않는다 — 그쪽은 그 값을
+  // 빼고 성공해 버려서, 고른 강도로 돈 것처럼 잘못 보인다.
+  if (!res.ok && res.status !== 404 && !effort) {
     res = await fetch(OPENAI_CHAT, {
       method: "POST",
       headers,
@@ -584,6 +589,8 @@ async function callGeminiVision(
   what: string,
   signal?: AbortSignal,
   modelName: string = KOREAN_TEXT_GEMINI_MODELS[0],
+  /** 출력 상한. 생각(thinking) 토큰도 여기에 든다 — 비교 화면은 넉넉히 준다. */
+  maxOutputTokens = 8192,
 ): Promise<{ text: string; usage?: GradeUsage; model: string }> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new GradeError("GEMINI_API_KEY가 설정되지 않았습니다.", 500);
@@ -609,7 +616,7 @@ async function callGeminiVision(
         temperature: 0,
         // 지문 한 편의 JSON 은 실측 3,544토큰이었다(terra 기준). 넉넉히 두되
         // 넘치면 잘린 JSON 이 오므로 아래에서 실패로 보고 terra 로 내려간다.
-        maxOutputTokens: 8192,
+        maxOutputTokens,
       },
     }),
   };
@@ -654,6 +661,8 @@ async function callGeminiVision(
       promptTokenCount?: number;
       candidatesTokenCount?: number;
       cachedContentTokenCount?: number;
+      /** 생각(thinking) 토큰. 출력 단가로 청구되므로 출력에 더한다. */
+      thoughtsTokenCount?: number;
     };
   };
   try {
@@ -681,7 +690,7 @@ async function callGeminiVision(
   const usage: GradeUsage | undefined = u
     ? {
         inputTokens: u.promptTokenCount ?? 0,
-        outputTokens: u.candidatesTokenCount ?? 0,
+        outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0),
         ...(typeof cached === "number" && cached > 0
           ? { cachedInputTokens: cached }
           : {}),
@@ -718,17 +727,8 @@ rules:
 - exclude running heads, page numbers, questions printed below passage
 - JSON only, no explanation`;
 
-/** 지문 사진 → 구조화된 블록. `reference` 는 Mathpix 가 읽은 글(있으면 더 정확하다). */
-export async function readKoreanRichText(
-  imageDataUrl: string,
-  reference: string,
-  signal?: AbortSignal,
-  /**
-   * BYOK 사용자의 본인 OpenAI 키. Gemini 경로에는 영향이 없다 — 이건
-   * OpenAI(terra) 예비 경로에만 쓰인다.
-   */
-  apiKeyOverride?: string,
-): Promise<{ blocks: unknown; usage?: GradeUsage; model: string }> {
+/** 지문 인식 프롬프트(참고 글·원문자 목록까지 붙인 것). 비교 화면도 같은 것을 쓴다. */
+function koreanTextPrompt(reference: string): string {
   // 조합용 자모(ᄀᄂᄃ)를 먼저 호환용(ㄱㄴㄷ)으로 바꾼다 — Mathpix 가 이 형태로
   // 주는 경우가 있는데, 그대로 두면 모델이 "참고 글을 베끼라"는 지시를 따라
   // 이 깨진 코드를 그대로 옮겨 적는다(renderMathText.ts 와 같은 사고).
@@ -773,6 +773,21 @@ reference — same passage as read by a text recogniser (Mathpix). for ORDINARY 
 ${cleanedReference}
 """`
     : KOREAN_TEXT_PROMPT;
+  return prompt;
+}
+
+/** 지문 사진 → 구조화된 블록. `reference` 는 Mathpix 가 읽은 글(있으면 더 정확하다). */
+export async function readKoreanRichText(
+  imageDataUrl: string,
+  reference: string,
+  signal?: AbortSignal,
+  /**
+   * BYOK 사용자의 본인 OpenAI 키. Gemini 경로에는 영향이 없다 — 이건
+   * OpenAI(terra) 예비 경로에만 쓰인다.
+   */
+  apiKeyOverride?: string,
+): Promise<{ blocks: unknown; usage?: GradeUsage; model: string }> {
+  const prompt = koreanTextPrompt(reference);
 
   /**
    * **Flash 를 먼저, 안 되면 terra**(사용자 지시). 갈아타는 이유가 무엇이든
@@ -835,6 +850,36 @@ ${cleanedReference}
   throw lastError instanceof Error
     ? lastError
     : new GradeError("지문을 읽지 못했습니다.", 502);
+}
+
+/**
+ * **모델 비교용** — 정해 준 모델 하나로만 읽는다(갈아타지 않는다).
+ *
+ * 운영의 `readKoreanRichText` 는 Flash → terra 로 내려가지만, 두 모델을 견주는
+ * 자리에서 조용히 다른 모델이 답하면 비교가 통째로 틀린다. 그래서 실패하면
+ * 그대로 실패로 돌려준다. 프롬프트·파싱은 운영과 **같은 것**을 쓴다 — 다르면
+ * 견준 결과가 운영에 안 맞는다.
+ */
+export async function readKoreanRichTextWith(
+  imageDataUrl: string,
+  reference: string,
+  target: { provider: "openai" | "gemini"; model: string; effort?: string },
+  signal?: AbortSignal,
+): Promise<{ blocks: unknown; usage?: GradeUsage; model: string; raw: string }> {
+  const prompt = koreanTextPrompt(reference);
+  const { text, usage, model } =
+    target.provider === "gemini"
+      ? await callGeminiVision(prompt, imageDataUrl, "지문 인식", signal, target.model, 65536)
+      : await callVision(
+          prompt,
+          [imageDataUrl],
+          "지문 인식",
+          signal,
+          target.model,
+          undefined,
+          target.effort,
+        );
+  return { blocks: parseBlocks(text), usage, model, raw: text };
 }
 
 /**

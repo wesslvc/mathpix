@@ -2785,6 +2785,24 @@ latest 로 바꿔 봐 ... flash 써 보고 안 되면 테라로 넘어가게")
 - **실제 Gemini API 로 성공한 응답은 아직 못 봤다** — 로그에 남은 것은 503뿐이다.
   자리가 나면 그때 품질과 값을 견줘 볼 것.
 
+#### 모델 비교 화면 (`/admin/compare-korean`, 2026-09-25)
+
+사용자 질문 — "3.8 flash 가 시력이 좋아, 루나 Max 가 시력이 좋아". 짐작으로는
+못 정하므로 한 지문을 두 모델에 **똑같이**(같은 프롬프트 `koreanTextPrompt`,
+같은 Mathpix 참고 글, 같은 원문자 교정) 보내 평가원 PDF 를 각각 받게 했다.
+무제한 계정 전용이고 토큰을 안 뗀다.
+
+- `readKoreanRichTextWith` 는 **정해 준 모델 하나로만** 읽는다 — 운영처럼
+  실패하면 다른 모델로 내려가면 무엇을 견줬는지 알 수 없다.
+- 이름·값은 probe 로 확인했다: `gemini-3.8-flash` 는 ListModels 에 있고
+  (`probe: "gemini-models"`), gpt-6-luna 의 `reasoning.effort` 는
+  none·minimal·low·medium·high·xhigh·**max** 를 받는다(`probe: "vision"` +
+  `effort`, 틀린 값을 넣으면 허용 목록을 알려 준다).
+- 추론 강도를 넘긴 호출은 Chat Completions 로 **안 내려간다** — 그쪽은 그 값을
+  빼고 성공해 버려 고른 강도로 돈 것처럼 보인다.
+- Gemini 의 생각 토큰(`thoughtsTokenCount`)을 이제 출력에 더한다(출력 단가로
+  청구된다). 비교 호출은 출력 상한을 65536 으로 둔다 — 생각 토큰도 상한에 든다.
+
 #### 단가는 모델마다 다르다 — 한 쌍으로 뭉뚱그리면 안 된다
 
 **사용자가 terra 요금표를 알려 줬다: 입력 $2.00 · 캐시 입력 $0.20 · 출력
