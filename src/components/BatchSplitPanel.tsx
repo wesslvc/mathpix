@@ -93,7 +93,7 @@ type Props = {
     answerType: "choice";
     boxRange: StoredBoxRange;
   }) => Promise<string>;
-  /** 자동 영역 찾기(Gemini)를 보여줄지. 서버에서도 같은 조건으로 막는다. */
+  /** 자동 영역 찾기(luna)를 보여줄지. 서버에서도 같은 조건으로 막는다. */
   unlimited?: boolean;
   /**
    * BYOK 패스 계정인가. 본인 키로 직접 내므로 "모두 AI로 재생성"에 토큰

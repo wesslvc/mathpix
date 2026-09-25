@@ -373,6 +373,18 @@ AI로 재생성"을 누르면 잘린 것들이 전부 문제 전체 다시 그�
 이어져 요금이 순식간에 커진다. 화면에서도 감추지만 **막는 자리는 서버**다
 (`entitlements.unlimited`) — 화면은 얼마든지 우회할 수 있다.
 
+- **지금은 영역 찾기도 luna(`gpt-6-luna`)가 한다**(2026-09-25, 사용자 지시 —
+  "루나 쓰는 거 다 gpt 6 luna 로 바꾸고 자리 잡는 것도 이제 얘가 하게 해 줘").
+  `DETECT_PROVIDER` 기본이 `openai` 로 뒤집혔고 국어 모드(지문+문제)도 같은
+  갈래를 탄다(`callOpenAIVision` 하나를 둘이 같이 쓴다). 되돌리려면 재배포 없이
+  `DETECT_PROVIDER=gemini`. luna 를 쓰는 곳(채점·답지·제목 짓기·영역 찾기)은
+  전부 `OPENAI_DETECT_MODEL` 하나라 기본값 하나로 같이 바뀐다.
+  **이름은 짐작하지 않고 확인했다** — 일꾼 라우트(`/api/figure-jobs/run`)에
+  `probe: "models"`(계정의 gpt 이름 목록)와 `probe: "vision"`(64×64 그림으로
+  사진+JSON 요청을 실제로 보내 봄)을 두었고, DB 의 `http` 확장이 Vault 토큰을
+  실어 부른다(값이 대화에 안 나온다). **`gpt-6-luna` 단가는 아직
+  `GRADING_PRICES` 에 없다** — 그동안 채점·제목 짓기는 보증금 고정으로 간다.
+  아래는 Gemini 가 기본이던 시절의 기록이다.
 - **영역 찾기는 Gemini Flash 다.** 그림을 만드는 일이 아니라 **자리를 재는**
   일이라 값이 싸고 빠른 쪽이 맞다. Gemini 가 정해 둔 `box_2d`
   (`[ymin,xmin,ymax,xmax]`, 0~1000 정규화) 규격을 그대로 쓴다.

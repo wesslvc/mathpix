@@ -388,11 +388,12 @@ const OPENAI_CHAT = "https://api.openai.com/v1/chat/completions";
  * `gpt-6-luna`(2026-09-25, 사용자 지시 — "루나 쓰는 거 다 gpt 6 luna 로").
  * **이름은 짐작하지 않고 계정의 `/v1/models` 목록에서 확인했다** — 일꾼
  * 라우트의 `probe: "models"` 로 봤고 `gpt-6-luna`·`gpt-6-sol`·`gpt-6-astra` 가
- * 있었다. 예전 값은 `gpt-5.6-luna` 다. 되돌리려면 재배포 없이
+ * 있었다. `probe: "vision"` 으로 우리 요청 모양(사진 + JSON 응답, Responses
+ * API)도 받는 것을 확인했다(64×64 그림, 4초). 예전 값은 `gpt-5.6-luna` 다. 되돌리려면 재배포 없이
  * `OPENAI_DETECT_MODEL` 을 넣는다. 비슷해 보이는 다른 모델로 몰래 갈아타지는
  * 않는다 — 고른 적 없는 모델에 요금이 나간 적이 있다.
  */
-export const OPENAI_DETECT_MODEL = process.env.OPENAI_DETECT_MODEL ?? "gpt-5.6-luna";
+export const OPENAI_DETECT_MODEL = process.env.OPENAI_DETECT_MODEL ?? "gpt-6-luna";
 
 /** 404 가 났을 때, 이 계정이 실제로 가진 이름들을 붙여 준다(목록 조회는 무료). */
 async function explain404(key: string, model: string): Promise<string> {
@@ -521,7 +522,7 @@ async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[
  * `DETECT_PROVIDER=gemini` 를 넣으면 된다(모델은 `GEMINI_DETECT_MODEL`).
  * 응답 형식과 뒤처리는 두 갈래가 완전히 같다.
  */
-export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "openai" ? "openai" : "gemini";
+export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "gemini" ? "gemini" : "openai";
 
 export async function detectProblems(
   dataUrl: string,
