@@ -324,11 +324,11 @@ function readerTitle(r: Reader): string {
 
 export default function CompareKoreanPage() {
   const [readers, setReaders] = useState<Reader[]>(DEFAULT_READERS);
-  // 기본은 운영과 같은 값(gpt-6-luna xhigh, `OPENAI_DETECT_EFFORT`).
+  // 기본은 운영과 같은 값(gpt-6-luna medium, `OPENAI_DETECT_EFFORT`).
   const [detector, setDetector] = useState<Detector>({
     provider: "openai",
     model: "gpt-6-luna",
-    effort: "xhigh",
+    effort: "medium",
     shape: "polygon",
   });
   /** 다각형으로 잡은 지문 자리. 있으면 네모 대신 이걸로 자른다. */
@@ -581,7 +581,7 @@ export default function CompareKoreanPage() {
                       ...d,
                       provider: pv,
                       model: pv === "openai" ? OPENAI_PRESETS[0] : "gemini-3.8-flash",
-                      effort: pv === "openai" ? "xhigh" : "",
+                      effort: pv === "openai" ? "medium" : "",
                     }))
                   }
                   className={`rounded-lg border px-2 py-1 ${

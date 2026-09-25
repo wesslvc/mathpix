@@ -26,7 +26,7 @@ import {
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import type { Frame, FrameBox, FrameItem, FrameSet } from "./frames";
-import type { RichBlock } from "./richText";
+import { framePassage, type RichBlock } from "./richText";
 import {
   DEFAULT_FLOW_STYLE,
   flowBlocks,
@@ -843,7 +843,8 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       const body = await fontForText(BODY_FONT, "");
       const measure = (t: string, size: number, bold: boolean) =>
         body.font.widthOfTextAtSize(t, size) * (bold ? 1.02 : 1);
-      const flowed = flowBlocks(planned.blocks, cols, measure, DEFAULT_FLOW_STYLE);
+      // 안내 줄([N~M] …)만 밖에 두고 지문 본문을 상자 하나로 두른다.
+      const flowed = flowBlocks(framePassage(planned.blocks), cols, measure, DEFAULT_FLOW_STYLE);
       for (const r of flowed.results) {
         await drawFlow(page, r.items, fontForText, flip, new Map());
       }

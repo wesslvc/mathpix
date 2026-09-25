@@ -76,14 +76,17 @@ function breakRuns(
   widths: number[],
   measure: Measure,
   size: number,
-): Chunk[][] {
+): { lines: Chunk[][]; hard: boolean[] } {
   const lines: Chunk[][] = [];
+  /** 그 줄이 `\n` 으로 끝났는지 — 남은 줄을 새 문단으로 돌려줄 때 되살린다. */
+  const hard: boolean[] = [];
   let line: Chunk[] = [];
   let used = 0;
   let limit = widths[0] ?? 0;
 
-  const push = () => {
+  const push = (isHard = false) => {
     lines.push(line);
+    hard.push(isHard);
     line = [];
     used = 0;
     limit = widths[Math.min(lines.length, widths.length - 1)] ?? limit;
@@ -106,6 +109,17 @@ function breakRuns(
     const chars = [...run.t];
     for (let i = 0; i < chars.length; i++) {
       const ch = chars[i];
+      // **줄바꿈은 그 자리에서 줄을 끊는다.** 시가(詩歌)는 한 문단 안에 행이
+      // `\n` 으로 나뉘어 온다. 예전에는 이걸 보통 글자로 흘려 한 줄에 넣었고,
+      // 그리는 쪽(pdf-lib `drawText`)이 `\n` 을 만나면 **제멋대로 아래 줄에**
+      // 그려서 다음 줄들과 포개졌다 — 사용자 PDF 에서 (가)(나) 시만 글자가
+      // 겹쳐 읽을 수 없었던 이유다(산문은 멀쩡했다).
+      if (ch === "\r") continue;
+      if (ch === "\n") {
+        flush();
+        push(true);
+        continue;
+      }
       const w = measure(ch, size, run.b === true);
       const next = chars[i + 1] ?? "";
       if (used + measure(buf, size, run.b === true) + w > limit && (buf || line.length)) {
@@ -147,8 +161,11 @@ function breakRuns(
     }
     flush();
   }
-  if (line.length > 0) lines.push(line);
-  return lines.length > 0 ? lines : [[]];
+  if (line.length > 0) {
+    lines.push(line);
+    hard.push(false);
+  }
+  return lines.length > 0 ? { lines, hard } : { lines: [[]], hard: [false] };
 }
 
 /** 줄 하나를 자리로 바꾼다. */
@@ -248,7 +265,7 @@ export function flowBlocks(
     if (block.kind === "para") {
       const first = block.indent ? style.indent : 0;
       // 첫 줄만 들여쓰기라 줄마다 쓸 수 있는 폭이 다르다.
-      const lines = breakRuns(
+      const { lines, hard } = breakRuns(
         block.runs,
         [width - first, width],
         measure,
@@ -258,14 +275,17 @@ export function flowBlocks(
         if (y + step > columns[col].bottom) {
           if (!nextColumn()) {
             // 남은 줄을 새 문단으로 돌려준다(들여쓰기는 이미 썼다).
-            const restRuns: RichRun[] = lines.slice(i).flatMap((l) =>
-              l.map((c) => ({
+            // `\n` 으로 끊긴 줄은 줄바꿈을 되살려 둔다 — 안 그러면 다음 쪽에서
+            // 시의 행들이 한 줄로 붙어 버린다.
+            const restRuns: RichRun[] = lines.slice(i).flatMap((l, k) => [
+              ...l.map((c) => ({
                 t: c.t,
                 ...(c.b ? { b: true } : {}),
                 ...(c.u ? { u: true } : {}),
                 ...(c.sq ? { sq: true } : {}),
               })),
-            );
+              ...(hard[i + k] ? [{ t: "\n" }] : []),
+            ]);
             return restRuns.length > 0 ? { kind: "para", runs: restRuns } : null;
           }
         }
@@ -334,6 +354,16 @@ export function flowBlocks(
           // 새 도막의 글이 위 테두리에 붙지 않게 하는 일은 `topPad` 가
           // 대신한다 — `nextColumn()` 이 처음부터 그만큼 내려서 시작한다.
           closeSegment(false);
+          // **마지막 단까지 다 썼으면 여기서 멈춘다.** 넘어갈 단이 없는데
+          // 새 도막을 열려고 `columns[col]` 을 읽으면 없는 단이라 터진다 —
+          // 지문 전체를 상자로 두르면서(`framePassage`) 긴 지문마다 이
+          // 자리를 밟게 됐다. 남은 것은 상자째 돌려준다(부르는 쪽이 이어 흘림).
+          if (col >= columns.length) {
+            const restBlocks = leftover
+              ? [leftover, ...remaining.slice(1)]
+              : remaining.slice(1);
+            return restBlocks.length > 0 ? { kind: "box", blocks: restBlocks } : null;
+          }
           startCol = col;
           startY = columns[col].top;
           openedTop = false;

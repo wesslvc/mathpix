@@ -103,6 +103,35 @@ export function readRichBlocks(raw: unknown, depth = 0): RichBlock[] {
 }
 
 /** 조판된 글자를 다시 평범한 글로. 제목 짓기·검색에 쓴다. */
+/** "[22~26] 다음 글을 읽고 물음에 답하시오." 같은 안내 줄의 머리. */
+const LEAD_IN = /^\s*\[\s*\d{1,2}\s*[~∼～〜\-–—]\s*\d{1,2}\s*\]/;
+
+/**
+ * **지문 본문을 상자 하나로 감싼다**(2026-09-25, 사용자 요청 — "지문 영역 전체를
+ * 하나의 박스가 감아 줘야 하고, [4~9] 물음에 답하시오 여기 말고").
+ *
+ * 모델에게 시키지 않고 **조판 직전에** 우리가 한다. 모델에게 "지문 전체를
+ * box 로" 라고 하면 조건 박스·<보기> 와 섞여 어디까지가 테두리인지 흐려지고,
+ * 예전에 "지문 전체가 box 하나"로 오는 바람에 조판이 무너진 적도 있다
+ * (CLAUDE.md "아홉 번째"). 지문의 겉테두리는 늘 같은 규칙이므로 코드로 두면
+ * 모델이 무엇을 주든 같은 모양이 나온다.
+ *
+ * - 맨 앞 문단이 안내 줄(`[N~M] …`)이면 그것만 상자 밖에 둔다.
+ * - 나머지가 이미 상자 **하나**면 그대로 둔다(두 겹이 되지 않게).
+ * - 안의 조건 박스·<보기> 는 그대로 안에 남는다(상자 속 상자).
+ */
+export function framePassage(blocks: RichBlock[]): RichBlock[] {
+  if (blocks.length === 0) return blocks;
+  const first = blocks[0];
+  const hasLeadIn =
+    first.kind === "para" && LEAD_IN.test(first.runs.map((r) => r.t).join(""));
+  const head = hasLeadIn ? [first] : [];
+  const body = hasLeadIn ? blocks.slice(1) : blocks;
+  if (body.length === 0) return blocks;
+  if (body.length === 1 && body[0].kind === "box") return blocks;
+  return [...head, { kind: "box", blocks: body }];
+}
+
 export function richToPlainText(blocks: RichBlock[]): string {
   const out: string[] = [];
   const walk = (list: RichBlock[]) => {

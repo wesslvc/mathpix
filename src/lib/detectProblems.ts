@@ -505,17 +505,18 @@ const OPENAI_CHAT = "https://api.openai.com/v1/chat/completions";
 export const OPENAI_DETECT_MODEL = process.env.OPENAI_DETECT_MODEL ?? "gpt-6-luna";
 
 /**
- * **영역 찾기의 추론 강도**(`reasoning.effort`). 기본 `xhigh`(2026-09-25, 사용자
- * 지시 — "지문 영역 설정이랑 문제 자르는 거 전부 luna6 xhigh 가 하게 해 줘").
- * gpt-6-luna 가 받는 값은 none·minimal·low·medium·high·xhigh·max 이고 xhigh 로
- * 사진 요청이 통하는 것을 probe 로 확인했다(64×64, 2.4초).
+ * **영역 찾기의 추론 강도**(`reasoning.effort`). 기본 `medium`. 같은 날 처음엔
+ * `xhigh` 로 올렸다가("지문 영역 설정이랑 문제 자르는 거 전부 luna6 xhigh 가"),
+ * 비교 화면에서 강도별로 돌려 본 뒤 사용자가 medium 으로 정했다("자리 잡는
+ * 거는 luna medium 으로 가고"). gpt-6-luna 가 받는 값은
+ * none·minimal·low·medium·high·xhigh·max 다(probe 로 확인).
  *
  * **영역 찾기에만 건다** — 채점·답지·제목 짓기는 같은 모델이라도 강도를 안
  * 올린다(요청받은 범위가 아니고, 생각 토큰은 출력 단가로 나간다). 재배포 없이
  * `OPENAI_DETECT_EFFORT` 로 바꾼다(`default` 를 넣으면 강도를 안 보내 모델 기본값이 된다).
  */
 export const OPENAI_DETECT_EFFORT = (() => {
-  const v = (process.env.OPENAI_DETECT_EFFORT ?? "xhigh").trim();
+  const v = (process.env.OPENAI_DETECT_EFFORT ?? "medium").trim();
   return v === "" || v === "default" ? undefined : v;
 })();
 
