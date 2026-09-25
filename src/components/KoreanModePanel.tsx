@@ -14,6 +14,7 @@ import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import { toStoredFigures, type StoredBoxRange } from "@/lib/storedFigures";
 import { readRichBlocks } from "@/lib/kice/richText";
 import { applyReference, describeMerge } from "@/lib/kice/referenceMerge";
+import { transcribePassage, type PassageTranscript } from "@/lib/passageTranscribe";
 import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
@@ -121,45 +122,27 @@ export default function KoreanModePanel({
   /** 제목을 지을 재료(지문 크롭). 다시 짓기 버튼이 쓴다. */
   const passageCropRef = useRef<string | null>(null);
   /**
-   * Mathpix 로 읽은 지문 글자. 제목 짓기와 지문 구조화 인식이 **같은 참고
-   * 글**을 나눠 쓴다 — 따로 부르면 Mathpix 요청이 두 번 나간다.
+   * **1차로 읽은 지문 글자**(GPT, 예전에는 Mathpix). 제목 짓기와 지문 구조화
+   * 인식이 **같은 글**을 나눠 쓴다 — 따로 부르면 1차 읽기가 두 번 나간다.
    *
    * **글자가 아니라 약속(Promise)을 들고 있다.** 예전에는 `makeTitle` 이
    * 다 읽은 뒤에야 채워지는 `string | null` 이었는데, 그 `makeTitle` 은
    * 크롭이 끝나자마자 **기다리지 않고**(`void makeTitle(...)`) 던져진다.
    * 그래서 사용자가 그 사이에 저장을 누르면 참고 글이 아직 `null` 이고,
-   * 지문 인식이 **"건너뜀 — 사진만 보고 읽습니다"** 로 떨어졌다. 이 기능의
-   * 설계 전제가 "글자는 Mathpix, 구조는 vision" 인데 그 절반이 조용히
-   * 빠지는 것이라, 정확도가 가장 나쁜 조합으로 도는 셈이었다(원문자를
-   * 참고 글에서 가져오는 규칙도 이때는 아예 적용되지 않는다).
+   * 지문 인식이 "건너뜀"으로 떨어졌다(정확도가 가장 나쁜 조합이다).
    *
    * 약속으로 들면 **읽는 중이면 그걸 기다리고, 아직 안 읽었으면 그때 읽는다.**
    * 크롭을 함께 들고 있어서, 저장 전에 네모를 다시 잡아 크롭이 달라졌으면
    * 엉뚱한 글을 재사용하지 않고 새로 읽는다.
    */
-  const passageOcrRef = useRef<{ crop: string; text: Promise<string> } | null>(
+  const passageOcrRef = useRef<{ crop: string; text: Promise<PassageTranscript> } | null>(
     null,
   );
 
-  /** 이 크롭의 Mathpix 결과. 이미 읽었거나 읽는 중이면 그것을 쓴다. */
-  function readPassageOcr(crop: string): Promise<string> {
+  /** 이 크롭의 1차 읽기 결과. 이미 읽었거나 읽는 중이면 그것을 쓴다. */
+  function readPassageOcr(crop: string): Promise<PassageTranscript> {
     if (passageOcrRef.current?.crop === crop) return passageOcrRef.current.text;
-    const text = (async () => {
-      const res = await fetch("/api/mathpix", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await enhanceContrast(crop) }),
-      });
-      const read = (await res.json()) as {
-        text?: string;
-        latex?: string;
-        error?: string;
-      };
-      if (!res.ok) throw new Error(read.error ?? "지문을 읽지 못했습니다.");
-      const t = (read.text || read.latex || "").trim();
-      if (t.length < 20) throw new Error("지문 글자가 거의 인식되지 않았습니다.");
-      return t;
-    })();
+    const text = (async () => transcribePassage(await enhanceContrast(crop)))();
     passageOcrRef.current = { crop, text };
     // 실패한 약속을 붙들고 있으면 다시 시도해도 같은 실패가 나온다.
     text.catch(() => {
@@ -171,7 +154,7 @@ export default function KoreanModePanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  /** 지문 인식 진행 상황(Mathpix → terra). 지문이 없거나 아직 안 돌면 null. */
+  /** 지문 인식 진행 상황(1차 글자 읽기 → 모양 읽기). 지문이 없거나 아직 안 돌면 null. */
   const [passageStatus, setPassageStatus] = useState<PassageStatus | null>(null);
 
   function reset() {
@@ -441,15 +424,15 @@ export default function KoreanModePanel({
     }
   }
 
-  /** Mathpix 로 지문을 읽고 그 **글자만** 보내 제목을 짓는다. */
+  /** 1차로 읽은 지문의 **글자만** 보내 제목을 짓는다. */
   async function makeTitle(passageCrop: string) {
     passageCropRef.current = passageCrop;
     setTitling(true);
     setTitleNote("제목을 짓는 중...");
     try {
-      // 지문 인식과 **같은 약속**을 쓴다 — 둘 중 누가 먼저 부르든 Mathpix 는
+      // 지문 인식과 **같은 약속**을 쓴다 — 둘 중 누가 먼저 부르든 1차 읽기는
       // 한 번만 나간다.
-      const text = await readPassageOcr(passageCrop);
+      const { text } = await readPassageOcr(passageCrop);
 
       const res = await fetch("/api/korean-title", {
         method: "POST",
@@ -503,26 +486,21 @@ export default function KoreanModePanel({
   async function readPassageBlocks(crop: string) {
     setBusy("지문을 글자로 옮기는 중... (평가원 글꼴로 조판됩니다)");
     /**
-     * **참고 글은 여기서 반드시 확보한다.**
-     *
-     * 예전에는 `makeTitle` 이 채워 둔 값을 그냥 읽고, 없으면 "건너뜀"으로
-     * 두고 사진만 보고 읽었다. 그런데 `makeTitle` 은 기다리지 않고 던져지는
-     * 호출이라 **저장을 조금만 빨리 눌러도 비어 있었다** — 이 기능의 설계
-     * 전제(글자는 Mathpix, 구조는 vision)의 절반이 조용히 빠진 채 도는
-     * 셈이었다. 이제 `readPassageOcr` 이 "읽는 중이면 기다리고, 안 읽었으면
-     * 읽는다"를 맡으므로 경쟁 상태가 사라진다.
-     *
-     * 그래도 실패하면(사진이 흐리거나 Mathpix 오류) 예전처럼 사진만 보고
-     * 읽는다 — 참고가 없다고 지문 인식을 막을 이유는 없다.
+     * **참고 글은 여기서 반드시 확보한다**(1차 글자 읽기). `makeTitle` 이 이미
+     * 읽는 중이면 그걸 기다리고, 안 읽었으면 지금 읽는다 — 경쟁 상태가 없다.
+     * 그래도 실패하면 모양 읽기만으로 진행한다(참고가 없다고 막을 이유는 없다).
      */
-    setPassageStatus({ mathpix: "running", terra: "pending" });
+    setPassageStatus({ reader: "running", terra: "pending" });
     let reference = "";
+    let reader: Partial<PassageStatus> = {};
     try {
-      reference = await readPassageOcr(crop);
+      const t = await readPassageOcr(crop);
+      reference = t.text;
+      reader = { readerModel: t.model, readerCostKrw: t.costKrw, readerTokens: t.chargedTokens };
     } catch {
-      // 사진만 보고 읽는 예전 경로로 내려간다.
+      // 모양 읽기만으로 내려간다.
     }
-    setPassageStatus({ mathpix: reference ? "ok" : "failed", terra: "running" });
+    setPassageStatus({ reader: reference ? "ok" : "failed", ...reader, terra: "running" });
     try {
       const res = await fetch("/api/korean-text", {
         method: "POST",
@@ -540,11 +518,12 @@ export default function KoreanModePanel({
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
       const raw = readRichBlocks(json.blocks);
       if (raw.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      // **글자와 원문자는 Mathpix 를 따른다 — 프롬프트가 아니라 코드로 맞춘다.**
+      // **글자와 원문자는 1차 읽기를 따른다 — 프롬프트가 아니라 코드로 맞춘다.**
       // 모델 결과에서는 줄바꿈·띄어쓰기·맞춤·굵게·밑줄·기호 자리만 남는다.
       const { blocks, replaced, matched, letters } = applyReference(raw, reference);
       setPassageStatus({
-        mathpix: reference ? "ok" : "failed",
+        reader: reference ? "ok" : "failed",
+        ...reader,
         terra: "done",
         circledFixed: replaced,
         circledMismatch: !matched,
@@ -559,7 +538,8 @@ export default function KoreanModePanel({
         (err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.") +
         " 이 지문은 사진으로 대신 저장했어요.";
       setPassageStatus({
-        mathpix: reference ? "ok" : "failed",
+        reader: reference ? "ok" : "failed",
+        ...reader,
         terra: "error",
         errorMessage: message,
       });
@@ -635,7 +615,7 @@ export default function KoreanModePanel({
             label: `${qIndex}번째 문제`,
             crop: piece.crop,
             mode: "problem",
-            // 국어는 글자뿐이라 Mathpix 가 읽은 것을 더 앞세운다.
+            // 국어는 글자뿐이라 참고 글(문제 그리기 쪽은 여전히 Mathpix)을 더 앞세운다.
             korean: true,
             problemId,
           });

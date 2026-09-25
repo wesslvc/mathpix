@@ -21,7 +21,7 @@ import { applyReference, describeMerge } from "@/lib/kice/referenceMerge";
 /**
  * **국어 지문 인식 모델 비교** — 무제한 계정 전용 시험 화면.
  *
- * 한 지문 사진을 두 모델에 **똑같이**(같은 프롬프트·같은 Mathpix 참고 글·같은
+ * 한 지문 사진을 두 모델에 **똑같이**(같은 프롬프트·같은 1차 읽기 참고 글·같은
  * 원문자 교정) 보내 평가원 양식 PDF 를 각각 뽑는다. 무엇이 더 잘 보는지는
  * 짐작으로 못 정한다 — 실제 지문으로 나란히 놓고 본다.
  *
@@ -118,6 +118,8 @@ async function passageImage(
 
 type ReadResponse = {
   jobId?: string;
+  /** 1차 글자 읽기 결과(`task: "transcribe"`). */
+  text?: string;
   blocks?: unknown;
   regions?: DetectedKoreanRegion[];
   polygons?: DetectedKoreanPolygon[];
@@ -131,7 +133,7 @@ type ReadResponse = {
 /** 백그라운드 작업이 끝날 때까지 기다린다. 30분이 넘으면 포기한다. */
 async function waitForJob(
   jobId: string,
-  task: "read" | "detect" = "read",
+  task: "read" | "detect" | "transcribe" = "read",
   shape: "box" | "polygon" = "box",
 ): Promise<ReadResponse> {
   const until = Date.now() + 30 * 60_000;
@@ -286,15 +288,47 @@ type DetectRun = {
   | { state: "error"; ms: number; message: string }
 );
 
-async function readReference(image: string): Promise<string> {
-  const res = await fetch("/api/mathpix", {
+/** 1차 글자 읽기를 할 모델(운영의 `OPENAI_TRANSCRIBE_MODEL` 자리). */
+type Transcriber = { model: string; effort: string };
+
+type ReferenceRead = {
+  /** 이 글을 읽은 그림과 모델 — 둘 중 하나라도 바뀌면 다시 읽는다. */
+  image: string;
+  key: string;
+  text: string;
+  model: string;
+  ms: number;
+  estKrw: number | null;
+  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
+};
+
+const transcriberKey = (t: Transcriber) => `${t.model}|${t.effort}`;
+
+/**
+ * **1차 글자 읽기**(예전 Mathpix 자리) — 운영과 같은 프롬프트(`KOREAN_TRANSCRIBE_PROMPT`)
+ * 를 고른 모델로 돌린다. OpenAI 라 백그라운드로 걸고 끝날 때까지 기다린다.
+ */
+async function readReference(image: string, t: Transcriber): Promise<ReferenceRead> {
+  const since = Date.now();
+  const res = await fetch("/api/admin/compare-korean", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image }),
+    body: JSON.stringify({ image, task: "transcribe", provider: "openai", model: t.model, effort: t.effort }),
   });
-  const json = (await res.json()) as { text?: string; latex?: string; error?: string };
-  if (!res.ok) throw new Error(json.error ?? "Mathpix 가 읽지 못했습니다.");
-  return (json.text || json.latex || "").trim();
+  let json = (await res.json().catch(() => ({}))) as ReadResponse;
+  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+  if (json.jobId) json = await waitForJob(json.jobId, "transcribe");
+  const text = (json.text ?? "").trim();
+  if (!text) throw new Error("글자를 하나도 읽지 못했습니다.");
+  return {
+    image,
+    key: transcriberKey(t),
+    text,
+    model: json.model ?? t.model,
+    ms: Date.now() - since,
+    estKrw: json.estKrw ?? null,
+    usage: json.usage,
+  };
 }
 
 async function makePdf(blocks: RichBlock[], title: string, tocLine: string): Promise<string> {
@@ -341,8 +375,11 @@ export default function CompareKoreanPage() {
   /** 실제로 두 모델에 보낸 그림 — 무엇을 견줬는지 눈으로 확인한다. */
   const [sent, setSent] = useState<string | null>(null);
   const [useReference, setUseReference] = useState(true);
-  /** Mathpix 결과. **보낸 그림과 짝으로** 든다 — 네모를 고치면 다시 읽어야 한다. */
-  const [reference, setReference] = useState<{ image: string; text: string } | null>(null);
+  /** 1차 읽기 결과. **보낸 그림·모델과 짝으로** 든다 — 네모나 모델을 바꾸면 다시 읽는다. */
+  const [reference, setReference] = useState<ReferenceRead | null>(null);
+  const [refError, setRefError] = useState<string | null>(null);
+  // 1차 읽기 기본은 sol medium — 글자 정확도가 목적이라 상위 모델, 강도는 중간.
+  const [transcriber, setTranscriber] = useState<Transcriber>({ model: "gpt-6-sol", effort: "medium" });
   const [refState, setRefState] = useState<"idle" | "running" | "ok" | "failed" | "off">("idle");
   const [results, setResults] = useState<Record<string, Result>>({ a: { state: "idle" }, b: { state: "idle" } });
   const [busy, setBusy] = useState(false);
@@ -516,16 +553,19 @@ export default function CompareKoreanPage() {
       setSent(image);
       let ref = "";
       if (useReference) {
-        if (reference?.image === image) {
+        if (reference?.image === image && reference.key === transcriberKey(transcriber)) {
           ref = reference.text;
           setRefState("ok");
         } else {
           setRefState("running");
+          setRefError(null);
           try {
-            ref = await readReference(image);
-            setReference({ image, text: ref });
+            const read = await readReference(image, transcriber);
+            ref = read.text;
+            setReference(read);
             setRefState("ok");
-          } catch {
+          } catch (err) {
+            setRefError(err instanceof Error ? err.message : String(err));
             setRefState("failed");
           }
         }
@@ -547,7 +587,8 @@ export default function CompareKoreanPage() {
         <h1 className="text-xl font-bold text-slate-900">국어 지문 인식 모델 비교</h1>
         <p className="mt-1 text-sm text-slate-600">
           같은 지문 사진을 두 모델에 똑같이 보내고 평가원 양식 PDF 를 각각 뽑습니다. 운영과
-          같은 프롬프트·Mathpix 참고 글·원문자 교정을 씁니다. 토큰은 차감하지 않습니다
+          같게 ① GPT 가 글자만 먼저 옮겨 적고(1차 읽기) ② 두 모델이 그 글을 참고해 줄바꿈·
+          굵게·밑줄·기호 자리를 읽은 뒤 ③ 글자를 1차 읽기 것으로 맞춥니다. 토큰은 차감하지 않습니다
           (무제한 계정 전용).
         </p>
       </div>
@@ -800,19 +841,69 @@ export default function CompareKoreanPage() {
             checked={useReference}
             onChange={(e) => setUseReference(e.target.checked)}
           />
-          Mathpix 참고 글 붙이기(운영과 같음, 1회만 읽어 두 모델에 같이 줌)
+          1차 글자 읽기(운영과 같음, 1회만 읽어 두 모델에 같이 줌)
         </label>
+        {useReference && (
+          <div className="flex flex-wrap items-end gap-2 text-xs">
+            {OPENAI_PRESETS.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setTranscriber((t) => ({ ...t, model: m }))}
+                className={`rounded-lg border px-2 py-1 font-mono ${
+                  transcriber.model === m
+                    ? "border-blue-600 bg-blue-50 text-blue-700"
+                    : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+            <label className="flex min-w-0 flex-col gap-1 text-slate-600">
+              모델
+              <input
+                value={transcriber.model}
+                onChange={(e) => setTranscriber((t) => ({ ...t, model: e.target.value }))}
+                className="w-36 rounded border border-slate-300 px-2 py-1 font-mono"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-slate-600">
+              추론 강도
+              <input
+                value={transcriber.effort}
+                onChange={(e) => setTranscriber((t) => ({ ...t, effort: e.target.value }))}
+                className="w-24 rounded border border-slate-300 px-2 py-1 font-mono"
+              />
+            </label>
+          </div>
+        )}
         {refState !== "idle" && (
-          <p className="text-xs text-slate-500">
-            Mathpix:{" "}
-            {refState === "running"
-              ? "읽는 중…"
-              : refState === "ok"
-                ? `✓ ${reference?.text.length ?? 0}자`
-                : refState === "off"
-                  ? "끔 — 사진만 보고 읽음"
-                  : "실패 — 사진만 보고 읽음"}
-          </p>
+          <div className="text-xs text-slate-500">
+            <p>
+              1차 읽기:{" "}
+              {refState === "running"
+                ? "글자만 옮겨 적는 중…"
+                : refState === "ok" && reference
+                  ? `✓ ${reference.text.length.toLocaleString()}자 · ${reference.model}${
+                      transcriber.effort ? ` (${transcriber.effort})` : ""
+                    } · ${(reference.ms / 1000).toFixed(1)}초 · ${
+                      reference.estKrw != null
+                        ? `약 ${reference.estKrw < 10 ? reference.estKrw.toFixed(1) : Math.round(reference.estKrw).toLocaleString()}원`
+                        : "단가 모름"
+                    }`
+                  : refState === "off"
+                    ? "끔 — 모양 읽기 모델이 사진만 보고 읽음"
+                    : `실패 — 사진만 보고 읽음${refError ? ` (${refError})` : ""}`}
+            </p>
+            {refState === "ok" && reference && (
+              <details className="mt-1">
+                <summary className="cursor-pointer">1차로 읽은 글 보기</summary>
+                <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-slate-700">
+                  {reference.text}
+                </pre>
+              </details>
+            )}
+          </div>
         )}
       </section>
 

@@ -524,8 +524,9 @@ function parseAnswerKey(text: string): AnswerKeyItem[] {
  * 이 일을 terra 에 맡기라고 정했다 — 자리를 재는 luna 와 갈라 두면 한쪽을
  * 바꿔도 다른 쪽이 흔들리지 않는다.
  *
- * **Mathpix 가 읽은 글을 함께 준다.** 글자를 정확히 읽는 일은 Mathpix 가 낫고,
- * 무엇이 문단이고 무엇이 상자인지 가리는 일은 vision 모델이 낫다.
+ * **1차로 읽어 둔 글을 함께 준다**(`transcribeKoreanPassage`, 예전에는 Mathpix).
+ * 글자만 따로 옮겨 적은 쪽이 글자가 정확하고, 무엇이 문단이고 무엇이 상자인지
+ * 가리는 일은 모양을 보는 호출이 맡는다.
  */
 export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL ?? "gpt-5.6-terra";
 
@@ -731,9 +732,88 @@ rules:
 - exclude running heads, page numbers, questions printed below passage
 - JSON only, no explanation`;
 
+/**
+ * **1차 글자 읽기 — Mathpix 자리를 GPT 가 맡는다**(2026-09-25, 사용자 지시 —
+ * "매쓰픽스 하는 일을 없애자, gpt 가 정확하게 텍스트 1차 스캔 → 그다음에 아까
+ * 말했던 일을").
+ *
+ * 지문 인식이 두 번에 나뉜다: ① 이 호출이 **글자만** 한 자씩 옮겨 적고(구조·
+ * 서식은 안 본다) ② 구조 호출(`koreanTextPrompt`)이 그 글을 참고로 문단·줄바꿈·
+ * 굵게·밑줄·기호 자리를 읽는다. 그 뒤 `applyReference` 가 ①의 글자를 ②의
+ * 뼈대에 갈아 끼운다 — 예전에 Mathpix 가 하던 자리를 그대로 이어받는다.
+ *
+ * 한 번에 다 시키지 않는 이유: 글자와 모양을 한꺼번에 옮기라고 하면 어느
+ * 한쪽이 흐트러진다. 글자만 보는 호출은 모양을 신경 쓸 일이 없어 글자에만
+ * 힘을 쓴다.
+ */
+export const OPENAI_TRANSCRIBE_MODEL =
+  process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || OPENAI_TEXT_MODEL;
+/** 1차 읽기의 추론 강도. 비워 두면 모델 기본값이다. */
+export const OPENAI_TRANSCRIBE_EFFORT =
+  process.env.OPENAI_TRANSCRIBE_EFFORT?.trim() || undefined;
+
+export const KOREAN_TRANSCRIBE_PROMPT = `task: OCR a Korean SAT (수능) 국어 passage image — transcribe every printed character exactly. accuracy of each character is the ONLY goal; layout and styling are handled elsewhere.
+
+answer JSON only: {"text":"..."}
+
+rules:
+- copy exactly what is printed: every Hangul syllable, Hanja in its original character (never convert 漢字 to Hangul or the reverse), Latin letters, digits, and punctuation/symbols such as 「」『』〈〉《》()[]·~…—‘’“” ※ ○ □ →
+- circled characters: identify each one individually by its inner character — ㉠㉡㉢㉣㉤㉥㉦ (ㄱㄴㄷㄹㅁㅂㅅ), ㉮㉯㉰㉱ (가나다라), ①②③④⑤ (1-5), ⓐⓑⓒⓓⓔ (a-e). never guess from neighbours or from alphabetical order, never switch between families, never add one that is not printed
+- list markers ㄱ. ㄴ. ㄷ. and section markers (가)(나)(다), [A][B], [중모리] etc. exactly as printed
+- keep printed word spacing; never fix spelling or modernise wording
+- reading order: natural order of the passage; if it runs in two columns, the whole left column top to bottom, then the right
+- separate printed paragraphs with a blank line. in verse (시·시조·가사), put each printed line on its own line. inside a prose paragraph do not insert line breaks
+- include the lead-in line (e.g. "[1~3] 다음 글을 읽고 물음에 답하시오.") and a trailing source/attribution line if printed
+- exclude running heads, page numbers, questions and answer choices printed below the passage, and anything handwritten (pen/pencil notes, underlines, circles, ticks)
+- if a character is hard to read, give your best reading — never drop text, never summarise
+- JSON only, no explanation`;
+
+/** 1차 읽기 응답에서 글을 꺼낸다. JSON 이 깨졌으면 실패다. */
+export function parseTranscript(text: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const a = text.indexOf("{");
+    const b = text.lastIndexOf("}");
+    if (a === -1 || b <= a) throw new GradeError("지문 글자를 읽지 못했습니다.", 502);
+    try {
+      parsed = JSON.parse(text.slice(a, b + 1));
+    } catch {
+      throw new GradeError("지문 글자를 읽지 못했습니다.", 502);
+    }
+  }
+  const t = (parsed as { text?: unknown })?.text;
+  if (typeof t !== "string" || t.trim().length < 20) {
+    throw new GradeError("지문 글자가 거의 읽히지 않았습니다.", 502);
+  }
+  return t.trim();
+}
+
+/** 지문 사진 → 글자만(1차 읽기). 정해 준 모델 하나로만 읽는다. */
+export async function transcribeKoreanPassage(
+  imageDataUrl: string,
+  signal?: AbortSignal,
+  apiKeyOverride?: string,
+  target: { model?: string; effort?: string } = {},
+): Promise<{ text: string; usage?: GradeUsage; model: string }> {
+  const model = target.model ?? OPENAI_TRANSCRIBE_MODEL;
+  const effort = target.model ? target.effort : (target.effort ?? OPENAI_TRANSCRIBE_EFFORT);
+  const out = await callVision(
+    KOREAN_TRANSCRIBE_PROMPT,
+    [imageDataUrl],
+    "지문 글자 읽기",
+    signal,
+    model,
+    apiKeyOverride,
+    effort,
+  );
+  return { text: parseTranscript(out.text), usage: out.usage, model: out.model };
+}
+
 /** 지문 인식 프롬프트(참고 글·원문자 목록까지 붙인 것). 비교 화면도 같은 것을 쓴다. */
 function koreanTextPrompt(reference: string): string {
-  // 조합용 자모(ᄀᄂᄃ)를 먼저 호환용(ㄱㄴㄷ)으로 바꾼다 — Mathpix 가 이 형태로
+  // 조합용 자모(ᄀᄂᄃ)를 먼저 호환용(ㄱㄴㄷ)으로 바꾼다 — 인식기가 이 형태로
   // 주는 경우가 있는데, 그대로 두면 모델이 "참고 글을 베끼라"는 지시를 따라
   // 이 깨진 코드를 그대로 옮겨 적는다(renderMathText.ts 와 같은 사고).
   const cleanedReference = normalizeJamo(reference.trim());
@@ -756,7 +836,11 @@ function koreanTextPrompt(reference: string): string {
    * 라고 따로 뽑아 주면 그대로 쓴다(그림 프롬프트의 `circledNote` 가 이미
    * 같은 방식으로 효과를 봤다).
    *
-   * **대가**: Mathpix 가 아예 못 읽은 원문자는 우리도 못 살린다. 그건 받아들인
+   * (2026-09-25부터 참고 글은 Mathpix 가 아니라 GPT 1차 읽기다 —
+   * `transcribeKoreanPassage`. 글자만 보는 호출이라 원문자를 가리는 일도 그쪽이
+   * 맡고, 규칙은 그대로다: 참고 글에 있는 원문자를 코드로 맞춘다.)
+   *
+   * **대가**: 1차 읽기가 아예 못 읽은 원문자는 우리도 못 살린다. 그건 받아들인
    * 선택이다 — 틀린 글자가 찍히는 것보다 낫고(㉠ 이 ㉡ 으로 바뀌면 문제가
    * 성립하지 않는다), 참고 글이 없을 때는 예전처럼 사진을 본다.
    */
@@ -773,7 +857,7 @@ use these exact characters from the reference. never substitute a different inne
   const prompt = cleanedReference
     ? `${KOREAN_TEXT_PROMPT}${circledLine}
 
-reference — same passage as read by a text recogniser (Mathpix). its LETTERS (Hangul, Hanja, Latin, digits) are what gets printed: use its spelling over your own reading when they differ. it can drop ㄱ/ㄴ/ㄷ list markers and other symbols, it mangles line breaks and spacing, and it carries no marks at all — for those (line breaks, spacing, alignment, paragraph breaks, boxes, bold, underline, sq, symbol positions), trust the IMAGE instead:
+reference — same passage transcribed letter-by-letter in a separate OCR pass. its LETTERS (Hangul, Hanja, Latin, digits) are what gets printed: use its spelling over your own reading when they differ. it can drop ㄱ/ㄴ/ㄷ list markers and other symbols, it mangles line breaks and spacing, and it carries no marks at all — for those (line breaks, spacing, alignment, paragraph breaks, boxes, bold, underline, sq, symbol positions), trust the IMAGE instead:
 """
 ${cleanedReference}
 """`
@@ -781,7 +865,7 @@ ${cleanedReference}
   return prompt;
 }
 
-/** 지문 사진 → 구조화된 블록. `reference` 는 Mathpix 가 읽은 글(있으면 더 정확하다). */
+/** 지문 사진 → 구조화된 블록. `reference` 는 1차로 읽어 둔 글(있으면 더 정확하다). */
 export async function readKoreanRichText(
   imageDataUrl: string,
   reference: string,

@@ -23,6 +23,7 @@ import { sortByProblemNumber } from "@/lib/problemOrder";
 import type { KoreanMeta } from "@/lib/koreanSet";
 import { readRichBlocks, type RichBlock } from "@/lib/kice/richText";
 import { applyReference, describeMerge } from "@/lib/kice/referenceMerge";
+import { transcribePassage } from "@/lib/passageTranscribe";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
@@ -409,42 +410,30 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   }
 
   /**
-   * 저장된 국어 지문을 다시 읽는다 — `KoreanModePanel`의 제목 짓기(Mathpix)
-   * + `readPassageBlocks`(terra, `/api/korean-text`)와 같은 두 단계다.
-   * **이미지 재생성이 아니다** — 그림을 그리는 게 아니라 terra 가 글자를
-   * 다시 읽어 구조화된 블록을 돌려주고, 그걸로 평가원 글꼴 조판을 다시
-   * 만든다(terra 5토큰).
+   * 저장된 국어 지문을 다시 읽는다 — `KoreanModePanel` 과 같은 두 단계다:
+   * ① 1차 글자 읽기(GPT, 예전에는 Mathpix) ② 모양 읽기(`/api/korean-text`).
+   * **이미지 재생성이 아니다** — 그림을 그리는 게 아니라 글자를 다시 읽어
+   * 구조화된 블록을 돌려주고, 그걸로 평가원 글꼴 조판을 다시 만든다.
    *
-   * **여기서도 Mathpix 를 새로 부른다**(1토큰 추가). 처음에는 비용을
-   * 아끼려고 뺐었는데, 참고 글이 있어야 terra 의 글자 정확도가 오른다는
-   * 게 이 기능 전체의 설계 전제라 — 재인식에서만 빼면 처음 만들 때보다
-   * 정확도가 떨어지는 경로가 하나 더 생긴다. 두 단계의 진행 상황과 비용을
-   * `PassageProgress` 로 그대로 보여준다(초 단위 타이머가 아니라 지금
-   * Mathpix 인지 terra 인지 이름으로).
+   * ①을 빼면 처음 만들 때보다 정확도가 떨어지는 경로가 하나 더 생기므로 여기서도
+   * 부른다. 두 단계의 진행 상황과 비용을 `PassageProgress` 로 그대로 보여 준다.
    */
   async function reReadPassage(crop: string) {
     setPassageBusy(true);
     setEditError(null);
-    setPassageStatus({ mathpix: "running", terra: "pending" });
+    setPassageStatus({ reader: "running", terra: "pending" });
     let reference = "";
+    let reader: Partial<PassageStatus> = {};
     try {
       const enhanced = await enhanceContrast(crop);
       try {
-        const ocrRes = await fetch("/api/mathpix", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: enhanced }),
-        });
-        const ocrJson = (await ocrRes.json()) as {
-          text?: string;
-          latex?: string;
-          error?: string;
-        };
-        if (ocrRes.ok) reference = (ocrJson.text || ocrJson.latex || "").trim();
+        const t = await transcribePassage(enhanced);
+        reference = t.text;
+        reader = { readerModel: t.model, readerCostKrw: t.costKrw, readerTokens: t.chargedTokens };
       } catch {
-        // Mathpix 가 실패해도 진행한다 — 사진만 보고 읽는 예전 경로와 같다.
+        // 1차 읽기가 실패해도 진행한다 — 모양 읽기만으로 읽는 길로 내려간다.
       }
-      setPassageStatus({ mathpix: reference ? "ok" : "failed", terra: "running" });
+      setPassageStatus({ reader: reference ? "ok" : "failed", ...reader, terra: "running" });
 
       const res = await fetch("/api/korean-text", {
         method: "POST",
@@ -462,12 +451,13 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
       const raw = readRichBlocks(json.blocks);
       if (raw.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      // **글자와 원문자는 Mathpix 를 따른다**(KoreanModePanel 과 같은 규칙 — 두 경로가
+      // **글자와 원문자는 1차 읽기를 따른다**(KoreanModePanel 과 같은 규칙 — 두 경로가
       // 달라지면 안 된다).
       const { blocks, replaced, matched, letters } = applyReference(raw, reference);
       setEditKoreanBlocks(blocks);
       setPassageStatus({
-        mathpix: reference ? "ok" : "failed",
+        reader: reference ? "ok" : "failed",
+        ...reader,
         terra: "done",
         circledFixed: replaced,
         circledMismatch: !matched,
@@ -480,7 +470,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       const message =
         err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.";
       setPassageStatus({
-        mathpix: reference ? "ok" : "failed",
+        reader: reference ? "ok" : "failed",
+        ...reader,
         terra: "error",
         errorMessage: message,
       });

@@ -10,17 +10,26 @@
  * 같은 방식을 그대로 가져왔다.
  */
 export type PassageStatus = {
-  mathpix: "running" | "ok" | "failed" | "skipped";
+  /**
+   * 1차 글자 읽기(GPT, 예전 Mathpix 자리). 글자만 한 자씩 옮겨 적는 단계다 —
+   * 그 글이 다음 단계(모양 읽기)의 참고 글이 되고, 끝나면 글자를 그걸로 맞춘다.
+   */
+  reader: "running" | "ok" | "failed" | "skipped";
+  /** 1차 읽기를 한 모델(서버가 응답에 실어 준다). */
+  readerModel?: string;
+  /** 1차 읽기 비용(무제한 계정은 원, 일반 계정은 토큰). */
+  readerCostKrw?: number;
+  readerTokens?: number;
   terra: "pending" | "running" | "done" | "error";
   /**
-   * Mathpix 기준으로 갈아 끼운 원문자 수(`alignCircledToReference`).
+   * 1차 읽기 기준으로 갈아 끼운 원문자 수(`alignCircledToReference`).
    * **보여 주는 이유**: 원문자 하나가 바뀌면 문제가 성립하지 않는 자리라,
    * 우리가 고쳤는지 안 고쳤는지가 눈에 보여야 한다.
    */
   circledFixed?: number;
   /** 원문자 개수가 참고 글과 달라 손대지 못했다(짝지을 근거가 없다). */
   circledMismatch?: boolean;
-  /** 글자를 Mathpix 것으로 갈아 끼운 결과 요약(`describeMerge`). */
+  /** 글자를 1차 읽기 것으로 갈아 끼운 결과 요약(`describeMerge`). */
   lettersNote?: string;
   /**
    * 실제로 답한 모델 이름(서버가 응답에 실어 준다).
@@ -38,11 +47,11 @@ export type PassageStatus = {
   errorMessage?: string;
 };
 
-const MATHPIX_LABEL: Record<PassageStatus["mathpix"], string> = {
-  running: "글자 읽는 중…",
-  ok: "참고 글 확보 ✓ (1토큰)",
-  failed: "읽지 못함 — 사진만 보고 읽습니다",
-  skipped: "건너뜀 — 사진만 보고 읽습니다",
+const READER_LABEL: Record<PassageStatus["reader"], string> = {
+  running: "글자만 한 자씩 옮겨 적는 중…",
+  ok: "글자 확보 ✓",
+  failed: "읽지 못함 — 모양 읽기만으로 진행합니다",
+  skipped: "건너뜀 — 모양 읽기만으로 진행합니다",
 };
 
 const TERRA_LABEL: Record<PassageStatus["terra"], string> = {
@@ -63,14 +72,20 @@ export function PassageProgress({
     <div className="flex flex-col gap-0.5 text-[11px]">
       <p
         className={
-          status.mathpix === "running"
+          status.reader === "running"
             ? "animate-soft-pulse text-slate-500"
-            : status.mathpix === "ok"
+            : status.reader === "ok"
               ? "text-emerald-700"
               : "text-amber-700"
         }
       >
-        Mathpix: {MATHPIX_LABEL[status.mathpix]}
+        1차 글자 읽기{status.readerModel ? ` (${status.readerModel})` : ""}:{" "}
+        {READER_LABEL[status.reader]}
+        {status.reader === "ok" && unlimited && typeof status.readerCostKrw === "number"
+          ? ` · 약 ${status.readerCostKrw.toLocaleString(undefined, { maximumFractionDigits: 1 })}원`
+          : status.reader === "ok" && typeof status.readerTokens === "number"
+            ? ` · ${status.readerTokens.toLocaleString()}토큰`
+            : ""}
       </p>
       <p
         className={
@@ -85,7 +100,7 @@ export function PassageProgress({
       >
         {status.model ?? "AI"}: {TERRA_LABEL[status.terra]}
         {status.terra === "done" && status.circledFixed
-          ? ` · 원문자 ${status.circledFixed}자를 Mathpix 기준으로 교정`
+          ? ` · 원문자 ${status.circledFixed}자를 1차 읽기 기준으로 교정`
           : ""}
         {status.terra === "done" && status.circledMismatch
           ? " · 원문자 개수가 참고 글과 달라 그대로 뒀어요(확인해 주세요)"

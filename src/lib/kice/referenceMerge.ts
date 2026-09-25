@@ -1,7 +1,9 @@
 import { alignCircledToReference, type RichBlock, type RichRun } from "./richText";
 
 /**
- * **글자는 Mathpix, 모양은 AI**(2026-09-25, 사용자 지시 — "텍스트 자체는
+ * **글자는 1차 읽기, 모양은 AI**(2026-09-25). 처음에는 1차 읽기가 Mathpix 였고
+ * 같은 날 GPT 1차 읽기(`transcribeKoreanPassage`)로 바뀌었다 — 아래의 "Mathpix"
+ * 는 참고 글(1차 읽기)을 가리킨다. (사용자 지시 — "텍스트 자체는
  * mathpix 가 하고, ai 가 알려 줄 거는 줄바꿈·띄어쓰기·정렬 위치·볼드체·기호·
  * 특수문자 등등").
  *
@@ -338,12 +340,12 @@ export function applyReference(
 /** 화면에 한 줄로 적을 글자 맞춤 요약. 손댄 게 없으면 빈 문자열. */
 export function describeMerge(stats: MergeStats): string {
   if (stats.skipped) {
-    return stats.referenceLetters > 0 ? "글자: 참고 글과 너무 달라 AI 글자를 그대로 씀" : "";
+    return stats.referenceLetters > 0 ? "글자: 1차 읽기와 너무 달라 모양 읽기 쪽 글자를 그대로 씀" : "";
   }
   const parts: string[] = [];
   if (stats.replaced) parts.push(`${stats.replaced}자 바꿈`);
   if (stats.inserted) parts.push(`${stats.inserted}자 끼움`);
   if (stats.dropped) parts.push(`${stats.dropped}자 뺌`);
-  if (stats.keptModel) parts.push(`Mathpix 에 없는 ${stats.keptModel}자는 AI 것을 둠`);
-  return parts.length ? `글자를 Mathpix 기준으로 ${parts.join(" · ")}` : "글자: Mathpix 와 일치";
+  if (stats.keptModel) parts.push(`1차 읽기에 없는 ${stats.keptModel}자는 모양 읽기 쪽 것을 둠`);
+  return parts.length ? `글자를 1차 읽기 기준으로 ${parts.join(" · ")}` : "글자: 1차 읽기와 일치";
 }

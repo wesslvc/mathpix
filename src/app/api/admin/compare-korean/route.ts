@@ -3,6 +3,8 @@ import { requireFontAdmin } from "../kice-font/auth";
 import {
   callGeminiJson,
   GradeError,
+  KOREAN_TRANSCRIBE_PROMPT,
+  parseTranscript,
   pollKoreanTextBackground,
   pollVisionBackground,
   readKoreanRichTextWith,
@@ -75,6 +77,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "effort 값이 이상합니다." }, { status: 400 });
   }
   const detect = body.task === "detect";
+  // **1차 글자 읽기**(예전 Mathpix 자리). 운영과 같은 프롬프트를 모델만 바꿔 돌린다.
+  if (body.task === "transcribe") {
+    const t0 = Date.now();
+    try {
+      if (provider === "openai") {
+        const jobId = await startVisionBackground(KOREAN_TRANSCRIBE_PROMPT, image, model, effort || undefined);
+        console.info(`[compare-korean] 1차 읽기 시작 model=${model} effort=${effort || "-"} id=${jobId}`);
+        return NextResponse.json({ jobId });
+      }
+      const out = await callGeminiJson(KOREAN_TRANSCRIBE_PROMPT, image, model);
+      return NextResponse.json({
+        text: parseTranscript(out.text),
+        usage: out.usage,
+        model: out.model,
+        estKrw: out.usage ? (gradingEstKrw(out.usage, out.model) ?? null) : null,
+        ms: Date.now() - t0,
+      });
+    } catch (err) {
+      const status = err instanceof GradeError ? err.status : 500;
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "지문 글자를 읽지 못했습니다.", ms: Date.now() - t0 },
+        { status: status >= 400 && status < 600 ? status : 500 },
+      );
+    }
+  }
   const polygon = body.shape === "polygon";
   const detectPrompt = polygon ? KOREAN_POLYGON_PROMPT : KOREAN_PROMPT;
 
@@ -179,6 +206,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "id 가 이상합니다." }, { status: 400 });
   }
   try {
+    if (req.nextUrl.searchParams.get("task") === "transcribe") {
+      const poll = await pollVisionBackground(id);
+      if (poll.status !== "done") return NextResponse.json(poll);
+      try {
+        return NextResponse.json({
+          status: "done",
+          text: parseTranscript(poll.text),
+          usage: poll.usage,
+          model: poll.model,
+          estKrw: poll.usage ? (gradingEstKrw(poll.usage, poll.model) ?? null) : null,
+        });
+      } catch (err) {
+        return NextResponse.json({
+          status: "error",
+          message: err instanceof Error ? err.message : "지문 글자를 읽지 못했습니다.",
+        });
+      }
+    }
     if (req.nextUrl.searchParams.get("task") === "detect") {
       const poll = await pollVisionBackground(id);
       if (poll.status !== "done") return NextResponse.json(poll);
