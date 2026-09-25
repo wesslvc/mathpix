@@ -12,7 +12,8 @@ import {
 } from "@/lib/figureImage";
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import { toStoredFigures, type StoredBoxRange } from "@/lib/storedFigures";
-import { alignCircledToReference, readRichBlocks } from "@/lib/kice/richText";
+import { readRichBlocks } from "@/lib/kice/richText";
+import { applyReference, describeMerge } from "@/lib/kice/referenceMerge";
 import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
@@ -539,13 +540,15 @@ export default function KoreanModePanel({
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
       const raw = readRichBlocks(json.blocks);
       if (raw.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      // **원문자는 Mathpix 를 따른다 — 프롬프트가 아니라 코드로 맞춘다.**
-      const { blocks, replaced, matched } = alignCircledToReference(raw, reference);
+      // **글자와 원문자는 Mathpix 를 따른다 — 프롬프트가 아니라 코드로 맞춘다.**
+      // 모델 결과에서는 줄바꿈·띄어쓰기·맞춤·굵게·밑줄·기호 자리만 남는다.
+      const { blocks, replaced, matched, letters } = applyReference(raw, reference);
       setPassageStatus({
         mathpix: reference ? "ok" : "failed",
         terra: "done",
         circledFixed: replaced,
         circledMismatch: !matched,
+        lettersNote: describeMerge(letters),
         model: json.model,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,

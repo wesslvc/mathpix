@@ -15,12 +15,8 @@ import type { DetectedKoreanPolygon, DetectedKoreanRegion } from "@/lib/detectPr
 import { buildKicePdf } from "@/lib/kice/pdf";
 import { frameKeyFor, loadFrameImages, loadKiceFrames } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
-import {
-  alignCircledToReference,
-  readRichBlocks,
-  richToPlainText,
-  type RichBlock,
-} from "@/lib/kice/richText";
+import { readRichBlocks, richToPlainText, type RichBlock } from "@/lib/kice/richText";
+import { applyReference, describeMerge } from "@/lib/kice/referenceMerge";
 
 /**
  * **국어 지문 인식 모델 비교** — 무제한 계정 전용 시험 화면.
@@ -70,6 +66,8 @@ type Result =
       estKrw: number | null;
       circledFixed: number;
       circledMismatch: boolean;
+      /** 글자 맞춤 요약(`describeMerge`). */
+      lettersNote: string;
       pdfUrl: string;
       chars: number;
     }
@@ -474,8 +472,8 @@ export default function CompareKoreanPage() {
       if (json.jobId) json = await waitForJob(json.jobId);
       const raw = readRichBlocks(json.blocks);
       if (raw.length === 0) throw new Error("문단을 하나도 읽지 못했습니다.");
-      // 운영과 똑같이 원문자를 참고 글에 맞춘다 — 여기만 다르면 견준 결과가 운영과 어긋난다.
-      const { blocks, replaced, matched } = alignCircledToReference(raw, ref);
+      // 운영과 똑같이 글자·원문자를 참고 글에 맞춘다 — 여기만 다르면 견준 결과가 운영과 어긋난다.
+      const { blocks, replaced, matched, letters } = applyReference(raw, ref);
       const model = json.model ?? reader.model;
       const tag = reader.provider === "openai" && reader.effort ? `${model} (${reader.effort})` : model;
       const pdfUrl = await makePdf(blocks, `지문 비교 — ${readerTitle(reader)}`, `2p, ${tag}`);
@@ -490,6 +488,7 @@ export default function CompareKoreanPage() {
           estKrw: json.estKrw ?? null,
           circledFixed: replaced,
           circledMismatch: !matched,
+          lettersNote: describeMerge(letters) || "참고 글 없음 — AI 글자 그대로",
           pdfUrl,
           chars: richToPlainText(blocks).length,
         },
@@ -948,6 +947,7 @@ function ResultView({ result }: { result: Result }) {
             ? "참고 글과 개수가 달라 일부 그대로 둠"
             : `참고 글에 맞춰 ${result.circledFixed}자 고침`}
         </li>
+        <li>{result.lettersNote}</li>
       </ul>
       <a
         href={result.pdfUrl}

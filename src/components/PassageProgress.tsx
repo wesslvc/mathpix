@@ -20,6 +20,8 @@ export type PassageStatus = {
   circledFixed?: number;
   /** 원문자 개수가 참고 글과 달라 손대지 못했다(짝지을 근거가 없다). */
   circledMismatch?: boolean;
+  /** 글자를 Mathpix 것으로 갈아 끼운 결과 요약(`describeMerge`). */
+  lettersNote?: string;
   /**
    * 실제로 답한 모델 이름(서버가 응답에 실어 준다).
    *
@@ -89,6 +91,9 @@ export function PassageProgress({
           ? " · 원문자 개수가 참고 글과 달라 그대로 뒀어요(확인해 주세요)"
           : ""}
       </p>
+      {status.terra === "done" && status.lettersNote ? (
+        <p className="text-slate-500">{status.lettersNote}</p>
+      ) : null}
       {status.terra === "done" &&
         (unlimited && typeof status.costKrw === "number" ? (
           <p className="text-slate-400">약 {status.costKrw.toLocaleString()}원</p>

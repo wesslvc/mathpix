@@ -702,11 +702,13 @@ async function callGeminiVision(
 
 const KOREAN_TEXT_PROMPT = `task: transcribe Korean SAT (수능) 국어 passage image into structured text for re-typesetting.
 reproduce EXACTLY — copying, not editing.
+your main job is the LAYOUT and MARKS, which only the image shows: where lines break, spacing, alignment, bold, printed underline, small boxes, circled chars, list markers, symbols and special characters — each at its exact position. still write out every word in full (the letters get checked against a text recogniser afterwards, but only your output says where things go).
 
 answer JSON only: {"blocks":[ ... ]}
 
 block = one of:
-- {"kind":"para","runs":[{"t":"text","b":true,"u":true,"sq":true}],"indent":true}
+- {"kind":"para","runs":[{"t":"text","b":true,"u":true,"sq":true}],"indent":true,"center":true,"right":true}
+  \`center\`=line printed centred (a title). \`right\`=line pushed to the right edge (typically the trailing attribution "- 작자 미상, 「적벽가」 -"). omit both for normal left-aligned text.
   \`b\`=printed bold, \`u\`=printed underline, \`sq\`=printed small box/rectangle drawn tightly around this word or phrase — a DIFFERENT mark from underline, used the same way (points at the expression a question refers to). omit each when absent. \`indent\`=paragraph's first line indented (usual for body paragraphs). split \`runs\` only where styling changes, else 1 run.
 - {"kind":"box","blocks":[ ... ]} — a bordered frame actually drawn in the image (조건 박스, <보기>, or a frame enclosing several lettered sections like (가)(나) together). one continuous border = exactly ONE box block containing every paragraph inside it, from where the border starts to where it ends — never split one border into multiple box blocks, never leave a paragraph that is visually inside the border sitting outside as a top-level para.
   a box is the EXCEPTION, not the default. rules:
@@ -718,12 +720,14 @@ block = one of:
 - {"kind":"figure","id":"f1","ratio":0.6} — picture/table not expressible as text. \`ratio\`=height/width.
 
 rules:
-- copy every character exactly, reading the IMAGE itself for these (the reference text below can be wrong here): 「」『』()·, ㄱ/ㄴ/ㄷ list markers, markers like (가)(나), literary work's trailing attribution line
-- circled chars (㉠㉡㉢, ①②③) are the ONE exception: take them from the reference text, never from your own reading of the image (see the circled-chars line below)
+- copy every character exactly, reading the IMAGE itself for these (the reference text below can be wrong here): 「」『』()·, ㄱ/ㄴ/ㄷ list markers, markers like (가)(나), [중모리]-style tags, ※ ○ ◎ ● □ ▲ → ~ …, literary work's trailing attribution line — each exactly where it sits
+- circled chars (㉠㉡㉢, ①②③) are the ONE exception: take them from the reference text, never from your own reading of the image (see the circled-chars line below) — but put each one at the position where the image shows it
 - no summarise/modernise/translate/fix-spelling/add anything
 - keep original paragraph breaks: 1 printed paragraph = 1 "para" block
+- line breaks: in verse (시·시조·가사·민요, a play's lines) every printed line ends with "\n" inside the run text, and a blank line between stanzas = a new para. in prose, never put "\n" inside a paragraph — the typesetter wraps it
+- spacing: keep the printed word spacing, including a wide gap inside a verse line (write it as two spaces)
 - lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." = own para block
-- mark bold/underline/sq only where PRINT shows it, ignore handwriting
+- bold/underline/sq only where PRINT shows it. printed underline = a crisp, straight, even, dark rule of the same ink as the text. a faint, wobbly, pencil/pen line under words is a student's HANDWRITTEN mark — never \`u\`. same for handwritten circles, ticks and notes: ignore them entirely
 - exclude running heads, page numbers, questions printed below passage
 - JSON only, no explanation`;
 
@@ -763,12 +767,13 @@ circled chars — this passage contains EXACTLY these, in this order: ${circledP
 use these exact characters from the reference. never substitute a different inner char, never reorder, never add or drop one based on the image.`
     : "";
 
-  // 일반 산문은 참고 글을 우선하되, **구조**(문단·박스·굵게·밑줄·네모)는
-  // 사진을 우선한다 — 참고 글에는 그 정보가 아예 없기 때문이다.
+  // **글자는 참고 글, 모양은 사진**(2026-09-25). 모델이 준 글자는 어차피
+  // `mergeTextFromReference` 가 참고 글 것으로 갈아 끼우므로, 모델에게는 줄바꿈·
+  // 띄어쓰기·맞춤·굵게·밑줄·네모·기호 자리를 사진에서 읽는 데 힘을 쓰게 한다.
   const prompt = cleanedReference
     ? `${KOREAN_TEXT_PROMPT}${circledLine}
 
-reference — same passage as read by a text recogniser (Mathpix). for ORDINARY PROSE WORDING and for CIRCLED CHARS, treat it as authoritative — copy it over your own reading when they differ. it can still drop ㄱ/ㄴ/ㄷ list markers and other symbols, and it carries no structure at all — for those (paragraph breaks, boxes, bold, underline, sq), trust the IMAGE instead:
+reference — same passage as read by a text recogniser (Mathpix). its LETTERS (Hangul, Hanja, Latin, digits) are what gets printed: use its spelling over your own reading when they differ. it can drop ㄱ/ㄴ/ㄷ list markers and other symbols, it mangles line breaks and spacing, and it carries no marks at all — for those (line breaks, spacing, alignment, paragraph breaks, boxes, bold, underline, sq, symbol positions), trust the IMAGE instead:
 """
 ${cleanedReference}
 """`

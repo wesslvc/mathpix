@@ -177,6 +177,7 @@ function placeLine(
   measure: Measure,
   indent: number,
   center: number | null,
+  right: number | null = null,
 ): FlowItem {
   const pieces: FlowPiece[] = [];
   let dx = indent;
@@ -194,6 +195,9 @@ function placeLine(
   }
   if (center != null && dx < center) {
     const shift = (center - dx) / 2;
+    for (const p of pieces) p.dx += shift;
+  } else if (right != null && dx < right) {
+    const shift = right - dx;
     for (const p of pieces) p.dx += shift;
   }
   return { kind: "line", x, y, size, pieces };
@@ -286,7 +290,15 @@ export function flowBlocks(
               })),
               ...(hard[i + k] ? [{ t: "\n" }] : []),
             ]);
-            return restRuns.length > 0 ? { kind: "para", runs: restRuns } : null;
+            // 이어지는 도막은 첫 줄이 아니므로 들여쓰기는 빼고, 맞춤은 그대로 둔다.
+            return restRuns.length > 0
+              ? {
+                  kind: "para",
+                  runs: restRuns,
+                  ...(block.center ? { center: true } : {}),
+                  ...(block.right ? { right: true } : {}),
+                }
+              : null;
           }
         }
         results[col].items.push(
@@ -298,6 +310,7 @@ export function flowBlocks(
             measure,
             i === 0 ? first : 0,
             block.center ? width : null,
+            block.right ? width : null,
           ),
         );
         y += step;

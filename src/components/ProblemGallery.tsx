@@ -21,11 +21,8 @@ import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import { sortByProblemNumber } from "@/lib/problemOrder";
 import type { KoreanMeta } from "@/lib/koreanSet";
-import {
-  alignCircledToReference,
-  readRichBlocks,
-  type RichBlock,
-} from "@/lib/kice/richText";
+import { readRichBlocks, type RichBlock } from "@/lib/kice/richText";
+import { applyReference, describeMerge } from "@/lib/kice/referenceMerge";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { PassageProgress, type PassageStatus } from "./PassageProgress";
 import FontSizeControl from "./FontSizeControl";
@@ -465,15 +462,16 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
       const raw = readRichBlocks(json.blocks);
       if (raw.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      // **원문자는 Mathpix 를 따른다**(KoreanModePanel 과 같은 규칙 — 두 경로가
+      // **글자와 원문자는 Mathpix 를 따른다**(KoreanModePanel 과 같은 규칙 — 두 경로가
       // 달라지면 안 된다).
-      const { blocks, replaced, matched } = alignCircledToReference(raw, reference);
+      const { blocks, replaced, matched, letters } = applyReference(raw, reference);
       setEditKoreanBlocks(blocks);
       setPassageStatus({
         mathpix: reference ? "ok" : "failed",
         terra: "done",
         circledFixed: replaced,
         circledMismatch: !matched,
+        lettersNote: describeMerge(letters),
         model: json.model,
         chargedTokens: json.chargedTokens,
         costKrw: json.usage?.estKrw,

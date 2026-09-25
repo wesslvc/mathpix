@@ -33,7 +33,14 @@ export type RichRun = {
 
 export type RichBlock =
   /** 문단. `indent` 면 첫 줄을 한 칸 들여 쓴다(국어 지문의 기본 모양). */
-  | { kind: "para"; runs: RichRun[]; indent?: boolean; center?: boolean }
+  | {
+      kind: "para";
+      runs: RichRun[];
+      indent?: boolean;
+      center?: boolean;
+      /** 오른쪽 맞춤(작품 끝의 `- 작자 미상, 「적벽가」 -` 같은 출처 줄). */
+      right?: boolean;
+    }
   /** 네모 상자(조건 박스·<보기>). 단을 넘어가면 잘리고 다음 단에서 이어진다. */
   | { kind: "box"; blocks: RichBlock[] }
   /** 그림 자리. 지문 안에 삽화가 있을 때 그 자리를 비워 둔다. */
@@ -97,12 +104,12 @@ export function readRichBlocks(raw: unknown, depth = 0): RichBlock[] {
       runs,
       ...(o.indent === true ? { indent: true } : {}),
       ...(o.center === true ? { center: true } : {}),
+      ...(o.right === true && o.center !== true ? { right: true } : {}),
     });
   }
   return out;
 }
 
-/** 조판된 글자를 다시 평범한 글로. 제목 짓기·검색에 쓴다. */
 /** "[22~26] 다음 글을 읽고 물음에 답하시오." 같은 안내 줄의 머리. */
 const LEAD_IN = /^\s*\[\s*\d{1,2}\s*[~∼～〜\-–—]\s*\d{1,2}\s*\]/;
 
@@ -132,6 +139,7 @@ export function framePassage(blocks: RichBlock[]): RichBlock[] {
   return [...head, { kind: "box", blocks: body }];
 }
 
+/** 조판된 글자를 다시 평범한 글로. 제목 짓기·검색에 쓴다. */
 export function richToPlainText(blocks: RichBlock[]): string {
   const out: string[] = [];
   const walk = (list: RichBlock[]) => {
