@@ -27,6 +27,7 @@ import {
 import fontkit from "@pdf-lib/fontkit";
 import type { Frame, FrameBox, FrameItem, FrameSet } from "./frames";
 import { framePassage, type RichBlock } from "./richText";
+import { planKoreanPages, type KoreanPage, type KoreanPassage, type KoreanSetIn } from "./koreanLayout";
 import {
   DEFAULT_FLOW_STYLE,
   flowBlocks,
@@ -476,6 +477,46 @@ function layoutPassage(
   };
 }
 
+/**
+ * `fitColumn` 이 이 문제들을 높이 `avail` 인 한 단에 넣을 때 쓸 배율(1 = 줄이지 않음).
+ * **`fitColumn` 과 같은 식이어야 한다** — 쪽을 짤 때 이 값으로 "옆 단에 들어가는가"를 본다.
+ */
+function columnScale(items: Shot[], avail: number): number {
+  if (!items.length) return 1;
+  const heads = items.reduce((a, it) => a + (it.label ? LABEL_SIZE + LABEL_GAP : 0), 0);
+  const sum = items.reduce(
+    (a, it) => a + it.img.height * Math.min(LAYOUT.columnWidth / it.img.width, 1),
+    0,
+  );
+  const gaps = LAYOUT.gap * (items.length - 1);
+  if (heads + sum + gaps <= avail) return 1;
+  return Math.max((avail - gaps - heads) / sum, 0);
+}
+
+/**
+ * 지문 옆 단에 문제를 둘 때 허용하는 가장 작은 배율. 이보다 줄여야 들어가면
+ * 한 쪽에 몰지 않고 두 쪽(짝수 지문 · 홀수 문제)으로 나눈다(사용자 결정 —
+ * 글씨가 작아지는 것보다 두 쪽이 낫다).
+ */
+const MIN_SPREAD_SCALE = 0.9;
+
+/**
+ * **한 쪽에 지문과 문제를 나란히** — 왼쪽 단 지문, 오른쪽 단 문제.
+ * 글자 지문은 여기서 자리만 비워 두고 그리는 쪽이 왼쪽 단에 흘려 넣는다.
+ */
+function layoutSpread(
+  passage: KoreanPassage,
+  questions: Shot[],
+  images: Shot[],
+  frames: FrameSet,
+  pageNo: number,
+): { items: Placed[] } {
+  const b = frameBounds(frameFor(frames, pageNo));
+  const top = b.headerBottom + LAYOUT.gap;
+  const left = passage.kind === "image" ? layoutPassage(images[passage.index], frames, pageNo).items : [];
+  return { items: [...left, ...fitColumn(questions, columnX(1), top, b.contentBottom)] };
+}
+
 export type KiceSpec = {
   frames: FrameSet;
   /** 틀에 적힌 글자 → 바꿔 넣을 글자(빈 문자열이면 지운다). 공백은 무시하고 찾는다. */
@@ -502,25 +543,21 @@ export type KiceSpec = {
   koreanPlan?: {
     /** 첫 장에 적을 줄들(예: `2~3p, 이감 5-6, 이중차분법`). */
     toc: string[];
-    pages: (
-      | { kind: "toc" }
-      /**
-       * **글자로 된 지문.** 사진이 아니라 우리가 평가원 글꼴로 조판한다 —
-       * 확대해도 또렷하고, 단을 따라 흐르고, 상자가 단을 넘어가면 잘린다.
-       */
-      | { kind: "passageText"; blocks: RichBlock[] }
-      | {
-          kind: "passage";
-          index: number;
-          /**
-           * 두 단에 나눠 흘릴 때의 **가르는 자리**(그림 높이의 0~1).
-           * 없으면 좌단에만 놓는다(좌단만으로 충분한 지문).
-           */
-          splitAt?: number;
-        }
-      | { kind: "questions"; indexes: number[] }
-    )[];
+    /**
+     * `passageText` = 글자로 된 지문(우리가 평가원 글꼴로 조판), `passage` =
+     * 사진 지문(`splitAt` 이 있으면 두 단에 나눠 흘림), `spread` = 한 쪽에
+     * 왼쪽 단 지문 · 오른쪽 단 문제, `blank` = 짝홀을 맞추는 빈 쪽.
+     */
+    pages: KoreanPage[];
   };
+  /**
+   * **국어 세트.** 있으면 `koreanPlan` 대신 여기서 쪽을 짠다(`planKoreanPages`).
+   *
+   * 지문이 한 단에 들어가는지·문제가 옆 단에 들어가는지는 글꼴과 그림 크기를
+   * 알아야 잴 수 있고, 그건 여기에만 있다. 목차의 쪽번호도 같은 자리에서 만든다
+   * — 목차를 만드는 쪽과 쪽을 짜는 쪽이 다르면 반드시 어긋난다.
+   */
+  koreanSets?: { sets: KoreanSetIn[]; loose: number[] };
   /**
    * 마지막에 붙일 **정답표**. 비어 있으면 붙이지 않는다.
    *
@@ -789,20 +826,57 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   }
 
   const pattern = spec.pagePattern.filter((n) => n > 0);
-  const plan = spec.koreanPlan;
+
+  // 글자 지문을 재고 그리는 글꼴·폭. **재는 쪽과 그리는 쪽이 같은 것을 써야
+  // 한다** — 어긋나면 "한 단에 들어간다"고 판단한 지문이 넘쳐 잘린다.
+  const body = await fontForText(BODY_FONT, "");
+  const measure = (t: string, size: number, bold: boolean) =>
+    body.font.widthOfTextAtSize(t, size) * (bold ? 1.02 : 1);
+  const columnsOf = (pageNo: number, which: number[]): FlowColumn[] => {
+    const b = frameBounds(frameFor(spec.frames, pageNo));
+    return which.map((i) => ({
+      x: columnX(i),
+      top: b.headerBottom + LAYOUT.gap,
+      bottom: b.contentBottom,
+      width: LAYOUT.columnWidth,
+    }));
+  };
+
+  const plan: KiceSpec["koreanPlan"] = spec.koreanSets
+    ? planKoreanPages(spec.koreanSets.sets, spec.koreanSets.loose, {
+        passageFitsColumn: (p, pageNo) => {
+          if (p.kind === "text") {
+            return flowBlocks(framePassage(p.blocks), columnsOf(pageNo, [0]), measure, DEFAULT_FLOW_STYLE)
+              .rest.length === 0;
+          }
+          const img = images[p.index]?.img;
+          if (!img) return false;
+          const col = columnsOf(pageNo, [0])[0];
+          // `passageSplitAt` 과 같은 식 — 단 폭에 맞췄을 때의 높이.
+          return (img.height * LAYOUT.columnWidth) / img.width <= col.bottom - col.top;
+        },
+        questionsFitColumn: (indexes, pageNo) => {
+          const col = columnsOf(pageNo, [1])[0];
+          return columnScale(indexes.map((i) => images[i]), col.bottom - col.top) >= MIN_SPREAD_SCALE;
+        },
+      })
+    : spec.koreanPlan;
   // 국어는 쪽마다 무엇이 들어갈지 이미 정해져 있다(짝수 지문 / 홀수 문제).
   const pages = plan
-    ? plan.pages.map((p, n) =>
-        p.kind === "toc" || p.kind === "passageText"
-          ? { items: [] as Placed[] }
-          : p.kind === "passage"
-            ? layoutPassage(images[p.index], spec.frames, n + 1, p.splitAt)
-            : layoutOnePage(
-                p.indexes.map((i) => images[i]),
-                spec.frames,
-                n + 1,
-              ),
-      )
+    ? plan.pages.map((p, n): { items: Placed[] } => {
+        switch (p.kind) {
+          case "toc":
+          case "passageText":
+          case "blank":
+            return { items: [] };
+          case "passage":
+            return layoutPassage(images[p.index], spec.frames, n + 1, p.splitAt);
+          case "spread":
+            return layoutSpread(p.passage, p.indexes.map((i) => images[i]), images, spec.frames, n + 1);
+          case "questions":
+            return layoutOnePage(p.indexes.map((i) => images[i]), spec.frames, n + 1);
+        }
+      })
     : layoutPages(images, spec.frames, pattern.length ? pattern : [4]);
   const answers = (spec.answers ?? []).filter((a) => a.answer.trim() !== "");
   /**
@@ -861,24 +935,24 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     if (planned?.kind === "toc") {
       await drawToc(page, frameFor(spec.frames, n + 1), plan!.toc, fontForText, flip);
     }
-    if (planned?.kind === "passageText") {
-      // 두 단에 흘려 넣는다. 남는 것이 있어도 이 쪽에서 끊는다 — 국어 계획은
-      // 세트마다 쪽을 정해 두므로(짝수 지문 / 홀수 문제) 여기서 쪽을 더
-      // 만들면 그 규칙이 무너진다. 넘칠 만큼 긴 지문은 계획을 짜는 쪽이
-      // 두 쪽으로 나눠 준다.
-      const b = frameBounds(frameFor(spec.frames, n + 1));
-      const cols: FlowColumn[] = [0, 1].map((i) => ({
-        x: columnX(i),
-        top: b.headerBottom + LAYOUT.gap,
-        bottom: b.contentBottom,
-        width: LAYOUT.columnWidth,
-      }));
-      const body = await fontForText(BODY_FONT, "");
-      const measure = (t: string, size: number, bold: boolean) =>
-        body.font.widthOfTextAtSize(t, size) * (bold ? 1.02 : 1);
+    // 글자 지문은 여기서 흘려 넣는다. 남는 것이 있어도 이 쪽에서 끊는다 — 국어
+    // 계획은 세트마다 쪽을 정해 두므로(짝수 지문 / 홀수 문제) 여기서 쪽을 더
+    // 만들면 그 규칙이 무너진다.
+    const textPassage =
+      planned?.kind === "passageText"
+        ? { blocks: planned.blocks, cols: [0, 1] }
+        : planned?.kind === "spread" && planned.passage.kind === "text"
+          ? { blocks: planned.passage.blocks, cols: [0] }
+          : null;
+    if (textPassage) {
       // 안내 줄([N~M] …)만 밖에 두고 지문 본문을 상자 하나로 두른다.
-      const flowed = flowBlocks(framePassage(planned.blocks), cols, measure, DEFAULT_FLOW_STYLE);
-      const passageFigures = await loadPassageFigures(pdf, planned.blocks, spec.onWarn);
+      const flowed = flowBlocks(
+        framePassage(textPassage.blocks),
+        columnsOf(n + 1, textPassage.cols),
+        measure,
+        DEFAULT_FLOW_STYLE,
+      );
+      const passageFigures = await loadPassageFigures(pdf, textPassage.blocks, spec.onWarn);
       for (const r of flowed.results) {
         await drawFlow(page, r.items, fontForText, flip, passageFigures);
       }

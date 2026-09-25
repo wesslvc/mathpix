@@ -12,7 +12,8 @@ import {
 import { loadKiceFonts } from "@/lib/kice/fonts";
 import { stripCardBorder } from "@/lib/kice/stripBorder";
 import { KICE_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
-import { groupKoreanSets, tocLine, type KoreanMeta } from "@/lib/koreanSet";
+import { groupKoreanSets, type KoreanMeta } from "@/lib/koreanSet";
+import type { KoreanPassage, KoreanSetIn } from "@/lib/kice/koreanLayout";
 
 /**
  * 평가원 문제지 양식으로 내보내기.
@@ -137,58 +138,45 @@ export default function KiceExportPanel({ title, items }: Props) {
   }
 
   /**
-   * 국어 배치 계획. **첫 장은 목차, 그다음부터 짝수 쪽 지문 · 홀수 쪽 문제**다.
-   *
-   * 여기서 짜는 이유는 목차에 쪽 번호가 그대로 적히기 때문이다 — 목차를
-   * 만드는 쪽과 쪽을 짜는 쪽이 다르면 반드시 어긋난다.
+   * 국어 세트를 모은다. **쪽은 여기서 짜지 않는다** — 지문이 한 단에 들어가는지
+   * (그러면 문제를 옆 단에)는 글꼴과 그림 크기를 알아야 재는데 그건 `pdf.ts`
+   * 에 있다(`planKoreanPages`). 목차 쪽번호도 거기서 함께 만든다.
    *
    * 지문 없는 문항(국어 모드를 안 거친 것)은 세트 뒤에 이어 붙인다. 지문
    * 쪽을 차지할 이유가 없어서 보통 배치처럼 한 쪽에 둘씩 넣는다.
    */
-  async function buildKoreanPlan(pngs: Uint8Array[]) {
+  async function buildKoreanSets(pngs: Uint8Array[]): Promise<NonNullable<KiceSpec["koreanSets"]>> {
     const index = new Map(items.map((it, i) => [it.id, i] as const));
     const { sets, loose } = groupKoreanSets(items, (it) => it.korean ?? null);
 
-    const pages: NonNullable<KiceSpec["koreanPlan"]>["pages"] = [{ kind: "toc" }];
-    const toc: string[] = [];
-
+    const out: KoreanSetIn[] = [];
     for (const set of sets) {
-      const from = pages.length + 1; // 지금 넣을 쪽의 번호(1부터)
+      let passage: KoreanPassage | null = null;
       if (set.passage) {
         const at = index.get(set.passage.id)!;
         // **글자로 옮겨져 있으면 그걸로 조판한다** — 사진보다 또렷하고 단을
         // 따라 흐르고 평가원 서체와 맞는다(`pdf.ts`의 `passageText`). 옛
         // 데이터나 "원본 그대로 넣기"로 들어와 글자가 없으면(`blocks`가
-        // 비어 있으면) 예전처럼 사진을 두 단에 나눠 흘린다.
+        // 비어 있으면) 예전처럼 사진을 쓴다.
         const blocks = set.passage.korean?.blocks;
         if (blocks && blocks.length > 0) {
-          pages.push({ kind: "passageText", blocks });
+          passage = { kind: "text", blocks };
         } else {
-          // 좌단만으로 충분하면 좌단에 몰아넣고, 넘치면 우단으로 이어 흘린다.
-          // 자를 자리는 줄과 줄 사이 빈 띠에서 고른다(글자 줄이 반으로 잘리면 안 된다).
+          // 두 쪽짜리가 되면 두 단에 나눠 흘린다. 자를 자리는 줄과 줄 사이 빈
+          // 띠에서 고른다(글자 줄이 반으로 잘리면 안 된다) — 그림을 여는 일이라
+          // 브라우저에서 미리 잰다.
           const splitAt = await passageSplitAt(pngs[at], KOREAN_COLUMN_HEIGHT);
-          pages.push({ kind: "passage", index: at, ...(splitAt ? { splitAt } : {}) });
+          passage = { kind: "image", index: at, ...(splitAt ? { splitAt } : {}) };
         }
       }
-      if (set.questions.length > 0) {
-        pages.push({
-          kind: "questions",
-          indexes: set.questions.map((q) => index.get(q.id)!),
-        });
-      }
-      const to = pages.length;
-      const source = set.passage?.source ?? set.questions[0]?.source ?? "";
-      toc.push(tocLine(from, to, source, set.title || "지문"));
-    }
-
-    for (let i = 0; i < loose.length; i += 2) {
-      pages.push({
-        kind: "questions",
-        indexes: loose.slice(i, i + 2).map((q) => index.get(q.id)!),
+      out.push({
+        passage,
+        questions: set.questions.map((q) => index.get(q.id)!),
+        title: set.title,
+        source: set.passage?.source ?? set.questions[0]?.source ?? "",
       });
     }
-
-    return { toc, pages };
+    return { sets: out, loose: loose.map((q) => index.get(q.id)!) };
   }
 
   async function generate() {
@@ -226,7 +214,7 @@ export default function KiceExportPanel({ title, items }: Props) {
           layoutKey === "tamgu"
             ? tamguPattern.map((s) => Number(s) || 0)
             : [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
-        koreanPlan: layoutKey === "korean" ? await buildKoreanPlan(pngs) : undefined,
+        koreanSets: layoutKey === "korean" ? await buildKoreanSets(pngs) : undefined,
         answers: showAnswers
           ? items.map((item) => ({
               label: item.answerLabel,
