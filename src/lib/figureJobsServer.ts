@@ -6,7 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** 화면으로 내려보내는 칸만. 입력 경로 같은 속사정은 안 보낸다. */
 export const JOB_COLUMNS =
-  "id, figure_id, problem_key, problem_id, label, mode, korean, instruction, status, charged, charged_tokens, usage, model, result_path, applied_at, error, created_at, finished_at";
+  "id, figure_id, problem_key, problem_id, label, mode, korean, instruction, status, charged, charged_tokens, usage, model, result_path, applied_at, error, created_at, finished_at, stage, note";
 
 export type FigureJobRow = {
   id: string;
@@ -14,7 +14,7 @@ export type FigureJobRow = {
   problem_key: string;
   problem_id: string | null;
   label: string;
-  mode: "figure" | "problem";
+  mode: "figure" | "problem" | "passage";
   korean: boolean;
   instruction: string | null;
   status: "pending" | "running" | "done" | "error";
@@ -27,6 +27,10 @@ export type FigureJobRow = {
   error: string | null;
   created_at: string;
   finished_at: string | null;
+  /** 지문 작업의 지금 단계(read / marks / figure:N / done). 다른 작업은 null. */
+  stage: string | null;
+  /** 사람이 읽는 한 줄(지문 작업). */
+  note: string | null;
 };
 
 let cachedToken: string | null = null;

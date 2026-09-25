@@ -65,6 +65,12 @@ export function figureTokenCharge(_estKrw: number | undefined): number {
   return FIGURE_TOKEN_DEPOSIT;
 }
 
+/** 국어 지문 인식 1회의 **고정** 차감액(2026-09-17 사용자 결정 — 원가와 무관). */
+export const PASSAGE_READ_TOKENS = 100;
+
+/** 지문 서식 검수(두 번째 호출)의 보증금. 실사용량으로 정산해 남으면 돌려준다. */
+export const PASSAGE_MARKS_DEPOSIT = 30;
+
 /**
  * 게이지를 그릴 때 "가득 찬 상태"로 볼 기준. 이용권 1회 구매분이다.
  * 잔액이 이보다 많으면 게이지는 가득 찬 것으로 보여준다.

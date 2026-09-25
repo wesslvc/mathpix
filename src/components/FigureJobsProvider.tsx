@@ -35,6 +35,15 @@ import { ptToPx, readFontPt } from "@/lib/fontSize";
 import { readStoredFigures, restoreCardFigures } from "@/lib/storedFigures";
 import type { CardSpec } from "@/lib/cardHtml";
 import type { BoxOverride } from "@/lib/renderMathText";
+import { enhanceContrast } from "@/lib/autoContrast";
+import { passageStrips } from "@/lib/passageMarks";
+import { figuresForReader, type PassageFigureInput } from "@/lib/passageFigures";
+
+/**
+ * 작업 종류. "figure"/"problem" 은 그림을 다시 그리고, "passage" 는 국어 지문을
+ * 글자로 옮긴다(서버 일꾼이 sol 읽기 → 서식 검수 → 지문 안 그림을 단계마다 한다).
+ */
+export type JobMode = FigureMode | "passage";
 
 export type FigureJob = {
   id: string;
@@ -52,7 +61,13 @@ export type FigureJob = {
    * "problem"이면 문제 한 개 전체를 다시 그린다 — 프롬프트도 입력 해상도도
    * 다르다(본문 글자까지 살아야 해서 더 크게 보낸다).
    */
-  mode?: FigureMode;
+  mode?: JobMode;
+  /** 지문 작업: 지문 안 그림들(넣을 때만 쓴다). */
+  passageFigures?: PassageFigureInput[];
+  /** 지문 작업의 지금 단계(read / marks / figure:N / done). */
+  stage?: string;
+  /** 지문 작업: 사람이 읽는 한 줄(읽은 모델·서식 검수·그림). */
+  note?: string;
   /**
    * 저장된 문제 행 id. 서버가 이 행에 결과를 직접 저장한다 — 브라우저를
    * 닫아도 결과가 남게 하려는 것이다.
@@ -112,10 +127,12 @@ type ServerJob = {
   problem_key: string;
   problem_id: string | null;
   label: string;
-  mode: FigureMode;
+  mode: JobMode;
   korean: boolean;
   instruction: string | null;
   status: FigureJob["status"];
+  stage: string | null;
+  note: string | null;
   charged: boolean;
   charged_tokens: number;
   usage: { estUsd?: number; estKrw?: number; krwRate?: number } | null;
@@ -281,6 +298,8 @@ export default function FigureJobsProvider({
       costUsd: row.status === "done" ? row.usage?.estUsd : undefined,
       costKrw: row.status === "done" ? row.usage?.estKrw : undefined,
       krwRate: row.usage?.krwRate,
+      stage: row.stage ?? undefined,
+      note: row.note ?? undefined,
     }),
     [],
   );
@@ -533,17 +552,112 @@ export default function FigureJobsProvider({
     }
   }, [fromServer, handleDone, setJobs]);
 
+  /**
+   * **지문 작업을 넣는다.** 브라우저만 할 수 있는 것(대비 올리기·확대 띠 자르기·
+   * 그림 줄이기)을 여기서 해서 `<uid>/_jobs/` 에 올리고 경로만 보낸다 — 한 요청에
+   * 다 실으면 4.5MB 한도를 넘는다. AI 호출은 전부 서버 일꾼이 한다.
+   */
+  const submitPassage = useCallback(async (job: Internal) => {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error("로그인이 필요합니다.");
+    const image = await enhanceContrast(await ensureDataUrl(job.crop));
+    const figs = job.passageFigures ?? [];
+    const [strips, small, full] = await Promise.all([
+      passageStrips(image),
+      figuresForReader(figs),
+      Promise.all(
+        figs.map(async (f) => {
+          const data = await prepareFigureForModel(await ensureDataUrl(f.crop), MODEL_INPUT_DIM);
+          const size = await imageSizeOf(data);
+          return { data, scale: f.scale, width: size?.width, height: size?.height };
+        }),
+      ),
+    ]);
+
+    const uploaded: string[] = [];
+    const base = `${user.id}/_jobs/p-${job.id}`;
+    const up = async (name: string, dataUrl: string) => {
+      const blob = await (await fetch(dataUrl)).blob();
+      const ext = blob.type === "image/png" ? "png" : "jpg";
+      const path = `${base}-${name}.${ext}`;
+      const r = await putBlob(supabase, path, blob, blob.type || "image/jpeg");
+      if (!r.ok) throw new Error(`지문 사진을 올리지 못했어요 (${r.error})`);
+      uploaded.push(path);
+      return path;
+    };
+    try {
+      const [inputPath, overview, stripPaths, smallPaths, figurePaths] = await Promise.all([
+        up("in", image),
+        up("overview", strips.overview),
+        Promise.all(strips.strips.map((d, i) => up(`strip${i}`, d))),
+        Promise.all(small.map((d, i) => up(`fsmall${i}`, d))),
+        Promise.all(full.map((f, i) => up(`fig${i}`, f.data))),
+      ]);
+      const res = await fetch("/api/figure-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "passage",
+          figureId: job.id,
+          problemKey: job.problemKey,
+          label: job.label,
+          problemId: job.problemId,
+          inputPath,
+          payload: {
+            overview,
+            strips: stripPaths,
+            figuresSmall: smallPaths,
+            figures: full.map((f, i) => ({
+              path: figurePaths[i],
+              scale: f.scale,
+              width: f.width,
+              height: f.height,
+            })),
+          },
+        }),
+      });
+      const json = await jsonOf<{ job?: ServerJob; error?: string }>(res);
+      if (!res.ok || !json.job) throw new Error(json.error ?? "지문 작업을 넣지 못했어요.");
+      return json.job;
+    } catch (err) {
+      await removeBlobs(uploaded).catch(() => {});
+      throw err;
+    }
+  }, []);
+
   /** 로컬 작업 하나를 줄여서 서버 큐에 넣는다. */
   const submit = useCallback(
     async (id: string) => {
       const job = jobsRef.current.find((j) => j.id === id && !j.serverId);
       if (!job || job.status !== "pending") return;
+      if (job.mode === "passage") {
+        try {
+          const row = await submitPassage(job);
+          if (!jobsRef.current.some((j) => j.id === id && !j.serverId)) {
+            await fetch(`/api/figure-jobs?id=${encodeURIComponent(row.id)}`, {
+              method: "DELETE",
+            }).catch(() => {});
+            return;
+          }
+          patchJob(id, { ...fromServer(row), crop: "", passageFigures: undefined, live: true });
+          setTick((n) => n + 1);
+        } catch (err) {
+          patchJob(id, {
+            status: "error",
+            error: err instanceof Error ? err.message : "지문 작업을 넣지 못했어요.",
+          });
+        }
+        return;
+      }
       try {
         // **바이트로 바꿔 둔다.** 이미 스토리지로 옮겨진 그림이면 주소 문자열이다.
         const crop = await ensureDataUrl(job.crop);
         // 입력 토큰을 줄이려고 크기를 낮춰 보낸다. 문제 전체는 본문 글자까지
         // 살아야 해서 **폭**을 기준으로 맞춘다.
-        const mode: FigureMode = job.mode ?? "figure";
+        const mode: FigureMode = job.mode === "problem" ? "problem" : "figure";
         const forModel =
           mode === "problem"
             ? await prepareProblemForModel(crop)
@@ -609,7 +723,7 @@ export default function FigureJobsProvider({
         });
       }
     },
-    [applyToProblem, fromServer, patchJob],
+    [applyToProblem, fromServer, patchJob, submitPassage],
   );
 
   /**

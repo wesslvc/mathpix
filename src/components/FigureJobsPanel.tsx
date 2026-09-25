@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useFigureJobs } from "./FigureJobsProvider";
+import { useFigureJobs, type FigureJob } from "./FigureJobsProvider";
 
 const STATUS_TEXT = {
   pending: "차례 기다리는 중",
@@ -9,6 +9,27 @@ const STATUS_TEXT = {
   done: "완료",
   error: "실패",
 } as const;
+
+/**
+ * 지문 작업은 그림을 그리는 게 아니라 **글자로 옮긴다**(사용자 — "지문은 글을
+ * 옮겨적는중이라고"). 서버가 알려 주는 단계로 지금 무엇을 하는지 적는다.
+ */
+function statusText(j: FigureJob): string {
+  if (j.mode !== "passage" || (j.status !== "running" && j.status !== "pending")) {
+    return STATUS_TEXT[j.status];
+  }
+  const stage = j.stage ?? "read";
+  const fig = /^figure:(\d+)$/.exec(stage);
+  const what =
+    stage === "read"
+      ? "지문을 글자로 옮기는 중"
+      : stage === "marks"
+        ? "서식(원문자·밑줄·네모·굵게) 검수 중"
+        : fig
+          ? `지문 안 그림 다시 그리는 중 (${Number(fig[1]) + 1}번째)`
+          : "지문 처리 중";
+  return j.status === "pending" && stage === "read" ? "차례 기다리는 중 · 지문 글자로 옮기기" : what;
+}
 
 /**
  * AI 그림 작업 현황을 화면 구석에 띄우는 패널.
@@ -52,7 +73,7 @@ export default function FigureJobsPanel() {
           )}
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
             {activeCount > 0
-              ? `AI가 ${activeCount}개를 그리는 중`
+              ? `AI 작업 ${activeCount}개 진행 중`
               : failed > 0
                 ? `${failed}개 실패`
                 : "AI 작업 완료"}
@@ -78,7 +99,7 @@ export default function FigureJobsPanel() {
         {open && activeCount > 0 && (
           // 큐가 서버에 있다는 것을 알려 둔다 — 모르면 예전처럼 창을 붙들고 기다린다.
           <p className="border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-500">
-            서버에서 그려요. 창을 닫아도 계속되고, 끝나면 문제에 저장돼요.
+            서버에서 해요. 창을 닫아도 계속되고, 끝나면 문제에 저장돼요.
           </p>
         )}
         {open && (
@@ -101,8 +122,11 @@ export default function FigureJobsPanel() {
                           : "text-slate-500"
                     } ${j.status === "running" ? "animate-soft-pulse" : ""}`}
                   >
-                    {STATUS_TEXT[j.status]}
+                    {statusText(j)}
                   </p>
+                  {j.mode === "passage" && j.note && (
+                    <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{j.note}</p>
+                  )}
                   {/* 어느 문제가 비쌌는지 보이게 한다. 캐시에 걸린 작업에는
                       값이 없다 — 그때는 돈이 안 나갔다. */}
                   {(typeof j.costUsd === "number" ||
@@ -173,8 +197,8 @@ export default function FigureJobsPanel() {
 
         {activeCount > 0 && (
           <p className="border-t border-slate-100 px-3 py-1.5 text-[10px] leading-snug text-slate-400">
-            그리는 동안 다음 문제를 계속 넣어도 됩니다. 완성되면 저장된 문제
-            이미지가 자동으로 갱신돼요.
+            도는 동안 다음 문제를 계속 넣어도 됩니다. 끝나면 저장된 문제에
+            자동으로 반영돼요.
           </p>
         )}
       </div>

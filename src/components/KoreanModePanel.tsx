@@ -12,23 +12,16 @@ import {
 } from "@/lib/figureImage";
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import { toStoredFigures, type StoredBoxRange } from "@/lib/storedFigures";
-import { describeMarks, emptyMarkStats, readRichBlocks } from "@/lib/kice/richText";
 import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import type { DetectedKoreanRegion } from "@/lib/detectProblems";
 import type { ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
-import {
-  attachPassageFigures,
-  figuresForReader,
-  type PassageFigureInput,
-} from "@/lib/passageFigures";
-import { reviewPassageMarks } from "@/lib/passageMarks";
-import { applyMarksReview } from "@/lib/kice/marksReview";
+import type { PassageFigureInput } from "@/lib/passageFigures";
+import { PASSAGE_MARKS_DEPOSIT, PASSAGE_READ_TOKENS } from "@/lib/tokens";
 import { useFigureJobs } from "./FigureJobsProvider";
 import BoxEditor, { type EditBox } from "./BoxEditor";
-import { PassageProgress, type PassageStatus } from "./PassageProgress";
 
 /**
  * **국어 모드** — 지문 한 편과 그에 딸린 문항들을 한 세트로 넣는다.
@@ -154,7 +147,6 @@ export default function KoreanModePanel({
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   /** 지문 인식 진행 상황. 지문이 없거나 아직 안 돌면 null. */
-  const [passageStatus, setPassageStatus] = useState<PassageStatus | null>(null);
 
   function reset() {
     setStep("pick");
@@ -522,111 +514,14 @@ export default function KoreanModePanel({
   }
 
   /**
-   * 지문을 **평가원 글꼴로 조판할 구조화된 글자**로 옮긴다(한 번의 호출).
-   *
-   * **지문은 그림이 아니다.** 문제(선지·자료가 섞인 그림)와 달리 지문은
-   * 표도 그림도 거의 없는 순수한 글이라, 이미지 생성 모델로 "다시 그리면"
-   * 확대 시 흐려지고 평가원 서체와도 어긋난다. 그래서 지문만은 `enqueue`
-   * (이미지 생성 큐)에 넣지 않고 `/api/korean-text` 로 구조(문단·상자·
-   * 굵게·밑줄)를 읽어 `korean.blocks` 에 저장한다 — 내보내기가 그 값으로
-   * 직접 조판한다(`pdf.ts` 의 `passageText`).
-   *
-   * 실패하면 `undefined` 를 돌려준다 — 그때는 예전처럼 오려낸 사진으로
-   * 저장된다(아무것도 못 하는 것보다 낫다).
-   */
-  async function readPassageBlocks(crop: string, figures: PassageFigureInput[] = []) {
-    setBusy("지문을 글자로 옮기는 중... (평가원 글꼴로 조판됩니다)");
-    setPassageStatus({ state: "running" });
-    try {
-      const res = await fetch("/api/korean-text", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: await enhanceContrast(crop),
-          // luna 가 찾은 그림들 — sol 이 지문의 어디에 들어가는지 짚는다.
-          figures: await figuresForReader(figures),
-        }),
-      });
-      const json = (await res.json()) as {
-        blocks?: unknown;
-        error?: string;
-        chargedTokens?: number;
-        usage?: { estKrw?: number };
-        /** 실제로 답한 모델. 화면에 그대로 보여 준다. */
-        model?: string;
-      };
-      if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
-      // 모델은 문단마다 글 전체와 서식 구간(`marks`)을 준다 — 여기서 토막으로 바꾼다.
-      const stats = emptyMarkStats();
-      const read = readRichBlocks(json.blocks, 0, stats);
-      if (read.length === 0) throw new Error("지문에서 문단을 하나도 읽지 못했습니다.");
-      const base: PassageStatus = {
-        state: "done",
-        marksNote: describeMarks(stats),
-        model: json.model,
-        chargedTokens: json.chargedTokens,
-        costKrw: json.usage?.estKrw,
-      };
-      // **서식 검수**(두 번째 호출)와 **그림 붙이기**를 함께 돌린다 — 서로 기다릴
-      // 이유가 없다. 검수는 문단의 서식·원문자만, 그림은 figure 블록만 건드린다.
-      const running = { ...base, state: "running" as const };
-      const notes = { marks: "서식(원문자·밑줄·네모·굵게) 검수 중…", figures: "" };
-      const show = () =>
-        setPassageStatus({
-          ...running,
-          marksNote: notes.marks,
-          figuresNote: notes.figures || undefined,
-        });
-      if (figures.length > 0) notes.figures = "그림을 붙이는 중…";
-      show();
-      setBusy("서식을 검수하는 중...");
-      const [reviewed, attached] = await Promise.all([
-        reviewPassageMarks(await enhanceContrast(crop), read).then((r) => {
-          notes.marks = r.ok ? "서식 검수 완료 — 그림을 기다리는 중…" : r.note;
-          show();
-          return r;
-        }),
-        figures.length > 0
-          ? attachPassageFigures(read, figures, (t) => {
-              notes.figures = t;
-              show();
-            })
-          : Promise.resolve(null),
-      ]);
-      const withFigures = attached?.blocks ?? read;
-      const final = reviewed.review
-        ? applyMarksReview(withFigures, reviewed.review).blocks
-        : withFigures;
-      const extraTokens = (reviewed.chargedTokens ?? 0) + (attached?.tokens ?? 0);
-      const extraKrw = (reviewed.costKrw ?? 0) + (attached?.krw ?? 0);
-      setPassageStatus({
-        ...base,
-        // 검수에 실패했으면 첫 결과의 서식 요약을 그대로 둔다.
-        marksNote: reviewed.ok ? reviewed.note : `${reviewed.note} · ${base.marksNote ?? ""}`,
-        figuresNote: attached?.note || undefined,
-        chargedTokens:
-          typeof base.chargedTokens === "number" ? base.chargedTokens + extraTokens : undefined,
-        costKrw: typeof base.costKrw === "number" ? base.costKrw + extraKrw : undefined,
-      });
-      return final;
-    } catch (err) {
-      const message =
-        (err instanceof Error ? err.message : "지문을 글자로 옮기지 못했습니다.") +
-        " 이 지문은 사진으로 대신 저장했어요.";
-      setPassageStatus({ state: "error", errorMessage: message });
-      setError(message);
-      return undefined;
-    }
-  }
-
-  /**
-   * 저장한다. `regenerate` 면 **문제**는 AI 재생성 큐에 넣고, **지문**은
-   * 위 `readPassageBlocks` 로 글자를 옮긴다 — 갈래가 다르다(사진 재생성 vs
-   * 글자 인식).
+   * 저장한다. `regenerate` 면 **문제**는 AI 재생성 큐에, **지문**은 지문 인식
+   * 큐에 넣는다 — 갈래가 다르다(사진 재생성 vs 글자 인식). 둘 다 서버 큐라
+   * **기다리지 않는다**(사용자 — "지문인식하는동안 아무것도 못함").
    *
    * **저장을 먼저 한다.** 그래야 행 id 를 큐에 함께 넘길 수 있고, 브라우저를
-   * 닫아도 서버가 결과를 그 행에 직접 저장한다(`persistWholeProblem`,
-   * 문제 쪽에만 해당 — 지문은 큐를 타지 않으므로 이 걱정이 없다).
+   * 닫아도 서버가 결과를 그 행에 직접 저장한다. 지문은 우선 사진으로 저장되고
+   * 인식이 끝나면 일꾼이 `korean.blocks` 를 채운다(`passageRun.ts`) — 그 전에
+   * 내보내도 사진으로 나올 뿐 빈 자리가 아니다.
    */
   async function save(regenerate: boolean) {
     if (pieces.length === 0) return;
@@ -636,19 +531,12 @@ export default function KoreanModePanel({
     const setId = crypto.randomUUID();
     let done = 0;
     let qIndex = 0;
-    let textified = false;
+    let passageQueued = false;
 
     for (const piece of pieces) {
       setBusy(`넣는 중... (${done + 1}/${pieces.length})`);
       try {
         const { figure, pngDataUrl } = await toCard(piece);
-
-        const blocks =
-          regenerate && !noPassage && piece.kind === "passage"
-            ? await readPassageBlocks(piece.crop, piece.figures)
-            : undefined;
-        if (blocks) textified = true;
-        setBusy(`넣는 중... (${done + 1}/${pieces.length})`);
 
         const korean = noPassage
           ? undefined
@@ -657,7 +545,6 @@ export default function KoreanModePanel({
                 setId,
                 role: "passage" as const,
                 ...(title.trim() ? { title: title.trim() } : {}),
-                ...(blocks ? { blocks } : {}),
               }
             : { setId, role: "question" as const, index: qIndex };
         // 지문 없는 문항이어도 세어 둔다 — 아래 진행 패널 이름표에 쓴다.
@@ -676,9 +563,20 @@ export default function KoreanModePanel({
           },
         });
 
-        // 지문은 위에서 이미 처리했다(글자 옮기기, 성공이든 실패든). 큐에는
-        // **문제만** 넣는다 — 지문을 여기 넣으면 이미지 생성 모델로 다시
-        // 그리게 되는데, 그건 지문에 쓸 방법이 아니다.
+        // 지문은 **글자로 옮기는** 작업으로 넣는다(이미지 생성이 아니다).
+        if (regenerate && !noPassage && piece.kind === "passage") {
+          enqueue({
+            id: piece.id,
+            problemKey: `korean:${problemId}`,
+            label: `지문 · ${title.trim() || "제목 없음"}`,
+            crop: piece.crop,
+            mode: "passage",
+            passageFigures: piece.figures,
+            korean: true,
+            problemId,
+          });
+          passageQueued = true;
+        }
         if (regenerate && piece.kind === "question") {
           enqueue({
             id: piece.id,
@@ -705,7 +603,7 @@ export default function KoreanModePanel({
     if (done > 0) {
       setNote(
         regenerate
-          ? `${done}개를 넣었어요.${textified ? " 지문은 글자로 옮겨 평가원 글꼴로 조판됩니다." : ""} 문제는 AI 재생성 큐에 올렸어요 — 진행 상황은 화면 구석에서 볼 수 있어요.`
+          ? `${done}개를 넣었어요.${passageQueued ? " 지문은 글자로 옮기는 중이에요(끝나면 평가원 글꼴로 조판됩니다)." : ""} 문제는 AI 재생성 큐에 올렸어요 — 진행 상황은 화면 구석에서 볼 수 있고, 그동안 다른 걸 해도 돼요.`
           : `${done}개를 원본 그대로 넣었어요.`,
       );
       reset();
@@ -1050,19 +948,19 @@ export default function KoreanModePanel({
               {typeof figureCost === "number" &&
                 !unlimited &&
                 !byok &&
-                ` (${
+                ` (최대 ${
                   figureCost *
-                  (pieces.length +
-                    pieces.reduce((n, p) => n + (p.figures?.length ?? 0), 0))
+                    (pieces.filter((p) => p.kind === "question").length +
+                      pieces.reduce((n, p) => n + (p.figures?.length ?? 0), 0)) +
+                  (pieces.some((p) => p.kind === "passage") && !noPassage
+                    ? PASSAGE_READ_TOKENS + PASSAGE_MARKS_DEPOSIT
+                    : 0)
                 }토큰)`}
             </button>
           </div>
         </div>
       )}
 
-      {passageStatus && (
-        <PassageProgress status={passageStatus} unlimited={unlimited} />
-      )}
       {note && <p className="text-sm text-emerald-700">{note}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
     </div>

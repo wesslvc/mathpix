@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GradeError, readKoreanMarks, readKoreanRichText } from "@/lib/gradeExam";
-import { gradingEstKrw } from "@/lib/tokens";
+import { gradingEstKrw, PASSAGE_MARKS_DEPOSIT, PASSAGE_READ_TOKENS } from "@/lib/tokens";
 import { startGradingBilling } from "@/lib/gradingBilling";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -11,22 +11,6 @@ export const dynamic = "force-dynamic";
 // 지문 한 편을 통째로 옮겨 적는 일이라 채점보다 출력이 길다.
 // sol medium 으로 지문 한 편의 글자와 모양을 한 번에 읽는다 — 오래 걸릴 수 있다.
 export const maxDuration = 300;
-
-/**
- * 지문 인식(국어) 1회의 **고정 차감액**.
- *
- * **실사용량 정산이 아니라 고정 차감이다**(사용자 결정, 2026-09-17). 원가가
- * 얼마든 항상 100토큰을 뗀다 — `startGradingBilling`에 `flat: true`를 넘겨
- * 정산 단계를 건너뛴다.
- */
-const DEPOSIT = 100;
-
-/**
- * 서식 검수(`task: "marks"`, 두 번째 호출)의 보증금. **실사용량으로 정산**한다 —
- * 글자는 이미 읽었고 서식만 다시 보는 일이라 지문 인식보다 훨씬 싸다(띠 사진
- * 몇 장 + 짧은 JSON). 남으면 돌려주고 모자라면 더 받는다.
- */
-const MARKS_DEPOSIT = 30;
 
 /** 서식 검수에 받는 띠 수 상한(`passageMarks.ts` 의 MAX_STRIPS 보다 넉넉히). */
 const MAX_STRIPS = 12;
@@ -115,7 +99,7 @@ export async function POST(req: NextRequest) {
     billing = await startGradingBilling(supabase, {
       unlimited,
       byok,
-      deposit: marks ? MARKS_DEPOSIT : DEPOSIT,
+      deposit: marks ? PASSAGE_MARKS_DEPOSIT : PASSAGE_READ_TOKENS,
       label: marks ? "api/korean-text:marks" : "api/korean-text",
       flat: !marks,
     });
@@ -128,7 +112,7 @@ export async function POST(req: NextRequest) {
   if (!billing) {
     return NextResponse.json(
       {
-        error: `토큰이 부족해요. ${marks ? "서식 검수" : "지문 인식"}에는 최소 ${marks ? MARKS_DEPOSIT : DEPOSIT}토큰이 필요합니다.`,
+        error: `토큰이 부족해요. ${marks ? "서식 검수" : "지문 인식"}에는 최소 ${marks ? PASSAGE_MARKS_DEPOSIT : PASSAGE_READ_TOKENS}토큰이 필요합니다.`,
       },
       { status: 402 },
     );

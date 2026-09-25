@@ -9,6 +9,7 @@ import {
   trimBlankBorder,
 } from "./figureImage";
 import type { RichBlock } from "./kice/richText";
+import { placePassageFigures } from "./kice/passageFigurePlace";
 
 /**
  * **지문 안 그림을 붙인다**(2026-09-25, 사용자 지시 — "luna 가 지문 영역에 그림이
@@ -41,16 +42,6 @@ export async function figuresForReader(figs: PassageFigureInput[]): Promise<stri
   return Promise.all(
     figs.map(async (f) => prepareFigureForModel(await ensureDataUrl(f.crop), 512)),
   );
-}
-
-/** 블록 안의 figure id 를 읽는 차례대로. */
-function figureIds(blocks: RichBlock[]): string[] {
-  const out: string[] = [];
-  for (const b of blocks) {
-    if (b.kind === "box") out.push(...figureIds(b.blocks));
-    else if (b.kind === "figure") out.push(b.id);
-  }
-  return out;
 }
 
 /** 그림 하나를 sunburst 로 다시 그린다. 실패하면 null. */
@@ -134,16 +125,6 @@ export async function attachPassageFigures(
   if (figs.length === 0) {
     return { blocks, note: "", tokens: 0, krw: 0 };
   }
-  const idOf = (i: number) => `f${i + 1}`;
-  const placed = new Set(figureIds(blocks).filter((id) => /^f\d+$/.test(id)));
-  const missing = figs.map((_, i) => idOf(i)).filter((id) => !placed.has(id));
-
-  // sol 이 자리를 못 짚은 그림은 지문 끝에 붙인다 — 버리지 않는다.
-  let withAll: RichBlock[] = [
-    ...blocks,
-    ...missing.map((id) => ({ kind: "figure" as const, id, ratio: 1 })),
-  ];
-
   const toMake = figs.filter((f) => !f.src).length;
   let done = 0;
   onProgress?.(toMake ? `그림 ${toMake}개를 sunburst 로 다시 그리는 중…` : "그림을 붙이는 중…");
@@ -173,23 +154,13 @@ export async function attachPassageFigures(
     }),
   );
 
-  const fill = (list: RichBlock[]): RichBlock[] =>
-    list.flatMap((b): RichBlock[] => {
-      if (b.kind === "box") return [{ ...b, blocks: fill(b.blocks) }];
-      if (b.kind !== "figure") return [b];
-      const m = /^f(\d+)$/.exec(b.id);
-      const got = m ? made[Number(m[1]) - 1] : undefined;
-      // 우리가 넘기지 않은 id 는 붙일 그림이 없다 — 빈 자리를 남기지 않게 뺀다.
-      if (!got) return [];
-      return [{ kind: "figure", id: b.id, ratio: got.ratio, src: got.src, scale: got.scale }];
-    });
-  withAll = fill(withAll);
+  const placed = placePassageFigures(blocks, made);
 
   const parts = [`그림 ${figs.length}개 붙임`];
   if (toMake > 0) parts.push(`sunburst 로 ${toMake - kept}개 다시 그림`);
   if (kept > 0) parts.push(`${kept}개는 다시 그리지 못해 원본을 붙였어요`);
-  if (missing.length > 0) parts.push(`${missing.length}개는 자리를 못 짚어 지문 끝에 붙였어요`);
-  return { blocks: withAll, note: parts.join(" · "), tokens, krw };
+  if (placed.missing > 0) parts.push(`${placed.missing}개는 자리를 못 짚어 지문 끝에 붙였어요`);
+  return { blocks: placed.blocks, note: parts.join(" · "), tokens, krw };
 }
 
 /** 이미 붙어 있는 그림들(다시 인식할 때 sol 에게 다시 알려 준다). */

@@ -4,6 +4,7 @@ import { getBillingContext } from "@/lib/byok";
 import { FIGURE_TOKEN_DEPOSIT } from "@/lib/tokens";
 import { removeStored, splitDataUrl, storeBytes } from "@/lib/figureRun";
 import { JOB_COLUMNS, kickWorker, type FigureJobRow } from "@/lib/figureJobsServer";
+import { passageDepositFrom, passageInputPaths, type PassagePayload } from "@/lib/passageRun";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -62,6 +63,8 @@ export async function POST(req: NextRequest) {
     problemId?: string | null;
     width?: number;
     height?: number;
+    inputPath?: unknown;
+    payload?: unknown;
   };
   try {
     body = await req.json();
@@ -73,6 +76,7 @@ export async function POST(req: NextRequest) {
   if (!supabase || !user) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
+  if (body.mode === "passage") return enqueuePassage(req, body, supabase, user.id);
 
   const figureId = typeof body.figureId === "string" ? body.figureId.slice(0, 100) : "";
   const image = typeof body.image === "string" ? body.image : "";
@@ -271,7 +275,7 @@ export async function PATCH(req: NextRequest) {
   if (body.action === "retry") {
     const { data: row } = await admin
       .from("figure_jobs")
-      .select("id, status, charged")
+      .select("id, status, charged, mode, stage, payload")
       .eq("id", body.id)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -280,6 +284,14 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "실패한 작업만 다시 돌릴 수 있어요." }, { status: 409 });
     }
     const billing = await getBillingContext(supabase, user.id);
+    // 지문 작업은 **실패한 단계부터** 잇는다 — 그 뒤 단계 몫만 다시 건다.
+    const deposit =
+      row.mode === "passage"
+        ? passageDepositFrom(
+            row.stage,
+            ((row.payload ?? null) as PassagePayload | null)?.figures.length ?? 0,
+          )
+        : FIGURE_TOKEN_DEPOSIT;
     const patch: Record<string, unknown> = {
       status: "pending",
       error: null,
@@ -288,20 +300,20 @@ export async function PATCH(req: NextRequest) {
     };
     if (!billing.unlimited && !billing.byok && !row.charged) {
       const { data, error } = await supabase.rpc("consume_recognition_credit", {
-        p_amount: FIGURE_TOKEN_DEPOSIT,
+        p_amount: deposit,
       });
       if (error || data === null) {
         return NextResponse.json(
           {
             error: error
               ? error.message
-              : `토큰이 부족해요. AI 그림 생성에는 최소 ${FIGURE_TOKEN_DEPOSIT}토큰이 필요합니다.`,
+              : `토큰이 부족해요. 다시 돌리려면 최소 ${deposit}토큰이 필요합니다.`,
           },
           { status: error ? 500 : 402 },
         );
       }
       patch.charged = true;
-      patch.charged_tokens = FIGURE_TOKEN_DEPOSIT;
+      patch.charged_tokens = deposit;
     }
     const { data, error } = await admin
       .from("figure_jobs")
@@ -316,7 +328,7 @@ export async function PATCH(req: NextRequest) {
       if (patch.charged) {
         await admin.rpc("refund_recognition_credit_for", {
           p_user_id: user.id,
-          p_amount: FIGURE_TOKEN_DEPOSIT,
+          p_amount: deposit,
         });
       }
       return NextResponse.json(
@@ -354,7 +366,7 @@ export async function DELETE(req: NextRequest) {
     .eq("id", id)
     .eq("user_id", user.id)
     .eq("status", "pending")
-    .select("input_path, charged, charged_tokens")
+    .select("input_path, payload, charged, charged_tokens")
     .maybeSingle();
   if (removed) {
     if (removed.charged && removed.charged_tokens > 0) {
@@ -363,7 +375,7 @@ export async function DELETE(req: NextRequest) {
         p_amount: removed.charged_tokens,
       });
     }
-    await removeStored(admin, [removed.input_path]);
+    await removeStored(admin, passageInputPaths(removed));
     return NextResponse.json({ ok: true, refunded: removed.charged });
   }
 
@@ -383,9 +395,159 @@ export async function DELETE(req: NextRequest) {
     .eq("id", id)
     .eq("user_id", user.id)
     .in("status", ["done", "error"])
-    .select("status, input_path")
+    .select("status, input_path, payload")
     .maybeSingle();
   // 실패한 작업은 다시 시도하려고 입력을 남겨 뒀다 — 치웠으니 지운다.
-  if (finished?.status === "error") await removeStored(admin, [finished.input_path]);
+  if (finished?.status === "error") await removeStored(admin, passageInputPaths(finished));
   return NextResponse.json({ ok: true });
+}
+
+/** 지문 입력 경로는 **자기 `_jobs/` 아래**만 받는다 — 남의 파일을 읽히면 안 된다. */
+function ownJobPath(v: unknown, userId: string): v is string {
+  return (
+    typeof v === "string" &&
+    v.length < 300 &&
+    v.startsWith(`${userId}/_jobs/`) &&
+    !v.includes("..") &&
+    /^[\w./-]+$/.test(v)
+  );
+}
+
+function readPayload(v: unknown, userId: string): PassagePayload | null {
+  const o = v as Record<string, unknown> | null;
+  if (!o || !ownJobPath(o.overview, userId)) return null;
+  const list = (x: unknown, max: number) =>
+    Array.isArray(x) && x.length <= max && x.every((p) => ownJobPath(p, userId)) ? (x as string[]) : null;
+  const strips = list(o.strips, 12);
+  const figuresSmall = list(o.figuresSmall, 8);
+  if (!strips || !figuresSmall || !Array.isArray(o.figures) || o.figures.length !== figuresSmall.length) {
+    return null;
+  }
+  const figures: PassagePayload["figures"] = [];
+  for (const f of o.figures as Record<string, unknown>[]) {
+    if (!ownJobPath(f?.path, userId)) return null;
+    const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x > 0 ? x : undefined);
+    figures.push({
+      path: f.path,
+      scale: Math.min(1, Math.max(0.1, num(f.scale) ?? 0.8)),
+      width: num(f.width),
+      height: num(f.height),
+    });
+  }
+  return { overview: o.overview, strips, figuresSmall, figures };
+}
+
+/**
+ * **지문 인식**을 줄에 세운다(`passageRun.ts`). 입력(지문 사진·확대 띠·그림)은
+ * 브라우저가 미리 `<uid>/_jobs/` 에 올려 두고 경로만 보낸다 — 한 요청에 다 실으면
+ * 4.5MB 한도를 넘는다. 지문 행이 먼저 저장돼 있어야 한다(결과를 그 행에 쓴다).
+ */
+async function enqueuePassage(
+  req: NextRequest,
+  body: {
+    figureId?: string;
+    problemKey?: string;
+    label?: string;
+    problemId?: string | null;
+    inputPath?: unknown;
+    payload?: unknown;
+  },
+  supabase: NonNullable<Awaited<ReturnType<typeof sessionUser>>["supabase"]>,
+  userId: string,
+) {
+  const figureId = typeof body.figureId === "string" ? body.figureId.slice(0, 100) : "";
+  const payload = readPayload(body.payload, userId);
+  if (!figureId || !ownJobPath(body.inputPath, userId) || !payload) {
+    return NextResponse.json({ error: "지문 입력을 받지 못했어요." }, { status: 400 });
+  }
+  const inputPath = body.inputPath;
+  const { data: problem } = await supabase
+    .from("problems")
+    .select("id")
+    .eq("id", typeof body.problemId === "string" ? body.problemId : "")
+    .maybeSingle();
+  if (!problem) return NextResponse.json({ error: "지문을 찾지 못했어요." }, { status: 404 });
+
+  const billing = await getBillingContext(supabase, userId);
+  if (billing.byok && !billing.byokApiKey) {
+    return NextResponse.json(
+      { error: "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요." },
+      { status: 402 },
+    );
+  }
+  if (!billing.byok && !process.env.OPENAI_API_KEY) {
+    return NextResponse.json(
+      { error: "OPENAI_API_KEY 가 설정되지 않아 지문 인식을 쓸 수 없습니다." },
+      { status: 500 },
+    );
+  }
+
+  const admin = createAdminClient();
+  const inputs = passageInputPaths({ input_path: inputPath, payload });
+  const existing = await admin
+    .from("figure_jobs")
+    .select(JOB_COLUMNS)
+    .eq("user_id", userId)
+    .eq("figure_id", figureId)
+    .in("status", ["pending", "running"])
+    .eq("dismissed", false)
+    .maybeSingle();
+  if (existing.data) {
+    await removeStored(admin, inputs);
+    return NextResponse.json({ job: existing.data });
+  }
+
+  const jobId = crypto.randomUUID();
+  const inserted = await admin
+    .from("figure_jobs")
+    .insert({
+      id: jobId,
+      user_id: userId,
+      figure_id: figureId,
+      problem_key: typeof body.problemKey === "string" ? body.problemKey.slice(0, 200) : "",
+      problem_id: problem.id,
+      label: typeof body.label === "string" ? body.label.slice(0, 100) : "",
+      mode: "passage",
+      korean: true,
+      input_path: inputPath,
+      payload,
+      stage: "read",
+    })
+    .select(JOB_COLUMNS)
+    .single<FigureJobRow>();
+  if (inserted.error || !inserted.data) {
+    await removeStored(admin, inputs);
+    return NextResponse.json(
+      { error: inserted.error?.message ?? "작업을 넣지 못했어요." },
+      { status: inserted.error?.code === "23505" ? 409 : 500 },
+    );
+  }
+
+  let job = inserted.data;
+  if (!billing.unlimited && !billing.byok) {
+    const deposit = passageDepositFrom("read", payload.figures.length);
+    const { data, error } = await supabase.rpc("consume_recognition_credit", { p_amount: deposit });
+    if (error || data === null) {
+      await admin.from("figure_jobs").delete().eq("id", jobId);
+      await removeStored(admin, inputs);
+      return NextResponse.json(
+        {
+          error: error
+            ? error.message
+            : `토큰이 부족해요. 지문 인식에는 최소 ${deposit}토큰이 필요합니다(남는 몫은 돌려드려요).`,
+        },
+        { status: error ? 500 : 402 },
+      );
+    }
+    const charged = await admin
+      .from("figure_jobs")
+      .update({ charged: true, charged_tokens: deposit })
+      .eq("id", jobId)
+      .select(JOB_COLUMNS)
+      .single<FigureJobRow>();
+    if (charged.data) job = charged.data;
+  }
+
+  await kickWorker(admin, redirectBase(req), userId);
+  return NextResponse.json({ job });
 }

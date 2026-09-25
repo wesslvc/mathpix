@@ -15,6 +15,12 @@ import {
 import { kickWorker, workerToken } from "@/lib/figureJobsServer";
 import { callOpenAIVision } from "@/lib/detectProblems";
 import { pollKoreanTextBackground, startKoreanTextBackground } from "@/lib/gradeExam";
+import {
+  passageInputPaths,
+  runPassageStage,
+  type PassagePayload,
+  type PassageState,
+} from "@/lib/passageRun";
 
 /** 확인용 64×64 PNG(청크 CRC 까지 검사한 것 — `/api/figure/models` 와 같은 파일). */
 const PROBE_PNG =
@@ -36,7 +42,7 @@ type ClaimedJob = {
   user_id: string;
   figure_id: string;
   problem_id: string | null;
-  mode: "figure" | "problem";
+  mode: "figure" | "problem" | "passage";
   korean: boolean;
   instruction: string | null;
   input_path: string;
@@ -45,7 +51,16 @@ type ClaimedJob = {
   charged: boolean;
   charged_tokens: number;
   dismissed: boolean;
+  payload: PassagePayload | null;
+  stage: string | null;
+  state: PassageState | null;
 };
+
+/**
+ * 지문 한 단계에 쓸 시간. 지문 읽기(sol)는 그림 생성보다 오래 걸릴 수 있어
+ * 더 준다 — 앞뒤로 입력 내려받기·DB 기록이 짧아서 300초 안에 들어간다.
+ */
+const PASSAGE_STAGE_MS = 270_000;
 
 /**
  * 서버 큐의 일꾼. **브라우저가 없어도 돈다** — 작업을 넣은 라우트, 앞선 일꾼,
@@ -240,6 +255,7 @@ async function fail(admin: Admin, job: ClaimedJob, message: string) {
 }
 
 async function runJob(admin: Admin, job: ClaimedJob) {
+  if (job.mode === "passage") return runPassageJob(admin, job);
   const tag = `figure-jobs/run ${job.id.slice(0, 8)}`;
   const image = await loadAsDataUrl(admin, job.input_path);
   if (!image) {
@@ -333,6 +349,75 @@ async function runJob(admin: Admin, job: ClaimedJob) {
 }
 
 /**
+ * 지문 작업의 **한 단계**를 돌린다(`passageRun.ts`). 다음 단계가 있으면 줄에
+ * 되돌려 세우고(pending), 다음 일꾼이 이어서 집는다.
+ */
+async function runPassageJob(admin: Admin, job: ClaimedJob) {
+  const tag = `figure-jobs/run ${job.id.slice(0, 8)} 지문`;
+  const billing = await getBillingContext(admin, job.user_id);
+  if (billing.byok && !billing.byokApiKey) {
+    await fail(
+      admin,
+      job,
+      "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
+    );
+    return;
+  }
+  const out = await runPassageStage(admin, job, {
+    byokApiKey: billing.byokApiKey ?? undefined,
+    modelIds: pickModelIds(billing.byok, billing.byokModel),
+    deadlineMs: PASSAGE_STAGE_MS,
+    tag,
+  });
+  if (out.kind === "fail") {
+    await fail(admin, job, out.error);
+    return;
+  }
+
+  // `charged_tokens` 는 **아직 안 쓴 보증금**이다. 이번 단계에서 쓴 것과 돌려준
+  // 것을 뺀다. 끝났으면 남은 것까지 모두 돌려주고 쓴 만큼으로 바꿔 적는다.
+  const unspent = job.charged ? Math.max(0, job.charged_tokens - out.spent - out.refund) : 0;
+  const refund = job.charged ? out.refund + (out.kind === "done" ? unspent : 0) : 0;
+  const now = new Date().toISOString();
+  const patch =
+    out.kind === "next"
+      ? {
+          status: "pending",
+          stage: out.stage,
+          state: out.state,
+          note: out.note,
+          charged_tokens: unspent,
+          started_at: null,
+        }
+      : {
+          status: "done",
+          stage: "done",
+          state: null,
+          note: out.note,
+          charged_tokens: job.charged ? (out.state.spent ?? 0) : 0,
+          applied_at: now,
+          result_path: null,
+          finished_at: now,
+        };
+  const { data: saved } = await admin
+    .from("figure_jobs")
+    .update(patch)
+    .eq("id", job.id)
+    .eq("status", "running")
+    .select("id")
+    .maybeSingle();
+  if (!saved) {
+    // 멈춘 작업 정리가 먼저 오류로 돌려놓고 남은 보증금을 돌려줬다 — 두 번 주지 않는다.
+    console.warn(`[${tag}] 이미 정리된 작업이라 기록을 건너뜀`);
+    return;
+  }
+  if (refund > 0) {
+    await admin.rpc("refund_recognition_credit_for", { p_user_id: job.user_id, p_amount: refund });
+  }
+  if (out.kind === "done") await removeStored(admin, passageInputPaths(job));
+}
+
+/**
  * 실패한 채 오래 남은 작업의 입력 파일을 치운다. 실패하면 다시 시도하라고
  * 입력을 남겨 두는데, 아무도 다시 안 누르면 그대로 쌓인다. 할 일이 없을 때만
  * 조금씩(한 번에 20개) 치운다.
@@ -341,14 +426,19 @@ async function sweepOldInputs(admin: Admin) {
   const before = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
   const { data } = await admin
     .from("figure_jobs")
-    .select("id, input_path")
+    .select("id, input_path, payload")
     .eq("status", "error")
     .lt("finished_at", before)
     .limit(20);
   if (!data || data.length === 0) return;
   await removeStored(
     admin,
-    data.map((r) => r.input_path as string),
+    data.flatMap((r) =>
+      passageInputPaths({
+        input_path: r.input_path as string,
+        payload: (r.payload ?? null) as PassagePayload | null,
+      }),
+    ),
   );
   await admin
     .from("figure_jobs")

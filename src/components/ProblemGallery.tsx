@@ -20,7 +20,7 @@ import {
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import { sortByProblemNumber } from "@/lib/problemOrder";
-import type { KoreanMeta } from "@/lib/koreanSet";
+import { readKoreanMeta, type KoreanMeta } from "@/lib/koreanSet";
 import { describeMarks, emptyMarkStats, readRichBlocks, type RichBlock } from "@/lib/kice/richText";
 import {
   attachPassageFigures,
@@ -690,6 +690,20 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       const dirPrefix = newPath.split("/").slice(0, -1).join("/");
       const figures = await persistFigureBlobs(supabase, dirPrefix, toStoredFigures(cardFigures));
 
+      // 지문이면 **지금 DB 에 있는 blocks** 를 다시 읽는다. 수정 창이 열린 사이
+      // 서버 일꾼이 지문 인식을 끝내 blocks 를 써 넣었을 수 있다 — 창을 열 때
+      // 읽어 둔 값으로 덮으면 방금 끝난 인식이 사라진다.
+      let koreanBlocks = editKoreanBlocks;
+      if (!koreanBlocks && editing.korean?.role === "passage") {
+        const { data: fresh } = await supabase
+          .from("problems")
+          .select("blocks:box_range->korean->blocks")
+          .eq("id", editing.id)
+          .maybeSingle<{ blocks: unknown }>();
+        const read = readKoreanMeta({ ...editing.korean, blocks: fresh?.blocks })?.blocks;
+        if (read) koreanBlocks = read;
+      }
+
       const { error: dbErr } = await supabase
         .from("problems")
         .update({
@@ -717,7 +731,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
             korean: editing.korean
               ? {
                   ...editing.korean,
-                  ...(editKoreanBlocks ? { blocks: editKoreanBlocks } : {}),
+                  ...(koreanBlocks ? { blocks: koreanBlocks } : {}),
                 }
               : undefined,
           },
