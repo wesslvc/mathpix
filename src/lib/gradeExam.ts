@@ -354,6 +354,20 @@ async function callVision(
 }
 
 /**
+ * **채점 호출의 추론 강도**(`reasoning.effort`). 기본 `medium`.
+ *
+ * 예전에는 채점만 강도를 안 줘 모델 기본값(낮은 추론)으로 돌고 있었다
+ * (영역 찾기만 `OPENAI_DETECT_EFFORT` 로 올려 뒀었다) — 그런데 실제로
+ * 채점 정확도가 떨어진다는 신고가 있어 채점에도 medium 을 준다(2026-09-25,
+ * 사용자 지시 — "luna medium이 채점하게해"). 재배포 없이
+ * `OPENAI_GRADE_EFFORT` 로 바꾼다(`default` 를 넣으면 강도를 안 보내 모델
+ * 기본값이 된다).
+ */
+const GRADE_EFFORT_ENV = (process.env.OPENAI_GRADE_EFFORT ?? "medium").trim();
+const OPENAI_GRADE_EFFORT: string | undefined =
+  GRADE_EFFORT_ENV === "" || GRADE_EFFORT_ENV === "default" ? undefined : GRADE_EFFORT_ENV;
+
+/**
  * OMR·정답표 사진을 모델에 보내 채점한다.
  *
  * `images` 순서가 곧 프롬프트가 말하는 "1) OMR, 2) 정답표..." 순서다 —
@@ -378,6 +392,7 @@ export async function gradeWithVision(
     signal,
     undefined,
     apiKeyOverride,
+    OPENAI_GRADE_EFFORT,
   );
   return { slots: parseSlots(text), usage, model };
 }
