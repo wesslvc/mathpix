@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { enhanceContrast } from "@/lib/autoContrast";
-import { isHeicFile, loadImage } from "@/lib/cropImage";
+import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage } from "@/lib/cropImage";
+import {
+  MAX_UPLOAD_CHARS,
+  PROBLEM_INPUT_DIM,
+  PROBLEM_MAX_HEIGHT,
+  stitchVertically,
+} from "@/lib/figureImage";
+import BoxEditor, { type EditBox } from "@/components/BoxEditor";
 import { buildKicePdf } from "@/lib/kice/pdf";
 import { frameKeyFor, loadFrameImages, loadKiceFrames } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
@@ -56,25 +63,39 @@ type Result =
     }
   | { state: "error"; message: string; ms?: number };
 
-/** 모델에 보낼 사진. 긴 변 2600px·JPEG 90 — 두 모델에 같은 것을 보낸다. */
-async function fileToModelImage(file: File): Promise<string> {
-  if (isHeicFile(file)) throw new Error("HEIC 는 열 수 없습니다. JPG/PNG 로 올려주세요.");
+/** 지문 네모가 가질 묶음 id — 그린 것 전부가 한 지문이다(국어 모드와 같다). */
+const PASSAGE_GROUP = "passage";
+
+/**
+ * 모델에 보낼 지문 사진. **운영 국어 모드와 똑같이 만든다** — 원본에서 네모대로
+ * 자르고(폭 1536·높이 3000 상한, 여유 없음) 여러 개면 읽는 차례대로 세로로 이어
+ * 붙인 뒤 대비를 올린다. 여기만 다르면 견준 결과가 운영에 안 맞는다.
+ * 네모를 안 그렸으면 사진 전체를 같은 상한으로 보낸다.
+ */
+async function passageImage(file: File, boxes: EditBox[]): Promise<string> {
   const url = URL.createObjectURL(file);
   try {
     const img = await loadImage(url);
-    // Vercel 본문 한도(4.5MB) 안에 들어갈 때까지 줄인다.
-    for (const max of [2600, 2200, 1800, 1600]) {
-      const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("캔버스를 만들 수 없습니다.");
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const data = canvas.toDataURL("image/jpeg", 0.9);
-      if (data.length < 3_300_000) return data;
+    const W = img.naturalWidth;
+    const H = img.naturalHeight;
+    const limits = { maxWidth: PROBLEM_INPUT_DIM, maxHeight: PROBLEM_MAX_HEIGHT };
+    const parts =
+      boxes.length > 0
+        ? boxes.map((b) =>
+            cropImageToDataUrl(
+              img,
+              { x: b.x * W, y: b.y * H, width: b.w * W, height: b.h * H },
+              limits,
+            ),
+          )
+        : [cropImageToDataUrl(img, { x: 0, y: 0, width: W, height: H }, limits)];
+    const stitched = await stitchVertically(parts);
+    const enhanced = await enhanceContrast(stitched);
+    const out = enhanced.length <= MAX_UPLOAD_CHARS ? enhanced : stitched;
+    if (out.length > MAX_UPLOAD_CHARS) {
+      throw new Error("지문 사진이 너무 큽니다. 네모를 나눠 그려 주세요.");
     }
-    throw new Error("사진이 너무 큽니다.");
+    return out;
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -112,9 +133,14 @@ async function makePdf(blocks: RichBlock[], title: string, tocLine: string): Pro
 export default function CompareKoreanPage() {
   const [readers, setReaders] = useState<Reader[]>(DEFAULT_READERS);
   const [file, setFile] = useState<File | null>(null);
+  /** 네모를 그릴 화면용 사진(긴 변 1600). 자르는 건 원본에서 한다. */
   const [preview, setPreview] = useState<string | null>(null);
+  const [boxes, setBoxes] = useState<EditBox[]>([]);
+  /** 실제로 두 모델에 보낸 그림 — 무엇을 견줬는지 눈으로 확인한다. */
+  const [sent, setSent] = useState<string | null>(null);
   const [useReference, setUseReference] = useState(true);
-  const [reference, setReference] = useState<string | null>(null);
+  /** Mathpix 결과. **보낸 그림과 짝으로** 든다 — 네모를 고치면 다시 읽어야 한다. */
+  const [reference, setReference] = useState<{ image: string; text: string } | null>(null);
   const [refState, setRefState] = useState<"idle" | "running" | "ok" | "failed" | "off">("idle");
   const [results, setResults] = useState<Record<string, Result>>({ a: { state: "idle" }, b: { state: "idle" } });
   const [busy, setBusy] = useState(false);
@@ -125,13 +151,25 @@ export default function CompareKoreanPage() {
   }
 
   async function pick(f: File | null) {
-    setFile(f);
+    setFile(null);
+    setPreview(null);
+    setBoxes([]);
+    setSent(null);
     setReference(null);
     setRefState("idle");
     setResults({ a: { state: "idle" }, b: { state: "idle" } });
     setError(null);
-    if (preview) URL.revokeObjectURL(preview);
-    setPreview(f ? URL.createObjectURL(f) : null);
+    if (!f) return;
+    if (isHeicFile(f)) {
+      setError("HEIC 는 열 수 없습니다. JPG/PNG 로 올려주세요.");
+      return;
+    }
+    try {
+      setPreview(await fileToDataUrl(f));
+      setFile(f);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "사진을 열지 못했습니다.");
+    }
   }
 
   async function runOne(reader: Reader, image: string, ref: string) {
@@ -197,16 +235,20 @@ export default function CompareKoreanPage() {
     setBusy(true);
     setError(null);
     try {
-      const image = await enhanceContrast(await fileToModelImage(file));
+      // **그린 차례가 곧 이어 붙이는 차례다**(운영 국어 모드와 같다) — 단을 넘는
+      // 지문은 왼쪽 단 조각부터 그리면 된다.
+      const image = await passageImage(file, boxes);
+      setSent(image);
       let ref = "";
       if (useReference) {
-        if (reference != null) {
-          ref = reference;
+        if (reference?.image === image) {
+          ref = reference.text;
+          setRefState("ok");
         } else {
           setRefState("running");
           try {
             ref = await readReference(image);
-            setReference(ref);
+            setReference({ image, text: ref });
             setRefState("ok");
           } catch {
             setRefState("failed");
@@ -246,8 +288,35 @@ export default function CompareKoreanPage() {
           />
         </label>
         {preview && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={preview} alt="지문" className="max-h-64 w-auto self-start rounded border" />
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-slate-600">
+              사진 위에 <b>지문 영역</b>을 끌어서 네모로 그리세요(발문 줄부터 지문 끝까지,
+              문항은 빼고). 단이나 쪽을 넘는 지문은 조각마다 그리면 <b>그린 차례대로</b>{" "}
+              세로로 이어 붙입니다. 안 그리면 사진 전체를 보냅니다.
+            </p>
+            <div className="max-w-xl">
+              <BoxEditor
+                image={preview}
+                boxes={boxes}
+                onChange={setBoxes}
+                color="#059669"
+                newGroup={PASSAGE_GROUP}
+                labelOf={() => "지문"}
+              />
+            </div>
+            <p className="text-xs text-slate-500">
+              {boxes.length === 0 ? "네모 없음 — 사진 전체" : `네모 ${boxes.length}개`}
+            </p>
+          </div>
+        )}
+        {sent && (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-slate-500">
+              두 모델에 실제로 보낸 그림 보기
+            </summary>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={sent} alt="보낸 지문" className="mt-2 max-h-[32rem] w-auto rounded border" />
+          </details>
         )}
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
@@ -263,7 +332,7 @@ export default function CompareKoreanPage() {
             {refState === "running"
               ? "읽는 중…"
               : refState === "ok"
-                ? `✓ ${reference?.length ?? 0}자`
+                ? `✓ ${reference?.text.length ?? 0}자`
                 : refState === "off"
                   ? "끔 — 사진만 보고 읽음"
                   : "실패 — 사진만 보고 읽음"}
