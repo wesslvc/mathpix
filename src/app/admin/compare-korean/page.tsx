@@ -109,6 +109,38 @@ async function passageImage(file: File, boxes: EditBox[]): Promise<string> {
   }
 }
 
+type ReadResponse = {
+  jobId?: string;
+  blocks?: unknown;
+  model?: string;
+  ms?: number;
+  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
+  estKrw?: number | null;
+  error?: string;
+};
+
+/** 백그라운드 작업이 끝날 때까지 기다린다. 30분이 넘으면 포기한다. */
+async function waitForJob(jobId: string): Promise<ReadResponse> {
+  const until = Date.now() + 30 * 60_000;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 4000));
+    let poll: ReadResponse & { status?: string; message?: string };
+    try {
+      const res = await fetch(`/api/admin/compare-korean?id=${encodeURIComponent(jobId)}`, {
+        cache: "no-store",
+      });
+      poll = await res.json();
+    } catch {
+      // 한 번 물어보다 끊긴 건 괜찮다 — 다음에 다시 묻는다.
+      if (Date.now() > until) throw new Error("30분이 지나도 끝나지 않았습니다.");
+      continue;
+    }
+    if (poll.status === "done") return poll;
+    if (poll.status === "error") throw new Error(poll.message ?? poll.error ?? "실패했습니다.");
+    if (Date.now() > until) throw new Error("30분이 지나도 끝나지 않았습니다.");
+  }
+}
+
 async function readReference(image: string): Promise<string> {
   const res = await fetch("/api/mathpix", {
     method: "POST",
@@ -200,17 +232,13 @@ export default function CompareKoreanPage() {
           effort: reader.provider === "openai" ? reader.effort : "",
         }),
       });
-      const json = (await res.json().catch(() => ({}))) as {
-        blocks?: unknown;
-        model?: string;
-        ms?: number;
-        usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
-        estKrw?: number | null;
-        error?: string;
-      };
+      let json = (await res.json().catch(() => ({}))) as ReadResponse;
       if (!res.ok) {
         throw Object.assign(new Error(json.error ?? `HTTP ${res.status}`), { ms: json.ms });
       }
+      // OpenAI 는 백그라운드로 걸려 id 만 온다 — 끝날 때까지 몇 초마다 물어본다.
+      // 함수 한도(300초)에 안 묶이므로 max 강도도 끝까지 기다릴 수 있다.
+      if (json.jobId) json = await waitForJob(json.jobId);
       const raw = readRichBlocks(json.blocks);
       if (raw.length === 0) throw new Error("문단을 하나도 읽지 못했습니다.");
       // 운영과 똑같이 원문자를 참고 글에 맞춘다 — 여기만 다르면 견준 결과가 운영과 어긋난다.
@@ -224,7 +252,7 @@ export default function CompareKoreanPage() {
           state: "done",
           blocks,
           model: tag,
-          ms: json.ms ?? Date.now() - since,
+          ms: Date.now() - since,
           usage: json.usage,
           estKrw: json.estKrw ?? null,
           circledFixed: replaced,
@@ -365,6 +393,28 @@ export default function CompareKoreanPage() {
             >
               <h2 className="font-semibold text-slate-900">{readerTitle(reader)}</h2>
               <div className="flex flex-wrap gap-2 text-xs">
+                <div className="flex w-full gap-1">
+                  {(["openai", "gemini"] as const).map((pv) => (
+                    <button
+                      key={pv}
+                      type="button"
+                      onClick={() =>
+                        patchReader(reader.key, {
+                          provider: pv,
+                          model: pv === "openai" ? OPENAI_PRESETS[0] : "gemini-3.8-flash",
+                          effort: pv === "openai" ? "max" : "",
+                        })
+                      }
+                      className={`rounded-lg border px-2 py-1 ${
+                        reader.provider === pv
+                          ? "border-slate-800 bg-slate-800 text-white"
+                          : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {pv === "openai" ? "OpenAI" : "Gemini"}
+                    </button>
+                  ))}
+                </div>
                 <label className="flex min-w-0 flex-1 flex-col gap-1 text-slate-600">
                   모델 ({reader.provider === "openai" ? "OpenAI" : "Gemini"})
                   <input

@@ -883,6 +883,109 @@ export async function readKoreanRichTextWith(
 }
 
 /**
+ * **오래 생각하는 OpenAI 호출은 백그라운드로 건다**(Responses API `background`).
+ *
+ * gpt-6-luna 를 추론 강도 `max` 로 지문 한 편에 돌렸더니 285초 안에 안 끝났다
+ * (2026-09-25 운영 로그 — 우리 쪽 마감에 걸려 504). Vercel 함수는 300초가
+ * 한도라 기다리는 방식으로는 못 받는다. 백그라운드로 걸면 OpenAI 가 제 서버에서
+ * 끝까지 돌리고, 우리는 id 만 들고 있다가 짧은 요청으로 몇 번이고 물어본다.
+ *
+ * 비교 화면 전용이다. Chat Completions 로는 내려가지 않는다(백그라운드도,
+ * 추론 강도도 그쪽에는 없다).
+ */
+export async function startKoreanTextBackground(
+  imageDataUrl: string,
+  reference: string,
+  model: string,
+  effort?: string,
+): Promise<string> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
+  const res = await fetch(OPENAI_RESPONSES, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      background: true,
+      // 백그라운드 결과는 저장돼 있어야 나중에 꺼낼 수 있다.
+      store: true,
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: koreanTextPrompt(reference) },
+            { type: "input_image", image_url: imageDataUrl, detail: "high" },
+          ],
+        },
+      ],
+      text: { format: { type: "json_object" } },
+      ...(effort ? { reasoning: { effort } } : {}),
+    }),
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    throw new GradeError(
+      `지문 인식을 시작하지 못했습니다 (${model}, HTTP ${res.status}). ${body.slice(0, 300)}`,
+      res.status,
+    );
+  }
+  const id = (JSON.parse(body) as { id?: unknown }).id;
+  if (typeof id !== "string" || !id.startsWith("resp")) {
+    throw new GradeError("OpenAI 가 작업 id 를 주지 않았습니다.", 502);
+  }
+  return id;
+}
+
+export type BackgroundPoll =
+  | { status: "running"; openaiStatus: string }
+  | { status: "done"; blocks: unknown; usage?: GradeUsage; model: string }
+  | { status: "error"; message: string };
+
+/** 백그라운드 작업이 어떻게 됐는지 한 번 묻는다. */
+export async function pollKoreanTextBackground(id: string): Promise<BackgroundPoll> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
+  const res = await fetch(`${OPENAI_RESPONSES}/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    return { status: "error", message: `상태를 못 읽었습니다 (HTTP ${res.status}). ${body.slice(0, 300)}` };
+  }
+  const json = JSON.parse(body) as {
+    status?: string;
+    model?: string;
+    error?: { message?: string } | null;
+    incomplete_details?: { reason?: string } | null;
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      input_tokens_details?: { cached_tokens?: number };
+    };
+  };
+  const st = json.status ?? "";
+  if (st === "queued" || st === "in_progress") return { status: "running", openaiStatus: st };
+  if (st !== "completed") {
+    const why = json.error?.message ?? json.incomplete_details?.reason ?? st;
+    return { status: "error", message: `모델이 끝내지 못했습니다 (${st}: ${why}).` };
+  }
+  const u = json.usage;
+  const cached = u?.input_tokens_details?.cached_tokens;
+  const usage: GradeUsage | undefined = u
+    ? {
+        inputTokens: u.input_tokens ?? 0,
+        outputTokens: u.output_tokens ?? 0,
+        ...(typeof cached === "number" && cached > 0 ? { cachedInputTokens: cached } : {}),
+      }
+    : undefined;
+  try {
+    return { status: "done", blocks: parseBlocks(harvest(json)), usage, model: json.model ?? "" };
+  } catch (err) {
+    return { status: "error", message: err instanceof Error ? err.message : "지문을 읽지 못했습니다." };
+  }
+}
+
+/**
  * 모델이 준 글에서 `blocks` 를 꺼낸다.
  *
  * JSON 만 달라고 했어도 앞뒤에 군더더기가 붙어 오는 경우가 있어 중괄호

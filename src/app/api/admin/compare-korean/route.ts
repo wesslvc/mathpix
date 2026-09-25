@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireFontAdmin } from "../kice-font/auth";
-import { GradeError, readKoreanRichTextWith } from "@/lib/gradeExam";
+import {
+  GradeError,
+  pollKoreanTextBackground,
+  readKoreanRichTextWith,
+  startKoreanTextBackground,
+} from "@/lib/gradeExam";
 import { gradingEstKrw } from "@/lib/tokens";
 
 export const runtime = "nodejs";
@@ -44,6 +49,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "effort 값이 이상합니다." }, { status: 400 });
   }
 
+  // **OpenAI 는 백그라운드로 건다** — 추론 강도 max 는 300초 한도를 넘긴다
+  // (실제로 넘겼다). 여기서는 id 만 돌려주고 화면이 GET 으로 물어본다.
+  if (provider === "openai") {
+    try {
+      const jobId = await startKoreanTextBackground(image, reference, model, effort || undefined);
+      console.info(`[compare-korean] 백그라운드 시작 model=${model} effort=${effort || "-"} id=${jobId}`);
+      return NextResponse.json({ jobId });
+    } catch (err) {
+      const status = err instanceof GradeError ? err.status : 500;
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "지문 인식을 시작하지 못했습니다." },
+        { status: status >= 400 && status < 600 ? status : 500 },
+      );
+    }
+  }
+
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), (maxDuration - 15) * 1000);
   const t0 = Date.now();
@@ -51,7 +72,7 @@ export async function POST(req: NextRequest) {
     const out = await readKoreanRichTextWith(
       image,
       reference,
-      { provider, model, effort: provider === "openai" && effort ? effort : undefined },
+      { provider, model },
       deadline.signal,
     );
     const ms = Date.now() - t0;
@@ -83,5 +104,35 @@ export async function POST(req: NextRequest) {
     );
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** 백그라운드로 건 OpenAI 작업이 끝났는지 묻는다. `?id=resp_...` */
+export async function GET(req: NextRequest) {
+  const gate = await requireFontAdmin();
+  if (!gate.ok) return gate.response;
+  const id = req.nextUrl.searchParams.get("id") ?? "";
+  if (!/^resp_[\w-]{8,200}$/.test(id)) {
+    return NextResponse.json({ error: "id 가 이상합니다." }, { status: 400 });
+  }
+  try {
+    const poll = await pollKoreanTextBackground(id);
+    if (poll.status !== "done") return NextResponse.json(poll);
+    console.info(
+      `[compare-korean] 백그라운드 끝 model=${poll.model} id=${id} ` +
+        `in=${poll.usage?.inputTokens ?? "?"} out=${poll.usage?.outputTokens ?? "?"}`,
+    );
+    return NextResponse.json({
+      status: "done",
+      blocks: poll.blocks,
+      usage: poll.usage,
+      model: poll.model,
+      estKrw: poll.usage ? (gradingEstKrw(poll.usage, poll.model) ?? null) : null,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { status: "error", message: err instanceof Error ? err.message : "상태를 못 읽었습니다." },
+      { status: 502 },
+    );
   }
 }

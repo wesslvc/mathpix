@@ -14,6 +14,7 @@ import {
 } from "@/lib/figureRun";
 import { kickWorker, workerToken } from "@/lib/figureJobsServer";
 import { callOpenAIVision } from "@/lib/detectProblems";
+import { pollKoreanTextBackground, startKoreanTextBackground } from "@/lib/gradeExam";
 
 /** 확인용 64×64 PNG(청크 CRC 까지 검사한 것 — `/api/figure/models` 와 같은 파일). */
 const PROBE_PNG =
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest) {
   let probe: string | null = null;
   let probeModel = "";
   let probeEffort = "";
+  let probeId = "";
   try {
     const body = (await req.json()) as {
       preferUser?: unknown;
@@ -74,6 +76,7 @@ export async function POST(req: NextRequest) {
       effort?: unknown;
     };
     if (typeof body.effort === "string") probeEffort = body.effort;
+    if (typeof (body as { id?: unknown }).id === "string") probeId = (body as { id: string }).id;
     if (typeof body.preferUser === "string") preferUser = body.preferUser;
     if (typeof body.probe === "string") probe = body.probe;
     if (typeof body.model === "string") probeModel = body.model;
@@ -97,6 +100,31 @@ export async function POST(req: NextRequest) {
       .filter((id: string) => id.startsWith("gpt"))
       .sort();
     return NextResponse.json({ models: ids });
+  }
+  // **백그라운드 호출 확인용**(비교 화면이 쓰는 길). 작은 그림 한 장으로 걸어
+  // 보고(`bg-start`) id 로 물어본다(`bg-poll`). 모델이 background 를 안 받으면
+  // 시작에서 바로 오류가 난다.
+  if (probe === "bg-start") {
+    if (!/^gpt-[\w.-]+$/.test(probeModel)) {
+      return NextResponse.json({ error: "model 이 필요합니다." }, { status: 400 });
+    }
+    try {
+      const id = await startKoreanTextBackground(
+        `data:image/png;base64,${PROBE_PNG}`,
+        "",
+        probeModel,
+        /^[a-z]{1,16}$/.test(probeEffort) ? probeEffort : undefined,
+      );
+      return NextResponse.json({ ok: true, id });
+    } catch (err) {
+      return NextResponse.json({ ok: false, error: err instanceof Error ? err.message.slice(0, 500) : String(err) });
+    }
+  }
+  if (probe === "bg-poll") {
+    if (!/^resp_[\w-]{8,200}$/.test(probeId)) {
+      return NextResponse.json({ error: "id 가 필요합니다." }, { status: 400 });
+    }
+    return NextResponse.json(await pollKoreanTextBackground(probeId));
   }
   // Gemini 쪽 이름 확인용. 이 키로 부를 수 있는 모델 이름과 지원하는 호출
   // 방식만 준다(ListModels 는 무료). 키는 내보내지 않는다.
