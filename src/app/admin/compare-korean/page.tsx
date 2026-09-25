@@ -34,7 +34,6 @@ import {
 
 type Reader = {
   key: "a" | "b";
-  label: string;
   provider: "openai" | "gemini";
   model: string;
   effort: string;
@@ -42,9 +41,16 @@ type Reader = {
 
 // 둘 다 2026-09-25 probe 로 확인했다: `gemini-3.8-flash` 는 이 키의 ListModels 에
 // 있고, gpt-6-luna 의 추론 강도는 none·minimal·low·medium·high·xhigh·max 를 받는다.
+/**
+ * 눌러서 고르는 OpenAI 모델. 둘 다 이 계정의 `/v1/models` 에 있고, 사진 +
+ * `reasoning.effort: "max"` 요청이 실제로 통한 것만 둔다(2026-09-25 probe).
+ * 다른 이름은 칸에 직접 적으면 된다.
+ */
+const OPENAI_PRESETS = ["gpt-6-luna", "gpt-6-sol"];
+
 const DEFAULT_READERS: Reader[] = [
-  { key: "a", label: "Luna Max", provider: "openai", model: "gpt-6-luna", effort: "max" },
-  { key: "b", label: "Gemini 3.8 Flash", provider: "gemini", model: "gemini-3.8-flash", effort: "" },
+  { key: "a", provider: "openai", model: "gpt-6-luna", effort: "max" },
+  { key: "b", provider: "gemini", model: "gemini-3.8-flash", effort: "" },
 ];
 
 type Result =
@@ -56,6 +62,8 @@ type Result =
       model: string;
       ms: number;
       usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
+      /** 공표 단가로 계산한 원가(원). 단가를 모르는 모델이면 null. */
+      estKrw: number | null;
       circledFixed: number;
       circledMismatch: boolean;
       pdfUrl: string;
@@ -130,6 +138,11 @@ async function makePdf(blocks: RichBlock[], title: string, tocLine: string): Pro
   return URL.createObjectURL(new Blob([bytes.slice().buffer], { type: "application/pdf" }));
 }
 
+/** 칸 머리글·PDF 제목. 고른 모델을 그대로 따라간다(칸에서 바꿀 수 있어서). */
+function readerTitle(r: Reader): string {
+  return r.provider === "openai" && r.effort ? `${r.model} · ${r.effort}` : r.model;
+}
+
 export default function CompareKoreanPage() {
   const [readers, setReaders] = useState<Reader[]>(DEFAULT_READERS);
   const [file, setFile] = useState<File | null>(null);
@@ -192,6 +205,7 @@ export default function CompareKoreanPage() {
         model?: string;
         ms?: number;
         usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
+        estKrw?: number | null;
         error?: string;
       };
       if (!res.ok) {
@@ -203,7 +217,7 @@ export default function CompareKoreanPage() {
       const { blocks, replaced, matched } = alignCircledToReference(raw, ref);
       const model = json.model ?? reader.model;
       const tag = reader.provider === "openai" && reader.effort ? `${model} (${reader.effort})` : model;
-      const pdfUrl = await makePdf(blocks, `지문 비교 — ${reader.label}`, `2p, ${tag}`);
+      const pdfUrl = await makePdf(blocks, `지문 비교 — ${readerTitle(reader)}`, `2p, ${tag}`);
       setResults((r) => ({
         ...r,
         [reader.key]: {
@@ -212,6 +226,7 @@ export default function CompareKoreanPage() {
           model: tag,
           ms: json.ms ?? Date.now() - since,
           usage: json.usage,
+          estKrw: json.estKrw ?? null,
           circledFixed: replaced,
           circledMismatch: !matched,
           pdfUrl,
@@ -348,7 +363,7 @@ export default function CompareKoreanPage() {
               key={reader.key}
               className="flex min-w-0 flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4"
             >
-              <h2 className="font-semibold text-slate-900">{reader.label}</h2>
+              <h2 className="font-semibold text-slate-900">{readerTitle(reader)}</h2>
               <div className="flex flex-wrap gap-2 text-xs">
                 <label className="flex min-w-0 flex-1 flex-col gap-1 text-slate-600">
                   모델 ({reader.provider === "openai" ? "OpenAI" : "Gemini"})
@@ -358,6 +373,24 @@ export default function CompareKoreanPage() {
                     className="rounded border border-slate-300 px-2 py-1 font-mono"
                   />
                 </label>
+                {reader.provider === "openai" && (
+                  <div className="flex w-full flex-wrap gap-1">
+                    {OPENAI_PRESETS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => patchReader(reader.key, { model: m })}
+                        className={`rounded-lg border px-2 py-1 font-mono ${
+                          reader.model === m
+                            ? "border-blue-600 bg-blue-50 text-blue-700"
+                            : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {reader.provider === "openai" && (
                   <label className="flex w-28 flex-col gap-1 text-slate-600">
                     추론 강도
@@ -414,6 +447,12 @@ function ResultView({ result }: { result: Result }) {
             {u.outputTokens.toLocaleString()}(생각 포함)
           </li>
         )}
+        <li>
+          원가:{" "}
+          {result.estKrw != null
+            ? `약 ${Math.round(result.estKrw).toLocaleString()}원 (공표 단가 기준)`
+            : "단가 모름"}
+        </li>
         <li>
           블록 {result.blocks.length}개 · 글자 {result.chars.toLocaleString()}자
         </li>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireFontAdmin } from "../kice-font/auth";
 import { GradeError, readKoreanRichTextWith } from "@/lib/gradeExam";
+import { gradingEstKrw } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,6 +64,8 @@ export async function POST(req: NextRequest) {
       usage: out.usage,
       model: out.model,
       effort: effort || null,
+      // 공표 단가를 아는 모델만(`GRADING_PRICES`). 모르면 비워 둔다 — 지어내지 않는다.
+      estKrw: out.usage ? (gradingEstKrw(out.usage, out.model) ?? null) : null,
       ms,
     });
   } catch (err) {

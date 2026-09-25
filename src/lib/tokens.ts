@@ -140,6 +140,10 @@ const GRADING_PRICES: Record<string, ModelPrice> = {
   "gpt-5.6-luna": { input: 0.2, output: 1.2 },
   // 지문 인식(`/api/korean-text`). 캐시 입력 단가까지 알려 준 값이다.
   "gpt-5.6-terra": { input: 2.0, cachedInput: 0.2, output: 12.0 },
+  // 2026-09-25 사용자가 알려 준 값. luna 는 채점·답지·제목 짓기·영역 찾기의
+  // 기본 모델이라, 이 줄이 생기면서 그쪽이 보증금 고정 → 실사용량 정산으로 바뀐다.
+  "gpt-6-luna": { input: 0.1, output: 0.5 },
+  "gpt-6-sol": { input: 2.0, output: 10.0 },
 };
 
 function priceFor(model?: string): ModelPrice | null {
