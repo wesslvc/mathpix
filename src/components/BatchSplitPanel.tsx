@@ -7,18 +7,14 @@ import {
   MAX_UPLOAD_CHARS,
   PROBLEM_INPUT_DIM,
   PROBLEM_MAX_HEIGHT,
-  rasterToSvg,
   stitchVertically,
 } from "@/lib/figureImage";
-import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
-import { toStoredFigures, type StoredBoxRange } from "@/lib/storedFigures";
-import type { CardFigure } from "@/lib/cardHtml";
-import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
-import type { DiagramLayout } from "@/lib/diagramLayout";
+import type { StoredBoxRange } from "@/lib/storedFigures";
 import type { DetectedProblem } from "@/lib/detectProblems";
 import { mergeChosen, type ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
-import { parseProblemNumber } from "@/lib/problemNumber";
+import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
+import type { AnswerByNumber } from "@/lib/answerMap";
 import { useFigureJobs } from "./FigureJobsProvider";
 
 /**
@@ -42,9 +38,6 @@ import { useFigureJobs } from "./FigureJobsProvider";
  * 그리기는 문제마다 1분쯤 걸리는 유료 호출이다. 먼저 보고 거른 다음 돌리는
  * 편이 안전하다.
  */
-
-/** 통째로 그린 문제 이미지의 배치(AddProblemFlow와 같은 값). */
-const WHOLE_PROBLEM_LAYOUT: DiagramLayout = { scale: 100, offsetX: 0, offsetY: 0 };
 
 /**
  * 자동으로 찾은 영역을 자를 때 사방으로 더 주는 여유(지면 크기 대비 비율).
@@ -102,38 +95,16 @@ type Props = {
   byok?: boolean;
   /** 문제 하나를 다시 그리는 데 드는 토큰. 서버가 알려준 값을 그대로 쓴다. */
   figureCost?: number | null;
+  /** 번호 → 정답. 번호를 읽으면 곧바로 정답도 붙인다(`answerMap.ts`). */
+  answerByNumber?: AnswerByNumber;
 };
-
-/**
- * 크롭 한 장을 Mathpix 에 보내 **문제 번호만** 얻는다.
- *
- * 본문 전체를 쓰지 않는 이유: 통째로 넣는 문제는 그림 한 장이 곧 카드라
- * 본문을 저장하면 안 된다(본문이 있으면 "수정" 화면이 본문으로 카드를 다시
- * 그려 그림이 사라진다 — storedFigures.ts 주석 참고). 번호만 뽑아 쓴다.
- *
- * **실패해도 던지지 않는다.** 번호가 없을 뿐 저장은 되어야 한다.
- */
-async function readNumberWithMathpix(crop: string): Promise<number | null> {
-  try {
-    const res = await fetch("/api/mathpix", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // 인식에 보낼 때만 대비를 올린다(화면에 남는 원본은 그대로 둔다).
-      body: JSON.stringify({ image: await enhanceContrast(crop) }),
-    });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { text?: string; latex?: string };
-    return parseProblemNumber(json.text || json.latex || "");
-  } catch {
-    return null;
-  }
-}
 
 export default function BatchSplitPanel({
   onSave,
   unlimited = false,
   byok = false,
   figureCost,
+  answerByNumber = {},
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   /**
@@ -543,38 +514,26 @@ export default function BatchSplitPanel({
     setNumberNote(null);
     let done = 0;
     let numbered = 0;
+    let answered = 0;
     for (const piece of pieces) {
       setBusy(`문제를 넣는 중... (${done + 1}/${pieces.length})`);
       try {
-        const figure: CardFigure = {
-          id: piece.id,
-          markup: await rasterToSvg(piece.crop),
-          layout: WHOLE_PROBLEM_LAYOUT,
-          position: 0,
-        };
-        const pngDataUrl = await renderCardOffscreen({
-          text: "",
-          boxOverride: undefined,
-          fontSizePx: ptToPx(DEFAULT_FONT_PT),
-          figures: [figure],
-        });
+        const card = await wholeProblemCard(piece.id, piece.crop);
         const number = await readNumberWithMathpix(piece.crop);
         if (number != null) numbered += 1;
-        await onSave({
-          pngDataUrl,
+        const problemId = await onSave({
+          pngDataUrl: card.pngDataUrl,
           text: "",
           answer: "",
           answerType: "choice",
-          boxRange: {
-            ranges: null,
-            fontPt: DEFAULT_FONT_PT,
-            figures: toStoredFigures([figure]),
-            // 못 읽었으면 아예 넣지 않는다(null 을 넣으면 "손으로 지정한
-            // 번호 없음"과 같은 뜻이라 어차피 같지만, 키를 비워 두는 편이
-            // 저장된 값을 볼 때 덜 헷갈린다).
-            ...(number != null ? { number } : {}),
-          },
+          boxRange: card.boxRange,
         });
+        // 번호와 그 번호의 정답을 함께 붙인다. 실패해도 저장은 된 것이다.
+        if (number != null) {
+          if (await attachNumberAndAnswer(problemId, number, answerByNumber).catch(() => null)) {
+            answered += 1;
+          }
+        }
         done += 1;
       } catch (err) {
         setError(
@@ -589,9 +548,10 @@ export default function BatchSplitPanel({
       // **번호가 몇 개 붙었는지 알려 준다.** 조용히 넘어가면 목록에서
       // 1번부터 새로 매겨진 걸 보고서야 알게 되고, 그때는 이미 늦다.
       setNumberNote(
-        numbered === done
+        (numbered === done
           ? `${done}개를 넣고 번호도 전부 인식했어요.`
-          : `${done}개를 넣었어요. 번호는 ${numbered}개만 인식돼서 나머지는 "수정"에서 직접 적어야 해요.`,
+          : `${done}개를 넣었어요. 번호는 ${numbered}개만 인식돼서 나머지는 "수정"에서 직접 적어야 해요.`) +
+          (answered > 0 ? ` 정답 ${answered}개를 붙였어요.` : ""),
       );
       setPieces([]);
       setPageImage(null);
@@ -616,29 +576,20 @@ export default function BatchSplitPanel({
     for (const piece of pieces) {
       setBusy(`문제를 넣는 중... (${done + 1}/${pieces.length})`);
       try {
-        const figure: CardFigure = {
-          id: piece.id,
-          markup: await rasterToSvg(piece.crop),
-          layout: WHOLE_PROBLEM_LAYOUT,
-          position: 0,
-        };
-        const pngDataUrl = await renderCardOffscreen({
-          text: "",
-          boxOverride: undefined,
-          fontSizePx: ptToPx(DEFAULT_FONT_PT),
-          figures: [figure],
-        });
+        // 번호는 원본 크롭에서 **곧바로** 읽기 시작한다 — 다시 그리기를 기다릴
+        // 이유가 없다(같은 번호다). 저장이 끝나면 그 행에 번호·정답을 붙인다.
+        const number = readNumberWithMathpix(piece.crop);
+        const card = await wholeProblemCard(piece.id, piece.crop);
         const problemId = await onSave({
-          pngDataUrl,
+          pngDataUrl: card.pngDataUrl,
           text: "",
           answer: "",
           answerType: "choice",
-          boxRange: {
-            ranges: null,
-            fontPt: DEFAULT_FONT_PT,
-            figures: toStoredFigures([figure]),
-          },
+          boxRange: card.boxRange,
         });
+        void number.then((n) =>
+          n != null ? attachNumberAndAnswer(problemId, n, answerByNumber).catch(() => null) : null,
+        );
         enqueue({
           id: piece.id,
           problemKey: `batch:${problemId}`,

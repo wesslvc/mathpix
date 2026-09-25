@@ -259,9 +259,16 @@ export async function persistWholeProblem(
     const newPath = `${dir}/${crypto.randomUUID()}.${parts.ext}`;
     if (!(await storeBytes(supabase, newPath, parts.bytes, parts.mime))) return null;
 
+    // **올린 뒤에 box_range 를 다시 읽는다.** 앞에서 읽은 값으로 통째로 쓰면
+    // 그 사이(업로드 몇 초) 붙은 번호·배점(`set_problem_numbers` ·
+    // `apply_answer_key`)이 지워진다 — 사진 빠른 넣기는 저장 직후 곧바로 붙인다.
+    let fresh = supabase.from("problems").select("box_range").eq("id", problemId);
+    if (ownerId) fresh = fresh.eq("user_id", ownerId);
+    const { data: now } = await fresh.maybeSingle();
+
     // 그림 목록에서 이 그림의 마크업만 갈아끼운다. 화면이 저장해 둔 자리·크기는
     // 건드리지 않는다(사용자가 옮겨 놨을 수 있다).
-    const box = (row.box_range ?? {}) as Record<string, unknown>;
+    const box = ((now ?? row).box_range ?? {}) as Record<string, unknown>;
     const figures = Array.isArray(box.figures)
       ? (box.figures as Record<string, unknown>[])
       : [];

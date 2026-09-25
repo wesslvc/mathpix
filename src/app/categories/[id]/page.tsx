@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { categoryLabel, categoryScore, type Category } from "@/lib/supabase/types";
 
 import AddProblemFlow from "@/components/AddProblemFlow";
+import { buildAnswerMap } from "@/lib/answerMap";
 import ProblemGallery, {
   type GalleryProblem,
 } from "@/components/ProblemGallery";
@@ -122,7 +123,7 @@ export default async function CategoryPage({
   // 연결된 채점). 그중 실모·문제·권한·연결된 채점·`?gradeId=` 는 서로
   // 독립이라 함께 보낼 수 있다 — 서명만 문제 목록이 있어야 하므로 뒤에 남는다.
   // 왕복 여섯 번이 두 번으로 줄었다.
-  const [{ data: category }, slim, access, { data: linkedGrades }, gradeRes] =
+  const [{ data: category }, slim, access, { data: linkedGrades }, gradeRes, { data: answerKeys }] =
     await Promise.all([
       supabase.from("categories").select("*").eq("id", id).single<Category>(),
       supabase
@@ -174,6 +175,12 @@ export default async function CategoryPage({
             .eq("category_id", id)
             .maybeSingle<ExamScore>()
         : Promise.resolve({ data: null }),
+      // 읽어 둔 답지. 사진을 넣자마자 번호로 정답을 붙이는 데 쓴다(`answerMap.ts`).
+      supabase
+        .from("answer_keys")
+        .select("items")
+        .eq("category_id", id)
+        .returns<{ items: unknown }[]>(),
     ]);
 
   if (!category) {
@@ -338,7 +345,14 @@ export default async function CategoryPage({
       ))}
 
       {/* 오답을 추가하는 길. 채점과 무관하게 늘 열려 있다. */}
-      <AddProblemFlow categoryId={category.id} canAdd={access.canRecognize} />
+      <AddProblemFlow
+        categoryId={category.id}
+        canAdd={access.canRecognize}
+        answerByNumber={buildAnswerMap(
+          (linkedGrades ?? []).map((g) => g.items),
+          (answerKeys ?? []).map((k) => k.items),
+        )}
+      />
 
       {/* 번호가 없는 문제에 번호를 한꺼번에 붙인다. 번호가 없으면 목록·PDF
           에서 저장된 차례대로 1번부터 매겨져 실제 시험지와 어긋난다. */}

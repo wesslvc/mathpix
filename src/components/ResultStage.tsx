@@ -78,15 +78,6 @@ type Props = {
    * 붙은 보통 문제와 완전히 같은 길을 탄다.
    */
   initialFigures?: { id: string; svg: string; layout?: DiagramLayout }[];
-  /**
-   * 화면이 뜨자마자 큐에 넣을 "문제 전체 다시 그리기" 작업.
-   *
-   * 큐에 넣으려면 이 문제의 키(problemKey)가 필요한데 그건 여기서 만들어지므로,
-   * 부모가 일감만 넘겨주고 넣는 건 여기서 한다. 넣고 나면 onWholeJobQueued로
-   * 알려 부모가 같은 일을 두 번 넣지 않게 한다.
-   */
-  pendingWholeJob?: { id: string; crop: string } | null;
-  onWholeJobQueued?: () => void;
 };
 
 /**
@@ -122,8 +113,6 @@ export default function ResultStage({
   onAddAnother,
   sourceImage,
   initialFigures,
-  pendingWholeJob,
-  onWholeJobQueued,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [fontPt, setFontPt] = useState(DEFAULT_FONT_PT);
@@ -431,29 +420,6 @@ export default function ResultStage({
     // (넣으면 타이머가 렌더마다 초기화돼 영영 저장되지 않는다).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answer, answerType, autoSaveOff, savedId, dirty, isSaving, onSaveToCategory]);
-
-  // "통째로 다시 그리기"를 고른 문제는 화면이 뜨자마자 큐에 얹는다. 기다리지
-  // 않으므로 사용자는 그 사이 정답을 적거나 다음 사진으로 넘어갈 수 있다.
-  //
-  // **넣는 건 기다리지 않고 곧바로 한다.** 저장을 먼저 하고 넣게 했더니, 저장
-  // 왕복이 끝나기 전에 사용자가 다음 사진으로 넘어가면 이 화면이 사라지면서
-  // 작업이 아예 안 들어갔다. 저장은 따로 걸어두고(서버가 결과를 남길 행이
-  // 필요하다), 실제 행 id는 일꾼이 호출 직전에 스냅샷에서 읽어 간다.
-  useEffect(() => {
-    if (!pendingWholeJob) return;
-    enqueue({
-      id: pendingWholeJob.id,
-      problemKey,
-      label: problemLabel,
-      crop: pendingWholeJob.crop,
-      mode: "problem",
-    });
-    onWholeJobQueued?.();
-    // 탭을 닫아도 서버가 결과를 남길 수 있게 문제 행을 미리 만들어 둔다.
-    if (!savedId && onSaveToCategory) void handleSaveToCategory();
-    // problemKey/label은 result와 함께 정해진다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingWholeJob]);
 
   // Mathpix가 텍스트로 옮길 수 없는 도형(원, 삼각형 등)을 감지하면 그 영역의
   // 좌표를 함께 알려준다. OCR로는 도형을 재구성할 수 없으니, 보낸 원본
