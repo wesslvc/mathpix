@@ -10,9 +10,10 @@ import { GRADING_TOKEN_DEPOSIT, gradingTokenCharge } from "./tokens";
  * **무제한 계정은 차감도 정산도 건너뛴다.** 예전에 이 검사가 빠진 라우트가
  * 있어서, 무제한인데 잔액이 0 이면 402 로 막혔다.
  *
- * 채점(`/api/grade-exam`)·답지(`/api/answer-key`)는 아직 각자 같은 코드를
- * 들고 있다. 잘 돌고 있는 과금 경로라 이번에 건드리지 않았을 뿐이고,
- * 다음에 그쪽을 고칠 일이 있으면 이리로 모을 것.
+ * **채점(`/api/grade-exam`)·답지(`/api/answer-key`)도 이제 이 함수를 쓴다**
+ * (2026-09-26, luna 를 고정 1토큰으로 바꾸면서 각자 들고 있던 같은 코드를
+ * 여기로 모았다). 셋 다 `flat: true` — luna 원가가 거의 안 들어 실사용량
+ * 정산 대신 늘 `deposit`만 뗀다.
  */
 export type GradingBilling = {
   charged: boolean;

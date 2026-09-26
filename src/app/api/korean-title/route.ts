@@ -14,7 +14,8 @@ export const maxDuration = 60;
 /** 보내는 글자 수 상한. 지문 한 편은 넉넉히 들어가고, 통째로 보내는 사고는 막는다. */
 const MAX_CHARS = 12000;
 
-/** 이 일에 걸어 두는 보증금. luna 라 사진을 붙여도 아주 싸다(모자라면 정산에서 더 받는다). */
+/** 이 일에 물릴 **고정** 차감액. luna 라 원가가 아주 싸다(2026-09-26, 무료 회원도
+ *  실컷 쓸 수 있게 실사용량 정산이 아니라 늘 이만큼만 뗀다 — `flat: true`). */
 const DEPOSIT = 1;
 
 /**
@@ -24,8 +25,7 @@ const DEPOSIT = 1;
  * 지문 인식이 한 번의 호출로 합쳐지면서(2026-09-25) 글자를 먼저 읽는 단계가
  * 없어졌다. 글자를 넘기면 예전처럼 글만 보낸다. 제목은 첫 장 목차와 지문 카드에 쓰인다.
  *
- * 과금은 다른 vision 라우트와 같은 모양(보증금 → 실사용량 정산)이고
- * `gradingBilling.ts` 한 곳을 쓴다.
+ * 과금은 `gradingBilling.ts` 한 곳을 쓰고 `flat: true`로 늘 `DEPOSIT`만 뗀다.
  */
 export async function POST(req: NextRequest) {
   let body: { text?: unknown; image?: unknown };
@@ -79,6 +79,7 @@ export async function POST(req: NextRequest) {
       unlimited,
       byok,
       deposit: DEPOSIT,
+      flat: true,
       label: "api/korean-title",
     });
   } catch (err) {

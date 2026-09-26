@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GradeError, readAnswerKeyWithVision } from "@/lib/gradeExam";
-import { GRADING_TOKEN_DEPOSIT, gradingEstKrw, gradingTokenCharge } from "@/lib/tokens";
+import { gradingEstKrw } from "@/lib/tokens";
+import { startGradingBilling } from "@/lib/gradingBilling";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { getBillingContext } from "@/lib/byok";
@@ -17,7 +18,8 @@ export const maxDuration = 90;
  * vision 이 잘못 읽는 일이 있어 사람이 검토·수정할 자리가 필요하다. 화면이
  * 표를 보여주고 사용자가 확인해야 `answer_keys` 에 저장하고 문제에 붙인다.
  *
- * 과금도 채점과 같은 모양(보증금 → 정산)이고 같은 단가를 쓴다(같은 모델이다).
+ * **과금은 고정 1토큰**(채점과 같은 이유·같은 시점, 2026-09-26 — 위
+ * `/api/grade-exam` 주석 참고). `gradingBilling.ts`의 `flat: true`를 쓴다.
  */
 export async function POST(req: NextRequest) {
   let body: { images?: unknown };
@@ -63,48 +65,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let charged = false;
-  if (!unlimited && !byok) {
-    const { data, error } = await supabase.rpc("consume_recognition_credit", {
-      p_amount: GRADING_TOKEN_DEPOSIT,
+  let billing;
+  try {
+    billing = await startGradingBilling(supabase, {
+      unlimited,
+      byok,
+      flat: true,
+      label: "api/answer-key",
     });
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (data === null) {
-      return NextResponse.json(
-        { error: `토큰이 부족해요. 답지 인식에는 최소 ${GRADING_TOKEN_DEPOSIT}토큰이 필요합니다.` },
-        { status: 402 },
-      );
-    }
-    charged = true;
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "과금 처리에 실패했습니다." },
+      { status: 500 },
+    );
   }
-
-  async function refund() {
-    if (!charged) return;
-    try {
-      await supabase.rpc("refund_recognition_credit", { p_amount: GRADING_TOKEN_DEPOSIT });
-    } catch {
-      // 환불 실패는 무시 — 사용자에게는 원래 오류만 보여준다.
-    }
-  }
-
-  /** 보증금과 실제 값(알면)의 차이를 맞춘다(채점과 같은 방식). */
-  async function settle(estKrw: number | undefined): Promise<number | null> {
-    if (!charged) return null;
-    const want = gradingTokenCharge(estKrw);
-    const diff = want - GRADING_TOKEN_DEPOSIT;
-    try {
-      if (diff < 0) {
-        await supabase.rpc("refund_recognition_credit", { p_amount: -diff });
-      } else if (diff > 0) {
-        const { data } = await supabase.rpc("consume_recognition_credit", { p_amount: diff });
-        if (data === null) {
-          console.warn(`[api/answer-key] ${user!.id} 잔액 부족으로 ${diff}토큰을 못 받았습니다.`);
-        }
-      }
-    } catch (err) {
-      console.error("[api/answer-key] 정산 실패:", err);
-    }
-    return want;
+  if (!billing) {
+    return NextResponse.json(
+      { error: "토큰이 부족해요. 답지 인식에는 토큰이 필요합니다." },
+      { status: 402 },
+    );
   }
 
   const deadline = new AbortController();
@@ -114,7 +93,7 @@ export async function POST(req: NextRequest) {
     const result = await readAnswerKeyWithVision(images, deadline.signal, byokApiKey ?? undefined);
     // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
     const estKrw = result.usage ? gradingEstKrw(result.usage, result.model) : undefined;
-    const chargedTokens = await settle(estKrw);
+    const chargedTokens = await billing.settle(estKrw);
 
     // 금액은 무제한·BYOK 계정에만 보여준다(막는 자리는 서버 — 화면 숨김은 우회 가능).
     const usage =
@@ -128,13 +107,13 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     if (deadline.signal.aborted) {
-      await refund();
+      await billing.refund();
       return NextResponse.json(
         { error: `답지 인식이 ${maxDuration}초 안에 끝나지 않았습니다. 토큰은 돌려드렸어요.` },
         { status: 504 },
       );
     }
-    await refund();
+    await billing.refund();
     const status = err instanceof GradeError ? err.status : 500;
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "답지 인식에 실패했습니다." },

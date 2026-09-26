@@ -984,6 +984,31 @@ p_amount` 를 요구한다).
 `estUsd`·`estKrw`·`krwRate` 를 아예 빼고 토큰 수만 내려보낸다. 일반 사용자 패널은
 `생성 2회 · 120토큰`, 무제한은 `생성 2회 · 약 239원` 이다(브라우저로 둘 다 확인).
 
+#### Mathpix·luna 는 고정 1토큰이다 (2026-09-26)
+
+사용자 지시 — "luna, mathpix는 돈 거의 안드니까 각각 1토큰씩으로해서 무료회원이
+실컷쓰게해". 둘 다 원가가 몇 원 수준이라(luna 채점 2.9원·제목 0.8원 실측 참고)
+실사용량 정산을 걷어내고 늘 1토큰만 뗀다.
+
+- **`OCR_TOKEN_COST`(Mathpix 인식)**: 5 → **1**(`tokens.ts`). 한때 1→5로 올렸던
+  것을 다시 내렸다.
+- **`GRADING_TOKEN_DEPOSIT`(luna 를 쓰는 채점·답지 인식·제목 짓기)**: 5 → **1**,
+  그리고 실사용량 정산에서 **고정 차감**으로 바꿨다 — `/api/grade-exam` ·
+  `/api/answer-key` · `/api/korean-title` 셋 다 `gradingBilling.ts` 의
+  `startGradingBilling({ ..., flat: true })` 를 쓴다. `flat: true` 면
+  `settle()` 이 `gradingTokenCharge(estKrw)`(원가 기반 계산)를 보지 않고 늘
+  `deposit` 만 돌려준다. **`/api/grade-exam`·`/api/answer-key`는 예전에 각자
+  같은 보증금→정산 코드를 들고 있었는데 이번에 `gradingBilling.ts` 하나로
+  모았다**(`/api/korean-title`은 처음부터 이 함수를 썼다).
+- **국어 지문 인식(`PASSAGE_READ_TOKENS`=100)·서식 검수(`PASSAGE_MARKS_DEPOSIT`)는
+  안 건드렸다** — 그건 sol(`gpt-6-sol`)이라 luna 보다 원가가 훨씬 크다
+  (지문 인식 실측 70원대). "luna, mathpix" 라고 지목한 범위 밖이다.
+- `estKrw`는 여전히 계산해 응답에 얹는다(무제한·BYOK 계정 화면 표시용) —
+  차감 금액만 고정이지, 원가를 보여주는 것은 그대로다.
+- 검증: `npx tsc --noEmit`·`npm run build` 통과. **실제 계정으로 무료 회원
+  잔액이 1토큰만 있어도 채점·답지 인식·제목 짓기·Mathpix 인식이 되는지는
+  아직 못 봤다** — 다음 세션 검증 항목.
+
 ### 표 처리 (Mathpix가 보내는 형태가 아주 여러 가지다)
 
 Mathpix는 표를 여러 형태로 보낸다. `protectTables()`가 문단/줄 분리 **전에**

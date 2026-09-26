@@ -13,12 +13,12 @@
  * 문제 인식(Mathpix) 1회의 고정 차감액. `/api/mathpix`가
  * `consume_recognition_credit({ p_amount: OCR_TOKEN_COST })`로 차감한다.
  *
- * **1에서 5로 올렸다**(사용자 결정, 2026-09-17). 예전에는 이 상수를 안 쓰고
- * RPC 호출에 `p_amount`를 아예 안 넘겨 DB 함수의 기본값(1)에 기대고
- * 있었다 — 그래서 값만 여기서 바꿔서는 실제 차감이 안 바뀐다. 라우트가
- * 이 상수를 명시적으로 넘기도록 함께 고쳤다.
+ * **5에서 1로 다시 내렸다**(사용자 결정, 2026-09-26 — "mathpix는 돈 거의
+ * 안드니까 1토큰으로 해서 무료회원이 실컷쓰게 해"). Mathpix 인식은 원가가
+ * 아주 싸서 무료 회원도 자주 쓸 수 있어야 한다는 판단이다. 한때 1→5로
+ * 올린 적이 있는데(위 이력) 그 반대 방향 결정이다.
  */
-export const OCR_TOKEN_COST = 5;
+export const OCR_TOKEN_COST = 1;
 
 /**
  * 토큰 하나의 판매가(원). 1000토큰을 3000원에 판다.
@@ -78,19 +78,20 @@ export const PASSAGE_MARKS_DEPOSIT = 30;
 export const TOKEN_GAUGE_FULL = 1000;
 
 /**
- * 자동채점(OMR·정답표 읽기) 1회의 **보증금**.
+ * luna 를 쓰는 호출(자동채점·답지 인식·제목 짓기) 1회의 **고정 차감액**.
  *
- * 단가를 모를 때(둘 중 하나라도 비어 있을 때)는 실사용량 정산이 아니라
- * 이 고정 소액을 그대로 받는다 — 그림 하나(50)에 비해 텍스트 위주
- * 호출이라 훨씬 싸다는 것만 가정한 값이다.
- *
- * `GRADING_PRICE_INPUT_PER_MTOK_USD` / `GRADING_PRICE_OUTPUT_PER_MTOK_USD`
- * 를 **둘 다** 채우면 그 순간부터 그림 생성과 같은 방식(보증금 → 실사용량
- * 정산)으로 바뀐다(`gradingTokenCharge`).
+ * **실사용량 정산에서 고정 1토큰으로 바꿨다**(사용자 결정, 2026-09-26 —
+ * "luna는 돈 거의 안드니까 1토큰으로 해서 무료회원이 실컷쓰게 해"). luna
+ * 원가가 실제로 몇 원 수준이라(위 채점 2.9원·제목 0.8원 실측 참고) 실사용량
+ * 정산이 주는 이점(정확한 원가 반영)보다 "무료 회원이 부담 없이 쓴다"는
+ * 목적이 우선이다. 이제 이 값을 쓰는 라우트(`/api/grade-exam`·
+ * `/api/answer-key`·`/api/korean-title`)는 전부 `gradingBilling.ts`의
+ * `flat: true` 로 항상 이 값만 뗀다 — `gradingTokenCharge`(실사용량 계산)는
+ * 더 이상 이 셋에서 안 불린다(다른 곳, 예: 지문 서식 검수의 sol 정산은 그대로).
  */
 export const GRADING_TOKEN_DEPOSIT = (() => {
   const raw = Number(process.env.GRADING_TOKEN_DEPOSIT);
-  return Number.isInteger(raw) && raw > 0 ? raw : 5;
+  return Number.isInteger(raw) && raw > 0 ? raw : 1;
 })();
 
 /**

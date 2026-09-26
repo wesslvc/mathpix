@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GradeError, gradeWithVision, type GradingMethod, type Subject } from "@/lib/gradeExam";
-import {
-  GRADING_TOKEN_DEPOSIT,
-  gradingEstKrw,
-  gradingTokenCharge,
-} from "@/lib/tokens";
+import { gradingEstKrw } from "@/lib/tokens";
+import { startGradingBilling } from "@/lib/gradingBilling";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { getBillingContext } from "@/lib/byok";
@@ -20,10 +17,11 @@ export const maxDuration = 90;
  * 검토(수정) 화면을 먼저 보여주고, 사용자가 확인을 눌러야 `exam_scores`에
  * 저장된다(vision이 마킹을 잘못 읽는 일이 있어 사람이 보정할 자리가 필요하다).
  *
- * 과금은 그림 생성과 같은 모양(보증금 → 정산)을 쓰지만, 이 모델의 **단가를
- * 모른다**(gpt-image-2 처럼 청구서로 검증한 적이 없다). 그래서 단가
- * 환경변수를 채우지 않으면 보증금이 그대로 최종 차감액이 된다
- * (`gradingTokenCharge`, `src/lib/tokens.ts` 참고).
+ * **과금은 고정 1토큰**(사용자 결정, 2026-09-26 — luna 는 원가가 거의
+ * 안 들어 무료 회원도 실컷 쓸 수 있게). 예전에는 실사용량 정산이었는데
+ * (`gradingTokenCharge`) 이제 `gradingBilling.ts`의 `flat: true`로 항상
+ * `GRADING_TOKEN_DEPOSIT`(1)만 뗀다. `estKrw`는 화면에 보여줄 원가(무제한·
+ * BYOK 계정에만)로만 쓴다.
  */
 export async function POST(req: NextRequest) {
   let body: {
@@ -113,53 +111,25 @@ export async function POST(req: NextRequest) {
 
   // **BYOK는 차감 없이 본인 키로 직접 부른다**(item 5 — 공유 키는 절대
   // 안 건드린다).
-  let charged = false;
-  if (!unlimited && !byok) {
-    const { data, error } = await supabase.rpc("consume_recognition_credit", {
-      p_amount: GRADING_TOKEN_DEPOSIT,
+  let billing;
+  try {
+    billing = await startGradingBilling(supabase, {
+      unlimited,
+      byok,
+      flat: true,
+      label: "api/grade-exam",
     });
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    if (data === null) {
-      return NextResponse.json(
-        { error: `토큰이 부족해요. 자동채점에는 최소 ${GRADING_TOKEN_DEPOSIT}토큰이 필요합니다.` },
-        { status: 402 },
-      );
-    }
-    charged = true;
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "과금 처리에 실패했습니다." },
+      { status: 500 },
+    );
   }
-
-  async function refund() {
-    if (!charged) return;
-    try {
-      await supabase.rpc("refund_recognition_credit", { p_amount: GRADING_TOKEN_DEPOSIT });
-    } catch {
-      // 환불 실패는 무시 — 사용자에게는 원래 오류만 보여준다.
-    }
-  }
-
-  /** 보증금과 실제 값(알면)의 차이를 맞춘다. 잔액 부족으로 추가 차감이
-   * 실패해도 이미 돌려준 채점 결과를 무를 수는 없으니 로그만 남긴다 — 그림
-   * 생성과 달리 여기엔 "잠글" 저장된 자원이 없다(카드 이미지가 아니라 그냥
-   * 텍스트 결과라 사용자가 저장하기 전까지는 아무것도 남지 않는다). */
-  async function settle(estKrw: number | undefined): Promise<number | null> {
-    if (!charged) return null;
-    const want = gradingTokenCharge(estKrw);
-    const diff = want - GRADING_TOKEN_DEPOSIT;
-    try {
-      if (diff < 0) {
-        await supabase.rpc("refund_recognition_credit", { p_amount: -diff });
-      } else if (diff > 0) {
-        const { data } = await supabase.rpc("consume_recognition_credit", { p_amount: diff });
-        if (data === null) {
-          console.warn(`[api/grade-exam] ${userId} 잔액 부족으로 ${diff}토큰을 못 받았습니다.`);
-        }
-      }
-    } catch (err) {
-      console.error("[api/grade-exam] 정산 실패:", err);
-    }
-    return want;
+  if (!billing) {
+    return NextResponse.json(
+      { error: "토큰이 부족해요. 자동채점에는 토큰이 필요합니다." },
+      { status: 402 },
+    );
   }
 
   const deadline = new AbortController();
@@ -175,9 +145,11 @@ export async function POST(req: NextRequest) {
       byokApiKey ?? undefined,
     );
 
-    // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다.
+    // **모델을 함께 넘긴다** — 단가가 모델마다 열 배까지 다르다. flat 이라
+    // settle 은 늘 GRADING_TOKEN_DEPOSIT 만 돌려주지만, estKrw 는 화면 표시용
+    // 원가(무제한·BYOK 계정)로 여전히 쓴다.
     const estKrw = result.usage ? gradingEstKrw(result.usage, result.model) : undefined;
-    const chargedTokens = await settle(estKrw);
+    const chargedTokens = await billing.settle(estKrw);
 
     // 슬롯에 사용자가 적어 준 과목명(elective_label)을 그대로 이어 붙인다.
     const slots = result.slots.map((s) => {
@@ -194,13 +166,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ slots, usage, chargedTokens, model: result.model });
   } catch (err) {
     if (deadline.signal.aborted) {
-      await refund();
+      await billing.refund();
       return NextResponse.json(
         { error: `채점이 ${maxDuration}초 안에 끝나지 않았습니다. 토큰은 돌려드렸어요.` },
         { status: 504 },
       );
     }
-    await refund();
+    await billing.refund();
     const status = err instanceof GradeError ? err.status : 500;
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "채점에 실패했습니다." },
