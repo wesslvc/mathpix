@@ -39,6 +39,26 @@ function valueText(metric: TrendMetric, p: TrendPoint): string {
   return p.hasScore ? `${p.value}점` : `${p.value}%`;
 }
 
+/**
+ * 기록 카드의 값 — **점수와 등급을 둘 다** 적는다. 보기(점수/등급)와 상관없이
+ * 같다(사용자 요청). 지금 보고 있는 쪽을 진하게 둔다. 없는 쪽은 빼고, 점수가
+ * 없으면 정답률로 대신한다.
+ */
+function RecordValues({ metric, p }: { metric: TrendMetric; p: TrendPoint }) {
+  const score =
+    p.score !== null ? `${p.score}/${p.max}점` : p.accuracy !== null ? `정답률 ${p.accuracy}%` : null;
+  const grade = p.grade !== null ? `${p.grade}등급` : null;
+  const [first, second] = metric === "grade" ? [grade, score] : [score, grade];
+  if (!first && !second) return <span className="block font-bold tabular-nums text-ink">{valueText(metric, p)}</span>;
+  return (
+    <span className="block whitespace-nowrap tabular-nums">
+      {first && <span className="font-bold text-ink">{first}</span>}
+      {first && second && <span className="text-slate-300"> · </span>}
+      {second && <span className={first ? "font-semibold text-slate-600" : "font-bold text-ink"}>{second}</span>}
+    </span>
+  );
+}
+
 /** 두 점 사이 변화. 좋아졌으면 good. 등급은 숫자가 작을수록 좋다. */
 function deltaOf(metric: TrendMetric, prev: TrendPoint, last: TrendPoint) {
   if (metric === "grade") {
@@ -424,7 +444,7 @@ function TrendChart({
                     )}
                   </span>
                   <span className="shrink-0 text-right">
-                    <span className="block font-bold tabular-nums text-ink">{valueText(metric, p)}</span>
+                    <RecordValues metric={metric} p={p} />
                     {p.wrongCount >= 0 && (
                       <span className="block text-[10px] text-slate-400">
                         {p.wrongCount > 0 ? `오답 ${p.wrongCount}` : "전부 정답"}

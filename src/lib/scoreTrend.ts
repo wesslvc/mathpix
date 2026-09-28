@@ -64,6 +64,17 @@ export type TrendPoint = {
   pct: number;
   /** 문항 정보가 있을 때만 뜻이 있다(직접 입력한 성적은 -1). */
   wrongCount: number;
+  /**
+   * 보기(점수/등급)와 상관없이 그 기록이 가진 값 전부. 그래프 아래 기록 카드는
+   * 어느 보기에서든 점수와 등급을 **둘 다** 보여 준다(사용자 요청) — 보기를
+   * 바꿔야만 다른 쪽 값을 알 수 있으면 한 시험을 보려고 토글을 오가야 한다.
+   */
+  score: number | null;
+  /** 배점이 없어 점수가 없을 때 대신 보여 줄 정답률(%). 문항 정보가 없으면 null. */
+  accuracy: number | null;
+  grade: number | null;
+  /** 이 과목의 만점(탐구 50, 그 밖 100). */
+  max: number;
 };
 
 /**
@@ -130,6 +141,13 @@ export function buildTrendSeries(
             ? Math.round((value / max) * 1000) / 10
             : value,
       wrongCount: row.total_questions > 0 ? row.wrong_numbers.length : -1,
+      score: row.score ?? null,
+      accuracy:
+        row.total_questions > 0
+          ? Math.round((row.correct_count / row.total_questions) * 100)
+          : null,
+      grade: row.grade_level ?? null,
+      max,
     });
     groups.set(key, series);
   }
