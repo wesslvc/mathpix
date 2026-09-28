@@ -1,5 +1,6 @@
 import type { ExamScore } from "./supabase/types";
 import { normalizeElectiveLabel } from "./examSubjects";
+import { examMaxScore } from "./gradeSummary";
 
 /** 과목별로 묶는 데 필요한 최소한의 필드. 채점 기록 목록(GradeHistoryRow)도
  * 같은 모양이라 그대로 받을 수 있다 — 묶는 기준을 두 곳에 따로 두면
@@ -43,7 +44,11 @@ export function compareSubjectGroups(
 }
 
 export type TrendPoint = {
+  /** 이 점을 만든 채점 기록(`/grades/[id]` 로 이어진다). */
+  id: string;
   takenAt: string;
+  /** 시험 이름(있으면). 그래프 툴팁에 쓴다. */
+  examName: string | null;
   /**
    * 점수 보기: 배점이 있으면 점수, 없으면 정답률(%) — 0~100 한 축이다.
    * 등급 보기: 1~9 등급. 축이 뒤집힌다(1등급이 위) — 그리는 쪽 몫이다.
@@ -51,6 +56,13 @@ export type TrendPoint = {
   value: number;
   /** 배점이 있는 값인지 — 없으면(정답률로 대신한 값) 점을 다르게 그린다. */
   hasScore: boolean;
+  /**
+   * 만점 대비 비율(0~100). 점수 보기에서 그래프의 세로 자리는 이 값으로 정한다 —
+   * 탐구(50점 만점)와 국어(100점 만점)를 한 축에 놓아도, 한 과목 안에 점수와
+   * 정답률이 섞여도 같은 자리에 온다. 등급 보기에서는 `value` 와 같다.
+   */
+  pct: number;
+  /** 문항 정보가 있을 때만 뜻이 있다(직접 입력한 성적은 -1). */
   wrongCount: number;
 };
 
@@ -68,6 +80,8 @@ export type TrendSeries = {
   key: string;
   /** 화면에 보여줄 이름. 탐구는 "탐구 · 생활과 윤리"처럼 과목명을 붙인다. */
   label: string;
+  /** 이 과목의 만점(탐구 50, 그 밖 100). */
+  max: number;
   points: TrendPoint[];
 };
 
@@ -99,13 +113,23 @@ export function buildTrendSeries(
             ? Math.round((row.correct_count / row.total_questions) * 100)
             : 0));
 
-    const series = groups.get(key) ?? { key, label, points: [] };
+    const max = examMaxScore(row.subject);
+    const hasScore = metric === "grade" ? true : row.score !== null;
+    const series = groups.get(key) ?? { key, label, max, points: [] };
     series.points.push({
+      id: row.id,
       takenAt: row.taken_at,
+      examName: row.exam_name?.trim() || null,
       value,
       // 등급은 "배점이 있어 얻은 값"이라는 구분 자체가 없다 — 전부 채운 점.
-      hasScore: metric === "grade" ? true : row.score !== null,
-      wrongCount: row.wrong_numbers.length,
+      hasScore,
+      pct:
+        metric === "grade"
+          ? value
+          : hasScore
+            ? Math.round((value / max) * 1000) / 10
+            : value,
+      wrongCount: row.total_questions > 0 ? row.wrong_numbers.length : -1,
     });
     groups.set(key, series);
   }

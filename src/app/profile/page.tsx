@@ -112,28 +112,27 @@ export default async function ProfilePage() {
 
       <CropShapeSetting />
 
-      <section className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-semibold text-ink">성적 추세</h2>
-          <Link href="/grade" className="text-sm text-blue-600 hover:underline">
-            자동채점 하러 가기
+          <Link href="/grade" className="g-btn g-btn-ghost g-btn-xs text-blue-700">
+            자동채점 →
           </Link>
         </div>
 
-        {/* 추세에 필요한 건 과목·응시일·점수(또는 등급)뿐이라, 채점을 거치지
-            않은 시험도 그 넷만 적으면 같은 그래프에 얹힌다(사용자 요청). */}
-        <ManualScoreForm />
-
-        {series.length === 0 ? (
+        {series.length === 0 && gradeSeries.length === 0 ? (
           <p className="g-panel px-4 py-6 text-center text-sm text-slate-400">
-            아직 성적 기록이 없어요. 자동채점을 하거나 위에서 성적을 직접
+            아직 성적 기록이 없어요. 자동채점을 하거나 아래에서 성적을 직접
             적어 넣으면 여기에 추세가 쌓입니다.
           </p>
         ) : (
-          <div className="g-panel p-4 sm:p-5">
-            <ScoreTrendChart series={series} gradeSeries={gradeSeries} />
-          </div>
+          <ScoreTrendChart series={series} gradeSeries={gradeSeries} />
         )}
+
+        {/* 추세에 필요한 건 과목·응시일·점수(또는 등급)뿐이라, 채점을 거치지
+            않은 시험도 그 넷만 적으면 같은 그래프에 얹힌다(사용자 요청).
+            그래프를 가리지 않게 아래에 둔다. */}
+        <ManualScoreForm />
       </section>
 
       {/* 추세(요약)와 기록(개별 시행 검색·상세)을 같은 화면에서 볼 수 있게
