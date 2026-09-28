@@ -442,6 +442,33 @@ function TrendChart({
   );
 }
 
+/** 볼 기간. "최근 N개월"은 오늘을 끝으로 잡는다. */
+type Period = "1m" | "3m" | "6m" | "1y" | "all";
+const PERIODS: { v: Period; label: string; months: number | null }[] = [
+  { v: "1m", label: "1개월", months: 1 },
+  { v: "3m", label: "3개월", months: 3 },
+  { v: "6m", label: "6개월", months: 6 },
+  { v: "1y", label: "1년", months: 12 },
+  { v: "all", label: "전체", months: null },
+];
+const PERIOD_KEY = "reprint.trendPeriod";
+
+function cutoffOf(period: Period): string | null {
+  const months = PERIODS.find((p) => p.v === period)?.months ?? null;
+  if (months == null) return null;
+  const d = new Date();
+  d.setMonth(d.getMonth() - months);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** 기간 밖의 점을 걸러 내고, 점이 하나도 안 남은 과목은 뺀다. */
+function withinPeriod(list: TrendSeries[], cutoff: string | null): TrendSeries[] {
+  if (!cutoff) return list;
+  return list
+    .map((s) => ({ ...s, points: s.points.filter((p) => p.takenAt >= cutoff) }))
+    .filter((s) => s.points.length > 0);
+}
+
 export default function ScoreTrendChart({
   series,
   gradeSeries = [],
@@ -467,9 +494,33 @@ export default function ScoreTrendChart({
     return m;
   }, [series, gradeSeries]);
 
+  // 기간 — 기록이 쌓이면 전체로는 최근 흐름이 눌려 안 보인다. 고른 기간은 기기에 남긴다.
+  const [period, setPeriodState] = useState<Period>("all");
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(PERIOD_KEY);
+      if (saved && PERIODS.some((p) => p.v === saved)) setPeriodState(saved as Period);
+    } catch {
+      /* 저장소를 못 써도 전체로 보면 된다 */
+    }
+  }, []);
+  function setPeriod(next: Period) {
+    setPeriodState(next);
+    try {
+      window.localStorage.setItem(PERIOD_KEY, next);
+    } catch {
+      /* 무시 */
+    }
+  }
+  const cutoff = cutoffOf(period);
+
   const shown: Colored[] = useMemo(
-    () => (isGrade ? gradeSeries : series).map((s) => ({ ...s, color: colorOf.get(s.key) ?? PALETTE[0] })),
-    [isGrade, gradeSeries, series, colorOf],
+    () =>
+      withinPeriod(isGrade ? gradeSeries : series, cutoff).map((s) => ({
+        ...s,
+        color: colorOf.get(s.key) ?? PALETTE[0],
+      })),
+    [isGrade, gradeSeries, series, colorOf, cutoff],
   );
 
   // 처음에는 가장 최근에 본 시험의 과목을 연다.
@@ -485,13 +536,43 @@ export default function ScoreTrendChart({
   const selection: Selection | null =
     picked === "all" || (picked && shown.some((s) => s.key === picked)) ? picked : latestKey;
 
-  if (shown.length === 0 || !selection) return null;
+  const periodControl = (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className="text-xs font-medium text-slate-500">기간</span>
+      <div className="g-seg" role="group" aria-label="볼 기간">
+        {PERIODS.map((p) => (
+          <button
+            key={p.v}
+            type="button"
+            data-active={period === p.v || undefined}
+            aria-pressed={period === p.v}
+            onClick={() => setPeriod(p.v)}
+            className="g-seg-item px-2.5 py-1 text-xs sm:px-3"
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (shown.length === 0 || !selection) {
+    return (
+      <div className="flex flex-col gap-3">
+        {periodControl}
+        <p className="g-panel px-4 py-6 text-center text-sm text-slate-400">
+          이 기간에는 기록이 없어요. 기간을 넓혀 보세요.
+        </p>
+      </div>
+    );
+  }
 
   const chartSeries = selection === "all" ? shown : shown.filter((s) => s.key === selection);
   const current = selection === "all" ? null : chartSeries[0];
 
   return (
     <div className="flex flex-col gap-4">
+      {periodControl}
       {/* 과목 요약 — 한눈에 최근 점수·변화를 보고, 눌러서 아래 그래프를 바꾼다. */}
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
         {shown.map((s) => (
