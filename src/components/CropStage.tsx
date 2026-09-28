@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import ReactCrop, { type Crop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import { detectContentRegion } from "@/lib/autoDetectRegion";
-import { cropImageToDataUrl, rotateImageDataUrl } from "@/lib/cropImage";
-import type { CropRect } from "@/lib/types";
+import { rotateImageDataUrl } from "@/lib/cropImage";
+import { cropRegionToDataUrl, rectPoly, type Region } from "@/lib/polygon";
+import { useCropShape } from "@/lib/cropShape";
+import BoxEditor, { type EditBox } from "./BoxEditor";
+import CropShapeToggle from "./CropShapeToggle";
 
 type Props = {
   imageSrc: string;
@@ -25,30 +28,31 @@ type Props = {
   byok?: boolean;
   onCancel: () => void;
   onError: (message: string) => void;
+  /** 이 사진을 건너뛴다(대기열 맨 뒤로). 여러 장을 넣을 때만 준다. */
+  onSkip?: () => void;
 };
 
-function rectToPercentCrop(rect: CropRect, naturalWidth: number, naturalHeight: number): Crop {
-  return {
-    unit: "%",
-    x: (rect.x / naturalWidth) * 100,
-    y: (rect.y / naturalHeight) * 100,
-    width: (rect.width / naturalWidth) * 100,
-    height: (rect.height / naturalHeight) * 100,
-  };
-}
+/** 한 문제 자르기에서 영역을 가리키는 id. 하나뿐이라 고정값이다. */
+const ONE = "crop";
 
 export default function CropStage({
   imageSrc,
   onConfirm,
   onCancel,
   onError,
+  onSkip,
   problemTokenCost,
   unlimited = false,
   byok = false,
 }: Props) {
+  /** 자를 재료. 화면에 뜬 `<img>` 가 아니라 따로 연 것이라 모양을 바꿔도 그대로다. */
   const imgRef = useRef<HTMLImageElement | null>(null);
-  const [crop, setCrop] = useState<Crop>();
+  /** 자를 자리(사진 대비 비율). 다각형이면 `poly` 가 있다. */
+  const [region, setRegion] = useState<Region | null>(null);
   const [autoDetected, setAutoDetected] = useState(false);
+  const [shape, setShape] = useCropShape();
+  /** 자동 감지는 사진마다 한 번만 한다 — 모양을 바꿀 때 그림이 다시 붙어도 덮지 않는다. */
+  const detectedFor = useRef<string | null>(null);
 
   /**
    * 사진 돌리기. 세로로 찍힌 사진이 누워서 들어오는 일이 흔하다.
@@ -59,6 +63,15 @@ export default function CropStage({
    */
   const [turns, setTurns] = useState(0);
   const [shown, setShown] = useState(imageSrc);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // 휴대폰에서는 사진이 바뀔 때마다 자르는 화면을 위로 붙인다 — 머리글·사진 줄
+  // 아래로 밀려 있으면 사진 아랫부분이 아래 버튼 줄에 가려 그 자리를 못 누른다.
+  // 여러 장을 연달아 넣을 때 매번 손으로 스크롤하던 수고도 던다.
+  useEffect(() => {
+    if (window.innerWidth >= 640) return;
+    rootRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [imageSrc]);
 
   useEffect(() => {
     let alive = true;
@@ -75,136 +88,173 @@ export default function CropStage({
     };
   }, [imageSrc, turns]);
 
+  // 네모로 돌아가면 다각형은 감싸는 네모로 접는다.
+  useEffect(() => {
+    if (shape === "rect") setRegion((r) => (r ? { x: r.x, y: r.y, w: r.w, h: r.h } : r));
+  }, [shape]);
+
   function handleImageError() {
     onError(
       "이미지를 불러올 수 없습니다. 이 브라우저가 지원하지 않는 형식(HEIC 등)일 수 있으니 JPG/PNG로 다시 시도해주세요.",
     );
   }
 
-  function handleImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
-    const img = e.currentTarget;
+  function handleImageLoad(img: HTMLImageElement) {
     imgRef.current = img;
-
+    if (detectedFor.current === shown) return;
+    detectedFor.current = shown;
     const rect = detectContentRegion(img);
-    setCrop(rectToPercentCrop(rect, img.naturalWidth, img.naturalHeight));
+    setRegion({
+      x: rect.x / img.naturalWidth,
+      y: rect.y / img.naturalHeight,
+      w: rect.width / img.naturalWidth,
+      h: rect.height / img.naturalHeight,
+    });
     setAutoDetected(true);
   }
 
+  const ready = !!region && region.w > 0 && region.h > 0;
+
   function handleConfirm(mode: "ocr" | "problem" | "asis") {
     const img = imgRef.current;
-    if (!img || !crop || !crop.width || !crop.height) return;
-
-    const rect: CropRect = {
-      x: (crop.x / 100) * img.naturalWidth,
-      y: (crop.y / 100) * img.naturalHeight,
-      width: (crop.width / 100) * img.naturalWidth,
-      height: (crop.height / 100) * img.naturalHeight,
-    };
-
-    const dataUrl = cropImageToDataUrl(img, rect);
-    onConfirm(dataUrl, mode);
+    if (!img || !region || !ready) return;
+    onConfirm(cropRegionToDataUrl(img, region), mode);
   }
 
-  function handleResetToFull() {
-    const img = imgRef.current;
-    if (!img) return;
-    setCrop({ unit: "%", x: 2, y: 2, width: 96, height: 96 });
-  }
+  const percentCrop: Crop | undefined = region
+    ? { unit: "%", x: region.x * 100, y: region.y * 100, width: region.w * 100, height: region.h * 100 }
+    : undefined;
+
+  const editBoxes: EditBox[] = region
+    ? [{ id: ONE, group: ONE, ...region, poly: region.poly ?? rectPoly(region) }]
+    : [];
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={rootRef} className="flex scroll-mt-14 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-ink">
-            문제 영역 확인 및 조정
-          </h2>
-          <p className="text-sm text-slate-500">
-            {autoDetected
-              ? "자동으로 문제 영역을 인식했습니다. 필요하면 손잡이를 끌어 범위를 조정하세요."
-              : "이미지를 분석하는 중입니다..."}
+          <h2 className="text-base font-semibold text-ink">문제 영역 자르기</h2>
+          <p className="text-xs text-slate-500">
+            {!autoDetected
+              ? "사진을 여는 중…"
+              : shape === "poly"
+                ? "점을 끌어 모양을 맞추세요. 변 가운데 점을 끌면 점이 늘어요."
+                : "자동으로 잡았어요. 손잡이를 끌어 범위를 맞추세요."}
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <button
-            type="button"
-            onClick={() => setTurns((t) => t + 1)}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
-          >
-            ↻ 90° 돌리기
+        <div className="flex flex-wrap items-center gap-1.5">
+          <CropShapeToggle value={shape} onChange={setShape} />
+          <button type="button" onClick={() => setTurns((t) => t + 1)} className="g-btn g-btn-outline g-btn-sm">
+            ↻ 돌리기
           </button>
           <button
             type="button"
-            onClick={handleResetToFull}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+            onClick={() => setRegion({ x: 0.02, y: 0.02, w: 0.96, h: 0.96 })}
+            className="g-btn g-btn-outline g-btn-sm"
           >
-            전체 이미지로 리셋
+            전체
           </button>
+          {shape === "poly" && (
+            <button
+              type="button"
+              onClick={() => setRegion(null)}
+              className="g-btn g-btn-outline g-btn-sm"
+              title="지우고 점을 새로 찍습니다"
+            >
+              새로 그리기
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="flex justify-center rounded-2xl bg-slate-100 p-4">
-        <ReactCrop
-          crop={crop}
-          onChange={(_, percentCrop) => setCrop(percentCrop)}
-          className="max-h-[70vh]"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            // 돌릴 때마다 src 가 바뀌므로 key 도 함께 바뀌어 onLoad 가 다시
-            // 불린다 — 돌아간 그림으로 자동 영역 감지를 새로 한다.
+      <div className="flex justify-center rounded-2xl bg-slate-100 p-3 sm:p-4">
+        {shape === "rect" ? (
+          <ReactCrop
+            crop={percentCrop}
+            onChange={(_, pc) =>
+              setRegion({ x: pc.x / 100, y: pc.y / 100, w: pc.width / 100, h: pc.height / 100 })
+            }
+            className="max-h-[58vh] sm:max-h-[70vh]"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              // 돌릴 때마다 src 가 바뀌므로 key 도 함께 바뀌어 onLoad 가 다시
+              // 불린다 — 돌아간 그림으로 자동 영역 감지를 새로 한다.
+              key={shown}
+              src={shown}
+              alt="업로드한 문제 이미지"
+              onLoad={(e) => handleImageLoad(e.currentTarget)}
+              onError={handleImageError}
+              className="max-h-[58vh] w-auto sm:max-h-[70vh]"
+            />
+          </ReactCrop>
+        ) : (
+          <BoxEditor
             key={shown}
-            src={shown}
-            alt="업로드한 문제 이미지"
-            onLoad={handleImageLoad}
-            onError={handleImageError}
-            className="max-h-[70vh] w-auto"
+            image={shown}
+            boxes={editBoxes}
+            onChange={(list) => {
+              const b = list[list.length - 1];
+              setRegion(b ? { x: b.x, y: b.y, w: b.w, h: b.h, poly: b.poly } : null);
+            }}
+            shape="poly"
+            single
+            fit="contain"
+            color="#2f74b8"
+            onImageLoad={handleImageLoad}
+            onImageError={handleImageError}
           />
-        </ReactCrop>
+        )}
       </div>
 
-      <div className="flex flex-wrap justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-        >
-          다른 이미지 선택
-        </button>
-        {/* 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다
-            통째로 다시 그리는 편이 원본에 가깝다. 대신 결과가 이미지라 나중에
-            본문을 고칠 수 없으므로, 기본은 여전히 인식이다. */}
-        {/* 이미 깨끗한 인쇄물이면 다시 그릴 이유가 없다. 지면 통째로 넣기에만
-            있던 길인데, 문제 한 장을 넣을 때도 똑같이 필요하다는 요청이 있었다.
-            인식도 생성도 하지 않으므로 여기서 드는 것은 번호를 읽는 1토큰뿐이다. */}
-        <button
-          type="button"
-          onClick={() => handleConfirm("asis")}
-          disabled={!crop?.width || !crop?.height}
-          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          원본 그대로 넣기
-        </button>
-        <button
-          type="button"
-          onClick={() => handleConfirm("problem")}
-          disabled={!crop?.width || !crop?.height}
-          className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          통째로 AI로 다시 그리기
-          {typeof problemTokenCost === "number" &&
-            !unlimited &&
-            !byok &&
-            ` (${problemTokenCost}토큰)`}
-          {byok && " (본인 키 사용)"}
-        </button>
-        <button
-          type="button"
-          onClick={() => handleConfirm("ocr")}
-          disabled={!crop?.width || !crop?.height}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          이 영역으로 인식하기
-        </button>
+      {/* 누르는 자리는 화면 아래에 붙여 둔다 — 휴대폰에서 자르고 나서 버튼까지
+          스크롤하지 않게. 여러 장을 넣을 때 가장 자주 누르는 자리다. */}
+      <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-2 border-t border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:flex-row sm:items-center sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+        <div className="flex items-center gap-1 sm:mr-auto">
+          <button type="button" onClick={onCancel} className="g-btn g-btn-ghost g-btn-sm">
+            닫기
+          </button>
+          {onSkip && (
+            <button type="button" onClick={onSkip} className="g-btn g-btn-ghost g-btn-sm" title="이 사진은 나중에 자릅니다">
+              건너뛰기
+            </button>
+          )}
+        </div>
+        {/* 휴대폰에서는 세 칸으로 나란히 — 한 손으로 연달아 누르는 자리다. */}
+        <div className="grid grid-cols-3 gap-2 sm:flex">
+          {/* 이미 깨끗한 인쇄물이면 다시 그릴 이유가 없다. 인식도 생성도 하지 않으므로
+              여기서 드는 것은 번호를 읽는 비용뿐이다. */}
+          <button
+            type="button"
+            onClick={() => handleConfirm("asis")}
+            disabled={!ready}
+            className="g-btn g-btn-outline whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm"
+          >
+            원본 그대로
+          </button>
+          {/* 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다
+              통째로 다시 그리는 편이 원본에 가깝다. */}
+          <button
+            type="button"
+            onClick={() => handleConfirm("problem")}
+            disabled={!ready}
+            className="g-btn g-btn-soft flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
+          >
+            AI로 다시 그리기
+            {typeof problemTokenCost === "number" && !unlimited && !byok && (
+              <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{problemTokenCost}토큰</span>
+            )}
+            {byok && <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">본인 키</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleConfirm("ocr")}
+            disabled={!ready}
+            className="g-btn g-btn-primary whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm"
+          >
+            글자로 인식
+          </button>
+        </div>
       </div>
     </div>
   );

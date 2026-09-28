@@ -51,7 +51,7 @@ export default function CommentBox({
         onBlur={() => void save()}
         placeholder="예: 3문단 독해가 오래 걸림, 문학 파트 시간 부족"
         rows={2}
-        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+        className="g-input w-full px-2 py-1.5 text-sm"
       />
       {saving && <span className="text-xs text-slate-400">저장 중...</span>}
       {!saving && savedAt !== null && (

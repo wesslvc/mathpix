@@ -228,7 +228,7 @@ export default function CategoryList({
     );
 
     return (
-      <div className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm transition hover:border-blue-300 hover:shadow">
+      <div className="g-panel group flex items-center gap-3 px-4 py-3.5 transition hover:border-blue-300 hover:shadow">
         {picking && (
           <input
             type="checkbox"
@@ -287,7 +287,7 @@ export default function CategoryList({
                     e.target.value === NO_FOLDER ? null : e.target.value,
                   )
                 }
-                className="rounded border border-slate-300 px-2 py-1.5 text-sm text-ink focus:border-blue-500 focus:outline-none"
+                className="g-input rounded px-2 py-1.5 text-sm text-ink"
               >
                 <option value={NO_FOLDER}>폴더 없음</option>
                 {folders.map((f) => (
@@ -320,13 +320,13 @@ export default function CategoryList({
           // 좁은 화면에서는 검색칸이 한 줄을 통째로 쓰고 버튼 둘이 아랫줄에
           // 나란히 선다. 셋을 한 줄에 욱여넣으면 버튼 하나만 아래로 떨어져
           // 줄이 어정쩡하게 갈린다(휴대폰에서 실제로 그랬다).
-          className="w-full min-w-[12rem] rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none sm:w-auto sm:flex-1"
+          className="g-input w-full min-w-[12rem] px-3 py-2 text-sm sm:w-auto sm:flex-1"
         />
         {!currentFolder && !creatingFolder && (
           <button
             type="button"
             onClick={() => setCreatingFolder(true)}
-            className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-ink hover:bg-slate-50"
+            className="g-btn g-btn-outline shrink-0"
           >
             + 폴더
           </button>
@@ -383,7 +383,7 @@ export default function CategoryList({
             type="button"
             onClick={exportSelected}
             disabled={resolvedIds.size === 0}
-            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+            className="g-btn g-btn-primary g-btn-sm"
           >
             PDF 만들기
           </button>
@@ -422,7 +422,7 @@ export default function CategoryList({
                   autoFocus
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
-                  className="rounded border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+                  className="g-input rounded px-2 py-1 text-sm"
                 />
                 <button
                   type="button"
@@ -510,13 +510,13 @@ export default function CategoryList({
                   }
                 }}
                 placeholder="폴더 이름"
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                className="g-input px-3 py-1.5 text-sm"
               />
               <button
                 type="button"
                 disabled={working || !newFolderName.trim()}
                 onClick={() => void createFolder()}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+                className="g-btn g-btn-primary g-btn-sm"
               >
                 만들기
               </button>
@@ -588,7 +588,7 @@ export default function CategoryList({
                   <Link
                     key={folder.id}
                     href={`/?folder=${folder.id}`}
-                    className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+                    className="g-panel flex items-center gap-2 px-3 py-3 transition hover:border-blue-300 hover:bg-blue-50"
                   >
                     {cardContent}
                   </Link>

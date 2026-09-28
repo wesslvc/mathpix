@@ -11,6 +11,7 @@ import ScoreTrendChart from "@/components/ScoreTrendChart";
 import Logo from "@/components/Logo";
 import GradeHistoryList from "@/components/GradeHistoryList";
 import GradingPrefsForm, { type GradingPrefsValue } from "@/components/GradingPrefsForm";
+import CropShapeSetting from "@/components/CropShapeSetting";
 import ManualScoreForm from "@/components/ManualScoreForm";
 import LinkedAccounts from "@/components/LinkedAccounts";
 
@@ -109,6 +110,8 @@ export default async function ProfilePage() {
 
       <GradingPrefsForm initial={gradingPrefs} />
 
+      <CropShapeSetting />
+
       <section className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-ink">성적 추세</h2>
@@ -122,12 +125,12 @@ export default async function ProfilePage() {
         <ManualScoreForm />
 
         {series.length === 0 ? (
-          <p className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400">
+          <p className="g-panel px-4 py-6 text-center text-sm text-slate-400">
             아직 성적 기록이 없어요. 자동채점을 하거나 위에서 성적을 직접
             적어 넣으면 여기에 추세가 쌓입니다.
           </p>
         ) : (
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="g-panel p-4 sm:p-5">
             <ScoreTrendChart series={series} gradeSeries={gradeSeries} />
           </div>
         )}

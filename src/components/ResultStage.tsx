@@ -700,7 +700,7 @@ export default function ResultStage({
               type="button"
               onClick={() => setSourceText(result.text || result.latex)}
               disabled={sourceText === (result.text || result.latex)}
-              className="self-start rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+              className="g-btn g-btn-outline g-btn-xs self-start"
             >
               인식 결과로 되돌리기
             </button>
@@ -873,7 +873,7 @@ export default function ResultStage({
                   <button
                     type="button"
                     onClick={() => setAutoSaveOff(true)}
-                    className="rounded border border-slate-300 px-1.5 py-0.5 text-slate-600 hover:bg-slate-100"
+                    className="g-btn g-btn-outline px-1.5 py-0.5"
                   >
                     자동 저장 끄기
                   </button>
@@ -943,7 +943,7 @@ export default function ResultStage({
               <button
                 type="button"
                 onClick={onNext}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                className="g-btn bg-emerald-600 text-white hover:bg-emerald-700"
               >
                 다음 이미지 → ({remainingCount}장 남음)
               </button>
@@ -952,7 +952,7 @@ export default function ResultStage({
                 <button
                   type="button"
                   onClick={onAddAnother}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                  className="g-btn bg-emerald-600 text-white hover:bg-emerald-700"
                 >
                   + 다음 문제 추가
                 </button>
@@ -986,7 +986,7 @@ export default function ResultStage({
             type="button"
             onClick={handleSaveToCategory}
             disabled={isSaving || (savedId !== null && !dirty)}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="g-btn bg-emerald-600 text-white hover:bg-emerald-700"
           >
             {isSaving
               ? "저장 중..."

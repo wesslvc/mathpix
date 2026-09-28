@@ -152,7 +152,7 @@ export default function DiagramCropModal({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+            className="g-btn g-btn-outline g-btn-sm"
           >
             🖼 다른 사진 선택
           </button>
@@ -224,7 +224,7 @@ export default function DiagramCropModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
+            className="g-btn g-btn-outline"
           >
             취소
           </button>
@@ -232,7 +232,7 @@ export default function DiagramCropModal({
             type="button"
             onClick={handleConfirm}
             disabled={!crop?.width || !crop?.height || isLoading || activeSrc === null}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            className="g-btn g-btn-primary"
           >
             {copy.confirm}
           </button>

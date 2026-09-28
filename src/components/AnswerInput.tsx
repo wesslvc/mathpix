@@ -73,7 +73,7 @@ export default function AnswerInput({
             onSubmit?.();
           }}
           placeholder="예: 12 — 여기에 쓰면 주관식으로 표기됩니다"
-          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          className="g-input min-w-0 flex-1 px-3 py-2 text-sm"
         />
       </label>
 

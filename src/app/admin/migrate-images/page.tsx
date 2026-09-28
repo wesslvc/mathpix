@@ -248,7 +248,7 @@ export default function MigrateImagesPage() {
         type="button"
         onClick={() => void runCopy()}
         disabled={copyBusy}
-        className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        className="g-btn g-btn-primary self-start"
       >
         {copyBusy ? "복사하는 중..." : "R2로 복사 시작"}
       </button>
@@ -298,7 +298,7 @@ export default function MigrateImagesPage() {
             type="button"
             onClick={() => void runDelete()}
             disabled={!confirmed || deleteBusy}
-            className="self-start rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            className="self-start g-btn bg-red-600 text-white hover:bg-red-700"
           >
             {deleteBusy ? "지우는 중..." : "Supabase 원본 지우기"}
           </button>

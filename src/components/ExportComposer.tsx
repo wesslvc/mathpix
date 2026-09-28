@@ -169,14 +169,14 @@ export default function ExportComposer({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+      <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
         <label className="flex flex-col gap-1 text-sm text-slate-700">
           제목
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={multi ? "제목을 입력하세요 (예: 미적분 오답 모음)" : "제목"}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            className="g-input px-3 py-2 text-sm"
           />
         </label>
         <p className="text-xs text-slate-400">
@@ -213,7 +213,7 @@ export default function ExportComposer({
                     type="button"
                     onClick={() => moveSource(index, -1)}
                     disabled={index === 0}
-                    className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    className="g-btn g-btn-outline g-btn-sm"
                   >
                     ↑
                   </button>
@@ -221,7 +221,7 @@ export default function ExportComposer({
                     type="button"
                     onClick={() => moveSource(index, 1)}
                     disabled={index === sources.length - 1}
-                    className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                    className="g-btn g-btn-outline g-btn-sm"
                   >
                     ↓
                   </button>
@@ -272,7 +272,7 @@ export default function ExportComposer({
                   type="button"
                   onClick={() => move(index, -1)}
                   disabled={index === 0}
-                  className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  className="g-btn g-btn-outline g-btn-sm"
                 >
                   ↑
                 </button>
@@ -280,7 +280,7 @@ export default function ExportComposer({
                   type="button"
                   onClick={() => move(index, 1)}
                   disabled={index === order.length - 1}
-                  className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  className="g-btn g-btn-outline g-btn-sm"
                 >
                   ↓
                 </button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import ImageUploader from "@/components/ImageUploader";
@@ -48,12 +48,32 @@ import { persistFigureBlobs } from "@/lib/figureBlob";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
 import type { AnswerByNumber } from "@/lib/answerMap";
+import {
+  clearQueue,
+  loadQueue,
+  preparePhoto,
+  removePhoto,
+  saveOrder,
+  savePhoto,
+  type QueuedPhoto,
+} from "@/lib/photoQueue";
 import { useFigureJobs } from "./FigureJobsProvider";
 import BatchSplitPanel from "./BatchSplitPanel";
 import KoreanModePanel from "./KoreanModePanel";
 import BulkMappedImportPanel from "./BulkMappedImportPanel";
+import PhotoQueueStrip from "./PhotoQueueStrip";
 
 type Stage = "idle" | "upload" | "crop" | "loading" | "result";
+
+/** 문제를 넣는 길. 한 화면에 전부 펼쳐 두면 어지러워서 탭으로 가른다. */
+type Mode = "photo" | "page" | "korean" | "csv";
+const MODES: { id: Mode; label: string; hint: string }[] = [
+  { id: "photo", label: "사진", hint: "문제 사진 여러 장을 한 장씩 잘라 넣어요" },
+  { id: "page", label: "지면 통째로", hint: "한 쪽에 문제가 여럿이면 문제마다 영역을 그려 한 번에" },
+  { id: "korean", label: "국어 세트", hint: "지문 한 편과 그 문항들을 한 세트로" },
+  { id: "csv", label: "CSV 일괄", hint: "이미 잘린 사진 여러 장 + 정답 CSV 를 한 번에(토큰 없음)" },
+];
+const MODE_KEY = "reprint.addMode";
 
 /** 자르자마자 뒤에서 저장하는 문제 하나(진행 줄에 보여 준다). */
 type QuickItem = {
@@ -64,6 +84,8 @@ type QuickItem = {
   answer?: string | null;
   error?: string;
 };
+
+const byOrder = (a: QueuedPhoto, b: QueuedPhoto) => a.order - b.order;
 
 export default function AddProblemFlow({
   categoryId,
@@ -81,13 +103,13 @@ export default function AddProblemFlow({
 }) {
   const router = useRouter();
   const [stage, setStage] = useState<Stage>("idle");
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [mode, setModeState] = useState<Mode>("photo");
   const [result, setResult] = useState<RecognizeResponse | null>(null);
   // 인식(result)을 만든 바로 그 이미지. 도형 영역을 오려낼 때 필요하다.
-  const [recognizedSourceImage, setRecognizedSourceImage] = useState<
-    string | null
-  >(null);
+  const [recognizedSourceImage, setRecognizedSourceImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** 초록 안내 한 줄(뒤로 가기로 빠져나왔을 때 등). */
+  const [notice, setNotice] = useState<string | null>(null);
   /** 크롭 화면에 "통째로 다시 그리기" 비용을 표시하려고 읽어둔다. */
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
   /**
@@ -112,16 +134,80 @@ export default function AddProblemFlow({
   const quickCountRef = useRef(0);
   const unsaved = quick.filter((q) => q.status === "saving").length;
 
+  // ── 사진 대기열 ────────────────────────────────────────────────────────
+  // `photoQueue.ts` 주석 참고 — 여러 장을 원본 그대로 한꺼번에 들고 있다가 탭이
+  // 죽어 "튕기던" 자리다. 지금은 한 장씩 줄여 Blob 으로 들고, 브라우저에 저장해
+  // 탭이 다시 떠도 남은 사진이 그대로 있다.
+  /** 지금 자르는 사진. 인식이 끝나 결과 화면으로 넘어가도(= 다 쓴 사진) 되돌아
+   *  올 수 있게 들고 있는다(`activeUsed`). */
+  const [active, setActive] = useState<QueuedPhoto | null>(null);
+  /** 아직 안 자른 사진들(들어온 차례). 지금 자르는 사진은 빠져 있다. */
+  const [pending, setPending] = useState<QueuedPhoto[]>([]);
+  /** 사진을 줄이는 중이면 진행 상황. */
+  const [preparing, setPreparing] = useState<{ done: number; total: number } | null>(null);
+  /** 지금 사진을 이미 다 썼는가(저장 대기열·결과 화면으로 넘어갔다). */
+  const activeUsedRef = useRef(false);
+  const activeRef = useRef<QueuedPhoto | null>(null);
+  const orderRef = useRef(0);
+  const addInputRef = useRef<HTMLInputElement>(null);
+  /** 지금 사진의 화면용 주소. 사진이 바뀌면 옛 주소를 풀어 준다. */
+  const [activeUrl, setActiveUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!active) {
+      setActiveUrl(null);
+      return;
+    }
+    const u = URL.createObjectURL(active.blob);
+    setActiveUrl(u);
+    return () => URL.revokeObjectURL(u);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id]);
+
+  // 들어오면 이 실모에서 자르다 만 사진이 있는지 본다(탭이 죽었다 살아난 경우).
+  useEffect(() => {
+    let alive = true;
+    void loadQueue(categoryId).then((rows) => {
+      if (!alive || rows.length === 0) return;
+      orderRef.current = Math.max(orderRef.current, ...rows.map((r) => r.order + 1));
+      setPending((prev) => {
+        const have = new Set(prev.map((p) => p.id));
+        return [...prev, ...rows.filter((r) => !have.has(r.id))].sort(byOrder);
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [categoryId]);
+
+  // 고른 탭을 기억한다(자주 쓰는 길이 사람마다 다르다).
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(MODE_KEY) as Mode | null;
+      if (saved && MODES.some((m) => m.id === saved)) setModeState(saved);
+    } catch {
+      // 기억 못 해도 된다.
+    }
+  }, []);
+  function setMode(m: Mode) {
+    setModeState(m);
+    try {
+      window.localStorage.setItem(MODE_KEY, m);
+    } catch {
+      // 무시.
+    }
+  }
+
   // 아직 저장이 안 끝난 문제가 있으면 탭 닫기를 되묻는다(사진이 통째로 사라진다).
   useEffect(() => {
-    if (unsaved === 0) return;
+    if (unsaved === 0 && !preparing) return;
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [unsaved]);
+  }, [unsaved, preparing]);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,65 +223,162 @@ export default function AddProblemFlow({
       cancelled = true;
     };
   }, []);
-  // 여러 장을 한 번에 올리면 첫 장부터 크롭→인식→저장하고, 나머지는 여기 대기.
-  const [queue, setQueue] = useState<string[]>([]);
-  function readAsDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error("이미지를 읽지 못했습니다."));
-      reader.readAsDataURL(file);
-    });
-  }
 
+  /** 이 사진을 지금 자를 사진으로 올린다. */
+  const activate = useCallback((p: QueuedPhoto | null) => {
+    activeRef.current = p;
+    activeUsedRef.current = false;
+    setActive(p);
+    setResult(null);
+    setRecognizedSourceImage(null);
+    setStage(p ? "crop" : "upload");
+  }, []);
+
+  /**
+   * 고른 사진을 **한 장씩** 줄여 대기열에 넣는다. 첫 장이 준비되는 대로 곧바로
+   * 자르기 화면을 띄운다 — 나머지는 자르는 동안 뒤에서 준비된다.
+   *
+   * 한 장이 안 열려도 나머지는 계속한다(예전에는 하나만 실패해도 통째로 멈췄다).
+   */
   async function handleImagesSelected(files: File[]) {
-    try {
-      const dataUrls = await Promise.all(files.map(readAsDataUrl));
-      if (dataUrls.length === 0) return;
-      const [first, ...rest] = dataUrls;
-      setImageSrc(first);
-      setQueue(rest);
-      setError(null);
-      setStage("crop");
-    } catch (err) {
-      handleImageError(
-        err instanceof Error ? err.message : "이미지를 읽지 못했습니다.",
+    if (files.length === 0) return;
+    setError(null);
+    setNotice(null);
+    const failed: string[] = [];
+    setPreparing({ done: 0, total: files.length });
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const p = await preparePhoto(files[i], orderRef.current++);
+        void savePhoto(categoryId, p);
+        if (!activeRef.current) activate(p);
+        else setPending((prev) => [...prev, p]);
+      } catch (err) {
+        failed.push(err instanceof Error ? err.message : `"${files[i].name}" 사진을 열지 못했습니다.`);
+      }
+      setPreparing(i + 1 < files.length ? { done: i + 1, total: files.length } : null);
+    }
+    if (failed.length > 0) {
+      setError(
+        failed.length === 1 ? failed[0] : `${failed.length}장은 열지 못해 뺐어요. ${failed[0]}`,
       );
     }
   }
 
-  // 저장 후 대기열에 남은 다음 이미지로 넘어간다. 대기열이 비었으면 곧바로
-  // 업로드 화면을 띄운다 — "다음"을 누른 사람은 계속 넣겠다는 뜻이므로
-  // 처음 화면으로 되돌려 "+ 오답 추가"를 다시 누르게 할 이유가 없다.
+  /** 지금 사진을 다 썼다고 적는다(브라우저 저장소에서도 지운다). */
+  function markActiveUsed() {
+    const a = activeRef.current;
+    if (!a || activeUsedRef.current) return;
+    activeUsedRef.current = true;
+    void removePhoto(a.id);
+  }
+
+  /** 다음 사진으로. 없으면 곧바로 사진 고르기 화면 — 계속 넣겠다는 뜻이므로. */
   function advanceQueue() {
-    setResult(null);
-    setRecognizedSourceImage(null);
     setError(null);
-    if (queue.length > 0) {
-      const [next, ...rest] = queue;
-      setQueue(rest);
-      setImageSrc(next);
-      setStage("crop");
-    } else {
-      startAnother();
+    const [next, ...rest] = pending;
+    setPending(rest);
+    activate(next ?? null);
+  }
+
+  /** 다 쓰지 않은 지금 사진을 대기열로 돌려놓는다(차례는 원래 자리). */
+  function returnActive() {
+    const a = activeRef.current;
+    if (a && !activeUsedRef.current) {
+      setPending((prev) => [...prev.filter((p) => p.id !== a.id), a].sort(byOrder));
     }
+    activeRef.current = null;
+    setActive(null);
   }
 
-  /** 저장한 결과를 치우고 새 사진을 고르는 화면으로 바로 넘어간다. */
-  function startAnother() {
-    setImageSrc(null);
+  function jumpTo(id: string) {
+    const target = pending.find((p) => p.id === id);
+    if (!target) return;
+    const a = activeRef.current;
+    const back = a && !activeUsedRef.current ? [a] : [];
+    setPending((prev) => [...prev.filter((p) => p.id !== id), ...back].sort(byOrder));
+    activate(target);
+  }
+
+  function removeFromQueue(id: string) {
+    void removePhoto(id);
+    if (activeRef.current?.id === id) {
+      activeUsedRef.current = true;
+      advanceQueue();
+      return;
+    }
+    setPending((prev) => prev.filter((p) => p.id !== id));
+  }
+
+  /** 이 사진은 나중에 — 맨 뒤로 보낸다. */
+  function skipActive() {
+    const a = activeRef.current;
+    if (!a) return;
+    const moved = { ...a, order: orderRef.current++ };
+    const rest = [...pending, moved];
+    void saveOrder(categoryId, rest);
+    activeUsedRef.current = true; // 대기열에 새 차례로 이미 넣었다.
+    const [next, ...others] = rest;
+    setPending(others);
+    activate(next);
+  }
+
+  async function clearAll() {
+    await clearQueue(categoryId);
+    setPending([]);
+    if (!activeUsedRef.current) activeRef.current = null;
+  }
+
+  /** 자르기를 접고 처음 화면으로. 남은 사진은 버리지 않는다. */
+  function exitToIdle() {
+    returnActive();
     setResult(null);
     setRecognizedSourceImage(null);
-    setError(null);
-    setStage("upload");
+    setStage("idle");
+    onDone?.();
   }
 
-  async function handleCropConfirm(
-    croppedDataUrl: string,
-    mode: "ocr" | "problem" | "asis",
-  ) {
-    if (mode === "problem" || mode === "asis") {
-      quickAdd(croppedDataUrl, mode);
+  // ── 뒤로 가기가 페이지를 떠나지 않게 ────────────────────────────────────
+  // 휴대폰에서 자르다가 화면 가장자리를 쓸면(제스처 뒤로 가기) 실모 화면을 통째로
+  // 떠나 버렸다 — 이것도 "갑자기 뒤로 가짐"의 한 갈래다. 자르는 동안에는 같은 주소로
+  // 기록을 하나 쌓아 두고, 뒤로 가기가 오면 **페이지를 떠나지 않고 자르기만 접는다.**
+  // (Next 14.2 는 `history.pushState` 를 가로채 제 상태를 옮겨 담으므로 주소 없이
+  // 쌓아도 라우터가 깨지지 않는다.)
+  const inFlow = stage !== "idle";
+  const guardRef = useRef(false);
+  const ignorePopRef = useRef(false);
+  const exitRef = useRef(exitToIdle);
+  exitRef.current = exitToIdle;
+
+  useEffect(() => {
+    if (inFlow && !guardRef.current) {
+      window.history.pushState({ reprintAddFlow: true }, "");
+      guardRef.current = true;
+    } else if (!inFlow && guardRef.current) {
+      // 버튼으로 접었으면 쌓아 둔 기록을 걷는다(안 걷으면 다음 뒤로 가기가 헛돈다).
+      guardRef.current = false;
+      ignorePopRef.current = true;
+      window.history.back();
+    }
+  }, [inFlow]);
+
+  useEffect(() => {
+    const onPop = () => {
+      if (ignorePopRef.current) {
+        ignorePopRef.current = false;
+        return;
+      }
+      if (!guardRef.current) return;
+      guardRef.current = false;
+      exitRef.current();
+      setNotice("자르기를 접었어요. 남은 사진은 그대로 있으니 ‘이어서 자르기’로 계속하세요.");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  async function handleCropConfirm(croppedDataUrl: string, cropMode: "ocr" | "problem" | "asis") {
+    if (cropMode === "problem" || cropMode === "asis") {
+      quickAdd(croppedDataUrl, cropMode);
       return;
     }
     setStage("loading");
@@ -212,6 +395,8 @@ export default function AddProblemFlow({
       if (!res.ok) throw new Error(json.error ?? "인식에 실패했습니다.");
       setResult(json as RecognizeResponse);
       setRecognizedSourceImage(croppedDataUrl);
+      // 결과 화면이 곧 저장한다 — 이 사진은 다 쓴 것이다.
+      markActiveUsed();
       setStage("result");
     } catch (err) {
       setError(err instanceof Error ? err.message : "알 수 없는 오류");
@@ -229,13 +414,14 @@ export default function AddProblemFlow({
    * 쓴다) → 원본 크롭에서 읽은 번호를 붙이고 그 번호의 정답도 붙인다.
    * 번호는 AI 결과를 기다리지 않는다 — 같은 번호이고 몇 초면 읽힌다.
    */
-  function quickAdd(crop: string, mode: "problem" | "asis") {
+  function quickAdd(crop: string, addMode: "problem" | "asis") {
     const key = crypto.randomUUID();
     const nth = ++quickCountRef.current;
     const patch = (next: Partial<QuickItem>) =>
       setQuick((prev) => prev.map((q) => (q.key === key ? { ...q, ...next } : q)));
     setQuick((prev) => [{ key, crop, status: "saving" as const }, ...prev].slice(0, 30));
     setError(null);
+    markActiveUsed();
     advanceQueue();
 
     const number = readNumberWithMathpix(crop);
@@ -248,7 +434,7 @@ export default function AddProblemFlow({
         answerType: "choice",
         boxRange: card.boxRange,
       });
-      if (mode === "problem") {
+      if (addMode === "problem") {
         enqueue({
           id: key,
           problemKey: `quick:${problemId}`,
@@ -281,22 +467,11 @@ export default function AddProblemFlow({
       );
   }
 
-  function handleReset() {
-    setImageSrc(null);
-    setResult(null);
-    setRecognizedSourceImage(null);
-    setError(null);
-    setQueue([]);
-    setStage("idle");
-  }
-
-  function handleImageError(message: string) {
+  /** 크롭 화면에서 사진을 못 열었다 — 그 사진만 빼고 다음으로 간다. */
+  function handleCropImageError(message: string) {
     setError(message);
-    setImageSrc(null);
-    setQueue([]);
-    // 번호가 정해진 채로 들어온 경우 사진만 다시 고르면 되므로 업로드
-    // 화면에 그대로 둔다(번호 선택으로 튕기지 않는다).
-    setStage("idle");
+    const a = activeRef.current;
+    if (a) removeFromQueue(a.id);
   }
 
   async function handleSaveToCategory({
@@ -411,152 +586,252 @@ export default function AddProblemFlow({
     return inserted.id as string;
   }
 
+  const inCrop = stage === "crop" || stage === "upload";
+
   return (
     <div className="flex flex-col gap-4">
+      {/* 사진 더 넣기(대기열 끝의 +). 어느 단계에서든 같은 입력칸을 쓴다. */}
+      <input
+        ref={addInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith("image/"));
+          e.target.value = "";
+          void handleImagesSelected(files);
+        }}
+      />
+
       {error && (
-        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span className="min-w-0 flex-1">{error}</span>
+          <button type="button" onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600" aria-label="닫기">
+            ×
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <span className="min-w-0 flex-1">{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-emerald-500 hover:text-emerald-700" aria-label="닫기">
+            ×
+          </button>
         </div>
       )}
 
-      {stage === "idle" && canAdd && (
-        <button
-          type="button"
-          onClick={() => setStage("upload")}
-          className="g-btn g-btn-primary self-start"
-        >
-          + 오답 추가
-        </button>
-      )}
-
-      {/* 지면 통째로 넣기. 손으로 네모를 그려 자르는 것은 누구나 쓴다 —
-          모델을 부르지 않아 공짜다. 영역을 **자동으로** 찾는 것만 무제한
-          계정에서 보이고, 막는 자리는 서버다(화면은 우회할 수 있다). */}
-      {stage === "idle" && canAdd && (
-        <BatchSplitPanel
-          onSave={handleSaveToCategory}
-          answerByNumber={answerByNumber}
-          unlimited={tokenStatus?.unlimited ?? false}
-          byok={tokenStatus?.byok ?? false}
-          figureCost={tokenStatus?.figureCost ?? null}
-        />
-      )}
-
-      {/* 국어는 지문 한 편에 문항 여러 개가 딸려서 낱개로 넣으면 인쇄할 때
-          지문과 문제가 갈라진다. 세트로 묶어 넣는 길을 따로 둔다. */}
-      {stage === "idle" && canAdd && (
-        <KoreanModePanel
-          onSave={handleSaveToCategory}
-          unlimited={tokenStatus?.unlimited ?? false}
-          byok={tokenStatus?.byok ?? false}
-          figureCost={tokenStatus?.figureCost ?? null}
-        />
-      )}
-
-      {/* 이미 깔끔하게 잘려 있는 사진 여러 장 + 정답 CSV(학원가 "연계교재
-          선별" 자료가 흔히 이 모양)를 한 번에 매칭해서 올린다. 크롭·인식이
-          필요 없으니 토큰도 안 든다. */}
-      {stage === "idle" && canAdd && <BulkMappedImportPanel categoryId={categoryId} />}
-
       {stage === "idle" && !canAdd && (
-        <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="flex flex-col gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
           <p>토큰을 모두 사용해 오답을 더 추가할 수 없어요. 이용권을 구매하면 5000토큰이 충전돼요.</p>
-          <a
-            href="/api/checkout?plan=tokens"
-            className="w-fit rounded-lg bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-700"
-          >
+          <a href="/api/checkout?plan=tokens" className="g-btn w-fit bg-amber-600 text-white hover:bg-amber-700">
             이용권 구매하기
           </a>
         </div>
       )}
 
-      {stage === "upload" && (
-        <div key="upload" className="animate-stage-in flex flex-col gap-2">
-          <ImageUploader
-            onImagesSelected={handleImagesSelected}
-            onError={handleImageError}
-          />
-          {/* 저장 직후 자동으로 이 화면이 열리기도 하므로, 그만 넣고 싶을 때
-              빠져나갈 길을 둔다. */}
-          <button
-            type="button"
-            onClick={handleReset}
-            className="self-start text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-          >
-            그만 추가하기
-          </button>
-        </div>
+      {/* ── 문제 넣기 ── 예전에는 "+ 오답 추가" 버튼 · 지면 통째로 · 국어 모드 ·
+          CSV 가 한 화면에 전부 펼쳐져 있어 무엇부터 해야 할지 안 보였다. 탭 하나로
+          모으고, 가장 많이 쓰는 "사진"은 누를 것 없이 곧바로 끌어다 놓게 한다.
+          다른 탭의 패널은 감추기만 한다(작업하던 것이 날아가지 않게). */}
+      {stage === "idle" && canAdd && (
+        <section className="g-panel overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
+            <h2 className="text-sm font-semibold text-ink">문제 넣기</h2>
+            <div className="g-tabs" role="tablist" aria-label="넣는 방법">
+              {MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === m.id}
+                  data-active={mode === m.id || undefined}
+                  onClick={() => setMode(m.id)}
+                  className="g-tab"
+                  title={m.hint}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5">
+            <p className="mb-3 text-xs text-slate-500">{MODES.find((m) => m.id === mode)?.hint}</p>
+
+            {/* `hidden` 은 껍데기에만 건다 — 같은 요소에 `flex` 를 주면 그 클래스가
+                이겨서 감춰지지 않는다. */}
+            <div hidden={mode !== "photo"}>
+              <div className="flex flex-col gap-3">
+                {pending.length > 0 && (
+                  <ResumeCard
+                    pending={pending}
+                    onResume={() => {
+                      const [next, ...rest] = pending;
+                      setPending(rest);
+                      setNotice(null);
+                      activate(next);
+                    }}
+                    onClear={() => void clearAll()}
+                  />
+                )}
+                <ImageUploader
+                  onImagesSelected={(f) => void handleImagesSelected(f)}
+                  onError={setError}
+                  compact
+                  pasteEnabled={mode === "photo"}
+                />
+              </div>
+            </div>
+            <div hidden={mode !== "page"}>
+              {/* 지면 통째로 넣기. 손으로 영역을 그려 자르는 것은 누구나 쓴다 —
+                  모델을 부르지 않아 공짜다. 영역을 **자동으로** 찾는 것만 무제한
+                  계정에서 보이고, 막는 자리는 서버다(화면은 우회할 수 있다). */}
+              <BatchSplitPanel
+                onSave={handleSaveToCategory}
+                answerByNumber={answerByNumber}
+                unlimited={tokenStatus?.unlimited ?? false}
+                byok={tokenStatus?.byok ?? false}
+                figureCost={tokenStatus?.figureCost ?? null}
+              />
+            </div>
+            <div hidden={mode !== "korean"}>
+              {/* 국어는 지문 한 편에 문항 여러 개가 딸려서 낱개로 넣으면 인쇄할 때
+                  지문과 문제가 갈라진다. 세트로 묶어 넣는 길을 따로 둔다. */}
+              <KoreanModePanel
+                onSave={handleSaveToCategory}
+                unlimited={tokenStatus?.unlimited ?? false}
+                byok={tokenStatus?.byok ?? false}
+                figureCost={tokenStatus?.figureCost ?? null}
+              />
+            </div>
+            <div hidden={mode !== "csv"}>
+              {/* 이미 깔끔하게 잘려 있는 사진 여러 장 + 정답 CSV(학원가 "연계교재
+                  선별" 자료가 흔히 이 모양)를 한 번에 매칭해서 올린다. */}
+              <BulkMappedImportPanel categoryId={categoryId} embedded />
+            </div>
+          </div>
+        </section>
       )}
 
-      {stage === "crop" && (
-        <p className="text-sm text-slate-500">
-          &quot;원본 그대로 넣기&quot;나 &quot;AI로 다시 그리기&quot;를 누르면 바로 다음 사진으로
-          넘어가요. 저장·번호 인식·정답 붙이기는 뒤에서 알아서 해요.
-          {queue.length > 0 && ` · ${queue.length}장 남음`}
-        </p>
+      {(inCrop || stage === "loading" || stage === "result") && (
+        <section className="g-panel flex flex-col gap-4 p-4 sm:p-5">
+          {inCrop && (active || pending.length > 0 || preparing) && (
+            <PhotoQueueStrip
+              active={active}
+              pending={pending}
+              preparing={preparing}
+              onJump={jumpTo}
+              onRemove={removeFromQueue}
+              onAdd={() => addInputRef.current?.click()}
+            />
+          )}
+
+          {stage === "upload" && (
+            <div key="upload" className="animate-stage-in flex flex-col gap-3">
+              {pending.length > 0 ? (
+                <ResumeCard
+                  pending={pending}
+                  onResume={() => {
+                    const [next, ...rest] = pending;
+                    setPending(rest);
+                    activate(next);
+                  }}
+                  onClear={() => void clearAll()}
+                />
+              ) : (
+                !preparing && (
+                  <p className="text-sm text-slate-500">
+                    남은 사진을 다 넣었어요. 더 넣으려면 사진을 고르세요.
+                  </p>
+                )
+              )}
+              <ImageUploader onImagesSelected={(f) => void handleImagesSelected(f)} onError={setError} compact />
+              <button type="button" onClick={exitToIdle} className="g-btn g-btn-ghost self-start">
+                그만 넣기
+              </button>
+            </div>
+          )}
+
+          {stage === "crop" && activeUrl && (
+            <div key={activeUrl} className="animate-stage-in">
+              <CropStage
+                imageSrc={activeUrl}
+                onConfirm={handleCropConfirm}
+                onCancel={exitToIdle}
+                onSkip={pending.length > 0 ? skipActive : undefined}
+                onError={handleCropImageError}
+                problemTokenCost={tokenStatus?.figureCost ?? null}
+                unlimited={tokenStatus?.unlimited ?? false}
+                byok={tokenStatus?.byok ?? false}
+              />
+            </div>
+          )}
+
+          {stage === "loading" && (
+            <div key="loading" className="animate-stage-in flex flex-col items-center gap-4 py-16">
+              <div className="relative h-12 w-12">
+                <div className="absolute inset-0 rounded-full border-4 border-slate-200" />
+                <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-blue-600" />
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <p className="text-sm font-medium text-slate-700">문제를 읽고 있어요</p>
+                <p className="text-xs text-slate-400">글자와 수식을 인식하는 중입니다. 보통 몇 초면 끝나요.</p>
+              </div>
+            </div>
+          )}
+
+          {stage === "result" && result && (
+            <div key="result" className="animate-stage-in">
+              <ResultStage
+                result={result}
+                onBack={() => setStage("crop")}
+                onRestart={exitToIdle}
+                onSaveToCategory={handleSaveToCategory}
+                remainingCount={pending.length}
+                onNext={advanceQueue}
+                onAddAnother={() => activate(null)}
+                sourceImage={recognizedSourceImage}
+              />
+            </div>
+          )}
+        </section>
       )}
 
       {quick.length > 0 && stage !== "result" && stage !== "loading" && (
         <QuickList
           items={quick}
-          onClear={() =>
-            setQuick((prev) => prev.filter((q) => q.status === "saving" || q.status === "saved"))
-          }
+          onClear={() => setQuick((prev) => prev.filter((q) => q.status === "saving" || q.status === "saved"))}
         />
       )}
+    </div>
+  );
+}
 
-      {stage === "crop" && imageSrc && (
-        <div key={imageSrc} className="animate-stage-in">
-        <CropStage
-          imageSrc={imageSrc}
-          onConfirm={handleCropConfirm}
-          onCancel={handleReset}
-          onError={handleImageError}
-          problemTokenCost={tokenStatus?.figureCost ?? null}
-          unlimited={tokenStatus?.unlimited ?? false}
-          byok={tokenStatus?.byok ?? false}
-        />
-        </div>
-      )}
-
-      {stage === "loading" && (
-        <div
-          key="loading"
-          className="animate-stage-in flex flex-col items-center gap-4 py-16"
-        >
-          <div className="relative h-12 w-12">
-            <div className="absolute inset-0 rounded-full border-4 border-slate-200" />
-            <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-blue-600" />
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <p className="text-sm font-medium text-slate-700">
-              문제를 읽고 있어요
-            </p>
-            <p className="text-xs text-slate-400">
-              글자와 수식을 인식하는 중입니다. 보통 몇 초면 끝나요.
-            </p>
-          </div>
-          {/* 진행률을 알 수 없으니 좌우로 흐르는 막대로 "돌아가는 중"만 보여준다. */}
-          <div className="h-1 w-40 overflow-hidden rounded-full bg-slate-200">
-            <div className="h-full w-1/3 animate-loading-sweep rounded-full bg-blue-600" />
-          </div>
-        </div>
-      )}
-
-      {stage === "result" && result && (
-        <div key="result" className="animate-stage-in">
-        <ResultStage
-          result={result}
-          onBack={() => setStage("crop")}
-          onRestart={handleReset}
-          onSaveToCategory={handleSaveToCategory}
-          remainingCount={queue.length}
-          onNext={advanceQueue}
-          onAddAnother={startAnother}
-          sourceImage={recognizedSourceImage}
-        />
-        </div>
-      )}
+/** 자르다 만 사진이 남아 있을 때(탭이 다시 떴거나, 뒤로 가기로 접었거나). */
+function ResumeCard({
+  pending,
+  onResume,
+  onClear,
+}: {
+  pending: QueuedPhoto[];
+  onResume: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-3 sm:flex-row sm:items-center">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-ink">자르다 만 사진 {pending.length}장이 있어요</p>
+        <p className="text-xs text-slate-500">이 기기에 저장돼 있어서 창을 닫았다 와도 남아 있어요.</p>
+      </div>
+      <div className="flex shrink-0 items-center justify-end gap-2">
+        <button type="button" onClick={onClear} className="g-btn g-btn-ghost g-btn-sm">
+          비우기
+        </button>
+        <button type="button" onClick={onResume} className="g-btn g-btn-primary g-btn-sm">
+          이어서 자르기
+        </button>
+      </div>
     </div>
   );
 }
@@ -565,10 +840,11 @@ export default function AddProblemFlow({
 function QuickList({ items, onClear }: { items: QuickItem[]; onClear: () => void }) {
   const busy = items.some((q) => q.status === "saving" || q.status === "saved");
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+    <div className="g-panel flex flex-col gap-2 px-4 py-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-slate-600">
-          방금 넣은 문제 {items.length}개{busy ? " · 뒤에서 처리 중" : ""}
+          방금 넣은 문제 {items.length}개
+          {busy && <span className="ml-1.5 text-slate-400">· 뒤에서 처리 중</span>}
         </p>
         {!busy && (
           <button type="button" onClick={onClear} className="text-xs text-slate-400 hover:text-slate-600">
@@ -576,13 +852,13 @@ function QuickList({ items, onClear }: { items: QuickItem[]; onClear: () => void
           </button>
         )}
       </div>
-      <ul className="flex flex-wrap gap-2">
+      <ul className="flex gap-2 overflow-x-auto pb-1">
         {items.map((q) => (
-          <li key={q.key} className="flex w-44 items-center gap-2 rounded border border-slate-100 p-1">
+          <li key={q.key} className="flex w-44 shrink-0 items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-1.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={q.crop} alt="" className="h-10 w-10 shrink-0 rounded object-cover object-top" />
+            <img src={q.crop} alt="" className="h-10 w-10 shrink-0 rounded-md bg-white object-cover object-top" />
             <span
-              className={`min-w-0 text-xs ${
+              className={`min-w-0 text-xs leading-snug ${
                 q.status === "error"
                   ? "text-red-600"
                   : q.status === "done"

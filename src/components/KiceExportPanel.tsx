@@ -245,7 +245,7 @@ export default function KiceExportPanel({ title, items }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="g-panel flex flex-col gap-4 p-4 sm:p-5">
       <div className="flex flex-col gap-2">
         <span className="text-sm font-medium text-slate-700">영역</span>
         <div className="flex flex-wrap gap-1">
@@ -327,7 +327,7 @@ export default function KiceExportPanel({ title, items }: Props) {
                   const digits = e.target.value.replace(/[^0-9]/g, "");
                   setTamguPattern((cur) => cur.map((v, idx) => (idx === i ? digits : v)));
                 }}
-                className="w-12 rounded border border-slate-300 px-2 py-1 text-center text-sm focus:border-blue-500 focus:outline-none"
+                className="g-input w-12 rounded px-2 py-1 text-center text-sm"
               />
             ))}
             <span className={`text-xs ${tamguSum === 20 ? "text-emerald-600" : "text-amber-600"}`}>
@@ -377,7 +377,7 @@ export default function KiceExportPanel({ title, items }: Props) {
           type="button"
           onClick={generate}
           disabled={busy || items.length === 0}
-          className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="g-btn g-btn-primary px-5 py-2.5 text-sm"
         >
           {busy ? "PDF 만드는 중..." : "평가원 양식 PDF 만들기"}
         </button>

@@ -51,7 +51,7 @@ export default function GradeDetailActions({
         <select
           value={level ?? ""}
           onChange={(e) => void updateLevel(e.target.value === "" ? null : Number(e.target.value))}
-          className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+          className="g-input px-2 py-1 text-sm"
         >
           <option value="">미입력</option>
           {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) => (

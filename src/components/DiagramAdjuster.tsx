@@ -126,7 +126,7 @@ export default function DiagramAdjuster({
           <button
             type="button"
             onClick={() => onChange(defaultLayout)}
-            className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
+            className="g-btn g-btn-outline px-1.5 py-0.5 text-[10px]"
           >
             초기화
           </button>

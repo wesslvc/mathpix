@@ -103,7 +103,7 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
             type="button"
             onClick={() => onChange(undefined)}
             disabled={isAuto}
-            className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+            className="g-btn g-btn-outline g-btn-xs"
           >
             자동으로 되돌리기
           </button>

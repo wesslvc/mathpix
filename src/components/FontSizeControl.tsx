@@ -42,7 +42,7 @@ export default function FontSizeControl({ value, onChange }: Props) {
           step={0.5}
           onChange={(e) => onChange(normalizeFontPt(e.target.value))}
           aria-label="글자 크기(pt)"
-          className="w-14 rounded border border-slate-300 px-1.5 py-1 text-right text-xs tabular-nums outline-none focus:border-blue-500"
+          className="g-input w-14 rounded px-1.5 py-1 text-right text-xs tabular-nums"
         />
         <span className="text-[11px] text-slate-500">pt</span>
       </label>

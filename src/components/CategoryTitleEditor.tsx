@@ -98,7 +98,7 @@ export default function CategoryTitleEditor({
             setDateDraft(examDate ?? "");
             setEditing(true);
           }}
-          className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100"
+          className="g-btn g-btn-outline g-btn-xs"
         >
           제목·날짜 수정
         </button>
@@ -121,7 +121,7 @@ export default function CategoryTitleEditor({
           }}
           disabled={busy}
           autoFocus
-          className="w-64 max-w-full rounded-lg border border-slate-300 px-3 py-1.5 text-lg font-bold text-ink focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          className="g-input w-64 max-w-full px-3 py-1.5 text-lg font-bold text-ink disabled:opacity-50"
         />
         <input
           type="date"
@@ -136,13 +136,13 @@ export default function CategoryTitleEditor({
           }}
           disabled={busy}
           aria-label="시행일"
-          className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-ink focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          className="g-input px-2 py-1.5 text-sm text-ink disabled:opacity-50"
         />
         <button
           type="button"
           onClick={() => void save()}
           disabled={busy}
-          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="g-btn g-btn-primary g-btn-sm"
         >
           {busy ? "저장 중..." : "저장"}
         </button>
@@ -154,7 +154,7 @@ export default function CategoryTitleEditor({
             setEditing(false);
           }}
           disabled={busy}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+          className="g-btn g-btn-outline g-btn-sm"
         >
           취소
         </button>

@@ -5,6 +5,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Props = {
   onImagesSelected: (files: File[]) => void;
   onError: (message: string) => void;
+  /** 문제 넣기 탭 안에 들어갈 때의 낮은 모양. */
+  compact?: boolean;
+  /**
+   * 붙여넣기(Ctrl+V)를 받을지. 이 칸이 감춰진 탭 안에 있어도 붙여넣기는
+   * 화면 전체에서 받으므로, 보이지 않을 때는 꺼 둔다.
+   */
+  pasteEnabled?: boolean;
 };
 
 const HEIC_PATTERN = /\.(heic|heif)$/i;
@@ -17,7 +24,7 @@ function isHeic(file: File): boolean {
   );
 }
 
-export default function ImageUploader({ onImagesSelected, onError }: Props) {
+export default function ImageUploader({ onImagesSelected, onError, compact = false, pasteEnabled = true }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -54,6 +61,7 @@ export default function ImageUploader({ onImagesSelected, onError }: Props) {
 
   // 붙여넣기(Ctrl+V)로 클립보드의 이미지를 바로 넣을 수 있게 한다.
   useEffect(() => {
+    if (!pasteEnabled) return;
     function onPaste(e: ClipboardEvent) {
       const items = e.clipboardData?.items;
       if (!items) return;
@@ -71,14 +79,16 @@ export default function ImageUploader({ onImagesSelected, onError }: Props) {
     }
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [handleFiles]);
+  }, [handleFiles, pasteEnabled]);
 
   return (
     <div
-      className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-12 text-center transition-colors ${
+      className={`group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed text-center transition-colors ${
+        compact ? "px-6 py-8" : "p-12"
+      } ${
         isDragging
           ? "border-blue-500 bg-blue-50"
-          : "border-slate-300 bg-white hover:border-slate-400"
+          : "border-slate-200 bg-slate-50/60 hover:border-blue-300 hover:bg-blue-50/40"
       }`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -91,23 +101,28 @@ export default function ImageUploader({ onImagesSelected, onError }: Props) {
         handleFiles(e.dataTransfer.files);
       }}
       onClick={() => inputRef.current?.click()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          inputRef.current?.click();
+        }
+      }}
       role="button"
       tabIndex={0}
     >
-      <div className="text-5xl">📷</div>
-      <p className="text-lg font-semibold text-ink">
-        문제 이미지를 여기에 끌어다 놓거나 클릭해서 선택하세요
+      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-blue-600 shadow-sm ring-1 ring-slate-200 transition group-hover:scale-105">
+        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+          <path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" strokeLinecap="round" />
+        </svg>
+      </span>
+      <p className="text-sm font-semibold text-ink sm:text-base">
+        문제 사진을 끌어다 놓거나 눌러서 고르세요
       </p>
-      <p className="text-sm text-slate-500">
-        여러 장을 한 번에 선택하거나, 캡처한 사진을{" "}
-        <kbd className="rounded border border-slate-300 bg-slate-50 px-1 text-xs">
-          Ctrl
-        </kbd>
-        +
-        <kbd className="rounded border border-slate-300 bg-slate-50 px-1 text-xs">
-          V
-        </kbd>{" "}
-        로 붙여넣어도 됩니다. 문제 영역은 자동으로 인식됩니다.
+      <p className="text-xs text-slate-500">
+        여러 장을 한 번에 골라도 돼요 · 캡처는{" "}
+        <kbd className="rounded border border-slate-300 bg-white px-1 text-[10px]">Ctrl</kbd>+
+        <kbd className="rounded border border-slate-300 bg-white px-1 text-[10px]">V</kbd> 로 붙여넣기
       </p>
       <input
         ref={inputRef}
@@ -115,7 +130,11 @@ export default function ImageUploader({ onImagesSelected, onError }: Props) {
         accept="image/*"
         multiple
         className="hidden"
-        onChange={(e) => handleFiles(e.target.files)}
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          // 같은 사진을 다시 골라도 onChange 가 오도록 비운다.
+          e.target.value = "";
+        }}
       />
     </div>
   );

@@ -188,7 +188,7 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
       <p className="text-sm font-medium text-slate-700">답지로 정답 채우기</p>
 
       {step === "picking" && (
@@ -301,7 +301,7 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
             type="button"
             onClick={() => void read()}
             disabled={pics.length === 0 || busy !== null}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+            className="g-btn g-btn-primary"
           >
             답지 읽기
           </button>
@@ -311,7 +311,7 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
             type="button"
             onClick={() => void save()}
             disabled={matched.length === 0 || busy !== null}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+            className="g-btn g-btn-primary"
           >
             {matched.length}개 문제에 정답 넣기
           </button>

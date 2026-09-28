@@ -240,7 +240,7 @@ function MathChip({
               onChange={(e) =>
                 onChange(buildTextFraction(e.target.value, fraction.denominator))
               }
-              className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-blue-500"
+              className="g-input min-w-0 flex-1 rounded px-2 py-1 text-xs"
             />
           </label>
           <label className="flex items-center gap-1.5">
@@ -250,13 +250,13 @@ function MathChip({
               onChange={(e) =>
                 onChange(buildTextFraction(fraction.numerator, e.target.value))
               }
-              className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-blue-500"
+              className="g-input min-w-0 flex-1 rounded px-2 py-1 text-xs"
             />
           </label>
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="self-end rounded bg-blue-600 px-2 py-1 text-[10px] text-white hover:bg-blue-700"
+            className="g-btn g-btn-primary g-btn-xs self-end"
           >
             완료
           </button>
@@ -274,7 +274,7 @@ function MathChip({
               setOpen(false);
             }}
             spellCheck={false}
-            className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 font-mono text-xs outline-none focus:border-blue-500"
+            className="g-input min-w-0 flex-1 rounded px-2 py-1 font-mono text-xs"
           />
           <button
             type="button"
@@ -282,7 +282,7 @@ function MathChip({
               onChange(draft);
               setOpen(false);
             }}
-            className="shrink-0 rounded bg-blue-600 px-2 py-1 text-[10px] text-white hover:bg-blue-700"
+            className="g-btn g-btn-primary g-btn-xs shrink-0"
           >
             적용
           </button>

@@ -82,7 +82,7 @@ export default function LatexEditor({ value, onChange, rows = 14 }: Props) {
         rows={rows}
         spellCheck={false}
         wrap="off"
-        className="w-full resize-y overflow-x-auto rounded-lg border border-slate-300 bg-slate-50 p-3 font-mono text-[13px] leading-7 tracking-tight text-ink focus:border-blue-500 focus:bg-white focus:outline-none"
+        className="g-input w-full resize-y overflow-x-auto bg-slate-50 p-3 font-mono text-[13px] leading-7 tracking-tight text-ink focus:bg-white"
       />
       <p className="text-[11px] text-slate-400">
         수식은 <code className="font-mono">$...$</code>(문장 안) 또는{" "}

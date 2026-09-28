@@ -91,7 +91,7 @@ export default function NewCategoryForm({
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        className="g-btn g-btn-primary self-start"
       >
         + 실모 추가
       </button>
@@ -101,14 +101,14 @@ export default function NewCategoryForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex w-full flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4"
+      className="g-panel flex w-full flex-col gap-3 p-4 sm:p-5"
     >
       <input
         autoFocus
         value={source}
         onChange={(e) => setSource(e.target.value)}
         placeholder="출처 (예: 강대모의고사 2회, 2025학년도 6월 모의평가)"
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+        className="g-input w-full px-3 py-2 text-sm"
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -130,7 +130,7 @@ export default function NewCategoryForm({
               value={score}
               onChange={(e) => setScore(e.target.value)}
               placeholder="예: 96"
-              className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+              className="g-input w-24 px-2 py-1 text-sm"
             />
             <span className="text-slate-400">/ 100</span>
           </label>
@@ -142,18 +142,10 @@ export default function NewCategoryForm({
             type="date"
             value={examDate}
             onChange={(e) => setExamDate(e.target.value)}
-            className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+            className="g-input px-2 py-1 text-sm"
           />
         </label>
       </div>
-
-      {isExam && score.trim() !== "" && (
-        <p className="text-xs text-slate-400">
-          출처는 <span className="font-medium text-slate-600">
-            {source.trim() || "출처"}({score.trim()}/100)
-          </span> 로 표시됩니다.
-        </p>
-      )}
 
       <div className="flex gap-2">
         <button
@@ -162,14 +154,14 @@ export default function NewCategoryForm({
             reset();
             setIsOpen(false);
           }}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+          className="g-btn g-btn-outline"
         >
           취소
         </button>
         <button
           type="submit"
           disabled={isSubmitting || !source.trim()}
-          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="g-btn g-btn-primary"
         >
           {isSubmitting ? "추가 중..." : "추가"}
         </button>

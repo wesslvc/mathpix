@@ -70,7 +70,7 @@ export default function LinkedAccounts({
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <section className="g-panel flex flex-col gap-3 p-4 sm:p-5">
       <h2 className="text-base font-semibold text-ink">로그인 방법</h2>
 
       <ul className="flex flex-col gap-2">
@@ -99,7 +99,7 @@ export default function LinkedAccounts({
           type="button"
           onClick={() => void linkGoogle()}
           disabled={busy}
-          className="self-start rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          className="g-btn g-btn-outline self-start"
         >
           {busy ? "이동 중..." : "Google 계정 연결하기"}
         </button>

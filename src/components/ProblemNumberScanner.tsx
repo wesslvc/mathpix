@@ -156,7 +156,7 @@ export default function ProblemNumberScanner({
   if (targets.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
+    <div className="g-panel flex flex-wrap items-center gap-2 px-4 py-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-slate-700">번호 없는 문제 {targets.length}개</p>
         <p className="text-xs text-slate-400">
@@ -173,7 +173,7 @@ export default function ProblemNumberScanner({
         type="button"
         onClick={() => void run()}
         disabled={busy !== null}
-        className="shrink-0 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+        className="g-btn g-btn-soft shrink-0"
       >
         {busy ?? "전체 번호 인식"}
       </button>

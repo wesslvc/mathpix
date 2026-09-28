@@ -10,6 +10,13 @@ type Props = {
   unlimited?: boolean;
   /** BYOK 패스 계정인지. 본인 키로 직접 내므로 토큰 잔량 자체가 의미 없다. */
   byok?: boolean;
+  /**
+   * 한 줄짜리 작은 모양. 실모 목록·실모 화면처럼 **매번 보는 화면**에서는
+   * 배너 두 개(잔량 + BYOK 안내)가 위를 통째로 차지해 정작 할 일이 밀려났다.
+   * 잔량과 충전만 한 줄로 두고, BYOK 안내는 프로필에서만 보여 준다.
+   * 토큰이 바닥났을 때는 그대로 눈에 띄게 한다.
+   */
+  compact?: boolean;
 };
 
 /**
@@ -22,8 +29,23 @@ export default function BillingStatus({
   byokCheckoutReady = false,
   unlimited = false,
   byok = false,
+  compact = false,
 }: Props) {
   const empty = !unlimited && !byok && credits <= 0;
+
+  if (compact && !empty) {
+    if (unlimited || byok) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+        <TokenGauge tokens={credits} className="min-w-[180px]" />
+        {checkoutReady && (
+          <a href="/api/checkout?plan=tokens" className="g-btn g-btn-ghost g-btn-xs text-blue-700">
+            충전하기
+          </a>
+        )}
+      </div>
+    );
+  }
 
   if (unlimited) {
     return (
@@ -46,7 +68,7 @@ export default function BillingStatus({
   return (
     <div className="flex flex-col gap-2">
       <div
-        className={`flex flex-col gap-2 rounded-xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${
+        className={`flex flex-col gap-2 rounded-2xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${
           empty
             ? "border-amber-200 bg-amber-50 text-amber-900"
             : "border-slate-200 bg-white text-slate-700"
@@ -68,10 +90,8 @@ export default function BillingStatus({
         {checkoutReady ? (
           <a
             href="/api/checkout?plan=tokens"
-            className={`shrink-0 rounded-lg px-4 py-2 text-center text-xs font-medium text-white ${
-              empty
-                ? "bg-amber-600 hover:bg-amber-700"
-                : "bg-slate-600 hover:bg-slate-700"
+            className={`g-btn g-btn-sm shrink-0 ${
+              empty ? "bg-amber-600 text-white hover:bg-amber-700" : "g-btn-dark"
             }`}
           >
             이용권 구매하기 (+5000토큰)
@@ -82,9 +102,13 @@ export default function BillingStatus({
       </div>
 
       {/* **+5000토큰 배너 바로 밑에 BYOK를 나란히 안내한다**(사용자 요청).
+          한 줄짜리(compact)에서는 뺀다 — 프로필에서 본다. */}
+      {!compact && (
+      <>
+      {/* **+5000토큰 배너 바로 밑에 BYOK를 나란히 안내한다**(사용자 요청).
           토큰이 남아 있어도 본인 OpenAI 키가 있으면 BYOK가 더 유리할 수
           있어 이용권 소진 여부와 무관하게 늘 보여준다. */}
-      <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+      <div className="g-panel flex flex-col gap-2 px-4 py-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
         <p>
           본인 OpenAI 키가 있다면 <span className="font-semibold">BYOK 패스</span>
           (5,250원)로 Mathpix 문제 인식을 무제한 무료로 쓰고, 나머지 기능도
@@ -93,7 +117,7 @@ export default function BillingStatus({
         {byokCheckoutReady ? (
           <a
             href="/api/checkout?plan=byok"
-            className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
+            className="g-btn g-btn-outline g-btn-sm shrink-0"
           >
             BYOK 패스 구매하기
           </a>
@@ -101,6 +125,8 @@ export default function BillingStatus({
           <span className="shrink-0 text-xs text-slate-400">결제 준비 중</span>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -107,7 +107,7 @@ export default function ByokSettingsForm() {
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
       <div>
         <p className="text-sm font-medium text-slate-700">BYOK 패스 — 본인 OpenAI 키</p>
         <p className="mt-1 text-xs text-slate-400">
@@ -161,7 +161,7 @@ export default function ByokSettingsForm() {
                 type="button"
                 onClick={saveKey}
                 disabled={saving}
-                className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                className="g-btn g-btn-primary shrink-0"
               >
                 {hasKey ? "교체" : "등록"}
               </button>

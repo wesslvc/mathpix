@@ -55,9 +55,16 @@ type BatchResponse = { ok: number; failed: string[]; skipped: SkippedItem[] };
  * **하나라도 안 맞으면 그 파일만 건너뛴다**(전체를 막지 않는다) — 맞는 것부터
  * 먼저 넣고, 안 맞은 것은 목록으로 보여줘 나중에 개별적으로 넣을 수 있게 한다.
  */
-export default function BulkMappedImportPanel({ categoryId }: { categoryId: string }) {
+export default function BulkMappedImportPanel({
+  categoryId,
+  embedded = false,
+}: {
+  categoryId: string;
+  /** "문제 넣기" 탭 안에 들어가 있으면 처음부터 펼치고 바깥 테두리를 뺀다. */
+  embedded?: boolean;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(embedded);
   const [images, setImages] = useState<File[]>([]);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvRows, setCsvRows] = useState<Record<string, string>[] | null>(null);
@@ -135,10 +142,18 @@ export default function BulkMappedImportPanel({ categoryId }: { categoryId: stri
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-      <p className="text-sm font-medium text-slate-700">
-        이미지 여러 장 + 정답 CSV로 한 번에 올리기
-      </p>
+    <div
+      className={
+        embedded
+          ? "flex flex-col gap-3"
+          : "flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4"
+      }
+    >
+      {!embedded && (
+        <p className="text-sm font-medium text-slate-700">
+          이미지 여러 장 + 정답 CSV로 한 번에 올리기
+        </p>
+      )}
       <p className="text-xs text-slate-400">
         이미 깔끔하게 잘려 있는 사진(스크린샷 등)에 맞는 기능입니다 — 크롭·문제
         인식 없이 그림 그대로 저장하고 정답만 CSV에서 매칭합니다. 토큰이 들지
@@ -196,7 +211,7 @@ export default function BulkMappedImportPanel({ categoryId }: { categoryId: stri
           type="button"
           disabled={plan.length === 0 || Boolean(busy)}
           onClick={() => void runImport()}
-          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+          className="g-btn g-btn-primary"
         >
           {busy ?? `${plan.length}개 올리기`}
         </button>
@@ -204,16 +219,17 @@ export default function BulkMappedImportPanel({ categoryId }: { categoryId: stri
           type="button"
           disabled={Boolean(busy)}
           onClick={() => {
-            setOpen(false);
+            // 탭 안에서는 접지 않고 비우기만 한다(접으면 탭이 빈 링크 하나가 된다).
+            if (!embedded) setOpen(false);
             setImages([]);
             setCsvFile(null);
             setCsvRows(null);
             setDone(null);
             setError(null);
           }}
-          className="text-xs text-slate-500 hover:text-slate-700"
+          className="g-btn g-btn-ghost g-btn-sm"
         >
-          닫기
+          {embedded ? "비우기" : "닫기"}
         </button>
       </div>
 

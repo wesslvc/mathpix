@@ -110,7 +110,7 @@ export default function GradeLinkPanel({
   }
 
   return (
-    <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+    <section className="g-panel flex flex-col gap-2 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-ink">
           채점 연동 · <span className="font-normal text-slate-600">{title}</span>
@@ -138,7 +138,7 @@ export default function GradeLinkPanel({
             type="button"
             onClick={() => void apply()}
             disabled={busy || targets.length === 0}
-            className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+            className="g-btn g-btn-primary"
           >
             {busy
               ? "붙이는 중..."

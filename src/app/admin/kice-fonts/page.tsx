@@ -112,7 +112,7 @@ export default function KiceFontAdminPage() {
         type="button"
         onClick={() => void upload()}
         disabled={busy !== null}
-        className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        className="g-btn g-btn-primary self-start"
       >
         {busy ?? "올리기"}
       </button>

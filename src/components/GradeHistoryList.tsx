@@ -62,7 +62,7 @@ function Row({ row }: { row: GradeHistoryRow }) {
     <li>
       <Link
         href={`/grades/${row.id}`}
-        className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:border-blue-300 hover:bg-blue-50"
+        className="g-panel flex items-center justify-between gap-3 px-4 py-3 hover:border-blue-300 hover:bg-blue-50"
       >
         <div className="min-w-0">
           {subjectSubline(row) && (
@@ -180,7 +180,7 @@ export default function GradeHistoryList({ rows }: { rows: GradeHistoryRow[] }) 
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="시험 이름·과목으로 검색 (예: 9월 모평, 생활과 윤리)"
-          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          className="g-input min-w-0 flex-1 px-3 py-2 text-sm"
         />
         {!searching && (
           <div className="flex shrink-0 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
@@ -203,7 +203,7 @@ export default function GradeHistoryList({ rows }: { rows: GradeHistoryRow[] }) 
       </div>
 
       {filtered.length === 0 ? (
-        <p className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400">
+        <p className="g-panel px-4 py-6 text-center text-sm text-slate-400">
           {rows.length === 0 ? "아직 채점 기록이 없어요." : "검색 결과가 없어요."}
         </p>
       ) : byDate ? (

@@ -196,7 +196,7 @@ function LoginForm() {
             type="button"
             onClick={() => void signInWithGoogle()}
             disabled={isGoogleLoading}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="g-btn g-btn-outline flex w-full items-center justify-center gap-2 px-4 py-3 text-sm"
           >
             <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
               <path
@@ -245,7 +245,7 @@ function LoginForm() {
               placeholder="이메일"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              className="g-input px-3 py-2 text-sm"
             />
             <input
               type="password"
@@ -253,7 +253,7 @@ function LoginForm() {
               placeholder="비밀번호"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              className="g-input px-3 py-2 text-sm"
             />
 
             {canResend && (
@@ -270,7 +270,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={isLoading}
-              className="mt-1 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="g-btn g-btn-primary mt-1 px-4 py-3 text-sm"
             >
               {isLoading ? "처리 중..." : "로그인하고 Google 연결하기"}
             </button>

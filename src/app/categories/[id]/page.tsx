@@ -259,8 +259,11 @@ export default async function CategoryPage({
   }
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 pt-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <Link href="/" className="text-xs font-medium text-slate-400 hover:text-slate-600">
+            ← 내 실모
+          </Link>
           {/* 점수는 **제목 안이 아니라 옆에** 붙인다(사용자 요청 — "이제 제목에
               괄호치고 점수넣지마"). 만점은 연결된 채점의 과목에서 온다(탐구
               50). 연결된 채점이 없으면 알 길이 없으니 100. */}
@@ -274,37 +277,35 @@ export default async function CategoryPage({
             )}
             examDate={category.exam_date}
           />
-          <p className="text-sm text-slate-500">
-            문제 {problems?.length ?? 0}개 저장됨
-          </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="g-chip">문제 {problems?.length ?? 0}개</span>
+            {/* 잔량은 한 줄로(BillingStatus 참고). 바닥나면 배너가 된다. */}
+            <BillingStatus
+              compact
+              credits={access.credits}
+              unlimited={access.unlimited}
+              byok={access.byok}
+              checkoutReady={isCheckoutReady()}
+              byokCheckoutReady={isByokCheckoutReady()}
+            />
+          </div>
         </div>
-        <Link
-          href={`/export?ids=${category.id}`}
-          className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-ink hover:bg-slate-50"
-        >
+        <Link href={`/export?ids=${category.id}`} className="g-btn g-btn-primary shrink-0 self-start">
           PDF 만들기
         </Link>
       </header>
 
-      <BillingStatus
-        credits={access.credits}
-        unlimited={access.unlimited}
-        byok={access.byok}
-        checkoutReady={isCheckoutReady()}
-        byokCheckoutReady={isByokCheckoutReady()}
-      />
-
       {linkedGrades && linkedGrades.length > 0 && (
-        <div className="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
           <p className="text-xs font-medium text-slate-500">
-            연동된 채점 기록
+            연동된 채점
           </p>
           <div className="flex flex-wrap gap-2">
             {linkedGrades.map((g) => (
               <Link
                 key={g.id}
                 href={`/grades/${g.id}`}
-                className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100"
+                className="g-btn g-btn-outline g-btn-xs"
               >
                 {g.exam_name || `${SUBJECT_LABEL[g.subject]}${g.elective_label ? ` · ${g.elective_label}` : ""}`}
                 {g.score != null && <> · {g.score}점</>}

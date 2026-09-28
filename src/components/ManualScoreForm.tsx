@@ -116,7 +116,7 @@ export default function ManualScoreForm() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="self-start rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        className="g-btn g-btn-outline g-btn-sm self-start"
       >
         + 성적 직접 입력
       </button>
@@ -124,7 +124,7 @@ export default function ManualScoreForm() {
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium text-slate-700">성적 직접 입력</p>
         <button
@@ -133,7 +133,7 @@ export default function ManualScoreForm() {
             reset();
             setOpen(false);
           }}
-          className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100"
+          className="g-btn g-btn-outline g-btn-xs"
         >
           닫기
         </button>
@@ -182,7 +182,7 @@ export default function ManualScoreForm() {
           <select
             value={elective}
             onChange={(e) => setElective(e.target.value)}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink focus:border-blue-500 focus:outline-none"
+            className="g-input px-3 py-2 text-sm text-ink"
           >
             <option value="">고르지 않음</option>
             {(subject === "math" ? MATH_ELECTIVES : KOREAN_ELECTIVES).map((s) => (
@@ -200,7 +200,7 @@ export default function ManualScoreForm() {
           value={examName}
           onChange={(e) => setExamName(e.target.value)}
           placeholder="예: 2025학년도 9월 모의평가"
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink placeholder:text-slate-400 focus:border-blue-500 focus:outline-none"
+          className="g-input px-3 py-2 text-sm text-ink placeholder:text-slate-400"
         />
       </label>
 
@@ -211,7 +211,7 @@ export default function ManualScoreForm() {
             type="date"
             value={takenAt}
             onChange={(e) => setTakenAt(e.target.value)}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink focus:border-blue-500 focus:outline-none"
+            className="g-input px-3 py-2 text-sm text-ink"
           />
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
@@ -224,7 +224,7 @@ export default function ManualScoreForm() {
             value={score}
             onChange={(e) => setScore(e.target.value)}
             placeholder={`0~${max}`}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink placeholder:text-slate-400 focus:border-blue-500 focus:outline-none"
+            className="g-input px-3 py-2 text-sm text-ink placeholder:text-slate-400"
           />
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
@@ -232,7 +232,7 @@ export default function ManualScoreForm() {
           <select
             value={grade}
             onChange={(e) => setGrade(e.target.value)}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink focus:border-blue-500 focus:outline-none"
+            className="g-input px-3 py-2 text-sm text-ink"
           >
             <option value="">없음</option>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) => (
@@ -260,7 +260,7 @@ export default function ManualScoreForm() {
         type="button"
         onClick={() => void save()}
         disabled={!canSave}
-        className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        className="g-btn g-btn-primary self-start"
       >
         {saving ? "저장 중..." : "저장"}
       </button>

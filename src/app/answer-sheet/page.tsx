@@ -220,7 +220,7 @@ export default function AnswerSheetPage() {
             key={c}
             type="button"
             onClick={() => setText((t) => t + c)}
-            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-sm text-slate-700 hover:bg-slate-50"
+            className="g-btn g-btn-outline g-btn-sm"
           >
             {c}
           </button>
@@ -241,7 +241,7 @@ export default function AnswerSheetPage() {
         type="button"
         onClick={() => void make()}
         disabled={busy || rows.length === 0}
-        className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        className="g-btn g-btn-primary self-start"
       >
         {busy ? "만드는 중..." : "PDF 내려받기"}
       </button>

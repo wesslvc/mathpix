@@ -548,7 +548,7 @@ export default function CompareKoreanPage() {
         </p>
       </div>
 
-      <section className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+      <section className="g-panel flex flex-col gap-3 p-4 sm:p-5">
         <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
           지문 사진
           <input
@@ -755,7 +755,7 @@ export default function CompareKoreanPage() {
           return (
             <section
               key={reader.key}
-              className="flex min-w-0 flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4"
+              className="g-panel flex min-w-0 flex-col gap-3 p-4 sm:p-5"
             >
               <h2 className="font-semibold text-slate-900">{readerTitle(reader)}</h2>
               <div className="flex flex-wrap items-end gap-1 text-xs">
@@ -793,7 +793,7 @@ export default function CompareKoreanPage() {
         type="button"
         disabled={!file || busy}
         onClick={run}
-        className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+        className="g-btn g-btn-primary self-start"
       >
         {busy ? "읽는 중…" : "두 강도로 읽고 PDF 만들기"}
       </button>

@@ -82,23 +82,27 @@ export default async function DashboardPage({
           내비게이션(`AppNav`)에 채점·프로필 및 설정·정답표 링크가 이미
           있어서, 여기 있던 셋은 같은 곳으로 가는 버튼이 위아래로 두 번
           찍히고 있었다. 로그아웃만 여기 고유한 동작이라 남긴다. */}
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <Logo size={44} />
-          <p className="mt-2 text-sm text-slate-500">
+      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-ink">내 실모</h1>
+          <p className="mt-1 text-sm text-slate-500">
             실모(출처)별로 오답을 모아두고, 나중에 한 번에 PDF로 인쇄하세요.
           </p>
         </div>
-        <LogoutButton />
+        {/* 잔량은 한 줄로 — 매번 보는 화면이라 배너 두 개가 위를 차지하면 목록이
+            밀려난다. 바닥났을 때만 눈에 띄는 배너가 된다(BillingStatus 참고). */}
+        <div className="flex items-center gap-3">
+          <BillingStatus
+            compact
+            credits={access.credits}
+            unlimited={access.unlimited}
+            byok={access.byok}
+            checkoutReady={isCheckoutReady()}
+            byokCheckoutReady={isByokCheckoutReady()}
+          />
+          <LogoutButton />
+        </div>
       </header>
-
-      <BillingStatus
-        credits={access.credits}
-        unlimited={access.unlimited}
-        byok={access.byok}
-        checkoutReady={isCheckoutReady()}
-        byokCheckoutReady={isByokCheckoutReady()}
-      />
 
       <NewCategoryForm folderId={currentFolderId ?? null} />
 

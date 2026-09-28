@@ -188,7 +188,7 @@ function NumberInput({
         inputMode="numeric"
         placeholder="—"
         aria-label="문제 번호"
-        className="w-11 rounded border border-slate-300 px-1 py-1.5 text-center text-xs text-ink focus:border-blue-500 focus:outline-none disabled:opacity-40"
+        className="g-input w-11 rounded px-1 py-1.5 text-center text-xs text-ink disabled:opacity-40"
       />
       번
     </label>
@@ -850,7 +850,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         type="button"
         onClick={() => remove(problem)}
         disabled={busyId === problem.id}
-        className="shrink-0 rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+        className="g-btn g-btn-outline g-btn-sm shrink-0"
       >
         삭제
       </button>
@@ -871,14 +871,14 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       <a
         href={problem.imageUrl}
         download={downloadName(problem, index)}
-        className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100"
+        className="g-btn g-btn-outline g-btn-sm"
       >
         다운로드
       </a>
       <button
         type="button"
         onClick={() => openEdit(problem)}
-        className="rounded border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-100"
+        className="g-btn g-btn-outline g-btn-sm"
       >
         수정
       </button>
@@ -984,7 +984,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
           ))}
         </ul>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {list.map((problem, index) => (
             <div
               key={problem.id}
@@ -1108,7 +1108,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                           ? "예: 3 → ③으로 표기"
                           : "예: 12"
                       }
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                      className="g-input min-w-0 flex-1 px-3 py-1.5 text-sm"
                     />
                   </label>
                   {/* 설명 글에 `min-w-[14rem]` 을 준다 — 자리가 그만큼 없으면
@@ -1125,7 +1125,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                       }
                       inputMode="numeric"
                       placeholder="비우면 자동"
-                      className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                      className="g-input w-24 px-3 py-1.5 text-sm"
                     />
                     <span className="min-w-[14rem] flex-1 text-[11px] text-slate-400">
                       인쇄물에 찍히는 번호입니다. 비우면 본문에서 뽑거나
@@ -1143,7 +1143,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                       }
                       inputMode="numeric"
                       placeholder="비우면 없음"
-                      className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                      className="g-input w-24 px-3 py-1.5 text-sm"
                     />
                     <span className="min-w-[14rem] flex-1 text-[11px] text-slate-400">
                       이 문제의 배점(점). 자동채점에서 못 읽었거나 나중에
@@ -1212,7 +1212,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                     <button
                       type="button"
                       onClick={() => setCropTarget({ mode: "add" })}
-                      className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                      className="g-btn g-btn-outline g-btn-xs shrink-0"
                     >
                       그림 추가
                     </button>
@@ -1253,7 +1253,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 type="button"
                                 onClick={() => reReadPassage(f.origin ?? raster)}
                                 disabled={passageBusy}
-                                className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                                className="g-btn g-btn-outline g-btn-xs"
                               >
                                 다시 인식하기
                               </button>
@@ -1282,7 +1282,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 })
                               }
                               disabled={busy}
-                              className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                              className="g-btn g-btn-outline g-btn-xs"
                             >
                               다시 오려내기
                             </button>
@@ -1302,7 +1302,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 )
                               }
                               disabled={busy || (f.ai === true && !f.origin)}
-                              className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                              className="g-btn g-btn-outline g-btn-xs"
                             >
                               {busy ? "다시 그리는 중..." : "AI로 다시 그리기"}
                             </button>
@@ -1311,7 +1311,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 type="button"
                                 onClick={() => revertToOrigin(f.id)}
                                 disabled={busy}
-                                className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                                className="g-btn g-btn-outline g-btn-xs"
                               >
                                 원본으로 되돌리기
                               </button>

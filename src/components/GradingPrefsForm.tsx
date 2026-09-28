@@ -64,7 +64,7 @@ export default function GradingPrefsForm({ initial }: { initial: GradingPrefsVal
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
       <p className="text-sm font-medium text-slate-700">기본 과목 설정</p>
       <p className="text-xs text-slate-400">
         자동채점을 시작할 때 아래 값으로 미리 선택돼 있어요. 시험마다 다르면
@@ -99,7 +99,7 @@ export default function GradingPrefsForm({ initial }: { initial: GradingPrefsVal
           <select
             value={mathElective}
             onChange={(e) => setMathElective(e.target.value)}
-            className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+            className="g-input px-2 py-1 text-sm"
           >
             <option value="">고르지 않음</option>
             {MATH_ELECTIVES.map((m) => (
@@ -117,7 +117,7 @@ export default function GradingPrefsForm({ initial }: { initial: GradingPrefsVal
           <select
             value={koreanElective}
             onChange={(e) => setKoreanElective(e.target.value)}
-            className="rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+            className="g-input px-2 py-1 text-sm"
           >
             <option value="">고르지 않음</option>
             {KOREAN_ELECTIVES.map((m) => (
@@ -181,7 +181,7 @@ export default function GradingPrefsForm({ initial }: { initial: GradingPrefsVal
           type="button"
           onClick={() => void save()}
           disabled={saving}
-          className="self-start rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="g-btn g-btn-primary g-btn-sm self-start"
         >
           {saving ? "저장 중..." : "저장"}
         </button>

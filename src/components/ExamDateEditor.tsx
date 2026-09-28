@@ -105,13 +105,13 @@ export default function ExamDateEditor({
           }}
           disabled={busy}
           aria-label="응시일"
-          className="rounded border border-slate-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          className="g-input rounded px-2 py-1 text-xs disabled:opacity-50"
         />
         <button
           type="button"
           onClick={() => void save()}
           disabled={busy}
-          className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="g-btn g-btn-primary g-btn-xs"
         >
           {busy ? "저장 중..." : "저장"}
         </button>

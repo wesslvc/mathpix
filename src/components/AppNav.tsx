@@ -40,7 +40,7 @@ export default function AppNav() {
   return (
     <nav
       data-app-nav
-      className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur"
+      className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/80 backdrop-blur-md backdrop-saturate-150"
     >
       <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-2.5">
         <Link href="/" className="mr-1 shrink-0" aria-label="ReprintOCR 홈">
@@ -60,10 +60,10 @@ export default function AppNav() {
               key={l.href}
               href={l.href}
               aria-current={isActive(l.href) ? "page" : undefined}
-              className={`shrink-0 whitespace-nowrap rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+              className={`shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm transition-colors ${
                 isActive(l.href)
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                  ? "bg-slate-100 font-semibold text-ink"
+                  : "font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-900"
               }`}
             >
               {l.label}

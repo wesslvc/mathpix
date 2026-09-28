@@ -256,7 +256,7 @@ export default function LinkCategoryPicker({
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
             disabled={busy || !categories}
-            className="rounded border border-slate-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none"
+            className="g-input rounded px-2 py-1 text-xs"
           >
             <option value="">
               {categories === null ? "불러오는 중..." : "실모 선택"}
@@ -284,7 +284,7 @@ export default function LinkCategoryPicker({
             type="button"
             disabled={busy || !selected}
             onClick={() => void linkTo(selected)}
-            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+            className="g-btn g-btn-outline g-btn-xs"
           >
             연결
           </button>
@@ -304,14 +304,14 @@ export default function LinkCategoryPicker({
             value={newSource}
             onChange={(e) => setNewSource(e.target.value)}
             placeholder="출처 (예: 2025학년도 6월 모의평가)"
-            className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none"
+            className="g-input min-w-0 flex-1 rounded px-2 py-1 text-xs"
           />
           <select
             value={newFolderId}
             onChange={(e) => setNewFolderId(e.target.value)}
             disabled={busy}
             title="정리할 폴더(선택, 없어도 됩니다)"
-            className="rounded border border-slate-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none"
+            className="g-input rounded px-2 py-1 text-xs"
           >
             <option value={NO_FOLDER}>폴더 없음</option>
             {folders.map((f) => (
@@ -324,7 +324,7 @@ export default function LinkCategoryPicker({
             type="button"
             disabled={busy || !newSource.trim()}
             onClick={() => void createAndLink()}
-            className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+            className="g-btn g-btn-primary g-btn-xs"
           >
             만들고 연결
           </button>

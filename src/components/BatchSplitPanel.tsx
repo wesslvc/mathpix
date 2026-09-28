@@ -1,7 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage } from "@/lib/cropImage";
+import { cropRegionToDataUrl, isRealPolygon, type Region } from "@/lib/polygon";
+import { useCropShape } from "@/lib/cropShape";
+import BoxEditor, { type EditBox } from "./BoxEditor";
+import CropShapeToggle from "./CropShapeToggle";
 import {
   DETECT_INPUT_DIM,
   MAX_UPLOAD_CHARS,
@@ -50,9 +54,6 @@ import { useFigureJobs } from "./FigureJobsProvider";
  */
 const PAD = 0.004;
 
-/** 이보다 작은 네모는 그리다 만 것으로 본다(지면 크기 대비 비율). */
-const MIN_BOX = 0.02;
-
 /**
  * 잘린 문제 하나.
  *
@@ -67,15 +68,11 @@ type Piece = {
   id: string;
   crop: string;
   parts: number;
-  boxes: ProblemBox[];
+  /** 자른 자리. 손으로 그린 다각형이면 `poly` 가 붙어 있다(`polygon.ts`). */
+  boxes: Region[];
   /** 자를 때 준 여유. 손으로 그린 것은 0, 자동으로 찾은 것은 PAD. */
   pad: number;
 };
-
-/** 손으로 그린 네모. 값은 전부 지면 크기 대비 비율(0~1)이다. */
-type Box = { id: string; x: number; y: number; w: number; h: number };
-
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 type Props = {
   /** 문제 하나를 저장하고 그 행 id를 돌려준다(AddProblemFlow가 준다). */
@@ -118,7 +115,9 @@ export default function BatchSplitPanel({
    */
   const [pageFile, setPageFile] = useState<File | null>(null);
   const [pageImage, setPageImage] = useState<string | null>(null);
-  const [boxes, setBoxes] = useState<Box[]>([]);
+  const [boxes, setBoxes] = useState<EditBox[]>([]);
+  /** 손으로 그릴 모양(사각형/다각형). 자르는 화면 어디서든 같은 기본값을 쓴다. */
+  const [shape, setShape] = useCropShape();
   const [pieces, setPieces] = useState<Piece[]>([]);
   /** 합치려고 고른 조각들. */
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -129,101 +128,6 @@ export default function BatchSplitPanel({
   const { enqueue } = useFigureJobs();
   /** "그대로 넣기" 뒤에 번호가 몇 개 인식됐는지 알려 주는 한 줄. */
   const [numberNote, setNumberNote] = useState<string | null>(null);
-
-  /** 그리는 중인 네모. 손을 뗄 때 boxes 로 옮긴다. */
-  const [draft, setDraft] = useState<Box | null>(null);
-  /**
-   * 그리는 중인 네모의 **최신 값**. 손을 뗄 때 이걸 읽는다.
-   *
-   * state 갱신 함수 안에서 다른 state 를 바꾸면 안 된다 — 갱신 함수는 순수해야
-   * 하고 React 가 두 번 부를 수 있다. 실제로 `setDraft(d => { setBoxes(...) })`
-   * 로 썼다가 **끌기 한 번에 네모가 두 개** 생겼다(브라우저로 확인했다).
-   */
-  const draftRef = useRef<Box | null>(null);
-  const frameRef = useRef<HTMLDivElement>(null);
-  /** 끌기 시작한 자리(비율). 그리는 중이 아니면 null. */
-  const startRef = useRef<{ x: number; y: number } | null>(null);
-
-  /**
-   * 화면 좌표를 사진 안의 비율로 바꾼다.
-   *
-   * 사진은 화면 폭에 맞춰 줄여 그리므로 화면 픽셀과 사진 픽셀이 다르다. 비율로
-   * 들고 있으면 화면 크기가 바뀌어도, 자를 때 원본 해상도로 되돌려도 그대로
-   * 맞는다.
-   */
-  const ratio = useCallback((clientX: number, clientY: number) => {
-    const el = frameRef.current;
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) return null;
-    return {
-      x: clamp01((clientX - r.left) / r.width),
-      y: clamp01((clientY - r.top) / r.height),
-    };
-  }, []);
-
-  /**
-   * 끌기는 **window 에서 받는다**(setPointerCapture 가 아니라).
-   *
-   * 그리는 중에 네모가 바뀌면서 화면이 다시 그려지는데, 그때 처음 잡았던 DOM
-   * 노드가 떨어져 나가면 포인터 캡처가 조용히 풀린다. 사진 **바깥**에서 손을
-   * 놓는 일도 흔하다(가장자리 문제를 그릴 때가 그렇다) — 그때 pointerup 이
-   * 아무 데도 닿지 않으면 그린 게 통째로 사라진다.
-   *
-   * 이 두 함수는 ref 와 setState 만 쓰므로 렌더가 바뀌어도 그대로다. 그래서
-   * 참조가 안정적이고 그냥 붙였다 뗄 수 있다.
-   */
-  const onMove = useCallback(
-    (e: PointerEvent) => {
-      const start = startRef.current;
-      if (!start) return;
-      const now = ratio(e.clientX, e.clientY);
-      if (!now) return;
-      const next: Box = {
-        id: "draft",
-        x: Math.min(start.x, now.x),
-        y: Math.min(start.y, now.y),
-        w: Math.abs(now.x - start.x),
-        h: Math.abs(now.y - start.y),
-      };
-      draftRef.current = next;
-      setDraft(next);
-    },
-    [ratio],
-  );
-
-  const onUp = useCallback(() => {
-    if (!startRef.current) return;
-    startRef.current = null;
-    const d = draftRef.current;
-    draftRef.current = null;
-    setDraft(null);
-    // 너무 작으면 그리다 만 것(또는 그냥 톡 누른 것)으로 보고 버린다.
-    if (d && d.w >= MIN_BOX && d.h >= MIN_BOX) {
-      setBoxes((prev) => [...prev, { ...d, id: crypto.randomUUID() }]);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [onMove, onUp]);
-
-  function startDraw(e: React.PointerEvent) {
-    if (busy) return;
-    const at = ratio(e.clientX, e.clientY);
-    if (!at) return;
-    startRef.current = at;
-    const seed: Box = { id: "draft", x: at.x, y: at.y, w: 0, h: 0 };
-    draftRef.current = seed;
-    setDraft(seed);
-  }
 
   async function pick(file: File | undefined) {
     if (!file) return;
@@ -276,20 +180,12 @@ export default function BatchSplitPanel({
    * 폭을 지켜서 자른다 — 긴 변 기준으로 줄이면 세로로 긴 문제의 폭이 무너져
    * 본문 글자가 뭉개진다.
    */
-  function cutBox(
-    img: HTMLImageElement,
-    b: { x: number; y: number; w: number; h: number },
-    pad: number,
-  ): string {
-    const x = Math.max(0, b.x - pad) * img.naturalWidth;
-    const y = Math.max(0, b.y - pad) * img.naturalHeight;
-    const w = Math.min(1 - b.x + pad, b.w + pad * 2) * img.naturalWidth;
-    const h = Math.min(1 - b.y + pad, b.h + pad * 2) * img.naturalHeight;
-    return cropImageToDataUrl(
-      img,
-      { x, y, width: w, height: h },
-      { maxWidth: PROBLEM_INPUT_DIM, maxHeight: PROBLEM_MAX_HEIGHT },
-    );
+  function cutBox(img: HTMLImageElement, b: Region, pad: number): string {
+    // 다각형이면 바깥을 흰색으로 지우고 자른다(`polygon.ts`).
+    return cropRegionToDataUrl(img, b, pad, {
+      maxWidth: PROBLEM_INPUT_DIM,
+      maxHeight: PROBLEM_MAX_HEIGHT,
+    });
   }
 
   /**
@@ -316,7 +212,7 @@ export default function BatchSplitPanel({
           id: crypto.randomUUID(),
           crop: cutBox(source.img, b, 0),
           parts: 1,
-          boxes: [{ x: b.x, y: b.y, w: b.w, h: b.h }],
+          boxes: [{ x: b.x, y: b.y, w: b.w, h: b.h, ...(b.poly ? { poly: b.poly } : {}) }],
           pad: 0,
         })),
       );
@@ -465,7 +361,11 @@ export default function BatchSplitPanel({
       // 여유는 가장 큰 것에 맞춘다. 손으로 그린 것(0)과 자동으로 찾은 것(PAD)이
       // 섞일 수 있는데, 좁은 쪽에 맞추면 자동으로 찾은 쪽 글자가 잘릴 수 있다.
       const pad = Math.max(...chosen.map((p) => p.pad));
-      const merged = mergeChosen(all);
+      // 다각형은 네모로 아우를 수 없다(아우르는 순간 지운 바깥이 되살아난다) —
+      // 하나라도 섞여 있으면 아우르지 않고 읽는 차례대로 이어 붙인다.
+      const merged: Region[] = all.some(isRealPolygon)
+        ? [...all].sort((a, b) => (a.x + a.w / 2 < 0.5 ? 0 : 1) - (b.x + b.w / 2 < 0.5 ? 0 : 1) || a.y - b.y)
+        : mergeChosen(all);
       const crop = await stitchVertically(
         merged.map((b) => cutBox(source.img, b, pad)),
       );
@@ -624,75 +524,38 @@ export default function BatchSplitPanel({
     typeof figureCost === "number" ? figureCost * pieces.length : null;
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-violet-200 bg-violet-50/40 p-4">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-slate-700">지면 통째로 넣기</span>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          onChange={(e) => void pick(e.target.files?.[0])}
+          className="g-file min-w-0 flex-1"
+        />
+        {pageImage && <CropShapeToggle value={shape} onChange={setShape} />}
       </div>
-      <p className="text-xs leading-relaxed text-slate-500">
-        문제가 여러 개 있는 지면을 올리고 <b>문제마다 네모를 끌어 그리면</b> 그
-        자리대로 하나씩 잘라 줍니다. 잘린 것을 보고 잘못된 것을 지운 다음 “모두
-        AI로 재생성”을 누르면 전부 큐에 들어가 한 개씩 다시 그려집니다.
-      </p>
-
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        onChange={(e) => void pick(e.target.files?.[0])}
-        className="text-xs text-slate-600 file:mr-2 file:rounded-lg file:border file:border-slate-300 file:bg-white file:px-3 file:py-1.5 file:text-xs file:text-slate-700"
-      />
 
       {pageImage && (
         <>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-xs text-slate-500">
             {boxes.length === 0
-              ? "사진 위에서 손가락이나 마우스로 문제 하나를 감싸는 네모를 그리세요."
-              : `${boxes.length}개를 그렸습니다. 이어서 더 그리거나, 네모의 × 로 지울 수 있어요.`}
+              ? shape === "poly"
+                ? "문제 하나를 감싸도록 점을 찍거나, 끌어서 네모로 시작한 뒤 점을 옮기세요."
+                : "사진 위에서 손가락이나 마우스로 문제 하나를 감싸는 네모를 그리세요."
+              : `${boxes.length}개를 그렸어요. 끌어 옮기거나 모서리·점으로 모양을 고치고, × 로 지울 수 있어요.`}
           </p>
-          <div
-            ref={frameRef}
-            onPointerDown={startDraw}
-            /* 터치가 스크롤로 먹히지 않게 한다. 없으면 화면만 밀린다. */
-            className="relative w-full touch-none select-none overflow-hidden rounded-lg border border-slate-300 bg-white"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={pageImage} alt="" draggable={false} className="w-full" />
-            {[...boxes, ...(draft ? [draft] : [])].map((b, i) => (
-              <div
-                key={b.id}
-                className={
-                  "absolute border-2 " +
-                  (b.id === "draft"
-                    ? "border-dashed border-violet-400 bg-violet-400/10"
-                    : "border-violet-600 bg-violet-600/10")
-                }
-                style={{
-                  left: `${b.x * 100}%`,
-                  top: `${b.y * 100}%`,
-                  width: `${b.w * 100}%`,
-                  height: `${b.h * 100}%`,
-                }}
-              >
-                {b.id !== "draft" && (
-                  <>
-                    <span className="absolute left-0 top-0 bg-violet-600 px-1 text-[11px] leading-tight text-white">
-                      {i + 1}
-                    </span>
-                    <button
-                      type="button"
-                      /* 여기서 pointerdown 을 멈추지 않으면 지우려고 누른 것이
-                         새 네모를 그리기 시작한다. */
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={() => setBoxes((prev) => prev.filter((x) => x.id !== b.id))}
-                      aria-label={`${i + 1}번째 네모 지우기`}
-                      className="absolute right-0 top-0 bg-violet-600 px-1 text-[11px] leading-tight text-white hover:bg-red-600"
-                    >
-                      ×
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
+          {/* 손으로 그리는 편집기는 국어 모드와 같은 것을 쓴다 — 예전에는 여기만
+              따로 그려서 그린 네모를 옮기거나 크기를 고칠 수가 없었다(지우고 다시
+              그려야 했다). 그린 차례가 곧 번호다. */}
+          <div className={busy ? "pointer-events-none opacity-60" : undefined}>
+            <BoxEditor
+              image={pageImage}
+              boxes={boxes}
+              onChange={setBoxes}
+              shape={shape}
+              color="#7c3aed"
+            />
           </div>
         </>
       )}
@@ -703,7 +566,7 @@ export default function BatchSplitPanel({
             type="button"
             onClick={() => void cutManual()}
             disabled={busy !== null || boxes.length === 0}
-            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+            className="g-btn g-btn-primary"
           >
             그린 자리대로 자르기{boxes.length > 0 && ` (${boxes.length}개)`}
           </button>
@@ -714,7 +577,7 @@ export default function BatchSplitPanel({
               type="button"
               onClick={() => void detect()}
               disabled={busy !== null}
-              className="rounded-lg border border-violet-300 bg-white px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+              className="g-btn g-btn-outline"
             >
               자동으로 찾기
             </button>
@@ -724,7 +587,7 @@ export default function BatchSplitPanel({
               type="button"
               onClick={() => void mergeSelected()}
               disabled={busy !== null}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              className="g-btn bg-emerald-600 text-white hover:bg-emerald-700"
             >
               고른 것 합치기 ({picked.size}개)
             </button>
@@ -734,7 +597,7 @@ export default function BatchSplitPanel({
               type="button"
               onClick={() => void saveAsIs()}
               disabled={busy !== null}
-              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+              className="g-btn g-btn-dark"
               title="AI로 다시 그리지 않고 잘린 그림 그대로 저장합니다. 문제 번호만 인식해서 붙입니다."
             >
               그대로 넣기 ({pieces.length}개)
@@ -745,7 +608,7 @@ export default function BatchSplitPanel({
               type="button"
               onClick={() => void regenerateAll()}
               disabled={busy !== null}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="g-btn g-btn-soft"
             >
               모두 AI로 재생성 ({pieces.length}개
               {totalCost !== null && !unlimited && !byok && ` · ${totalCost}토큰`})

@@ -78,7 +78,7 @@ export default function Landing() {
           <div className="mt-7 flex w-full flex-col items-center gap-3 sm:w-auto sm:flex-row">
             <Link
               href="/login"
-              className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center text-sm font-medium text-white hover:bg-blue-700 sm:w-auto"
+              className="g-btn g-btn-primary w-full px-6 py-3 text-sm sm:w-auto"
             >
               무료로 시작하기
             </Link>
@@ -150,7 +150,7 @@ export default function Landing() {
         </section>
 
         {/* ── 마무리 ──────────────────────────────────────────────── */}
-        <section className="flex flex-col items-center gap-4 rounded-xl border border-slate-200 bg-white px-6 py-10 text-center">
+        <section className="g-panel flex flex-col items-center gap-4 px-6 py-10 text-center">
           <h2 className="text-lg font-semibold text-ink">
             오늘 틀린 문제부터 시작해보세요
           </h2>
@@ -160,7 +160,7 @@ export default function Landing() {
           </p>
           <Link
             href="/login"
-            className="rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white hover:bg-blue-700"
+            className="g-btn g-btn-primary px-6 py-3 text-sm"
           >
             시작하기
           </Link>
@@ -178,7 +178,7 @@ function Feature({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
+    <div className="g-panel p-5">
       <h3 className="text-sm font-semibold text-ink">{title}</h3>
       <p className="mt-2 text-sm leading-relaxed text-slate-600">{children}</p>
     </div>

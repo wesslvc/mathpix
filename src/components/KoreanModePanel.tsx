@@ -22,6 +22,9 @@ import type { PassageFigureInput } from "@/lib/passageFigures";
 import { PASSAGE_MARKS_DEPOSIT, PASSAGE_READ_TOKENS } from "@/lib/tokens";
 import { useFigureJobs } from "./FigureJobsProvider";
 import BoxEditor, { type EditBox } from "./BoxEditor";
+import CropShapeToggle from "./CropShapeToggle";
+import { useCropShape } from "@/lib/cropShape";
+import { cropRegionToDataUrl, type Region } from "@/lib/polygon";
 
 /**
  * **국어 모드** — 지문 한 편과 그에 딸린 문항들을 한 세트로 넣는다.
@@ -125,6 +128,8 @@ export default function KoreanModePanel({
   const [pages, setPages] = useState<Page[]>([]);
   /** 쪽(사진) id → 그 쪽에 그린 네모들. */
   const [passageBoxes, setPassageBoxes] = useState<Record<string, EditBox[]>>({});
+  /** 손으로 그릴 모양(사각형/다각형). 자르는 화면 어디서든 같은 기본값을 쓴다. */
+  const [shape, setShape] = useCropShape();
   const [questionBoxes, setQuestionBoxes] = useState<Record<string, EditBox[]>>({});
   /** 합치기용으로 고른 묶음들. */
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -196,16 +201,12 @@ export default function KoreanModePanel({
     return { img: await loadImage(page.dataUrl), revoke: () => {} };
   }
 
-  function cutBox(img: HTMLImageElement, b: ProblemBox, pad: number): string {
-    const x = Math.max(0, b.x - pad) * img.naturalWidth;
-    const y = Math.max(0, b.y - pad) * img.naturalHeight;
-    const w = Math.min(1 - b.x + pad, b.w + pad * 2) * img.naturalWidth;
-    const h = Math.min(1 - b.y + pad, b.h + pad * 2) * img.naturalHeight;
-    return cropImageToDataUrl(
-      img,
-      { x, y, width: w, height: h },
-      { maxWidth: PROBLEM_INPUT_DIM, maxHeight: PROBLEM_MAX_HEIGHT },
-    );
+  function cutBox(img: HTMLImageElement, b: Region, pad: number): string {
+    // 손으로 그린 다각형이면 바깥을 흰색으로 지우고 자른다(`polygon.ts`).
+    return cropRegionToDataUrl(img, b, pad, {
+      maxWidth: PROBLEM_INPUT_DIM,
+      maxHeight: PROBLEM_MAX_HEIGHT,
+    });
   }
 
   /**
@@ -630,7 +631,7 @@ export default function KoreanModePanel({
   );
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
       <div>
         <h3 className="text-sm font-semibold text-slate-700">
           국어 모드 (지문 + 문항 세트)
@@ -699,7 +700,7 @@ export default function KoreanModePanel({
             type="button"
             onClick={() => setStep(noPassage ? "questions" : "passage")}
             disabled={pages.length === 0}
-            className="self-start rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+            className="self-start g-btn g-btn-dark"
           >
             다음: {noPassage ? "문제" : "지문"} 자리 잡기
           </button>
@@ -725,9 +726,11 @@ export default function KoreanModePanel({
             )}
           </p>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <CropShapeToggle value={shape} onChange={setShape} />
           {step === "passage" && (
             <div className="flex items-center gap-1 text-xs">
-              <span className="text-slate-500">새로 그리는 네모:</span>
+              <span className="text-slate-500">새로 그리는 것:</span>
               {(["passage", "figure"] as const).map((k) => (
                 <button
                   key={k}
@@ -746,12 +749,14 @@ export default function KoreanModePanel({
               ))}
             </div>
           )}
+          </div>
 
           {pages.map((page, i) => (
             <div key={page.id} className="flex flex-col gap-1">
               <span className="text-xs font-medium text-slate-500">{i + 1}번째 사진</span>
               <BoxEditor
                 image={page.dataUrl}
+                shape={shape}
                 boxes={
                   (step === "passage" ? passageBoxes[page.id] : questionBoxes[page.id]) ?? []
                 }
@@ -803,7 +808,7 @@ export default function KoreanModePanel({
               type="button"
               onClick={() => void autoFill(step === "passage" ? "passage" : "question")}
               disabled={busy !== null}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="g-btn g-btn-outline g-btn-sm"
             >
               {busy ?? "자동으로 찾기"}
             </button>
@@ -821,7 +826,7 @@ export default function KoreanModePanel({
                   type="button"
                   onClick={splitPicked}
                   disabled={picked.size === 0}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                  className="g-btn g-btn-outline g-btn-sm"
                 >
                   묶음 풀기
                 </button>
@@ -841,7 +846,7 @@ export default function KoreanModePanel({
               onClick={() =>
                 step === "passage" ? setStep("pick") : setStep(noPassage ? "pick" : "passage")
               }
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              className="g-btn g-btn-outline"
             >
               ← 뒤로
             </button>
@@ -850,7 +855,7 @@ export default function KoreanModePanel({
                 type="button"
                 onClick={() => setStep("questions")}
                 disabled={passageCount === 0}
-                className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                className="g-btn g-btn-dark"
               >
                 다음: 문제 자리 잡기
               </button>
@@ -859,7 +864,7 @@ export default function KoreanModePanel({
                 type="button"
                 onClick={() => void cutAll()}
                 disabled={groups.length === 0 || busy !== null}
-                className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                className="g-btn g-btn-dark"
               >
                 {busy ?? "다음: 확인하기"}
               </button>
@@ -886,7 +891,7 @@ export default function KoreanModePanel({
                     passageCropRef.current && void makeTitle(passageCropRef.current)
                   }
                   disabled={titling || !passageCropRef.current}
-                  className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  className="g-btn g-btn-outline g-btn-sm shrink-0"
                 >
                   {titling ? "짓는 중..." : "다시 짓기"}
                 </button>
@@ -926,7 +931,7 @@ export default function KoreanModePanel({
               type="button"
               onClick={() => setStep("questions")}
               disabled={busy !== null}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              className="g-btn g-btn-outline"
             >
               ← 자리 고치기
             </button>
@@ -934,7 +939,7 @@ export default function KoreanModePanel({
               type="button"
               onClick={() => void save(false)}
               disabled={busy !== null}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="g-btn g-btn-outline"
             >
               {busy ?? "원본 그대로 넣기"}
             </button>
@@ -942,7 +947,7 @@ export default function KoreanModePanel({
               type="button"
               onClick={() => void save(true)}
               disabled={busy !== null}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="g-btn g-btn-primary"
             >
               {busy ?? "모두 AI로 다시 그리기"}
               {typeof figureCost === "number" &&
