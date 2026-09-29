@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import animate from "tailwindcss-animate";
 
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
@@ -26,6 +27,42 @@ const config: Config = {
         ],
       },
       colors: {
+        // shadcn/ui 토큰(globals.css 의 --background 등). **borderRadius 는 일부러
+        // 안 덮어쓴다** — shadcn 기본 설정은 lg/md/sm 을 --radius 로 갈아 끼우는데,
+        // 그러면 화면 곳곳의 기존 `rounded-lg` 가 전부 달라진다.
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
         // 브랜드 색(globals.css 의 --g-text · --g-blue 와 같은 값).
         // 지오글(seji)의 라이트 모드 팔레트에서 그대로 가져왔다.
         ink: "#191c21",
@@ -77,7 +114,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 };
 
 export default config;

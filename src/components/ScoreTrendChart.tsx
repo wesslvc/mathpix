@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TrendMetric, TrendPoint, TrendSeries } from "@/lib/scoreTrend";
 import { officialExamOn } from "@/lib/officialExams";
+import { Card, cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 /**
  * 성적 추세 — **과목별 요약 카드 + 고른 과목의 큰 그래프**.
@@ -82,7 +85,7 @@ function Delta({ metric, points }: { metric: TrendMetric; points: TrendPoint[] }
       className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
         good ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"
       }`}
-    >
+ >
       {good ? "▲" : "▼"} {text}
     </span>
   );
@@ -150,7 +153,7 @@ function SummaryCard({
           : "border-slate-200 hover:border-slate-300 hover:shadow-sm"
       }`}
       style={selected ? ({ "--tw-ring-color": s.color } as React.CSSProperties) : undefined}
-    >
+ >
       <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
         <span className="truncate">{s.label}</span>
@@ -360,7 +363,7 @@ function TrendChart({
                       fill={q.p.hasScore ? s.color : "#ffffff"}
                       stroke={official ? "#ffffff" : s.color}
                       strokeWidth={official ? 2 : 2}
-                    />
+ />
                     {official && <circle cx={q.x} cy={q.y} r={(on ? 6 : 5.5) + 2.5} fill="none" stroke={s.color} strokeWidth={1.5} />}
                     {showLabel && mode === "single" && (
                       <text
@@ -401,7 +404,7 @@ function TrendChart({
               fontWeight={hover === i ? 700 : 400}
               textAnchor={dates.length === 1 ? "middle" : i === 0 ? "start" : i === dates.length - 1 ? "end" : "middle"}
               className="tabular-nums"
-            >
+ >
               {fmtDate(d)}
             </text>
           );
@@ -580,7 +583,7 @@ export default function ScoreTrendChart({
     return (
       <div className="flex flex-col gap-3">
         {periodControl}
-        <p className="g-panel px-4 py-6 text-center text-sm text-slate-400">
+        <p className={cn(cardClass, "px-4 py-6 text-center text-sm text-slate-400")}>
           이 기간에는 기록이 없어요. 기간을 넓혀 보세요.
         </p>
       </div>
@@ -606,7 +609,7 @@ export default function ScoreTrendChart({
         ))}
       </div>
 
-      <div className="g-panel flex flex-col gap-3 p-3 sm:p-5">
+      <Card className="flex flex-col gap-3 p-3 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -623,13 +626,14 @@ export default function ScoreTrendChart({
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {shown.length > 1 && (
-              <button
+              <Button
                 type="button"
+                variant={selection === "all" ? "dark" : "outline"}
+                size="xs"
                 onClick={() => setPicked(selection === "all" ? latestKey : "all")}
-                className={`g-btn g-btn-xs ${selection === "all" ? "g-btn-dark" : "g-btn-outline"}`}
               >
                 전체 비교
-              </button>
+              </Button>
             )}
             {hasGrade && hasScore && (
               <div className="g-seg">
@@ -671,7 +675,7 @@ export default function ScoreTrendChart({
         {!isGrade && chartSeries.some((s) => s.points.some((p) => !p.hasScore)) && (
           <p className="text-[11px] text-slate-400">속이 빈 점은 배점이 없어 정답률(%)로 대신한 시험이에요.</p>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

@@ -3722,6 +3722,7 @@ AI 는 자기 할 일 하고, 끝나면 자동으로 번호 인식하고 자동�
   찍기 → 닫기 → 점 하나 지우기)까지 확인했다.
 
 **UI 정리**:
+- **(2026-09-29 이후 이 부품들은 shadcn/ui 컴포넌트로 옮겨 갔다 — 바로 아래 "shadcn/ui" 절.)**
 - **모양은 `globals.css` 의 부품 한 벌에서 정한다**(`g-btn` + `primary/outline/soft/
   ghost/dark` · `g-btn-sm/xs` · `g-input` · `g-panel` · `g-seg`/`g-tabs` · `g-chip` ·
   `g-file`). 화면마다 `rounded-lg bg-blue-600 px-4 py-2 …` 를 따로 적어 버튼 높이·
@@ -3745,6 +3746,56 @@ AI 는 자기 할 일 하고, 끝나면 자동으로 번호 인식하고 자동�
   (제목에 점수를 안 붙인 지 오래다) — 뺐다.
 - 검증: 실제 컴포넌트를 가짜 데이터로 띄워 1280/390px 로 찍어 봤다(가로 스크롤 0).
   **로그인한 실제 화면으로는 못 봤다** — 이 환경에 Supabase 키가 없다.
+
+### shadcn/ui (2026-09-29)
+
+사용자 — "shadcn/ui 반영해줘". 이 저장소에는 화면마다 흩어진 `g-btn`·`g-input`·`g-panel`
+계열이 196곳 있었다. 그걸 shadcn/ui 컴포넌트로 옮기고 앞으로 `npx shadcn add` 로 새
+컴포넌트를 받을 수 있게 기반을 깔았다.
+
+- **기반**: `components.json`(별칭 `@/components/ui`·`@/lib/utils`) · `src/lib/utils.ts` 의 `cn`
+  (clsx + tailwind-merge) · `globals.css` 의 shadcn 토큰(`--background`·`--primary`·`--border` …) ·
+  `tailwind.config.ts` 의 색 매핑 + `tailwindcss-animate`.
+  - 토큰 값은 기존 `--g-*` 를 **HSL 로 계산해 옮겼다**(눈대중이 아니다). 색을 바꿀 때는 `--g-*` 와
+    shadcn 토큰 블록을 함께 고칠 것.
+  - **`tailwind-merge` 는 2.x 여야 한다.** 3.x 는 Tailwind v4 클래스 이름 기준이라 이 저장소(v3.4)
+    에서 `shadow-sm`·`rounded` 같은 단계 이름을 잘못 병합한다.
+  - **`borderRadius` 는 덮어쓰지 않았다.** shadcn 기본 설정은 `lg/md/sm` 을 `--radius` 로 갈아 끼우는데,
+    그러면 화면 곳곳의 기존 `rounded-lg` 가 전부 달라진다. 컴포넌트는 예전과 같은 px 값을 쓴다.
+    같은 이유로 shadcn 의 `* { border-color }` 전역 규칙도 넣지 않았다.
+- **컴포넌트**(`src/components/ui/`): `Button`(variant `primary·outline·soft·ghost·dark·text·plain` ×
+  size `default·sm·xs`, `asChild` 지원) · `buttonVariants()`(`<Link>`·`<a>` 를 버튼처럼 보이게) ·
+  `Input`·`Textarea`·`NativeSelect`(같은 `inputClass`) · `Card`·`cardClass`(`<section>`·`<form>`·`<Link>`
+  처럼 div 가 아닌 태그에 판 모양을 입힐 때 `cn(cardClass, "…")`) · `Badge`.
+  **값은 예전 `g-*` 와 같다** — 화면이 바뀐 것처럼 보이면 안 된다.
+- **옮긴 방법**: TypeScript AST 코드모드로 **정적 className 만** 옮겼다(태그 이름·닫는 태그·속성을 정확히
+  바꾼다 — 문자열 치환이 아니다). 버튼 102 · 링크 버튼 9 · 입력 36 · textarea 2 · select 12 · 판 20(div)
+  + 14(그 밖 태그) · 꼬리표 1. 동적 className 2곳(`BillingStatus`·`ScoreTrendChart`)은 손으로 옮겼다.
+  다 옮긴 `g-btn`·`g-input`·`g-panel`·`g-chip` CSS 는 지웠다(`g-seg`·`g-tabs`·`g-file` 만 남았다).
+- **물린 자리 셋**(전부 비교 측정에서 잡았다):
+  1. **`text-[…]` 크기 클래스가 앞의 `leading-*` 를 지운다.** tailwind-merge 는 둘을 충돌로 본다. 그래서
+     `size="sm"`·`xs` 의 줄 높이가 글자 크기의 1.5배로 떨어져 예전(1.25rem)보다 낮아졌다 — 크기마다
+     `leading-5` 를 다시 적었다.
+  2. **`buttonVariants()` 를 병합 없이 쓰면 링크 버튼 테두리가 사라진다.** cva 는 클래스를 이어 붙이기만
+     해서 바탕의 `border-transparent` 와 변형의 `border-border` 가 둘 다 남고, CSS 에서 뒤에 생성된
+     투명이 이긴다. `buttonVariants` 가 `cn` 으로 병합해서 돌려주게 했다.
+  3. **`enabled:hover:` 는 `<a>` 에 안 붙는다**(`:enabled` 는 폼 요소만). 예전 `:hover:not(:disabled)` 와
+     같게 `[&:not(:disabled)]:hover:` 로 썼다.
+- **검증**: ① 예전 `g-*` 요소와 새 컴포넌트를 나란히 놓고 **계산된 스타일 25개 속성 × 26개 요소 + 호버·포커스
+  9개 상태**를 비교 — 차이 0(전환 중간값 샘플·투명 그림자 3중 표기는 노이즈라 걸렀다). ② 옮기기 전 HEAD 와
+  옮긴 뒤를 **같은 가짜 데이터로 렌더해 화면을 픽셀 비교** — `BillingStatus`·`NewCategoryForm`·`CategoryList`
+  ·`ScoreTrendChart`·`ManualScoreForm`·`GradingPrefsForm`·`CropShapeSetting`·`GradeExamFlow` 를 390·1280px 에서,
+  실모 추가 폼을 펼친 상태·PDF 선택 모드까지 — 차이 0픽셀. ③ `tsc`·`build` 통과.
+  **로그인한 실제 화면으로는 못 봤다**(Supabase 키가 없다). 비교 화면에서 하이드레이션 경고가 났는데 옮기기
+  전 트리에도 똑같이 있어 이번 변경과 무관하다 — 원인은 안 찾았다.
+- **일부러 안 옮긴 것**: 모달·크롭·드래그가 얽힌 화면(`ProblemGallery` 수정 창·`DiagramCropModal`·`BoxEditor`).
+  Radix `Dialog` 는 열리는 동안 `body` 의 포인터 이벤트와 포커스를 가로채는데, 이 앱의 크롭·드래그는 **window 에서
+  pointermove/up 을 직접 받는** 구조라 부딪힐 수 있다 — 브라우저에서 실제 포인터 입력으로 확인할 수 있을 때 하는
+  게 맞다. `g-seg`·`g-tabs`(선택 표시가 `data-active`)도 그대로다 — Radix `Tabs` 는 `role="radiogroup"`·
+  `role="group"` 으로 쓰이던 자리의 뜻을 바꾼다. 필요하면 `npx shadcn add dialog tabs toggle-group` 으로 받아
+  화면 하나씩 옮길 것.
+- **코드모드가 남긴 모양**: 한 태그 안에서 `variant`·`className` 이 앞 속성과 같은 줄에 붙어 있는 곳이 있다
+  (prettier 설정이 없다). 동작에는 영향이 없다.
 
 ### 국어 지문 인식도 서버 대기열에서 (2026-09-25)
 

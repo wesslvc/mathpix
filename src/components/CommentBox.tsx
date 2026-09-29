@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { Textarea } from "@/components/ui/input";
 
 /**
  * 국어 채점 기록의 시험지 전체 메모.
@@ -45,13 +46,13 @@ export default function CommentBox({
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs text-slate-500">메모(시험지 전체)</label>
-      <textarea
+      <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void save()}
         placeholder="예: 3문단 독해가 오래 걸림, 문학 파트 시간 부족"
         rows={2}
-        className="g-input w-full px-2 py-1.5 text-sm"
+        className="w-full px-2 py-1.5 text-sm"
       />
       {saving && <span className="text-xs text-slate-400">저장 중...</span>}
       {!saving && savedAt !== null && (

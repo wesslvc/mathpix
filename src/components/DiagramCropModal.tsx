@@ -5,6 +5,7 @@ import ReactCrop, { type Crop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import { cropImageToDataUrl, fileToDataUrl } from "@/lib/cropImage";
 import type { CropRect } from "@/lib/types";
+import { Button } from "@/components/ui/button";
 
 /**
  * 무엇을 오려내는 중인가. 오려내는 동작은 똑같고 안내 문구와 확인 버튼만 다르다.
@@ -109,7 +110,7 @@ export default function DiagramCropModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onCancel}
-    >
+ >
       <div
         className="flex max-h-[90vh] w-full max-w-6xl flex-col gap-4 overflow-auto rounded-2xl bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -149,13 +150,13 @@ export default function DiagramCropModal({
           >
             📷 카메라로 찍기
           </button>
-          <button
+          <Button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="g-btn g-btn-outline g-btn-sm"
+            variant="outline" size="sm"
           >
             🖼 다른 사진 선택
-          </button>
+          </Button>
           {newPhoto !== null && (
             <span className="text-[11px] text-slate-400">새로 찍은 사진 사용 중</span>
           )}
@@ -221,21 +222,21 @@ export default function DiagramCropModal({
         </div>
 
         <div className="flex justify-end gap-2">
-          <button
+          <Button
             type="button"
             onClick={onCancel}
-            className="g-btn g-btn-outline"
-          >
+            variant="outline"
+ >
             취소
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={handleConfirm}
             disabled={!crop?.width || !crop?.height || isLoading || activeSrc === null}
-            className="g-btn g-btn-primary"
-          >
+            variant="primary"
+ >
             {copy.confirm}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

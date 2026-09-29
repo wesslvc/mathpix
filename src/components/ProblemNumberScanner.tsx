@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { parseProblemNumber } from "@/lib/problemNumber";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 /** 번호를 붙일 대상. 이미 번호가 있는 문제는 넘기지 않는다. */
 export type NumberScanTarget = {
@@ -156,7 +158,7 @@ export default function ProblemNumberScanner({
   if (targets.length === 0) return null;
 
   return (
-    <div className="g-panel flex flex-wrap items-center gap-2 px-4 py-3">
+    <Card className="flex flex-wrap items-center gap-2 px-4 py-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-slate-700">번호 없는 문제 {targets.length}개</p>
         <p className="text-xs text-slate-400">
@@ -169,14 +171,14 @@ export default function ProblemNumberScanner({
         {done && <p className="mt-1 text-sm text-emerald-700">{done}</p>}
         {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
       </div>
-      <button
+      <Button
         type="button"
         onClick={() => void run()}
         disabled={busy !== null}
-        className="g-btn g-btn-soft shrink-0"
+        variant="soft" className="shrink-0"
       >
         {busy ?? "전체 번호 인식"}
-      </button>
-    </div>
+      </Button>
+    </Card>
   );
 }

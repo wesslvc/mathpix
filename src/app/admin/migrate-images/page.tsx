@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 
 /**
  * **PC 없이 Supabase의 그림을 R2로 옮긴다.**
@@ -244,14 +245,14 @@ export default function MigrateImagesPage() {
         </p>
       )}
 
-      <button
+      <Button
         type="button"
         onClick={() => void runCopy()}
         disabled={copyBusy}
-        className="g-btn g-btn-primary self-start"
+        variant="primary" className="self-start"
       >
         {copyBusy ? "복사하는 중..." : "R2로 복사 시작"}
-      </button>
+      </Button>
 
       {copy && (
         <div className="flex flex-col gap-1 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
@@ -294,14 +295,14 @@ export default function MigrateImagesPage() {
             />
             앱에서 그림이 잘 뜨는 것을 확인했고, Supabase 원본을 지우겠습니다.
           </label>
-          <button
+          <Button
             type="button"
             onClick={() => void runDelete()}
             disabled={!confirmed || deleteBusy}
-            className="self-start g-btn bg-red-600 text-white hover:bg-red-700"
+            className="self-start bg-red-600 text-white hover:bg-red-700"
           >
             {deleteBusy ? "지우는 중..." : "Supabase 원본 지우기"}
-          </button>
+          </Button>
         </div>
       )}
 

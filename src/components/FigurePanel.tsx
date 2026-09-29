@@ -4,6 +4,7 @@ import { useState } from "react";
 import DiagramCropModal from "./DiagramCropModal";
 import TokenGauge from "./TokenGauge";
 import type { TokenStatus } from "@/app/api/tokens/route";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   /** 문제를 인식할 때 쓴 사진. null이면 카메라로 새로 찍어서만 쓸 수 있다. */
@@ -58,13 +59,13 @@ export default function FigurePanel({
     <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium text-slate-500">그림 넣기</p>
-        <button
+        <Button
           type="button"
           onClick={() => setShowCrop(true)}
-          className="g-btn g-btn-outline text-xs"
+          variant="outline" className="text-xs"
         >
           + 그림 추가
-        </button>
+        </Button>
       </div>
 
       <TokenGauge
@@ -72,7 +73,7 @@ export default function FigurePanel({
         unlimited={unlimited}
         byok={byok}
         pending={queuedCount * cost}
-      />
+ />
 
       <p className="text-[11px] text-slate-400">
         도형·자료 부분을 오려서 문제에 붙입니다. 원본을 그대로 붙이면 무료이고, AI로
@@ -96,34 +97,34 @@ export default function FigurePanel({
               src={pending}
               alt="오려낸 그림"
               className="max-h-48 w-auto object-contain"
-            />
+ />
           </div>
 
           <p className="text-[11px] text-slate-600">이 그림을 어떻게 넣을까요?</p>
 
           <div className="flex flex-col gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => choose(false)}
-              className="g-btn g-btn-primary w-full text-xs"
+              variant="primary" className="w-full text-xs"
             >
               원본 그대로 붙이기 (무료)
-            </button>
+            </Button>
             <p className="px-1 text-[11px] text-slate-500">
               사진, 현미경 사진, 지도처럼 색이 연속적으로 변하는 자료는 이쪽이
               정확합니다. 다시 그리면 원본에 있던 정보가 오히려 사라집니다.
             </p>
 
-            <button
+            <Button
               type="button"
               onClick={() => choose(true)}
               disabled={!canUseAi || notEnough}
-              className="g-btn g-btn-outline w-full text-xs"
+              variant="outline" className="w-full text-xs"
             >
               AI로 깨끗하게 다시 그리기
               {/* 2026-09-17부터 고정 차감이라 확정 금액을 그대로 적는다. */}
               {unlimited ? " (무제한)" : byok ? " (본인 키 사용)" : ` (${cost}토큰)`}
-            </button>
+            </Button>
             <p className="px-1 text-[11px] text-slate-500">
               선과 글자로 된 도식·그래프·회로도라면 이쪽이 훨씬 깨끗하게
               인쇄됩니다. 누르면 자리부터 잡아두고 뒤에서 그리니 기다리지 않아도
@@ -137,13 +138,13 @@ export default function FigurePanel({
             </p>
           </div>
 
-          <button
+          <Button
             type="button"
             onClick={() => setPending(null)}
-            className="g-btn g-btn-text self-start text-xs"
+            variant="text" className="self-start text-xs"
           >
             취소
-          </button>
+          </Button>
         </div>
       )}
 

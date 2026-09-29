@@ -7,6 +7,7 @@ import {
   diagramStyleCss,
   type DiagramLayout,
 } from "@/lib/diagramLayout";
+import { Button } from "@/components/ui/button";
 
 // 예전 import 경로를 쓰던 곳들이 있어 그대로 다시 내보낸다.
 export {
@@ -110,7 +111,7 @@ export default function DiagramAdjuster({
       <div className="flex items-center justify-between">
         <span
           className={`text-[11px] font-medium text-slate-600 ${busy ? "animate-soft-pulse" : ""}`}
-        >
+ >
           {label}
         </span>
         <div className="flex gap-1">
@@ -119,23 +120,23 @@ export default function DiagramAdjuster({
               type="button"
               onClick={onRetry}
               className="rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
-            >
+ >
               다시 시도
             </button>
           )}
-          <button
+          <Button
             type="button"
             onClick={() => onChange(defaultLayout)}
-            className="g-btn g-btn-outline px-1.5 py-0.5 text-[10px]"
+            variant="outline" className="px-1.5 py-0.5 text-[10px]"
           >
             초기화
-          </button>
+          </Button>
           {onRemove && (
             <button
               type="button"
               onClick={onRemove}
               className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600"
-            >
+ >
               삭제
             </button>
           )}

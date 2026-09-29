@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { BYOK_IMAGE_MODEL_CHOICES } from "@/lib/figureImageGen";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 /**
  * BYOK(Bring Your Own [OpenAI] Key) 패스 설정 — 본인 OpenAI 키 등록·교체·
@@ -107,7 +109,7 @@ export default function ByokSettingsForm() {
   }
 
   return (
-    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
+    <Card className="flex flex-col gap-3 p-4 sm:p-5">
       <div>
         <p className="text-sm font-medium text-slate-700">BYOK 패스 — 본인 OpenAI 키</p>
         <p className="mt-1 text-xs text-slate-400">
@@ -129,7 +131,7 @@ export default function ByokSettingsForm() {
               target="_blank"
               rel="noreferrer"
               className="text-blue-600 underline"
-            >
+ >
               platform.openai.com/api-keys
             </a>
             에 로그인합니다(OpenAI 계정이 없으면 먼저 만듭니다).
@@ -157,14 +159,14 @@ export default function ByokSettingsForm() {
                 className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 autoComplete="off"
               />
-              <button
+              <Button
                 type="button"
                 onClick={saveKey}
                 disabled={saving}
-                className="g-btn g-btn-primary shrink-0"
-              >
+                variant="primary" className="shrink-0"
+ >
                 {hasKey ? "교체" : "등록"}
-              </button>
+              </Button>
             </div>
             {hasKey && (
               <div className="flex items-center justify-between">
@@ -174,7 +176,7 @@ export default function ByokSettingsForm() {
                   onClick={clearKey}
                   disabled={saving}
                   className="text-xs text-red-600 underline disabled:opacity-50"
-                >
+ >
                   키 지우기
                 </button>
               </div>
@@ -207,6 +209,6 @@ export default function ByokSettingsForm() {
 
       {saved && <p className="text-xs text-emerald-600">{saved}</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
-    </div>
+    </Card>
   );
 }

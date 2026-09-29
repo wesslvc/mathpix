@@ -5,6 +5,9 @@ import { createClient } from "@/lib/supabase/client";
 import type { Subject } from "@/lib/gradeSummary";
 import { MATH_ELECTIVES, KOREAN_ELECTIVES, SUBJECT_LABEL } from "@/lib/examSubjects";
 import { ElectiveSelect } from "./GradeExamFlow";
+import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
 
 export type GradingPrefsValue = {
   subject: Subject | null;
@@ -64,7 +67,7 @@ export default function GradingPrefsForm({ initial }: { initial: GradingPrefsVal
   }
 
   return (
-    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
+    <Card className="flex flex-col gap-3 p-4 sm:p-5">
       <p className="text-sm font-medium text-slate-700">기본 과목 설정</p>
       <p className="text-xs text-slate-400">
         자동채점을 시작할 때 아래 값으로 미리 선택돼 있어요. 시험마다 다르면
@@ -96,10 +99,10 @@ export default function GradingPrefsForm({ initial }: { initial: GradingPrefsVal
       {subject === "math" && (
         <label className="flex items-center gap-2 text-sm text-slate-700">
           선택과목
-          <select
+          <NativeSelect
             value={mathElective}
             onChange={(e) => setMathElective(e.target.value)}
-            className="g-input px-2 py-1 text-sm"
+            className="px-2 py-1 text-sm"
           >
             <option value="">고르지 않음</option>
             {MATH_ELECTIVES.map((m) => (
@@ -107,17 +110,17 @@ export default function GradingPrefsForm({ initial }: { initial: GradingPrefsVal
                 {m}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
       )}
 
       {subject === "korean" && (
         <label className="flex items-center gap-2 text-sm text-slate-700">
           선택과목
-          <select
+          <NativeSelect
             value={koreanElective}
             onChange={(e) => setKoreanElective(e.target.value)}
-            className="g-input px-2 py-1 text-sm"
+            className="px-2 py-1 text-sm"
           >
             <option value="">고르지 않음</option>
             {KOREAN_ELECTIVES.map((m) => (
@@ -125,7 +128,7 @@ export default function GradingPrefsForm({ initial }: { initial: GradingPrefsVal
                 {m}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
       )}
 
@@ -177,16 +180,16 @@ export default function GradingPrefsForm({ initial }: { initial: GradingPrefsVal
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex items-center gap-2">
-        <button
+        <Button
           type="button"
           onClick={() => void save()}
           disabled={saving}
-          className="g-btn g-btn-primary g-btn-sm self-start"
+          variant="primary" size="sm" className="self-start"
         >
           {saving ? "저장 중..." : "저장"}
-        </button>
+        </Button>
         {saved && <span className="text-xs text-emerald-600">저장됐어요</span>}
       </div>
-    </div>
+    </Card>
   );
 }

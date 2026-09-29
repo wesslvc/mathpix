@@ -8,6 +8,9 @@ import {
   subjectGroupLabel,
 } from "@/lib/scoreTrend";
 import { normalizeElectiveLabel, SUBJECT_LABEL } from "@/lib/examSubjects";
+import { Input } from "@/components/ui/input";
+import { cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 export type GradeHistoryRow = {
   id: string;
@@ -62,8 +65,8 @@ function Row({ row }: { row: GradeHistoryRow }) {
     <li>
       <Link
         href={`/grades/${row.id}`}
-        className="g-panel flex items-center justify-between gap-3 px-4 py-3 hover:border-blue-300 hover:bg-blue-50"
-      >
+        className={cn(cardClass, "flex items-center justify-between gap-3 px-4 py-3 hover:border-blue-300 hover:bg-blue-50")}
+ >
         <div className="min-w-0">
           {subjectSubline(row) && (
             <p className="truncate text-xs text-slate-400">{subjectSubline(row)}</p>
@@ -176,11 +179,11 @@ export default function GradeHistoryList({ rows }: { rows: GradeHistoryRow[] }) 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <input
+        <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="시험 이름·과목으로 검색 (예: 9월 모평, 생활과 윤리)"
-          className="g-input min-w-0 flex-1 px-3 py-2 text-sm"
+          className="min-w-0 flex-1 px-3 py-2 text-sm"
         />
         {!searching && (
           <div className="flex shrink-0 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
@@ -203,7 +206,7 @@ export default function GradeHistoryList({ rows }: { rows: GradeHistoryRow[] }) 
       </div>
 
       {filtered.length === 0 ? (
-        <p className="g-panel px-4 py-6 text-center text-sm text-slate-400">
+        <p className={cn(cardClass, "px-4 py-6 text-center text-sm text-slate-400")}>
           {rows.length === 0 ? "아직 채점 기록이 없어요." : "검색 결과가 없어요."}
         </p>
       ) : byDate ? (

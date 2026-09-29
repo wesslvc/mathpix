@@ -11,6 +11,9 @@ import {
   SUBJECT_LABEL,
 } from "@/lib/examSubjects";
 import { ElectiveSelect } from "./GradeExamFlow";
+import { Button } from "@/components/ui/button";
+import { Input, NativeSelect } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
 
 const SUBJECTS: readonly Subject[] = ["korean", "math", "english", "elective"];
 
@@ -113,30 +116,30 @@ export default function ManualScoreForm() {
 
   if (!open) {
     return (
-      <button
+      <Button
         type="button"
         onClick={() => setOpen(true)}
-        className="g-btn g-btn-outline g-btn-sm self-start"
+        variant="outline" size="sm" className="self-start"
       >
         + 성적 직접 입력
-      </button>
+      </Button>
     );
   }
 
   return (
-    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
+    <Card className="flex flex-col gap-3 p-4 sm:p-5">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium text-slate-700">성적 직접 입력</p>
-        <button
+        <Button
           type="button"
           onClick={() => {
             reset();
             setOpen(false);
           }}
-          className="g-btn g-btn-outline g-btn-xs"
+          variant="outline" size="xs"
         >
           닫기
-        </button>
+        </Button>
       </div>
       <p className="text-xs text-slate-400">
         채점을 거치지 않고 점수만 남깁니다. 추세 그래프와 채점 기록에 함께
@@ -179,10 +182,10 @@ export default function ManualScoreForm() {
       {(subject === "math" || subject === "korean") && (
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
           선택과목 (선택 입력)
-          <select
+          <NativeSelect
             value={elective}
             onChange={(e) => setElective(e.target.value)}
-            className="g-input px-3 py-2 text-sm text-ink"
+            className="px-3 py-2 text-sm text-ink"
           >
             <option value="">고르지 않음</option>
             {(subject === "math" ? MATH_ELECTIVES : KOREAN_ELECTIVES).map((s) => (
@@ -190,33 +193,33 @@ export default function ManualScoreForm() {
                 {s}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
       )}
 
       <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
         시험 이름 (선택 입력)
-        <input
+        <Input
           value={examName}
           onChange={(e) => setExamName(e.target.value)}
           placeholder="예: 2025학년도 9월 모의평가"
-          className="g-input px-3 py-2 text-sm text-ink placeholder:text-slate-400"
+          className="px-3 py-2 text-sm text-ink placeholder:text-slate-400"
         />
       </label>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
           응시일
-          <input
+          <Input
             type="date"
             value={takenAt}
             onChange={(e) => setTakenAt(e.target.value)}
-            className="g-input px-3 py-2 text-sm text-ink"
+            className="px-3 py-2 text-sm text-ink"
           />
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
           점수 (만점 {max})
-          <input
+          <Input
             type="number"
             inputMode="numeric"
             min={0}
@@ -224,15 +227,15 @@ export default function ManualScoreForm() {
             value={score}
             onChange={(e) => setScore(e.target.value)}
             placeholder={`0~${max}`}
-            className="g-input px-3 py-2 text-sm text-ink placeholder:text-slate-400"
+            className="px-3 py-2 text-sm text-ink placeholder:text-slate-400"
           />
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
           등급 (선택 입력)
-          <select
+          <NativeSelect
             value={grade}
             onChange={(e) => setGrade(e.target.value)}
-            className="g-input px-3 py-2 text-sm text-ink"
+            className="px-3 py-2 text-sm text-ink"
           >
             <option value="">없음</option>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) => (
@@ -240,7 +243,7 @@ export default function ManualScoreForm() {
                 {g}등급
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
       </div>
 
@@ -256,14 +259,14 @@ export default function ManualScoreForm() {
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}
 
-      <button
+      <Button
         type="button"
         onClick={() => void save()}
         disabled={!canSave}
-        className="g-btn g-btn-primary self-start"
+        variant="primary" className="self-start"
       >
         {saving ? "저장 중..." : "저장"}
-      </button>
-    </div>
+      </Button>
+    </Card>
   );
 }

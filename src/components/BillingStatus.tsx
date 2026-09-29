@@ -1,4 +1,7 @@
 import TokenGauge from "./TokenGauge";
+import { buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Props = {
   credits: number;
@@ -39,7 +42,7 @@ export default function BillingStatus({
       <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
         <TokenGauge tokens={credits} className="min-w-[180px]" />
         {checkoutReady && (
-          <a href="/api/checkout?plan=tokens" className="g-btn g-btn-ghost g-btn-xs text-blue-700">
+          <a href="/api/checkout?plan=tokens" className={buttonVariants({ variant: "ghost", size: "xs", className: "text-blue-700" })}>
             충전하기
           </a>
         )}
@@ -73,7 +76,7 @@ export default function BillingStatus({
             ? "border-amber-200 bg-amber-50 text-amber-900"
             : "border-slate-200 bg-white text-slate-700"
         }`}
-      >
+ >
         <p>
           {empty ? (
             <>
@@ -90,9 +93,14 @@ export default function BillingStatus({
         {checkoutReady ? (
           <a
             href="/api/checkout?plan=tokens"
-            className={`g-btn g-btn-sm shrink-0 ${
-              empty ? "bg-amber-600 text-white hover:bg-amber-700" : "g-btn-dark"
-            }`}
+            className={buttonVariants({
+              variant: empty ? "plain" : "dark",
+              size: "sm",
+              className: cn(
+                "shrink-0",
+                empty && "bg-amber-600 text-white hover:bg-amber-700",
+              ),
+            })}
           >
             이용권 구매하기 (+5000토큰)
           </a>
@@ -108,7 +116,7 @@ export default function BillingStatus({
       {/* **+5000토큰 배너 바로 밑에 BYOK를 나란히 안내한다**(사용자 요청).
           토큰이 남아 있어도 본인 OpenAI 키가 있으면 BYOK가 더 유리할 수
           있어 이용권 소진 여부와 무관하게 늘 보여준다. */}
-      <div className="g-panel flex flex-col gap-2 px-4 py-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+      <Card className="flex flex-col gap-2 px-4 py-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
         <p>
           본인 OpenAI 키가 있다면 <span className="font-semibold">BYOK 패스</span>
           (5,250원)로 Mathpix 문제 인식을 무제한 무료로 쓰고, 나머지 기능도
@@ -117,14 +125,14 @@ export default function BillingStatus({
         {byokCheckoutReady ? (
           <a
             href="/api/checkout?plan=byok"
-            className="g-btn g-btn-outline g-btn-sm shrink-0"
-          >
+            className={buttonVariants({ variant: "outline", size: "sm", className: "shrink-0" })}
+ >
             BYOK 패스 구매하기
           </a>
         ) : (
           <span className="shrink-0 text-xs text-slate-400">결제 준비 중</span>
         )}
-      </div>
+      </Card>
       </>
       )}
     </div>

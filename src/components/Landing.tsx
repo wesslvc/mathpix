@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { Card, cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /**
  * 로그아웃 상태로 `/` 에 왔을 때 보여주는 **공개 소개 화면**.
@@ -43,7 +46,7 @@ export default function Landing() {
             publisher: { "@type": "Organization", name: "NEPICA" },
           }),
         }}
-      />
+ />
 
       <main className="mx-auto flex w-full max-w-3xl flex-col gap-16 px-4 pb-16 pt-10">
         {/* ── 첫 화면 ─────────────────────────────────────────────── */}
@@ -56,7 +59,7 @@ export default function Landing() {
             height={96}
             className="h-24 w-24 select-none"
             draggable={false}
-          />
+ />
           <span className="mt-2 font-display text-3xl font-semibold tracking-tight text-ink">
             Reprint<span className="text-gblue">OCR</span>
           </span>
@@ -78,8 +81,8 @@ export default function Landing() {
           <div className="mt-7 flex w-full flex-col items-center gap-3 sm:w-auto sm:flex-row">
             <Link
               href="/login"
-              className="g-btn g-btn-primary w-full px-6 py-3 text-sm sm:w-auto"
-            >
+              className={buttonVariants({ variant: "primary", className: "w-full px-6 py-3 text-sm sm:w-auto" })}
+ >
               무료로 시작하기
             </Link>
             <span className="text-xs text-slate-500">
@@ -150,7 +153,7 @@ export default function Landing() {
         </section>
 
         {/* ── 마무리 ──────────────────────────────────────────────── */}
-        <section className="g-panel flex flex-col items-center gap-4 px-6 py-10 text-center">
+        <section className={cn(cardClass, "flex flex-col items-center gap-4 px-6 py-10 text-center")}>
           <h2 className="text-lg font-semibold text-ink">
             오늘 틀린 문제부터 시작해보세요
           </h2>
@@ -160,8 +163,8 @@ export default function Landing() {
           </p>
           <Link
             href="/login"
-            className="g-btn g-btn-primary px-6 py-3 text-sm"
-          >
+            className={buttonVariants({ variant: "primary", className: "px-6 py-3 text-sm" })}
+ >
             시작하기
           </Link>
         </section>
@@ -178,9 +181,9 @@ function Feature({
   children: React.ReactNode;
 }) {
   return (
-    <div className="g-panel p-5">
+    <Card className="p-5">
       <h3 className="text-sm font-semibold text-ink">{title}</h3>
       <p className="mt-2 text-sm leading-relaxed text-slate-600">{children}</p>
-    </div>
+    </Card>
   );
 }

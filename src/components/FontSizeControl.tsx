@@ -6,6 +6,7 @@ import {
   MIN_FONT_PT,
   normalizeFontPt,
 } from "@/lib/fontSize";
+import { Input } from "@/components/ui/input";
 
 type Props = {
   value: number;
@@ -34,7 +35,7 @@ export default function FontSizeControl({ value, onChange }: Props) {
         </button>
       ))}
       <label className="flex items-center gap-1 pl-1">
-        <input
+        <Input
           type="number"
           value={value}
           min={MIN_FONT_PT}
@@ -42,7 +43,7 @@ export default function FontSizeControl({ value, onChange }: Props) {
           step={0.5}
           onChange={(e) => onChange(normalizeFontPt(e.target.value))}
           aria-label="글자 크기(pt)"
-          className="g-input w-14 rounded px-1.5 py-1 text-right text-xs tabular-nums"
+          className="w-14 rounded px-1.5 py-1 text-right text-xs tabular-nums"
         />
         <span className="text-[11px] text-slate-500">pt</span>
       </label>

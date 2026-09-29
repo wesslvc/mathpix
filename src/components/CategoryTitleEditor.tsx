@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /**
  * 실모 제목(출처)을 그 자리에서 고친다.
@@ -91,17 +93,17 @@ export default function CategoryTitleEditor({
           </span>
         )}
         {examDate && <span className="text-sm text-slate-500">{examDate}</span>}
-        <button
+        <Button
           type="button"
           onClick={() => {
             setDraft(source);
             setDateDraft(examDate ?? "");
             setEditing(true);
           }}
-          className="g-btn g-btn-outline g-btn-xs"
+          variant="outline" size="xs"
         >
           제목·날짜 수정
-        </button>
+        </Button>
       </div>
     );
   }
@@ -109,7 +111,7 @@ export default function CategoryTitleEditor({
   return (
     <div className="mt-1 flex flex-col gap-1">
       <div className="flex items-center gap-2">
-        <input
+        <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -121,9 +123,9 @@ export default function CategoryTitleEditor({
           }}
           disabled={busy}
           autoFocus
-          className="g-input w-64 max-w-full px-3 py-1.5 text-lg font-bold text-ink disabled:opacity-50"
+          className="w-64 max-w-full px-3 py-1.5 text-lg font-bold text-ink disabled:opacity-50"
         />
-        <input
+        <Input
           type="date"
           value={dateDraft}
           onChange={(e) => setDateDraft(e.target.value)}
@@ -136,17 +138,17 @@ export default function CategoryTitleEditor({
           }}
           disabled={busy}
           aria-label="시행일"
-          className="g-input px-2 py-1.5 text-sm text-ink disabled:opacity-50"
+          className="px-2 py-1.5 text-sm text-ink disabled:opacity-50"
         />
-        <button
+        <Button
           type="button"
           onClick={() => void save()}
           disabled={busy}
-          className="g-btn g-btn-primary g-btn-sm"
+          variant="primary" size="sm"
         >
           {busy ? "저장 중..." : "저장"}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={() => {
             setDraft(source);
@@ -154,10 +156,10 @@ export default function CategoryTitleEditor({
             setEditing(false);
           }}
           disabled={busy}
-          className="g-btn g-btn-outline g-btn-sm"
+          variant="outline" size="sm"
         >
           취소
-        </button>
+        </Button>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </div>

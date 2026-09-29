@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { matchFiles, parseCsv, type MatchedItem, type SkippedItem } from "@/lib/bulkImportMatch";
+import { Button } from "@/components/ui/button";
 
 /**
  * 한 요청에 담을 최대 바이트. Vercel Serverless Function 요청 본문은
@@ -148,7 +149,7 @@ export default function BulkMappedImportPanel({
           ? "flex flex-col gap-3"
           : "flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4"
       }
-    >
+ >
       {!embedded && (
         <p className="text-sm font-medium text-slate-700">
           이미지 여러 장 + 정답 CSV로 한 번에 올리기
@@ -207,15 +208,15 @@ export default function BulkMappedImportPanel({
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex items-center gap-2">
-        <button
+        <Button
           type="button"
           disabled={plan.length === 0 || Boolean(busy)}
           onClick={() => void runImport()}
-          className="g-btn g-btn-primary"
+          variant="primary"
         >
           {busy ?? `${plan.length}개 올리기`}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           disabled={Boolean(busy)}
           onClick={() => {
@@ -227,10 +228,10 @@ export default function BulkMappedImportPanel({
             setDone(null);
             setError(null);
           }}
-          className="g-btn g-btn-ghost g-btn-sm"
+          variant="ghost" size="sm"
         >
           {embedded ? "비우기" : "닫기"}
-        </button>
+        </Button>
       </div>
 
       {done && (

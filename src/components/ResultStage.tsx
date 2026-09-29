@@ -42,6 +42,7 @@ import {
   toStoredFigures,
   type StoredBoxRange,
 } from "@/lib/storedFigures";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   result: RecognizeResponse;
@@ -696,14 +697,14 @@ export default function ResultStage({
         {showTextEditor && (
           <div className="mt-2 flex flex-col gap-2">
             <TextEditTabs value={sourceText} onChange={setSourceText} />
-            <button
+            <Button
               type="button"
               onClick={() => setSourceText(result.text || result.latex)}
               disabled={sourceText === (result.text || result.latex)}
-              className="g-btn g-btn-outline g-btn-xs self-start"
+              variant="outline" size="xs" className="self-start"
             >
               인식 결과로 되돌리기
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -731,7 +732,7 @@ export default function ResultStage({
               text={sourceText}
               value={boxOverride}
               onChange={setBoxOverride}
-            />
+ />
           </div>
         )}
       </div>
@@ -838,7 +839,7 @@ export default function ResultStage({
         status={tokenStatus}
         queuedCount={pendingJobCount}
         onAdd={addFigure}
-      />
+ />
 
       {result.confidence !== null && (
         <p className="text-xs text-slate-400">
@@ -870,13 +871,13 @@ export default function ResultStage({
                   <span className="text-blue-700">
                     {autoSaveLeftSec}초 후 자동으로 저장돼요.
                   </span>
-                  <button
+                  <Button
                     type="button"
                     onClick={() => setAutoSaveOff(true)}
-                    className="g-btn g-btn-outline px-1.5 py-0.5"
+                    variant="outline" className="px-1.5 py-0.5"
                   >
                     자동 저장 끄기
-                  </button>
+                  </Button>
                 </>
               ) : (
                 <span className="text-slate-400">
@@ -900,14 +901,14 @@ export default function ResultStage({
           type="button"
           onClick={onRestart}
           className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-        >
+ >
           새 이미지로 시작
         </button>
         <button
           type="button"
           onClick={onBack}
           className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-        >
+ >
           크롭 다시하기
         </button>
         {!isImageOnly && (
@@ -916,14 +917,14 @@ export default function ResultStage({
           type="button"
           onClick={handleCopyLatex}
           className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-        >
+ >
           {copied ? "복사됨!" : "LaTeX 복사"}
         </button>
         <button
           type="button"
           onClick={handleCopyText}
           className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-        >
+ >
           {textCopied ? "복사됨!" : "텍스트 복사"}
         </button>
           </>
@@ -940,22 +941,22 @@ export default function ResultStage({
           </p>
           <div className="flex flex-wrap gap-2">
             {onNext && remainingCount > 0 ? (
-              <button
+              <Button
                 type="button"
                 onClick={onNext}
-                className="g-btn bg-emerald-600 text-white hover:bg-emerald-700"
-              >
+                className="bg-emerald-600 text-white hover:bg-emerald-700"
+ >
                 다음 이미지 → ({remainingCount}장 남음)
-              </button>
+              </Button>
             ) : (
               onAddAnother && (
-                <button
+                <Button
                   type="button"
                   onClick={onAddAnother}
-                  className="g-btn bg-emerald-600 text-white hover:bg-emerald-700"
-                >
+                  className="bg-emerald-600 text-white hover:bg-emerald-700"
+ >
                   + 다음 문제 추가
-                </button>
+                </Button>
               )
             )}
           </div>
@@ -965,29 +966,29 @@ export default function ResultStage({
       {/* 주요 액션: 결과를 실제로 저장/출력하는 버튼만 모아 눈에 띄게 둔다. */}
       <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
         {onNext && remainingCount > 0 && (
-          <button
+          <Button
             type="button"
             onClick={onNext}
-            className="g-btn g-btn-primary"
-          >
+            variant="primary"
+ >
             다음 이미지 → ({remainingCount}장 남음)
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type="button"
           onClick={handleExport}
           disabled={isExporting}
-          className="g-btn g-btn-outline"
-        >
+          variant="outline"
+ >
           {isExporting ? "저장 중..." : "이미지로 저장"}
-        </button>
+        </Button>
         {onSaveToCategory && (
-          <button
+          <Button
             type="button"
             onClick={handleSaveToCategory}
             disabled={isSaving || (savedId !== null && !dirty)}
-            className="g-btn bg-emerald-600 text-white hover:bg-emerald-700"
-          >
+            className="bg-emerald-600 text-white hover:bg-emerald-700"
+ >
             {isSaving
               ? "저장 중..."
               : savedId === null
@@ -995,7 +996,7 @@ export default function ResultStage({
                 : dirty
                   ? "수정 내용 저장"
                   : "저장됨!"}
-          </button>
+          </Button>
         )}
       </div>
     </div>

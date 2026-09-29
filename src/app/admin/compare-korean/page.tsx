@@ -37,6 +37,9 @@ import {
   richToPlainText,
   type RichBlock,
 } from "@/lib/kice/richText";
+import { Button } from "@/components/ui/button";
+import { cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /**
  * **국어 지문 인식 비교** — 무제한 계정 전용 시험 화면.
@@ -548,7 +551,7 @@ export default function CompareKoreanPage() {
         </p>
       </div>
 
-      <section className="g-panel flex flex-col gap-3 p-4 sm:p-5">
+      <section className={cn(cardClass, "flex flex-col gap-3 p-4 sm:p-5")}>
         <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
           지문 사진
           <input
@@ -625,7 +628,7 @@ export default function CompareKoreanPage() {
                 type="button"
                 onClick={runDetect}
                 className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white"
-              >
+ >
                 위치 찾기
               </button>
             </div>
@@ -635,7 +638,7 @@ export default function CompareKoreanPage() {
                   <li
                     key={run.id}
                     className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-slate-50 px-2 py-1"
-                  >
+ >
                     <span className="font-mono text-slate-800">{run.label}</span>
                     {run.state === "running" && <Elapsed since={run.since} />}
                     {run.state === "error" && (
@@ -755,8 +758,8 @@ export default function CompareKoreanPage() {
           return (
             <section
               key={reader.key}
-              className="g-panel flex min-w-0 flex-col gap-3 p-4 sm:p-5"
-            >
+              className={cn(cardClass, "flex min-w-0 flex-col gap-3 p-4 sm:p-5")}
+ >
               <h2 className="font-semibold text-slate-900">{readerTitle(reader)}</h2>
               <div className="flex flex-wrap items-end gap-1 text-xs">
                 {EFFORTS.map((e) => (
@@ -789,14 +792,14 @@ export default function CompareKoreanPage() {
         })}
       </div>
 
-      <button
+      <Button
         type="button"
         disabled={!file || busy}
         onClick={run}
-        className="g-btn g-btn-primary self-start"
-      >
+        variant="primary" className="self-start"
+ >
         {busy ? "읽는 중…" : "두 강도로 읽고 PDF 만들기"}
-      </button>
+      </Button>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </main>
   );
@@ -854,7 +857,7 @@ function ResultView({ result }: { result: Result }) {
         href={result.pdfUrl}
         download={`지문비교_${result.model.replace(/[^\w.-]+/g, "_")}.pdf`}
         className="self-start rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-      >
+ >
         PDF 받기
       </a>
       <details className="text-xs">

@@ -14,6 +14,9 @@ import { stripCardBorder } from "@/lib/kice/stripBorder";
 import { KICE_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
 import { groupKoreanSets, type KoreanMeta } from "@/lib/koreanSet";
 import type { KoreanPassage, KoreanSetIn } from "@/lib/kice/koreanLayout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
 
 /**
  * 평가원 문제지 양식으로 내보내기.
@@ -245,7 +248,7 @@ export default function KiceExportPanel({ title, items }: Props) {
   }
 
   return (
-    <div className="g-panel flex flex-col gap-4 p-4 sm:p-5">
+    <Card className="flex flex-col gap-4 p-4 sm:p-5">
       <div className="flex flex-col gap-2">
         <span className="text-sm font-medium text-slate-700">영역</span>
         <div className="flex flex-wrap gap-1">
@@ -318,7 +321,7 @@ export default function KiceExportPanel({ title, items }: Props) {
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
             <span className="text-xs text-slate-500">쪽마다 문제 수(1→4쪽):</span>
             {tamguPattern.map((value, i) => (
-              <input
+              <Input
                 key={i}
                 type="text"
                 inputMode="numeric"
@@ -327,7 +330,7 @@ export default function KiceExportPanel({ title, items }: Props) {
                   const digits = e.target.value.replace(/[^0-9]/g, "");
                   setTamguPattern((cur) => cur.map((v, idx) => (idx === i ? digits : v)));
                 }}
-                className="g-input w-12 rounded px-2 py-1 text-center text-sm"
+                className="w-12 rounded px-2 py-1 text-center text-sm"
               />
             ))}
             <span className={`text-xs ${tamguSum === 20 ? "text-emerald-600" : "text-amber-600"}`}>
@@ -373,15 +376,15 @@ export default function KiceExportPanel({ title, items }: Props) {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex justify-end">
-        <button
+        <Button
           type="button"
           onClick={generate}
           disabled={busy || items.length === 0}
-          className="g-btn g-btn-primary px-5 py-2.5 text-sm"
-        >
+          variant="primary" className="px-5 py-2.5 text-sm"
+ >
           {busy ? "PDF 만드는 중..." : "평가원 양식 PDF 만들기"}
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }

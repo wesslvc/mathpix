@@ -3,6 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 function todayString(): string {
   const d = new Date();
@@ -88,27 +92,27 @@ export default function NewCategoryForm({
 
   if (!isOpen) {
     return (
-      <button
+      <Button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="g-btn g-btn-primary self-start"
+        variant="primary" className="self-start"
       >
         + 실모 추가
-      </button>
+      </Button>
     );
   }
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="g-panel flex w-full flex-col gap-3 p-4 sm:p-5"
-    >
-      <input
+      className={cn(cardClass, "flex w-full flex-col gap-3 p-4 sm:p-5")}
+ >
+      <Input
         autoFocus
         value={source}
         onChange={(e) => setSource(e.target.value)}
         placeholder="출처 (예: 강대모의고사 2회, 2025학년도 6월 모의평가)"
-        className="g-input w-full px-3 py-2 text-sm"
+        className="w-full px-3 py-2 text-sm"
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -125,12 +129,12 @@ export default function NewCategoryForm({
         {isExam && (
           <label className="flex items-center gap-1.5 text-sm text-slate-700">
             점수
-            <input
+            <Input
               type="number"
               value={score}
               onChange={(e) => setScore(e.target.value)}
               placeholder="예: 96"
-              className="g-input w-24 px-2 py-1 text-sm"
+              className="w-24 px-2 py-1 text-sm"
             />
             <span className="text-slate-400">/ 100</span>
           </label>
@@ -138,33 +142,33 @@ export default function NewCategoryForm({
 
         <label className="flex items-center gap-1.5 text-sm text-slate-700">
           시행일
-          <input
+          <Input
             type="date"
             value={examDate}
             onChange={(e) => setExamDate(e.target.value)}
-            className="g-input px-2 py-1 text-sm"
+            className="px-2 py-1 text-sm"
           />
         </label>
       </div>
 
       <div className="flex gap-2">
-        <button
+        <Button
           type="button"
           onClick={() => {
             reset();
             setIsOpen(false);
           }}
-          className="g-btn g-btn-outline"
+          variant="outline"
         >
           취소
-        </button>
-        <button
+        </Button>
+        <Button
           type="submit"
           disabled={isSubmitting || !source.trim()}
-          className="g-btn g-btn-primary"
-        >
+          variant="primary"
+ >
           {isSubmitting ? "추가 중..." : "추가"}
-        </button>
+        </Button>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </form>

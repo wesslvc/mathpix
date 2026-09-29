@@ -25,6 +25,8 @@ import GradeLinkPanel from "@/components/GradeLinkPanel";
 import AnswerKeyPanel from "@/components/AnswerKeyPanel";
 import ProblemNumberScanner from "@/components/ProblemNumberScanner";
 import { readKoreanMeta } from "@/lib/koreanSet";
+import { buttonVariants } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 /**
  * 목록 조회에서 실제로 받아오는 모양.
@@ -276,9 +278,9 @@ export default async function CategoryPage({
               linkedGrades?.[0] ? examMaxScore(linkedGrades[0].subject) : 100,
             )}
             examDate={category.exam_date}
-          />
+ />
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <span className="g-chip">문제 {problems?.length ?? 0}개</span>
+            <Badge >문제 {problems?.length ?? 0}개</Badge>
             {/* 잔량은 한 줄로(BillingStatus 참고). 바닥나면 배너가 된다. */}
             <BillingStatus
               compact
@@ -287,10 +289,10 @@ export default async function CategoryPage({
               byok={access.byok}
               checkoutReady={isCheckoutReady()}
               byokCheckoutReady={isByokCheckoutReady()}
-            />
+ />
           </div>
         </div>
-        <Link href={`/export?ids=${category.id}`} className="g-btn g-btn-primary shrink-0 self-start">
+        <Link href={`/export?ids=${category.id}`} className={buttonVariants({ variant: "primary", className: "shrink-0 self-start" })}>
           PDF 만들기
         </Link>
       </header>
@@ -305,8 +307,8 @@ export default async function CategoryPage({
               <Link
                 key={g.id}
                 href={`/grades/${g.id}`}
-                className="g-btn g-btn-outline g-btn-xs"
-              >
+                className={buttonVariants({ variant: "outline", size: "xs" })}
+ >
                 {g.exam_name || `${SUBJECT_LABEL[g.subject]}${g.elective_label ? ` · ${g.elective_label}` : ""}`}
                 {g.score != null && <> · {g.score}점</>}
                 {uploadedCountByGrade.get(g.id) ? (

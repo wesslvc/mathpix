@@ -5,6 +5,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import LinkCategoryPicker from "./LinkCategoryPicker";
 import CommentBox from "./CommentBox";
+import { NativeSelect } from "@/components/ui/input";
 
 type Props = {
   examScoreId: string;
@@ -48,10 +49,10 @@ export default function GradeDetailActions({
     <div className="flex flex-col gap-3">
       <label className="flex items-center gap-2 text-sm text-slate-700">
         등급
-        <select
+        <NativeSelect
           value={level ?? ""}
           onChange={(e) => void updateLevel(e.target.value === "" ? null : Number(e.target.value))}
-          className="g-input px-2 py-1 text-sm"
+          className="px-2 py-1 text-sm"
         >
           <option value="">미입력</option>
           {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) => (
@@ -59,7 +60,7 @@ export default function GradeDetailActions({
               {g}등급
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
 
       {/* 실모 연결은 항상 보여준다 — 만점을 받았거나(오답 업로드가 필요

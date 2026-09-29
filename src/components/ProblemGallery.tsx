@@ -66,6 +66,8 @@ import {
   toAnswerType,
   type AnswerType,
 } from "@/lib/answer";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export type GalleryProblem = {
   id: string;
@@ -176,7 +178,7 @@ function NumberInput({
 
   return (
     <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
-      <input
+      <Input
         value={draft}
         onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
         onBlur={commit}
@@ -188,7 +190,7 @@ function NumberInput({
         inputMode="numeric"
         placeholder="—"
         aria-label="문제 번호"
-        className="g-input w-11 rounded px-1 py-1.5 text-center text-xs text-ink disabled:opacity-40"
+        className="w-11 rounded px-1 py-1.5 text-center text-xs text-ink disabled:opacity-40"
       />
       번
     </label>
@@ -846,14 +848,14 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       >
         잠금 해제
       </button>
-      <button
+      <Button
         type="button"
         onClick={() => remove(problem)}
         disabled={busyId === problem.id}
-        className="g-btn g-btn-outline g-btn-sm shrink-0"
+        variant="outline" size="sm" className="shrink-0"
       >
         삭제
-      </button>
+      </Button>
     </>
   );
 
@@ -871,17 +873,17 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       <a
         href={problem.imageUrl}
         download={downloadName(problem, index)}
-        className="g-btn g-btn-outline g-btn-sm"
-      >
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+ >
         다운로드
       </a>
-      <button
+      <Button
         type="button"
         onClick={() => openEdit(problem)}
-        className="g-btn g-btn-outline g-btn-sm"
+        variant="outline" size="sm"
       >
         수정
-      </button>
+      </Button>
       <button
         type="button"
         onClick={() => remove(problem)}
@@ -927,7 +929,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
               className={`flex items-center gap-2 px-2 py-1.5 ${
                 busyId === problem.id ? "opacity-50" : ""
               }`}
-            >
+ >
               <NumberInput
                 value={problem.number ?? parseProblemNumber(problem.text)}
                 disabled={busyId === problem.id}
@@ -942,7 +944,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                 className={`h-10 w-14 shrink-0 rounded border border-slate-200 object-cover object-top ${
                   problem.debt ? "blur-[3px]" : ""
                 }`}
-              />
+ />
               <span className="min-w-0 flex-1 truncate text-xs text-slate-600">
                 {/* 지문은 문제가 아니다. 번호가 없는 게 정상이라, 없다고
                     알려 주는 대신 지문이라고 알려 준다. */}
@@ -968,7 +970,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                   href={`/grades/${problem.gradeId}`}
                   title="이 문제가 나온 채점 기록 보기"
                   className="shrink-0 rounded border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-100"
-                >
+ >
                   채점 연동
                 </Link>
               )}
@@ -989,7 +991,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
             <div
               key={problem.id}
               className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
-            >
+ >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={problem.imageUrl}
@@ -998,7 +1000,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                 className={`w-full rounded object-contain ${
                   problem.debt ? "blur-md" : ""
                 }`}
-              />
+ />
               <div className="flex flex-wrap items-center justify-between gap-1 px-1 pb-1">
                 {!problem.debt && (
                   <NumberInput
@@ -1100,7 +1102,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                     <span className="shrink-0 text-xs font-medium text-slate-500">
                       정답
                     </span>
-                    <input
+                    <Input
                       value={editAnswer}
                       onChange={(e) => setEditAnswer(e.target.value)}
                       placeholder={
@@ -1108,7 +1110,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                           ? "예: 3 → ③으로 표기"
                           : "예: 12"
                       }
-                      className="g-input min-w-0 flex-1 px-3 py-1.5 text-sm"
+                      className="min-w-0 flex-1 px-3 py-1.5 text-sm"
                     />
                   </label>
                   {/* 설명 글에 `min-w-[14rem]` 을 준다 — 자리가 그만큼 없으면
@@ -1118,14 +1120,14 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                     <span className="shrink-0 text-xs font-medium text-slate-500">
                       문제 번호
                     </span>
-                    <input
+                    <Input
                       value={editNumber}
                       onChange={(e) =>
                         setEditNumber(e.target.value.replace(/[^0-9]/g, ""))
                       }
                       inputMode="numeric"
                       placeholder="비우면 자동"
-                      className="g-input w-24 px-3 py-1.5 text-sm"
+                      className="w-24 px-3 py-1.5 text-sm"
                     />
                     <span className="min-w-[14rem] flex-1 text-[11px] text-slate-400">
                       인쇄물에 찍히는 번호입니다. 비우면 본문에서 뽑거나
@@ -1136,14 +1138,14 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                     <span className="shrink-0 text-xs font-medium text-slate-500">
                       배점
                     </span>
-                    <input
+                    <Input
                       value={editPoints}
                       onChange={(e) =>
                         setEditPoints(e.target.value.replace(/[^0-9]/g, ""))
                       }
                       inputMode="numeric"
                       placeholder="비우면 없음"
-                      className="g-input w-24 px-3 py-1.5 text-sm"
+                      className="w-24 px-3 py-1.5 text-sm"
                     />
                     <span className="min-w-[14rem] flex-1 text-[11px] text-slate-400">
                       이 문제의 배점(점). 자동채점에서 못 읽었거나 나중에
@@ -1166,7 +1168,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                       text={editText}
                       value={editBox}
                       onChange={setEditBox}
-                    />
+ />
                   </div>
                 )}
               </div>
@@ -1179,7 +1181,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                   <FontSizeControl
                     value={editFontPt}
                     onChange={setEditFontPt}
-                  />
+ />
                 </div>
                 {/* 휴대폰에서 가로로 밀지 않고 한눈에 보이도록 축소한다.
                     카드 너비는 고정이라 저장되는 결과는 달라지지 않는다. */}
@@ -1209,13 +1211,13 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                       옮길 수 있어요. 같은 자리에 둘을 놓고 “옆으로 나란히”를
                       켜면 가로로 놓입니다.
                     </p>
-                    <button
+                    <Button
                       type="button"
                       onClick={() => setCropTarget({ mode: "add" })}
-                      className="g-btn g-btn-outline g-btn-xs shrink-0"
+                      variant="outline" size="xs" className="shrink-0"
                     >
                       그림 추가
-                    </button>
+                    </Button>
                   </div>
                   {cardFigures.map((f) => {
                     const job = jobs.find((j) => j.id === f.id);
@@ -1249,14 +1251,14 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                           // 같은 사진을 다시 인식(`reReadPassage`, 5토큰)한다.
                           <div className="flex flex-col gap-1.5 pl-1">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <button
+                              <Button
                                 type="button"
                                 onClick={() => reReadPassage(f.origin ?? raster)}
                                 disabled={passageBusy}
-                                className="g-btn g-btn-outline g-btn-xs"
+                                variant="outline" size="xs"
                               >
                                 다시 인식하기
-                              </button>
+                              </Button>
                               {!passageStatus && (
                                 <span className="text-[11px] text-slate-400">
                                   {editKoreanBlocks
@@ -1272,7 +1274,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                         )}
                         {f.kind !== "table" && raster && !isPassage && (
                           <div className="flex flex-wrap items-center gap-1.5 pl-1">
-                            <button
+                            <Button
                               type="button"
                               onClick={() =>
                                 setCropTarget({
@@ -1282,10 +1284,10 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 })
                               }
                               disabled={busy}
-                              className="g-btn g-btn-outline g-btn-xs"
+                              variant="outline" size="xs"
                             >
                               다시 오려내기
-                            </button>
+                            </Button>
                             {/* **지시가 없으면 원본**을 보낸다 — AI 결과를 또
                                 AI 에 넣으면 원본에서 멀어지기만 한다. **지시가
                                 있으면 지금 보이는 그림**(AI 결과 포함)을 보낸다
@@ -1293,7 +1295,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 방금 나온 결과를 고쳐 달라는 뜻이라, 원본부터
                                 다시 그리면 사용자가 이미 확인한 결과와 동떨어진
                                 그림이 나올 수 있다(사용자 요청, 2026-09-19). */}
-                            <button
+                            <Button
                               type="button"
                               onClick={() =>
                                 requestRedraw(
@@ -1302,19 +1304,19 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 )
                               }
                               disabled={busy || (f.ai === true && !f.origin)}
-                              className="g-btn g-btn-outline g-btn-xs"
+                              variant="outline" size="xs"
                             >
                               {busy ? "다시 그리는 중..." : "AI로 다시 그리기"}
-                            </button>
+                            </Button>
                             {f.origin && (
-                              <button
+                              <Button
                                 type="button"
                                 onClick={() => revertToOrigin(f.id)}
                                 disabled={busy}
-                                className="g-btn g-btn-outline g-btn-xs"
+                                variant="outline" size="xs"
                               >
                                 원본으로 되돌리기
-                              </button>
+                              </Button>
                             )}
                             {f.ai === true && !f.origin && (
                               <span className="text-[11px] text-slate-400">
@@ -1367,22 +1369,22 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
             {editError && <p className="text-sm text-red-600">{editError}</p>}
 
             <div className="flex justify-end gap-2">
-              <button
+              <Button
                 type="button"
                 onClick={() => setEditing(null)}
                 disabled={isSaving}
-                className="g-btn g-btn-outline"
+                variant="outline"
               >
                 취소
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={saveEdit}
                 disabled={isSaving}
-                className="g-btn g-btn-primary"
-              >
+                variant="primary"
+ >
                 {isSaving ? "저장 중..." : "저장"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

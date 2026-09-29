@@ -11,6 +11,10 @@ import {
 } from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
 import DeleteCategoryButton from "@/components/DeleteCategoryButton";
+import { Button } from "@/components/ui/button";
+import { Input, NativeSelect } from "@/components/ui/input";
+import { Card, cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 const NO_FOLDER = "__none__";
 
@@ -228,7 +232,7 @@ export default function CategoryList({
     );
 
     return (
-      <div className="g-panel group flex items-center gap-3 px-4 py-3.5 transition hover:border-blue-300 hover:shadow">
+      <Card className="group flex items-center gap-3 px-4 py-3.5 transition hover:border-blue-300 hover:shadow">
         {picking && (
           <input
             type="checkbox"
@@ -273,13 +277,13 @@ export default function CategoryList({
           <summary
             className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 [&::-webkit-details-marker]:hidden"
             aria-label={`${label} 더보기`}
-          >
+ >
             ⋯
           </summary>
           <div className="absolute right-0 top-9 z-20 flex w-52 flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
             <label className="flex flex-col gap-1 text-xs text-slate-500">
               폴더로 옮기기
-              <select
+              <NativeSelect
                 value={category.folder_id ?? NO_FOLDER}
                 onChange={(e) =>
                   void moveCategory(
@@ -287,7 +291,7 @@ export default function CategoryList({
                     e.target.value === NO_FOLDER ? null : e.target.value,
                   )
                 }
-                className="g-input rounded px-2 py-1.5 text-sm text-ink"
+                className="rounded px-2 py-1.5 text-sm text-ink"
               >
                 <option value={NO_FOLDER}>폴더 없음</option>
                 {folders.map((f) => (
@@ -295,14 +299,14 @@ export default function CategoryList({
                     {f.name}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <div className="border-t border-slate-100 pt-2">
               <DeleteCategoryButton categoryId={category.id} label={label} />
             </div>
           </div>
         </details>
-      </div>
+      </Card>
     );
   }
 
@@ -313,23 +317,23 @@ export default function CategoryList({
       {/* 검색과 도구를 한 줄에 둔다. 예전에는 안내 문구 한 줄 + PDF 버튼 한
           줄 + 검색 한 줄 + 폴더 만들기 한 줄로 **네 줄**이 목록 위를 차지했다. */}
       <div className="flex flex-wrap items-center gap-2">
-        <input
+        <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="실모 이름으로 검색"
           // 좁은 화면에서는 검색칸이 한 줄을 통째로 쓰고 버튼 둘이 아랫줄에
           // 나란히 선다. 셋을 한 줄에 욱여넣으면 버튼 하나만 아래로 떨어져
           // 줄이 어정쩡하게 갈린다(휴대폰에서 실제로 그랬다).
-          className="g-input w-full min-w-[12rem] px-3 py-2 text-sm sm:w-auto sm:flex-1"
+          className="w-full min-w-[12rem] px-3 py-2 text-sm sm:w-auto sm:flex-1"
         />
         {!currentFolder && !creatingFolder && (
-          <button
+          <Button
             type="button"
             onClick={() => setCreatingFolder(true)}
-            className="g-btn g-btn-outline shrink-0"
+            variant="outline" className="shrink-0"
           >
             + 폴더
-          </button>
+          </Button>
         )}
         <button
           type="button"
@@ -379,14 +383,14 @@ export default function CategoryList({
               선택 해제
             </button>
           </div>
-          <button
+          <Button
             type="button"
             onClick={exportSelected}
             disabled={resolvedIds.size === 0}
-            className="g-btn g-btn-primary g-btn-sm"
-          >
+            variant="primary" size="sm"
+ >
             PDF 만들기
-          </button>
+          </Button>
         </div>
       )}
 
@@ -418,11 +422,11 @@ export default function CategoryList({
           <div className="flex items-center gap-2">
             {renamingFolder ? (
               <>
-                <input
+                <Input
                   autoFocus
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
-                  className="g-input rounded px-2 py-1 text-sm"
+                  className="rounded px-2 py-1 text-sm"
                 />
                 <button
                   type="button"
@@ -450,7 +454,7 @@ export default function CategoryList({
                   <summary
                     className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 [&::-webkit-details-marker]:hidden"
                     aria-label="폴더 더보기"
-                  >
+ >
                     ⋯
                   </summary>
                   <div className="absolute right-0 top-9 z-20 flex w-40 flex-col rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
@@ -498,7 +502,7 @@ export default function CategoryList({
         <div className="flex flex-col gap-4">
           {creatingFolder && (
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 autoFocus
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
@@ -510,16 +514,16 @@ export default function CategoryList({
                   }
                 }}
                 placeholder="폴더 이름"
-                className="g-input px-3 py-1.5 text-sm"
+                className="px-3 py-1.5 text-sm"
               />
-              <button
+              <Button
                 type="button"
                 disabled={working || !newFolderName.trim()}
                 onClick={() => void createFolder()}
-                className="g-btn g-btn-primary g-btn-sm"
+                variant="primary" size="sm"
               >
                 만들기
-              </button>
+              </Button>
               <button
                 type="button"
                 onClick={() => {
@@ -588,8 +592,8 @@ export default function CategoryList({
                   <Link
                     key={folder.id}
                     href={`/?folder=${folder.id}`}
-                    className="g-panel flex items-center gap-2 px-3 py-3 transition hover:border-blue-300 hover:bg-blue-50"
-                  >
+                    className={cn(cardClass, "flex items-center gap-2 px-3 py-3 transition hover:border-blue-300 hover:bg-blue-50")}
+ >
                     {cardContent}
                   </Link>
                 );

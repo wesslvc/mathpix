@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pointInPoly, rectPoly, regionFromPoly, type Pt } from "@/lib/polygon";
 import type { CropShape } from "@/lib/cropShape";
+import { Button } from "@/components/ui/button";
 
 /**
  * 사진 위에 영역을 **그리고 · 옮기고 · 크기를 고치는** 편집기. 네모와 다각형을
@@ -446,7 +447,7 @@ export default function BoxEditor({
           // 고른 묶음은 테두리로 표시한다(색을 바꾸면 지문/문제 구분과 섞인다).
           outline: picked?.has(b.group) ? "2px solid #f59e0b" : undefined,
         }}
-      >
+ >
         <button
           type="button"
           onPointerDown={(e) => e.stopPropagation()}
@@ -506,7 +507,7 @@ export default function BoxEditor({
           className="pointer-events-none absolute inset-0 h-full w-full"
           viewBox="0 0 1 1"
           preserveAspectRatio="none"
-        >
+ >
           {/* 하나뿐인 화면에서는 다각형 바깥을 어둡게 — 네모일 때와 같은 표시다. */}
           {single &&
             shown
@@ -554,7 +555,7 @@ export default function BoxEditor({
               <div
                 className="pointer-events-none absolute"
                 style={{ left: pct(b.x), top: pct(b.y), width: pct(b.w), height: 0 }}
-              >
+ >
                 <div className="pointer-events-auto">{labelChip(b, i)}</div>
               </div>
               {(single || activeId === b.id) &&
@@ -573,7 +574,7 @@ export default function BoxEditor({
                         <span
                           className="h-2.5 w-2.5 rounded-full border bg-white/80"
                           style={{ borderColor: colorFor(b) }}
-                        />
+ />
                       </span>
                       {/* 점 — 끌어 옮긴다. 누르면 골라지고 × 가 뜬다. */}
                       <span
@@ -584,7 +585,7 @@ export default function BoxEditor({
                         <span
                           className={`h-3.5 w-3.5 rounded-full border-2 bg-white shadow ${sel ? "scale-125" : ""}`}
                           style={{ borderColor: colorFor(b) }}
-                        />
+ />
                       </span>
                       {sel && b.poly!.length > 3 && (
                         <button
@@ -662,31 +663,31 @@ export default function BoxEditor({
           {path ? (
             <>
               <span className="font-medium text-slate-700">점 {path.length}개</span>
-              <button
+              <Button
                 type="button"
                 onClick={finishPath}
                 disabled={path.length < 3}
-                className="g-btn g-btn-primary g-btn-xs"
+                variant="primary" size="xs"
               >
                 완료
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => setPathBoth(path.length > 1 ? path.slice(0, -1) : null)}
-                className="g-btn g-btn-outline g-btn-xs"
+                variant="outline" size="xs"
               >
                 점 하나 취소
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   setPathBoth(null);
                   setHover(null);
                 }}
-                className="g-btn g-btn-ghost g-btn-xs"
+                variant="ghost" size="xs"
               >
                 그만 그리기
-              </button>
+              </Button>
             </>
           ) : (
             <span>

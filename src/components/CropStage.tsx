@@ -9,6 +9,7 @@ import { cropRegionToDataUrl, rectPoly, type Region } from "@/lib/polygon";
 import { useCropShape } from "@/lib/cropShape";
 import BoxEditor, { type EditBox } from "./BoxEditor";
 import CropShapeToggle from "./CropShapeToggle";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   imageSrc: string;
@@ -144,25 +145,25 @@ export default function CropStage({
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <CropShapeToggle value={shape} onChange={setShape} />
-          <button type="button" onClick={() => setTurns((t) => t + 1)} className="g-btn g-btn-outline g-btn-sm">
+          <Button type="button" onClick={() => setTurns((t) => t + 1)} variant="outline" size="sm">
             ↻ 돌리기
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={() => setRegion({ x: 0.02, y: 0.02, w: 0.96, h: 0.96 })}
-            className="g-btn g-btn-outline g-btn-sm"
+            variant="outline" size="sm"
           >
             전체
-          </button>
+          </Button>
           {shape === "poly" && (
-            <button
+            <Button
               type="button"
               onClick={() => setRegion(null)}
-              className="g-btn g-btn-outline g-btn-sm"
+              variant="outline" size="sm"
               title="지우고 점을 새로 찍습니다"
             >
               새로 그리기
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -211,49 +212,49 @@ export default function CropStage({
           스크롤하지 않게. 여러 장을 넣을 때 가장 자주 누르는 자리다. */}
       <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-2 border-t border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:flex-row sm:items-center sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
         <div className="flex items-center gap-1 sm:mr-auto">
-          <button type="button" onClick={onCancel} className="g-btn g-btn-ghost g-btn-sm">
+          <Button type="button" onClick={onCancel} variant="ghost" size="sm">
             닫기
-          </button>
+          </Button>
           {onSkip && (
-            <button type="button" onClick={onSkip} className="g-btn g-btn-ghost g-btn-sm" title="이 사진은 나중에 자릅니다">
+            <Button type="button" onClick={onSkip} variant="ghost" size="sm" title="이 사진은 나중에 자릅니다">
               건너뛰기
-            </button>
+            </Button>
           )}
         </div>
         {/* 휴대폰에서는 세 칸으로 나란히 — 한 손으로 연달아 누르는 자리다. */}
         <div className="grid grid-cols-3 gap-2 sm:flex">
           {/* 이미 깨끗한 인쇄물이면 다시 그릴 이유가 없다. 인식도 생성도 하지 않으므로
               여기서 드는 것은 번호를 읽는 비용뿐이다. */}
-          <button
+          <Button
             type="button"
             onClick={() => handleConfirm("asis")}
             disabled={!ready}
-            className="g-btn g-btn-outline whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm"
+            variant="outline" className="whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm"
           >
             원본 그대로
-          </button>
+          </Button>
           {/* 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다
               통째로 다시 그리는 편이 원본에 가깝다. */}
-          <button
+          <Button
             type="button"
             onClick={() => handleConfirm("problem")}
             disabled={!ready}
-            className="g-btn g-btn-soft flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
+            variant="soft" className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
           >
             AI로 다시 그리기
             {typeof problemTokenCost === "number" && !unlimited && !byok && (
               <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{problemTokenCost}토큰</span>
             )}
             {byok && <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">본인 키</span>}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={() => handleConfirm("ocr")}
             disabled={!ready}
-            className="g-btn g-btn-primary whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm"
+            variant="primary" className="whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm"
           >
             글자로 인식
-          </button>
+          </Button>
         </div>
       </div>
     </div>

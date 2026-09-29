@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { categoryLabel, type Category, type Folder } from "@/lib/supabase/types";
+import { Button } from "@/components/ui/button";
+import { Input, NativeSelect } from "@/components/ui/input";
 
 const NO_FOLDER = "__none__";
 
@@ -252,11 +254,11 @@ export default function LinkCategoryPicker({
       <span className="text-slate-500">실모에 연결(선택):</span>
       {!creating ? (
         <>
-          <select
+          <NativeSelect
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
             disabled={busy || !categories}
-            className="g-input rounded px-2 py-1 text-xs"
+            className="rounded px-2 py-1 text-xs"
           >
             <option value="">
               {categories === null ? "불러오는 중..." : "실모 선택"}
@@ -279,15 +281,15 @@ export default function LinkCategoryPicker({
                 </optgroup>
               );
             })}
-          </select>
-          <button
+          </NativeSelect>
+          <Button
             type="button"
             disabled={busy || !selected}
             onClick={() => void linkTo(selected)}
-            className="g-btn g-btn-outline g-btn-xs"
+            variant="outline" size="xs"
           >
             연결
-          </button>
+          </Button>
           <button
             type="button"
             disabled={busy}
@@ -299,19 +301,19 @@ export default function LinkCategoryPicker({
         </>
       ) : (
         <>
-          <input
+          <Input
             autoFocus
             value={newSource}
             onChange={(e) => setNewSource(e.target.value)}
             placeholder="출처 (예: 2025학년도 6월 모의평가)"
-            className="g-input min-w-0 flex-1 rounded px-2 py-1 text-xs"
+            className="min-w-0 flex-1 rounded px-2 py-1 text-xs"
           />
-          <select
+          <NativeSelect
             value={newFolderId}
             onChange={(e) => setNewFolderId(e.target.value)}
             disabled={busy}
             title="정리할 폴더(선택, 없어도 됩니다)"
-            className="g-input rounded px-2 py-1 text-xs"
+            className="rounded px-2 py-1 text-xs"
           >
             <option value={NO_FOLDER}>폴더 없음</option>
             {folders.map((f) => (
@@ -319,15 +321,15 @@ export default function LinkCategoryPicker({
                 📁 {f.name}
               </option>
             ))}
-          </select>
-          <button
+          </NativeSelect>
+          <Button
             type="button"
             disabled={busy || !newSource.trim()}
             onClick={() => void createAndLink()}
-            className="g-btn g-btn-primary g-btn-xs"
+            variant="primary" size="xs"
           >
             만들고 연결
-          </button>
+          </Button>
           <button
             type="button"
             disabled={busy}

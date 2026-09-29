@@ -3,6 +3,9 @@
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { KoreanMeta } from "@/lib/koreanSet";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
 
 /**
  * 내보내기 — 제목·인쇄 순서를 정하고 **평가원 문제지 양식**으로 뽑는다.
@@ -169,20 +172,20 @@ export default function ExportComposer({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
+      <Card className="flex flex-col gap-3 p-4 sm:p-5">
         <label className="flex flex-col gap-1 text-sm text-slate-700">
           제목
-          <input
+          <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={multi ? "제목을 입력하세요 (예: 미적분 오답 모음)" : "제목"}
-            className="g-input px-3 py-2 text-sm"
+            className="px-3 py-2 text-sm"
           />
         </label>
         <p className="text-xs text-slate-400">
           시행일 : {formatDate(examDate)} (실모 추가 시 정한 날짜)
         </p>
-      </div>
+      </Card>
 
       {sources.length > 1 && (
         <div className="flex flex-col gap-2">
@@ -198,7 +201,7 @@ export default function ExportComposer({
               <li
                 key={name}
                 className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
-              >
+ >
                 <span className="w-5 shrink-0 text-center text-xs text-slate-400">
                   {index + 1}
                 </span>
@@ -209,22 +212,22 @@ export default function ExportComposer({
                   {order.filter((p) => p.source === name).length}문제
                 </span>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button
+                  <Button
                     type="button"
                     onClick={() => moveSource(index, -1)}
                     disabled={index === 0}
-                    className="g-btn g-btn-outline g-btn-sm"
+                    variant="outline" size="sm"
                   >
                     ↑
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     onClick={() => moveSource(index, 1)}
                     disabled={index === sources.length - 1}
-                    className="g-btn g-btn-outline g-btn-sm"
+                    variant="outline" size="sm"
                   >
                     ↓
-                  </button>
+                  </Button>
                 </div>
               </li>
             ))}
@@ -249,7 +252,7 @@ export default function ExportComposer({
             <li
               key={problem.id}
               className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2"
-            >
+ >
               <span className="w-6 shrink-0 text-center text-sm font-medium text-slate-500">
                 {index + 1}
               </span>
@@ -258,7 +261,7 @@ export default function ExportComposer({
                 src={problem.imageUrl}
                 alt="오답"
                 className="h-16 w-16 shrink-0 rounded border border-slate-200 object-contain"
-              />
+ />
               <span className="min-w-0 flex-1 truncate text-sm text-slate-700">
                 {problem.korean?.role === "passage" && (
                   <span className="mr-1 rounded bg-emerald-100 px-1 text-xs text-emerald-700">
@@ -268,22 +271,22 @@ export default function ExportComposer({
                 {labelFor(problem, index)}
               </span>
               <div className="flex shrink-0 items-center gap-1">
-                <button
+                <Button
                   type="button"
                   onClick={() => move(index, -1)}
                   disabled={index === 0}
-                  className="g-btn g-btn-outline g-btn-sm"
+                  variant="outline" size="sm"
                 >
                   ↑
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => move(index, 1)}
                   disabled={index === order.length - 1}
-                  className="g-btn g-btn-outline g-btn-sm"
+                  variant="outline" size="sm"
                 >
                   ↓
-                </button>
+                </Button>
               </div>
             </li>
           ))}

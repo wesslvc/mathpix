@@ -4,6 +4,9 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { GradedItemRow } from "@/lib/supabase/types";
+import { Button } from "@/components/ui/button";
+import { cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Props = {
   /** 이 채점 기록(exam_scores.id). */
@@ -110,7 +113,7 @@ export default function GradeLinkPanel({
   }
 
   return (
-    <section className="g-panel flex flex-col gap-2 p-4 sm:p-5">
+    <section className={cn(cardClass, "flex flex-col gap-2 p-4 sm:p-5")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-ink">
           채점 연동 · <span className="font-normal text-slate-600">{title}</span>
@@ -134,16 +137,16 @@ export default function GradeLinkPanel({
 
       {items && items.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          <Button
             type="button"
             onClick={() => void apply()}
             disabled={busy || targets.length === 0}
-            className="g-btn g-btn-primary"
+            variant="primary"
           >
             {busy
               ? "붙이는 중..."
               : `채점 기록의 정답 붙이기${targets.length ? ` (${targets.length}문제)` : ""}`}
-          </button>
+          </Button>
           <span className="text-xs text-slate-400">
             채점할 때 읽어 둔 정답을 씁니다 — 사진도 토큰도 들지 않아요.
           </span>

@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /**
  * 채점 기록의 **응시일**(`exam_scores.taken_at`)을 그 자리에서 고친다.
@@ -91,7 +93,7 @@ export default function ExamDateEditor({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-1.5">
-        <input
+        <Input
           autoFocus
           type="date"
           value={draft}
@@ -105,16 +107,16 @@ export default function ExamDateEditor({
           }}
           disabled={busy}
           aria-label="응시일"
-          className="g-input rounded px-2 py-1 text-xs disabled:opacity-50"
+          className="rounded px-2 py-1 text-xs disabled:opacity-50"
         />
-        <button
+        <Button
           type="button"
           onClick={() => void save()}
           disabled={busy}
-          className="g-btn g-btn-primary g-btn-xs"
+          variant="primary" size="xs"
         >
           {busy ? "저장 중..." : "저장"}
-        </button>
+        </Button>
         <button
           type="button"
           onClick={() => {

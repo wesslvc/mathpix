@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { KICE_FONT_NAMES } from "@/lib/kice/fonts";
+import { Button } from "@/components/ui/button";
 
 /**
  * **PC 없이 평가원 글꼴을 올린다.**
@@ -106,16 +107,16 @@ export default function KiceFontAdminPage() {
         type="file"
         accept=".ttf,.otf,font/ttf,font/otf"
         className="text-sm"
-      />
+ />
 
-      <button
+      <Button
         type="button"
         onClick={() => void upload()}
         disabled={busy !== null}
-        className="g-btn g-btn-primary self-start"
+        variant="primary" className="self-start"
       >
         {busy ?? "올리기"}
-      </button>
+      </Button>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

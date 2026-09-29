@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /**
  * 채점 기록의 이름(`exam_scores.exam_name`)을 그 자리에서 붙이거나 고친다.
@@ -94,7 +96,7 @@ export default function ExamNameEditor({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-1.5">
-        <input
+        <Input
           autoFocus
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -107,16 +109,16 @@ export default function ExamNameEditor({
           }}
           disabled={busy}
           placeholder="예: 2025학년도 9월 모의평가"
-          className="g-input min-w-0 flex-1 rounded px-2 py-1 text-xs disabled:opacity-50"
+          className="min-w-0 flex-1 rounded px-2 py-1 text-xs disabled:opacity-50"
         />
-        <button
+        <Button
           type="button"
           onClick={() => void save()}
           disabled={busy}
-          className="g-btn g-btn-primary g-btn-xs"
+          variant="primary" size="xs"
         >
           {busy ? "저장 중..." : "저장"}
-        </button>
+        </Button>
         <button
           type="button"
           onClick={() => {

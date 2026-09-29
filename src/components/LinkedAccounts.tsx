@@ -4,6 +4,9 @@ import { useState } from "react";
 import type { UserIdentity } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { emailConfirmRedirect } from "@/lib/siteUrl";
+import { Button } from "@/components/ui/button";
+import { cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /**
  * 로그인 방법을 보여주고 구글 계정을 연결/해제한다.
@@ -70,7 +73,7 @@ export default function LinkedAccounts({
   }
 
   return (
-    <section className="g-panel flex flex-col gap-3 p-4 sm:p-5">
+    <section className={cn(cardClass, "flex flex-col gap-3 p-4 sm:p-5")}>
       <h2 className="text-base font-semibold text-ink">로그인 방법</h2>
 
       <ul className="flex flex-col gap-2">
@@ -78,7 +81,7 @@ export default function LinkedAccounts({
           <li
             key={identity.identity_id}
             className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
-          >
+ >
             <span>{labelFor(identity.provider)}</span>
             {identities.length > 1 && (
               <button
@@ -95,14 +98,14 @@ export default function LinkedAccounts({
       </ul>
 
       {!hasGoogle && (
-        <button
+        <Button
           type="button"
           onClick={() => void linkGoogle()}
           disabled={busy}
-          className="g-btn g-btn-outline self-start"
+          variant="outline" className="self-start"
         >
           {busy ? "이동 중..." : "Google 계정 연결하기"}
-        </button>
+        </Button>
       )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}

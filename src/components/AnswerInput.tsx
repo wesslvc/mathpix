@@ -1,6 +1,7 @@
 "use client";
 
 import { toCircledNumber, type AnswerType } from "@/lib/answer";
+import { Input } from "@/components/ui/input";
 
 /** 보여줄 객관식 번호. 대부분 5지선다지만 넉넉히 5개면 충분하다. */
 const CHOICES = [1, 2, 3, 4, 5];
@@ -63,7 +64,7 @@ export default function AnswerInput({
 
       <label className="flex items-center gap-2 text-sm text-slate-700">
         <span className="shrink-0 text-xs text-slate-500">주관식</span>
-        <input
+        <Input
           value={shortValue}
           onChange={(e) => onChange(e.target.value, "short")}
           onKeyDown={(e) => {
@@ -73,7 +74,7 @@ export default function AnswerInput({
             onSubmit?.();
           }}
           placeholder="예: 12 — 여기에 쓰면 주관식으로 표기됩니다"
-          className="g-input min-w-0 flex-1 px-3 py-2 text-sm"
+          className="min-w-0 flex-1 px-3 py-2 text-sm"
         />
       </label>
 

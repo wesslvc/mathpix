@@ -20,6 +20,7 @@ import { enhanceContrast } from "@/lib/autoContrast";
 import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
 import type { AnswerByNumber } from "@/lib/answerMap";
 import { useFigureJobs } from "./FigureJobsProvider";
+import { Button } from "@/components/ui/button";
 
 /**
  * 지면 한 장을 문제 여러 개로 잘라 한꺼번에 넣는 패널.
@@ -555,64 +556,64 @@ export default function BatchSplitPanel({
               onChange={setBoxes}
               shape={shape}
               color="#7c3aed"
-            />
+ />
           </div>
         </>
       )}
 
       {pageImage && (
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          <Button
             type="button"
             onClick={() => void cutManual()}
             disabled={busy !== null || boxes.length === 0}
-            className="g-btn g-btn-primary"
+            variant="primary"
           >
             그린 자리대로 자르기{boxes.length > 0 && ` (${boxes.length}개)`}
-          </button>
+          </Button>
           {/* 자동으로 찾기는 유료 호출이라 무제한 계정에서만 보인다.
               막는 자리는 서버다 — 화면은 얼마든지 우회할 수 있다. */}
           {unlimited && (
-            <button
+            <Button
               type="button"
               onClick={() => void detect()}
               disabled={busy !== null}
-              className="g-btn g-btn-outline"
+              variant="outline"
             >
               자동으로 찾기
-            </button>
+            </Button>
           )}
           {picked.size >= 2 && (
-            <button
+            <Button
               type="button"
               onClick={() => void mergeSelected()}
               disabled={busy !== null}
-              className="g-btn bg-emerald-600 text-white hover:bg-emerald-700"
+              className="bg-emerald-600 text-white hover:bg-emerald-700"
             >
               고른 것 합치기 ({picked.size}개)
-            </button>
+            </Button>
           )}
           {pieces.length > 0 && (
-            <button
+            <Button
               type="button"
               onClick={() => void saveAsIs()}
               disabled={busy !== null}
-              className="g-btn g-btn-dark"
+              variant="dark"
               title="AI로 다시 그리지 않고 잘린 그림 그대로 저장합니다. 문제 번호만 인식해서 붙입니다."
             >
               그대로 넣기 ({pieces.length}개)
-            </button>
+            </Button>
           )}
           {pieces.length > 0 && (
-            <button
+            <Button
               type="button"
               onClick={() => void regenerateAll()}
               disabled={busy !== null}
-              className="g-btn g-btn-soft"
+              variant="soft"
             >
               모두 AI로 재생성 ({pieces.length}개
               {totalCost !== null && !unlimited && !byok && ` · ${totalCost}토큰`})
-            </button>
+            </Button>
           )}
         </div>
       )}

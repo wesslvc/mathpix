@@ -10,6 +10,7 @@ import {
   type BoxOverride,
   type BoxRange,
 } from "@/lib/renderMathText";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   /** 문제 원문(mmd). 줄 번호는 이 텍스트를 기준으로 매겨진다. */
@@ -99,14 +100,14 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
           )}
         </p>
         <div className="flex gap-1">
-          <button
+          <Button
             type="button"
             onClick={() => onChange(undefined)}
             disabled={isAuto}
-            className="g-btn g-btn-outline g-btn-xs"
+            variant="outline" size="xs"
           >
             자동으로 되돌리기
-          </button>
+          </Button>
           <button
             type="button"
             onClick={() => commit([], 0)}
@@ -131,7 +132,7 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
                 ? "border-blue-600 bg-blue-50 text-blue-700"
                 : "border-slate-300 text-slate-600"
             }`}
-          >
+ >
             <button
               type="button"
               onClick={() => setActiveRaw(i)}
@@ -153,7 +154,7 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
           type="button"
           onClick={addBox}
           className="rounded-full border border-dashed border-slate-400 px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-100"
-        >
+ >
           + 박스 추가
         </button>
       </div>
@@ -186,7 +187,7 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
                     ? "bg-blue-100"
                     : "bg-blue-50"
               }`}
-            >
+ >
               <span className="w-6 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-slate-400">
                 {i + 1}
               </span>
@@ -196,7 +197,7 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
                   className={`w-3 shrink-0 pt-0.5 text-[10px] tabular-nums ${
                     isActiveBox ? "text-blue-700" : "text-blue-400"
                   }`}
-                >
+ >
                   {boxIdx === -1 ? "" : boxIdx + 1}
                 </span>
               )}
@@ -208,7 +209,7 @@ export default function BoxRangeEditor({ text, value, onChange }: Props) {
                     dangerouslySetInnerHTML={{
                       __html: renderPreviewLine(line, text),
                     }}
-                  />
+ />
                 )}
               </div>
               <div className="flex shrink-0 gap-1">

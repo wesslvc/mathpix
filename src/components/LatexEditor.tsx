@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { Textarea } from "@/components/ui/input";
 
 /** 자주 쓰는 LaTeX 조각. `${}`는 커서를 놓을 자리를 뜻한다. */
 const SNIPPETS: { label: string; insert: string; title: string }[] = [
@@ -75,14 +76,14 @@ export default function LatexEditor({ value, onChange, rows = 14 }: Props) {
           </button>
         ))}
       </div>
-      <textarea
+      <Textarea
         ref={ref}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={rows}
         spellCheck={false}
         wrap="off"
-        className="g-input w-full resize-y overflow-x-auto bg-slate-50 p-3 font-mono text-[13px] leading-7 tracking-tight text-ink focus:bg-white"
+        className="w-full resize-y overflow-x-auto bg-slate-50 p-3 font-mono text-[13px] leading-7 tracking-tight text-ink focus:bg-white"
       />
       <p className="text-[11px] text-slate-400">
         수식은 <code className="font-mono">$...$</code>(문장 안) 또는{" "}

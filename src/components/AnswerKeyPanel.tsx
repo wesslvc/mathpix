@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/client";
 import { isHeicFile, readAsDataUrl } from "@/lib/cropImage";
 import { prepareGradingImage, gradingImageBudget, type PickedImage } from "@/lib/gradeImagePrep";
 import type { AnswerKeyItem } from "@/lib/gradeExam";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 /** 이 실모에 저장된 문제 — 번호로 답지와 이어 붙인다. */
 export type AnswerKeyTarget = { id: string; number: number | null };
@@ -188,7 +190,7 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
   }
 
   return (
-    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
+    <Card className="flex flex-col gap-3 p-4 sm:p-5">
       <p className="text-sm font-medium text-slate-700">답지로 정답 채우기</p>
 
       {step === "picking" && (
@@ -273,7 +275,7 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
                       </td>
                       <td
                         className={`px-2 py-1 ${linked ? "text-emerald-600" : "text-slate-400"}`}
-                      >
+ >
                         {linked ? "○" : "—"}
                       </td>
                     </tr>
@@ -297,34 +299,34 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
 
       <div className="flex items-center gap-2">
         {step === "picking" && (
-          <button
+          <Button
             type="button"
             onClick={() => void read()}
             disabled={pics.length === 0 || busy !== null}
-            className="g-btn g-btn-primary"
+            variant="primary"
           >
             답지 읽기
-          </button>
+          </Button>
         )}
         {step === "review" && (
-          <button
+          <Button
             type="button"
             onClick={() => void save()}
             disabled={matched.length === 0 || busy !== null}
-            className="g-btn g-btn-primary"
+            variant="primary"
           >
             {matched.length}개 문제에 정답 넣기
-          </button>
+          </Button>
         )}
         <button
           type="button"
           onClick={reset}
           disabled={busy !== null}
           className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
-        >
+ >
           {step === "done" ? "닫기" : "취소"}
         </button>
       </div>
-    </div>
+    </Card>
   );
 }

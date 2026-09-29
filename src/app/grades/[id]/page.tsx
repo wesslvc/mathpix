@@ -8,6 +8,8 @@ import ExamNameEditor from "@/components/ExamNameEditor";
 import ExamDateEditor from "@/components/ExamDateEditor";
 import DeleteGradeButton from "@/components/DeleteGradeButton";
 import { normalizeElectiveLabel, SUBJECT_LABEL } from "@/lib/examSubjects";
+import { Card, cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 export default async function GradeDetailPage({
   params,
@@ -71,7 +73,7 @@ export default async function GradeDetailPage({
             examScoreId={row.id}
             value={row.exam_name ?? ""}
             categoryId={row.category_id}
-          />
+ />
         </div>
         <h1 className="text-xl font-semibold text-ink">{title}</h1>
         <p className="text-sm text-slate-500">
@@ -86,11 +88,11 @@ export default async function GradeDetailPage({
             examScoreId={row.id}
             value={row.taken_at}
             categoryId={row.category_id}
-          />
+ />
         </div>
       </header>
 
-      <div className="g-panel p-4 sm:p-5">
+      <Card className="p-4 sm:p-5">
         <GradeDetailActions
           examScoreId={row.id}
           categoryId={row.category_id}
@@ -102,13 +104,13 @@ export default async function GradeDetailPage({
           showUpload={row.subject !== "korean"}
           isKorean={row.subject === "korean"}
           comment={row.comment}
-        />
-      </div>
+ />
+      </Card>
 
       <section>
         <h2 className="mb-2 text-base font-semibold text-ink">세부오답</h2>
         {!row.items ? (
-          <p className="g-panel px-4 py-6 text-center text-sm text-slate-400">
+          <p className={cn(cardClass, "px-4 py-6 text-center text-sm text-slate-400")}>
             {/* 손으로 적어 넣은 성적은 문항 정보가 아예 없다(0 문항).
                 "예전 기록"이라고 하면 왜 없는지 잘못 알려 준다. */}
             {row.total_questions <= 0
@@ -116,7 +118,7 @@ export default async function GradeDetailPage({
               : "예전 기록이라 문항별 상세가 없어요. 틀린 번호만 남아 있습니다."}
           </p>
         ) : (
-          <div className="g-panel overflow-x-auto">
+          <Card className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
@@ -134,7 +136,7 @@ export default async function GradeDetailPage({
                     <tr
                       key={item.no}
                       className={`border-b border-slate-100 last:border-0 ${isWrong ? "bg-red-50" : ""}`}
-                    >
+ >
                       <td className="px-3 py-1.5">{item.no}</td>
                       <td className="px-3 py-1.5">{item.studentAnswer ?? "—"}</td>
                       <td className="px-3 py-1.5">{item.correctAnswer}</td>
@@ -147,7 +149,7 @@ export default async function GradeDetailPage({
                 })}
               </tbody>
             </table>
-          </div>
+          </Card>
         )}
       </section>
 
@@ -158,7 +160,7 @@ export default async function GradeDetailPage({
           examScoreId={row.id}
           label={row.exam_name?.trim() || title}
           takenAt={row.taken_at}
-        />
+ />
       </section>
     </main>
   );

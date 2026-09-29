@@ -23,6 +23,9 @@ import LinkCategoryPicker from "./LinkCategoryPicker";
 import CommentBox from "./CommentBox";
 import ExamNameEditor from "./ExamNameEditor";
 import ExamDateEditor from "./ExamDateEditor";
+import { Button } from "@/components/ui/button";
+import { Input, NativeSelect } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
 
 function todayString(): string {
   const d = new Date();
@@ -408,7 +411,7 @@ export default function GradeExamFlow() {
   return (
     <div className="flex flex-col gap-6">
       {step === "setup" && (
-        <div className="g-panel flex flex-col gap-4 p-4 sm:p-5">
+        <Card className="flex flex-col gap-4 p-4 sm:p-5">
           <div>
             <p className="mb-2 text-sm font-medium text-slate-700">과목</p>
             <div className="flex gap-1.5">
@@ -437,10 +440,10 @@ export default function GradeExamFlow() {
             <div className="flex flex-col gap-1">
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 선택과목 <span className="text-red-500">*</span>
-                <select
+                <NativeSelect
                   value={mathElective}
                   onChange={(e) => setMathElective(e.target.value)}
-                  className="g-input px-2 py-1 text-sm"
+                  className="px-2 py-1 text-sm"
                 >
                   <option value="">고르지 않음</option>
                   {MATH_ELECTIVES.map((m) => (
@@ -448,7 +451,7 @@ export default function GradeExamFlow() {
                       {m}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </label>
               {!mathElective && (
                 <p className="text-xs text-amber-600">
@@ -463,10 +466,10 @@ export default function GradeExamFlow() {
             <div className="flex flex-col gap-1">
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 선택과목 <span className="text-red-500">*</span>
-                <select
+                <NativeSelect
                   value={koreanElective}
                   onChange={(e) => setKoreanElective(e.target.value)}
-                  className="g-input px-2 py-1 text-sm"
+                  className="px-2 py-1 text-sm"
                 >
                   <option value="">고르지 않음</option>
                   {KOREAN_ELECTIVES.map((m) => (
@@ -474,7 +477,7 @@ export default function GradeExamFlow() {
                       {m}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </label>
               {!koreanElective && (
                 <p className="text-xs text-amber-600">
@@ -547,11 +550,11 @@ export default function GradeExamFlow() {
             tamguSingle ? (
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 시험 이름
-                <input
+                <Input
                   value={examName1}
                   onChange={(e) => setExamName1(e.target.value)}
                   placeholder="예: 2025학년도 9월 모의평가 — 선택 입력"
-                  className="g-input min-w-0 flex-1 px-2 py-1 text-sm"
+                  className="min-w-0 flex-1 px-2 py-1 text-sm"
                 />
               </label>
             ) : (
@@ -563,20 +566,20 @@ export default function GradeExamFlow() {
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="flex flex-col gap-1 text-xs text-slate-500">
                     1선택
-                    <input
+                    <Input
                       value={examName1}
                       onChange={(e) => setExamName1(e.target.value)}
                       placeholder="예: 2025학년도 9월 모의평가"
-                      className="g-input px-2 py-1 text-sm text-ink"
+                      className="px-2 py-1 text-sm text-ink"
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-xs text-slate-500">
                     2선택
-                    <input
+                    <Input
                       value={examName2}
                       onChange={(e) => setExamName2(e.target.value)}
                       placeholder="예: 2025학년도 9월 모의평가"
-                      className="g-input px-2 py-1 text-sm text-ink"
+                      className="px-2 py-1 text-sm text-ink"
                     />
                   </label>
                 </div>
@@ -585,22 +588,22 @@ export default function GradeExamFlow() {
           ) : (
             <label className="flex items-center gap-2 text-sm text-slate-700">
               시험 이름
-              <input
+              <Input
                 value={examName}
                 onChange={(e) => setExamName(e.target.value)}
                 placeholder="예: 2025학년도 9월 모의평가 — 선택 입력"
-                className="g-input min-w-0 flex-1 px-2 py-1 text-sm"
+                className="min-w-0 flex-1 px-2 py-1 text-sm"
               />
             </label>
           )}
 
           <label className="flex items-center gap-2 text-sm text-slate-700">
             시행일
-            <input
+            <Input
               type="date"
               value={takenAt}
               onChange={(e) => setTakenAt(e.target.value)}
-              className="g-input px-2 py-1 text-sm"
+              className="px-2 py-1 text-sm"
             />
           </label>
 
@@ -622,20 +625,20 @@ export default function GradeExamFlow() {
             </span>
           </label>
 
-          <button
+          <Button
             type="button"
             onClick={() => setStep("uploading")}
             disabled={!electivePicked}
             title={electivePicked ? undefined : "선택과목을 먼저 골라주세요"}
-            className="g-btn g-btn-primary self-start"
+            variant="primary" className="self-start"
           >
             다음
-          </button>
-        </div>
+          </Button>
+        </Card>
       )}
 
       {step === "uploading" && (
-        <div className="g-panel flex flex-col gap-4 p-4 sm:p-5">
+        <Card className="flex flex-col gap-4 p-4 sm:p-5">
           <p className="text-sm text-slate-500">
             {SUBJECT_LABEL[subject]}
             {electiveLabelFor(undefined) && ` · ${electiveLabelFor(undefined)}`}
@@ -679,24 +682,24 @@ export default function GradeExamFlow() {
           {busyMessage && <p className="text-sm text-slate-500">{busyMessage}</p>}
 
           <div className="flex gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => setStep("setup")}
               disabled={Boolean(busyMessage)}
-              className="g-btn g-btn-outline"
+              variant="outline"
             >
               이전
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => void grade()}
               disabled={!canGrade || Boolean(busyMessage)}
-              className="g-btn g-btn-primary"
+              variant="primary"
             >
               채점하기
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
 
       {step === "review" && (
@@ -715,7 +718,7 @@ export default function GradeExamFlow() {
               ? summary.wrongNumbers.filter((no) => slot.deductions[no] == null)
               : [];
             return (
-              <div key={si} className="g-panel p-4 sm:p-5">
+              <Card key={si} className="p-4 sm:p-5">
                 <p className="mb-2 text-sm font-semibold text-ink">
                   {slotTitle(slot)}
                   {" — "}
@@ -747,25 +750,25 @@ export default function GradeExamFlow() {
                           <tr key={ii} className="border-b border-slate-100">
                             <td className="py-1">{item.no}</td>
                             <td className="py-1">
-                              <input
+                              <Input
                                 value={item.studentAnswer ?? ""}
                                 onChange={(e) =>
                                   updateItem(si, ii, {
                                     studentAnswer: e.target.value === "" ? null : e.target.value,
                                   })
                                 }
-                                className="g-input w-16 rounded px-1.5 py-0.5"
+                                className="w-16 rounded px-1.5 py-0.5"
                               />
                             </td>
                             <td className="py-1">
-                              <input
+                              <Input
                                 value={item.correctAnswer}
                                 onChange={(e) => updateItem(si, ii, { correctAnswer: e.target.value })}
-                                className="g-input w-16 rounded px-1.5 py-0.5"
+                                className="w-16 rounded px-1.5 py-0.5"
                               />
                             </td>
                             <td className="py-1">
-                              <input
+                              <Input
                                 value={item.points ?? ""}
                                 onChange={(e) => {
                                   const n = Number(e.target.value);
@@ -773,7 +776,7 @@ export default function GradeExamFlow() {
                                     points: e.target.value === "" || Number.isNaN(n) ? undefined : n,
                                   });
                                 }}
-                                className="g-input w-12 rounded px-1.5 py-0.5"
+                                className="w-12 rounded px-1.5 py-0.5"
                               />
                             </td>
                             <td className={`py-1 ${isCorrect ? "text-emerald-600" : "text-red-500"}`}>
@@ -832,7 +835,7 @@ export default function GradeExamFlow() {
                     )}
                   </div>
                 )}
-              </div>
+              </Card>
             );
           })}
 
@@ -840,22 +843,22 @@ export default function GradeExamFlow() {
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           <div className="flex gap-2">
-            <button
+            <Button
               type="button"
               onClick={reset}
               disabled={Boolean(busyMessage)}
-              className="g-btn g-btn-outline"
-            >
+              variant="outline"
+ >
               처음부터
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => void saveAll()}
               disabled={Boolean(busyMessage)}
-              className="g-btn g-btn-primary"
+              variant="primary"
             >
               {busyMessage ?? "저장"}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -870,7 +873,7 @@ export default function GradeExamFlow() {
                 : summary.score;
             const title = slotTitle(slot);
             return (
-              <div key={si} className="g-panel p-4 sm:p-5">
+              <Card key={si} className="p-4 sm:p-5">
                 {slot.examScoreId && (
                   <div className="flex flex-col gap-0.5">
                     <ExamNameEditor
@@ -914,7 +917,7 @@ export default function GradeExamFlow() {
 
                 <label className="mt-2 flex items-center gap-2 text-xs text-slate-500">
                   등급
-                  <select
+                  <NativeSelect
                     value={slot.gradeLevel ?? ""}
                     disabled={!slot.examScoreId}
                     onChange={(e) =>
@@ -925,7 +928,7 @@ export default function GradeExamFlow() {
                         e.target.value === "" ? null : Number(e.target.value),
                       )
                     }
-                    className="g-input rounded px-2 py-0.5 text-xs"
+                    className="rounded px-2 py-0.5 text-xs"
                   >
                     <option value="">미입력</option>
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) => (
@@ -933,7 +936,7 @@ export default function GradeExamFlow() {
                         {g}등급
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </label>
 
                 {/* 실모 연결은 모든 과목에서 보여준다 — 만점을 받아 틀린
@@ -1000,25 +1003,25 @@ export default function GradeExamFlow() {
                     )}
                   </div>
                 )}
-              </div>
+              </Card>
             );
           })}
 
           <div className="flex gap-2">
-            <button
+            <Button
               type="button"
               onClick={reset}
-              className="g-btn g-btn-outline self-start"
-            >
+              variant="outline" className="self-start"
+ >
               다른 시험 채점하기
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => router.push("/profile")}
-              className="g-btn g-btn-outline self-start"
+              variant="outline" className="self-start"
             >
               채점 기록 보기
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -1035,10 +1038,10 @@ export function ElectiveSelect({
   onChange: (v: string) => void;
 }) {
   return (
-    <select
+    <NativeSelect
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="g-input mb-2 w-full px-3 py-2 text-sm"
+      className="mb-2 w-full px-3 py-2 text-sm"
     >
       <option value="">과목 선택</option>
       <optgroup label="사회탐구">
@@ -1055,7 +1058,7 @@ export function ElectiveSelect({
           </option>
         ))}
       </optgroup>
-    </select>
+    </NativeSelect>
   );
 }
 

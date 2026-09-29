@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { KiceArea } from "@/lib/kice/frames";
 import { ANSWER_SHEET_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
+import { Button } from "@/components/ui/button";
 
 // pdf-lib(과 평가원 틀·글꼴 로더)은 **"만들기"를 누를 때만** 받는다.
 // 정적으로 가져오면 이 화면을 열기만 해도 페이지 JS 가 510kB 가 되는데
@@ -216,14 +217,14 @@ export default function AnswerSheetPage() {
       <div className="-mt-3 flex flex-wrap items-center gap-2">
         <span className="text-xs text-slate-400">지금 {rows.length}개.</span>
         {CIRCLED.map((c) => (
-          <button
+          <Button
             key={c}
             type="button"
             onClick={() => setText((t) => t + c)}
-            className="g-btn g-btn-outline g-btn-sm"
+            variant="outline" size="sm"
           >
             {c}
-          </button>
+          </Button>
         ))}
         <span className="text-xs text-slate-400">← 커서 대신 맨 뒤에 붙습니다</span>
       </div>
@@ -237,14 +238,14 @@ export default function AnswerSheetPage() {
         </div>
       )}
 
-      <button
+      <Button
         type="button"
         onClick={() => void make()}
         disabled={busy || rows.length === 0}
-        className="g-btn g-btn-primary self-start"
+        variant="primary" className="self-start"
       >
         {busy ? "만드는 중..." : "PDF 내려받기"}
-      </button>
+      </Button>
     </main>
   );
 }

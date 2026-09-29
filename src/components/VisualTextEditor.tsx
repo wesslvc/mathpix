@@ -9,6 +9,8 @@ import {
   tokenizeMath,
   type MathToken,
 } from "@/lib/mathTokens";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 type Props = {
   value: string;
@@ -226,7 +228,7 @@ function MathChip({
           onClick={onRemove}
           aria-label="이 수식 지우기"
           className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600"
-        >
+ >
           삭제
         </button>
       </div>
@@ -235,35 +237,35 @@ function MathChip({
         <div className="flex flex-col gap-1 border-t border-slate-200 px-1.5 py-1.5">
           <label className="flex items-center gap-1.5">
             <span className="w-8 shrink-0 text-[10px] text-slate-500">분자</span>
-            <input
+            <Input
               value={fraction.numerator}
               onChange={(e) =>
                 onChange(buildTextFraction(e.target.value, fraction.denominator))
               }
-              className="g-input min-w-0 flex-1 rounded px-2 py-1 text-xs"
+              className="min-w-0 flex-1 rounded px-2 py-1 text-xs"
             />
           </label>
           <label className="flex items-center gap-1.5">
             <span className="w-8 shrink-0 text-[10px] text-slate-500">분모</span>
-            <input
+            <Input
               value={fraction.denominator}
               onChange={(e) =>
                 onChange(buildTextFraction(fraction.numerator, e.target.value))
               }
-              className="g-input min-w-0 flex-1 rounded px-2 py-1 text-xs"
+              className="min-w-0 flex-1 rounded px-2 py-1 text-xs"
             />
           </label>
-          <button
+          <Button
             type="button"
             onClick={() => setOpen(false)}
-            className="g-btn g-btn-primary g-btn-xs self-end"
+            variant="primary" size="xs" className="self-end"
           >
             완료
-          </button>
+          </Button>
         </div>
       ) : open ? (
         <div className="flex items-center gap-1.5 border-t border-slate-200 px-1.5 py-1.5">
-          <input
+          <Input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => onChange(draft)}
@@ -274,18 +276,18 @@ function MathChip({
               setOpen(false);
             }}
             spellCheck={false}
-            className="g-input min-w-0 flex-1 rounded px-2 py-1 font-mono text-xs"
+            className="min-w-0 flex-1 rounded px-2 py-1 font-mono text-xs"
           />
-          <button
+          <Button
             type="button"
             onClick={() => {
               onChange(draft);
               setOpen(false);
             }}
-            className="g-btn g-btn-primary g-btn-xs shrink-0"
+            variant="primary" size="xs" className="shrink-0"
           >
             적용
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>

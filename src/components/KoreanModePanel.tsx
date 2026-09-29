@@ -25,6 +25,8 @@ import BoxEditor, { type EditBox } from "./BoxEditor";
 import CropShapeToggle from "./CropShapeToggle";
 import { useCropShape } from "@/lib/cropShape";
 import { cropRegionToDataUrl, type Region } from "@/lib/polygon";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 /**
  * **국어 모드** — 지문 한 편과 그에 딸린 문항들을 한 세트로 넣는다.
@@ -631,7 +633,7 @@ export default function KoreanModePanel({
   );
 
   return (
-    <div className="g-panel flex flex-col gap-3 p-4 sm:p-5">
+    <Card className="flex flex-col gap-3 p-4 sm:p-5">
       <div>
         <h3 className="text-sm font-semibold text-slate-700">
           국어 모드 (지문 + 문항 세트)
@@ -669,7 +671,7 @@ export default function KoreanModePanel({
                     src={p.dataUrl}
                     alt=""
                     className="h-24 w-20 rounded border border-slate-200 object-cover"
-                  />
+ />
                   <span className="absolute left-1 top-1 rounded bg-slate-700 px-1 text-[10px] text-white">
                     {i + 1}
                   </span>
@@ -696,14 +698,14 @@ export default function KoreanModePanel({
               어휘·문법 단독 문항처럼 지문이 없으면 켜세요. 지문 단계를 건너뜁니다.
             </span>
           </label>
-          <button
+          <Button
             type="button"
             onClick={() => setStep(noPassage ? "questions" : "passage")}
             disabled={pages.length === 0}
-            className="self-start g-btn g-btn-dark"
+            variant="dark" className="self-start"
           >
             다음: {noPassage ? "문제" : "지문"} 자리 잡기
-          </button>
+          </Button>
         </>
       )}
 
@@ -804,14 +806,14 @@ export default function KoreanModePanel({
           ))}
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => void autoFill(step === "passage" ? "passage" : "question")}
               disabled={busy !== null}
-              className="g-btn g-btn-outline g-btn-sm"
+              variant="outline" size="sm"
             >
               {busy ?? "자동으로 찾기"}
-            </button>
+            </Button>
             {step === "questions" && (
               <>
                 <button
@@ -822,14 +824,14 @@ export default function KoreanModePanel({
                 >
                   고른 것 한 문제로 묶기 ({picked.size})
                 </button>
-                <button
+                <Button
                   type="button"
                   onClick={splitPicked}
                   disabled={picked.size === 0}
-                  className="g-btn g-btn-outline g-btn-sm"
-                >
+                  variant="outline" size="sm"
+ >
                   묶음 풀기
-                </button>
+                </Button>
               </>
             )}
             <span className="text-xs text-slate-400">
@@ -841,33 +843,33 @@ export default function KoreanModePanel({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
+            <Button
               type="button"
               onClick={() =>
                 step === "passage" ? setStep("pick") : setStep(noPassage ? "pick" : "passage")
               }
-              className="g-btn g-btn-outline"
+              variant="outline"
             >
               ← 뒤로
-            </button>
+            </Button>
             {step === "passage" ? (
-              <button
+              <Button
                 type="button"
                 onClick={() => setStep("questions")}
                 disabled={passageCount === 0}
-                className="g-btn g-btn-dark"
+                variant="dark"
               >
                 다음: 문제 자리 잡기
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
                 type="button"
                 onClick={() => void cutAll()}
                 disabled={groups.length === 0 || busy !== null}
-                className="g-btn g-btn-dark"
+                variant="dark"
               >
                 {busy ?? "다음: 확인하기"}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -885,16 +887,16 @@ export default function KoreanModePanel({
                   placeholder="예: 이중차분법"
                   className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
                 />
-                <button
+                <Button
                   type="button"
                   onClick={() =>
                     passageCropRef.current && void makeTitle(passageCropRef.current)
                   }
                   disabled={titling || !passageCropRef.current}
-                  className="g-btn g-btn-outline g-btn-sm shrink-0"
+                  variant="outline" size="sm" className="shrink-0"
                 >
                   {titling ? "짓는 중..." : "다시 짓기"}
-                </button>
+                </Button>
               </div>
               {titleNote && <span className="text-xs text-slate-400">{titleNote}</span>}
               {/* 제목이 비면 첫 장 목차에 그냥 "지문" 으로 찍힌다 — 목차의
@@ -914,7 +916,7 @@ export default function KoreanModePanel({
                 className={`rounded border p-1 ${
                   p.kind === "passage" ? "border-emerald-400 bg-emerald-50" : "border-slate-200"
                 }`}
-              >
+ >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.crop} alt="" className="h-32 w-full object-contain" />
                 <p className="mt-1 text-center text-xs text-slate-500">
@@ -927,27 +929,27 @@ export default function KoreanModePanel({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => setStep("questions")}
               disabled={busy !== null}
-              className="g-btn g-btn-outline"
+              variant="outline"
             >
               ← 자리 고치기
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => void save(false)}
               disabled={busy !== null}
-              className="g-btn g-btn-outline"
+              variant="outline"
             >
               {busy ?? "원본 그대로 넣기"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => void save(true)}
               disabled={busy !== null}
-              className="g-btn g-btn-primary"
+              variant="primary"
             >
               {busy ?? "모두 AI로 다시 그리기"}
               {typeof figureCost === "number" &&
@@ -961,13 +963,13 @@ export default function KoreanModePanel({
                     ? PASSAGE_READ_TOKENS + PASSAGE_MARKS_DEPOSIT
                     : 0)
                 }토큰)`}
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       {note && <p className="text-sm text-emerald-700">{note}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
-    </div>
+    </Card>
   );
 }

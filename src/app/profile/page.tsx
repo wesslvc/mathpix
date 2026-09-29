@@ -14,6 +14,9 @@ import GradingPrefsForm, { type GradingPrefsValue } from "@/components/GradingPr
 import CropShapeSetting from "@/components/CropShapeSetting";
 import ManualScoreForm from "@/components/ManualScoreForm";
 import LinkedAccounts from "@/components/LinkedAccounts";
+import { buttonVariants } from "@/components/ui/button";
+import { cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 const VALID_SUBJECTS: readonly Subject[] = ["korean", "math", "english", "elective"];
 
@@ -100,7 +103,7 @@ export default async function ProfilePage() {
         byok={access.byok}
         checkoutReady={isCheckoutReady()}
         byokCheckoutReady={isByokCheckoutReady()}
-      />
+ />
 
       <LinkedAccounts initialIdentities={user.identities ?? []} />
 
@@ -115,13 +118,13 @@ export default async function ProfilePage() {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-semibold text-ink">성적 추세</h2>
-          <Link href="/grade" className="g-btn g-btn-ghost g-btn-xs text-blue-700">
+          <Link href="/grade" className={buttonVariants({ variant: "ghost", size: "xs", className: "text-blue-700" })}>
             자동채점 →
           </Link>
         </div>
 
         {series.length === 0 && gradeSeries.length === 0 ? (
-          <p className="g-panel px-4 py-6 text-center text-sm text-slate-400">
+          <p className={cn(cardClass, "px-4 py-6 text-center text-sm text-slate-400")}>
             아직 성적 기록이 없어요. 자동채점을 하거나 아래에서 성적을 직접
             적어 넣으면 여기에 추세가 쌓입니다.
           </p>

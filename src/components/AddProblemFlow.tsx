@@ -62,6 +62,9 @@ import BatchSplitPanel from "./BatchSplitPanel";
 import KoreanModePanel from "./KoreanModePanel";
 import BulkMappedImportPanel from "./BulkMappedImportPanel";
 import PhotoQueueStrip from "./PhotoQueueStrip";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card, cardClass } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Stage = "idle" | "upload" | "crop" | "loading" | "result";
 
@@ -624,7 +627,7 @@ export default function AddProblemFlow({
       {stage === "idle" && !canAdd && (
         <div className="flex flex-col gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
           <p>토큰을 모두 사용해 오답을 더 추가할 수 없어요. 이용권을 구매하면 5000토큰이 충전돼요.</p>
-          <a href="/api/checkout?plan=tokens" className="g-btn w-fit bg-amber-600 text-white hover:bg-amber-700">
+          <a href="/api/checkout?plan=tokens" className={buttonVariants({ className: "w-fit bg-amber-600 text-white hover:bg-amber-700" })}>
             이용권 구매하기
           </a>
         </div>
@@ -635,7 +638,7 @@ export default function AddProblemFlow({
           모으고, 가장 많이 쓰는 "사진"은 누를 것 없이 곧바로 끌어다 놓게 한다.
           다른 탭의 패널은 감추기만 한다(작업하던 것이 날아가지 않게). */}
       {stage === "idle" && canAdd && (
-        <section className="g-panel overflow-hidden">
+        <section className={cn(cardClass, "overflow-hidden")}>
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
             <h2 className="text-sm font-semibold text-ink">문제 넣기</h2>
             <div className="g-tabs" role="tablist" aria-label="넣는 방법">
@@ -693,7 +696,7 @@ export default function AddProblemFlow({
                 unlimited={tokenStatus?.unlimited ?? false}
                 byok={tokenStatus?.byok ?? false}
                 figureCost={tokenStatus?.figureCost ?? null}
-              />
+ />
             </div>
             <div hidden={mode !== "korean"}>
               {/* 국어는 지문 한 편에 문항 여러 개가 딸려서 낱개로 넣으면 인쇄할 때
@@ -703,7 +706,7 @@ export default function AddProblemFlow({
                 unlimited={tokenStatus?.unlimited ?? false}
                 byok={tokenStatus?.byok ?? false}
                 figureCost={tokenStatus?.figureCost ?? null}
-              />
+ />
             </div>
             <div hidden={mode !== "csv"}>
               {/* 이미 깔끔하게 잘려 있는 사진 여러 장 + 정답 CSV(학원가 "연계교재
@@ -715,7 +718,7 @@ export default function AddProblemFlow({
       )}
 
       {(inCrop || stage === "loading" || stage === "result") && (
-        <section className="g-panel flex flex-col gap-4 p-4 sm:p-5">
+        <section className={cn(cardClass, "flex flex-col gap-4 p-4 sm:p-5")}>
           {inCrop && (active || pending.length > 0 || preparing) && (
             <PhotoQueueStrip
               active={active}
@@ -747,9 +750,9 @@ export default function AddProblemFlow({
                 )
               )}
               <ImageUploader onImagesSelected={(f) => void handleImagesSelected(f)} onError={setError} compact />
-              <button type="button" onClick={exitToIdle} className="g-btn g-btn-ghost self-start">
+              <Button type="button" onClick={exitToIdle} variant="ghost" className="self-start">
                 그만 넣기
-              </button>
+              </Button>
             </div>
           )}
 
@@ -825,12 +828,12 @@ function ResumeCard({
         <p className="text-xs text-slate-500">이 기기에 저장돼 있어서 창을 닫았다 와도 남아 있어요.</p>
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2">
-        <button type="button" onClick={onClear} className="g-btn g-btn-ghost g-btn-sm">
+        <Button type="button" onClick={onClear} variant="ghost" size="sm">
           비우기
-        </button>
-        <button type="button" onClick={onResume} className="g-btn g-btn-primary g-btn-sm">
+        </Button>
+        <Button type="button" onClick={onResume} variant="primary" size="sm">
           이어서 자르기
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -840,7 +843,7 @@ function ResumeCard({
 function QuickList({ items, onClear }: { items: QuickItem[]; onClear: () => void }) {
   const busy = items.some((q) => q.status === "saving" || q.status === "saved");
   return (
-    <div className="g-panel flex flex-col gap-2 px-4 py-3">
+    <Card className="flex flex-col gap-2 px-4 py-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-slate-600">
           방금 넣은 문제 {items.length}개
@@ -865,7 +868,7 @@ function QuickList({ items, onClear }: { items: QuickItem[]; onClear: () => void
                     ? "text-slate-700"
                     : "animate-pulse text-slate-400"
               }`}
-            >
+ >
               {q.status === "saving" && "저장 중…"}
               {q.status === "saved" && "번호 읽는 중…"}
               {q.status === "error" && (q.error ?? "실패")}
@@ -877,6 +880,6 @@ function QuickList({ items, onClear }: { items: QuickItem[]; onClear: () => void
           </li>
         ))}
       </ul>
-    </div>
+    </Card>
   );
 }
