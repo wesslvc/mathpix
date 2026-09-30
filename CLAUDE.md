@@ -2898,7 +2898,7 @@ latest 로 바꿔 봐 ... flash 써 보고 안 되면 테라로 넘어가게")
 
 **지금**:
 - `/api/korean-text` 가 `readKoreanRichText(image)` **한 번**을 부른다 —
-  `OPENAI_TEXT_MODEL`(기본 `gpt-6-sol`) · `OPENAI_TEXT_EFFORT`(기본 `medium`,
+  `OPENAI_TEXT_MODEL`(기본 `gpt-6.1-sol`, 2026-09-30 부터) · `OPENAI_TEXT_EFFORT`(기본 `medium`,
   `default` 를 적으면 강도를 안 보낸다). **OpenAI 만**이다 — Gemini Flash 먼저
   시도하기도 걷어냈다. `maxDuration` 300, 차감은 그대로 고정 100토큰.
 - 모델은 문단마다 **글 전체**(`text`)와 **서식 구간**(`marks`)을 준다:
@@ -3019,6 +3019,14 @@ latest 로 바꿔 봐 ... flash 써 보고 안 되면 테라로 넘어가게")
 
 - **운영 값**: 지문 인식·서식 검수 둘 다 `gpt-6-sol` · `medium`(`OPENAI_TEXT_*`,
   `OPENAI_MARKS_*` 는 비우면 텍스트 값을 따른다). Vercel 에 덮어쓰는 환경변수는 없다.
+  **2026-09-30 에 sol 을 `gpt-6.1-sol` 로 올렸다**(사용자 — "sol 을 6.1 로 바꿔"). 이름은
+  짐작하지 않고 일꾼 라우트 `probe: "models"` 로 계정에 `gpt-5.6-sol`·`gpt-6-sol`·`gpt-6.1-sol`
+  이 있는 것을 보고, `probe: "vision"`(medium)으로 사진 + JSON 요청이 통하는 것까지 확인했다
+  (4.7초). 바뀐 곳은 `gradeExam.ts` 의 `OPENAI_TEXT_MODEL` 기본값 하나(서식 검수·비교 화면도
+  따라온다). **단가표(`GRADING_PRICES`)에는 6.1 단가를 안 넣었다** — 못 받았고 짐작한 값을
+  넣었다가 데인 자리다. 그래서 지금은 보증금 고정으로 정산된다(지문 인식 100 · 서식 검수 30).
+  공표 단가를 알게 되면 `tokens.ts` 에 한 줄 더할 것. 되돌리려면 재배포 없이
+  `OPENAI_TEXT_MODEL=gpt-6-sol`. **실제 지문으로 6.1 이 6 보다 나은지는 아직 못 봤다.**
 - **서식 검수는 빠지지 않는다**: 국어 모드·다시 인식하기가 늘 부르고, 실패하면 **한 번
   더** 건다(400·401·402 는 다시 해도 같아 바로 멈춘다). 그래도 안 되면 1차 서식으로
   가되 진행 패널에 이유가 뜬다. 비교 화면의 끄는 체크박스도 없앴다.

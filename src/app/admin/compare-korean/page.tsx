@@ -46,12 +46,12 @@ import { cn } from "@/lib/utils";
  *
  * 한 지문 사진을 **운영과 같은 한 번의 호출**(글자와 서식 구간을 함께 읽는다,
  * `KOREAN_TEXT_PROMPT`)로 두 번 보내 평가원 양식 PDF 를 각각 뽑는다. 2026-09-25
- * 사용자 지시로 **모델은 운영 값(gpt-6-sol)으로 고정하고 추론 강도만** 칸마다
+ * 사용자 지시로 **모델은 운영 값(gpt-6.1-sol)으로 고정하고 추론 강도만** 칸마다
  * 바꿔 견준다 — OpenAI 만 된다.
  */
 
 /** 운영 지문 인식 모델(`OPENAI_TEXT_MODEL` 기본값과 같다). */
-const READ_MODEL = "gpt-6-sol";
+const READ_MODEL = "gpt-6.1-sol";
 
 /** 눌러서 고르는 추론 강도 — 2026-09-25 probe 로 받는 값을 확인했다. */
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -60,7 +60,7 @@ const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
  * 지문 위치 찾기 칸에서 눌러 고르는 OpenAI 모델. 둘 다 이 계정의 `/v1/models`
  * 에 있고 사진 요청이 실제로 통한 것만 둔다(2026-09-25 probe).
  */
-const OPENAI_PRESETS = ["gpt-6-luna", "gpt-6-sol"];
+const OPENAI_PRESETS = ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"];
 
 type Reader = { key: "a" | "b"; effort: string };
 

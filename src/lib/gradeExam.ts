@@ -545,12 +545,15 @@ function parseAnswerKey(text: string): AnswerKeyItem[] {
  * 지금은 모델이 문단마다 **글 전체**와 **서식 구간**(`marks`: 정확히 어디부터
  * 어디까지가 굵게·밑줄·네모인지)을 함께 준다(`applyMarks`, richText.ts).
  *
- * 모델은 `OPENAI_TEXT_MODEL`(기본 `gpt-6-sol`), 추론 강도는 `OPENAI_TEXT_EFFORT`
+ * 모델은 `OPENAI_TEXT_MODEL`(기본 `gpt-6.1-sol` — 2026-09-30 사용자 지시 "sol 을
+ * 6.1 로 바꿔". 이름은 짐작하지 않고 일꾼 라우트 `probe: "models"` 로 계정에 있는 것을
+ * 보고, `probe: "vision"`(medium)으로 사진 + JSON 요청이 통하는 것까지 확인했다. 서식
+ * 검수도 이 값을 따른다), 추론 강도는 `OPENAI_TEXT_EFFORT`
  * (기본 `medium`) — 둘 다 재배포 없이 바꾼다. 강도를 비우려면 `none` 이 아니라
  * `default` 를 적는다(모델 기본값으로 부른다). OpenAI 하나뿐이다 — 예전의
  * Gemini Flash 먼저 시도하기는 걷어냈다(같은 지시).
  */
-export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-6-sol";
+export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-6.1-sol";
 const TEXT_EFFORT_ENV = process.env.OPENAI_TEXT_EFFORT?.trim() || "medium";
 export const OPENAI_TEXT_EFFORT: string | undefined =
   TEXT_EFFORT_ENV === "default" ? undefined : TEXT_EFFORT_ENV;
