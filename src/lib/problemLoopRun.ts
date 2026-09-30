@@ -347,7 +347,12 @@ async function runVerify(
         fail = poll.message;
         break;
       }
-      if (poll.usage) solKrw = gradingEstKrw(poll.usage, poll.model) ?? 0;
+      if (poll.usage) {
+        solKrw = gradingEstKrw(poll.usage, poll.model) ?? 0;
+        console.info(
+          `[${ctx.tag}] sol 검수 usage model=${poll.model} in=${poll.usage.inputTokens} out=${poll.usage.outputTokens} est=${solKrw.toFixed(1)}원`,
+        );
+      }
       diffs = parseVerify(poll.text);
       break;
     }
