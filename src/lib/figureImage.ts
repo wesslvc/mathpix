@@ -31,7 +31,20 @@ import { enhanceContrast } from "./autoContrast";
  */
 export async function ensureDataUrl(src: string): Promise<string> {
   if (src.startsWith("data:")) return src;
-  const blob = await (await fetch(src)).blob();
+  const res = await fetch(src);
+  // 주소가 죽었거나(404) 로그인이 풀렸을 때(401)는 그림이 아니라 오류 글이 온다 — 그걸 그대로 그림으로 읽으면 뒤에서
+  // "이미지를 불러오지 못했습니다"라는 뜻 없는 오류가 난다. 여기서 원인을 알려 준다.
+  if (!res.ok) {
+    throw new Error(
+      `저장된 그림 파일을 받지 못했어요 (HTTP ${res.status}). ${
+        res.status === 401 ? "로그인이 풀렸을 수 있어요 — 새로고침해 보세요." : "그림 파일이 없어졌을 수 있어요 — '다시 오려내기'로 새로 잘라 주세요."
+      }`,
+    );
+  }
+  const blob = await res.blob();
+  if (!blob.type.startsWith("image/")) {
+    throw new Error("저장된 그림 파일이 그림이 아니에요. '다시 오려내기'로 새로 잘라 주세요.");
+  }
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
