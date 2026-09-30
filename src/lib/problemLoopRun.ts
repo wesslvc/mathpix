@@ -7,7 +7,9 @@
 //   verify:0 sol 이 원본과 대조한다(글자 · 깨진 글자 · 도형 · 남은 손글씨). 차이가 0곳이면 끝.
 //   gen:1    차이 목록을 지시로 붙여 medium 으로 다시 그린다(입력은 늘 **원본**)
 //   verify:1 …
-//   gen:2    max 로 마지막으로 그린다 → verify:2 → 끝
+//   (medium 검수에서도 차이가 남으면 여기서 **멈춘다** — 가장 나은 그림을 먼저 저장하고 작업을
+//    `max-offer` 로 남긴다. max 는 사용자가 패널에서 확인하면 200토큰을 걷고 이어서 돈다.)
+//   gen:2    max 로 마지막으로 그린다(확인 뒤에만) → verify:2 → 끝
 //
 // 끝나면 **남은 차이가 가장 적은 그림**을 저장한다(같으면 앞의 것 — quality 가 낮아 더 싸다).
 //
@@ -69,6 +71,8 @@ export type ProblemLoopState = {
   rounds: Round[];
   /** 다음 그리기에 붙일 지시(앞선 **모든** 시도가 틀린 곳을 모은 것). */
   instruction?: string;
+  /** 사용자가 max 다시 그리기를 확인해 돌고 있다(`max-offer` 에서 넘어온 것). 실패하면 환불하고 offer 로 돌아간다. */
+  maxPhase?: boolean;
   /** 라운드마다 검수가 찾은 차이 목록. 다음 그리기의 지시를 만드는 재료(그림은 폐기하고 실수만 넘긴다). */
   history?: RoundDiffs[];
   /** 지금까지 그림 호출의 사용량 합. */
@@ -100,6 +104,13 @@ export type ProblemLoopOutcome =
       note: string;
       /** 지울 중간 파일. */
       cleanup: string[];
+      /** 그린 라운드 수(max 까지 그렸는지 가릴 때 쓴다). */
+      rounds: number;
+      /**
+       * 차이가 남았지만 max 는 **사용자 확인 뒤에** 돌린다 — 이 상태를 작업에 그대로 남기고(입력·중간 그림
+       * 유지) 일꾼은 여기서 멈춘다.
+       */
+      offer?: ProblemLoopState;
     }
   | { kind: "fail"; error: string; cleanup: string[] };
 
@@ -194,6 +205,7 @@ async function finalize(
           usage: withSol(state),
           note: `${why} (그림 ${i + 1} 사용)`,
           cleanup,
+          rounds: state.rounds.length,
         };
       }
     }
@@ -213,6 +225,7 @@ async function finalize(
     usage: withSol(state),
     note: `${round.quality} 그림 저장 · ${summary}${why ? ` · ${why}` : ""}`,
     cleanup,
+    rounds: state.rounds.length,
   };
 }
 
@@ -407,11 +420,29 @@ async function runVerify(
     ...(state.history ?? []).filter((h) => h.quality !== round.quality),
     { quality: round.quality, diffs: diffs.slice(0, 20) },
   ];
+  const withHistory: ProblemLoopState = { ...checked, history, instruction: accumulatedCorrection(history) };
+
+  // **max 는 바로 돌리지 않는다**(사용자 — "딴 거 먼저 한 다음에 마지막에 최종 컨펌받고 돌려").
+  // medium 까지 해도 차이가 남으면 지금까지 나온 것 중 가장 나은 그림을 **먼저 저장**하고, 입력·중간
+  // 그림·지시를 작업에 남겨 둔 채 멈춘다. 사용자가 패널에서 확인하면 그때 200토큰을 걷고 이어 돌린다.
+  if (i === PROBLEM_LADDER.length - 2 && !state.maxPhase) {
+    const saved = await finalize(admin, withHistory, bestRound(rounds), ctx, "");
+    if (saved.kind === "done") {
+      return {
+        ...saved,
+        note: `${saved.note} · max 로 고쳐 그리려면 확인이 필요해요`,
+        cleanup: [],
+        offer: withHistory,
+      };
+    }
+    return saved;
+  }
+
   const nextQ = PROBLEM_LADDER[i + 1];
   return {
     kind: "next",
     stage: `gen:${i + 1}`,
-    state: { ...checked, history, instruction: accumulatedCorrection(history) },
+    state: withHistory,
     note: `${round.quality}: 차이 ${diffs.length}곳 → ${nextQ} 로 고쳐 그립니다`,
   };
 }

@@ -408,6 +408,9 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       // 지문은 이 버튼이 아예 안 뜨지만(그쪽은 "다시 인식하기"다) 조건을
       // 그대로 적어 둔다 — 나중에 버튼이 옮겨 다녀도 안전하게.
       mode: isWholeProblemFigure(id) ? "problem" : undefined,
+      // **수정 모드의 다시 그리기는 우리 프로세스(그리기 → sol 검수 → 고쳐 그리기)를 안 탄다** — quality=auto
+      // 로 한 번만 그리고 sol 검증도 없다(사용자 지시). 사용자가 결과를 눈으로 보고 다시 고를 수 있어서다.
+      auto: true,
       // 국어 문항은 거의 글자뿐이라 서버가 프롬프트 톤을 고를 때 참고한다
       // (Mathpix 참고 글 자체는 더 이상 안 쓴다 — 위 FigureJobsProvider 참고).
       korean: editing?.korean ? true : undefined,

@@ -84,6 +84,11 @@ export type FigureJob = {
    * Mathpix 참고 글은 더 이상 여기서 안 쓴다(2026-09-18).
    */
   korean?: boolean;
+  /**
+   * **수정 모드의 다시 그리기**다 — 우리 프로세스(그리기 → sol 검수 → 고쳐 그리기)를 타지 않고
+   * quality=auto 로 **한 번만** 그린다(사용자 지시). 서버가 작업 payload 로 기억한다.
+   */
+  auto?: boolean;
   status: "pending" | "running" | "done" | "error";
   /** 이 작업에 실제로 든 **추정** 비용(달러). 캐시에 걸렸으면 없다. */
   costUsd?: number;
@@ -172,6 +177,12 @@ type Ctx = {
   krwRate: number | null;
   /** 물린 토큰 합계. 금액이 안 오는 일반 사용자는 이걸 본다. */
   spentTokens: number;
+  /** max 로 고쳐 그리기 확인 1건에 걷는 토큰(서버가 알려 준다). */
+  maxTokens: number;
+  /** max 를 확인받고 돌린다. 실패하면 이유를 돌려준다(토큰 부족 등). */
+  confirmMax: (id: string) => Promise<string | null>;
+  /** max 는 안 돌리고 지금 그림으로 둔다. */
+  skipMax: (id: string) => Promise<void>;
   enqueue: (job: Omit<FigureJob, "status">) => void;
   retry: (id: string) => void;
   dismiss: (id: string) => void;
@@ -273,6 +284,7 @@ export default function FigureJobsProvider({
   /** 로그인 안 한 화면에서는 서버를 계속 두드리지 않는다. */
   const signedOutRef = useRef(false);
   const [tick, setTick] = useState(0);
+  const [maxTokens, setMaxTokens] = useState(200);
 
   const putSnapshot = useCallback(
     (problemKey: string, snapshot: ProblemSnapshot) => {
@@ -477,7 +489,9 @@ export default function FigureJobsProvider({
         return;
       }
       if (!res.ok) return;
-      rows = (await jsonOf<{ jobs?: ServerJob[] }>(res)).jobs ?? [];
+      const body = await jsonOf<{ jobs?: ServerJob[]; maxRedrawTokens?: number }>(res);
+      rows = body.jobs ?? [];
+      if (typeof body.maxRedrawTokens === "number") setMaxTokens(body.maxRedrawTokens);
     } catch {
       return; // 오프라인 등. 다음 차례에 다시 본다.
     }
@@ -514,6 +528,7 @@ export default function FigureJobsProvider({
         const recent =
           row.status === "pending" ||
           row.status === "running" ||
+          row.stage === "max-offer" ||
           (row.status === "done" && !row.applied_at) ||
           now - finished < SHOW_FINISHED_MS;
         if (!recent) continue;
@@ -670,7 +685,7 @@ export default function FigureJobsProvider({
         // 같은 그림을 이미 그린 적이 있으면 그대로 쓴다(세트 문항 대비).
         // 모드·모델·지시를 키에 넣는다 — 하나라도 빠지면 바꿨는데도 옛 결과가 나온다.
         const cacheKey = await figureCacheKey(
-          `${mode}:${DEFAULT_FIGURE_MODEL}:${job.instruction ?? ""}:${forModel}`,
+          `${mode}${mode === "problem" && job.auto ? ":auto" : ""}:${DEFAULT_FIGURE_MODEL}:${job.instruction ?? ""}:${forModel}`,
         );
         const cached = readFigureCache(cacheKey);
         if (cached) {
@@ -697,6 +712,7 @@ export default function FigureJobsProvider({
             mode,
             korean: job.korean ? true : undefined,
             instruction: job.instruction,
+            auto: mode === "problem" && job.auto ? true : undefined,
             // 넣을 때 아직 저장 전일 수 있다 — 화면이 계속 갱신해 주는
             // 스냅샷에서 지금 아는 값을 읽는다. 나중에 생기면 sync 가 알려 준다.
             problemId:
@@ -800,6 +816,48 @@ export default function FigureJobsProvider({
     [runOnChain, setJobs],
   );
 
+  const confirmMax = useCallback(
+    async (id: string): Promise<string | null> => {
+      const job = jobsRef.current.find((j) => j.id === id);
+      const serverId = job?.serverId;
+      if (!serverId) return "서버 작업을 찾지 못했어요.";
+      try {
+        const res = await fetch("/api/figure-jobs", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: serverId, action: "max" }),
+        });
+        const json = await jsonOf<{ job?: ServerJob; error?: string }>(res);
+        if (!res.ok || !json.job) return json.error ?? "max 를 시작하지 못했어요.";
+        // 새 결과가 오면 이 화면이 받아 갈아끼우도록 예전 결과를 비운다.
+        patchJob(id, { ...fromServer(json.job), svg: undefined, gaveUp: false, live: true });
+        setTick((n) => n + 1);
+        return null;
+      } catch {
+        return "네트워크 오류로 시작하지 못했어요.";
+      }
+    },
+    [fromServer, patchJob],
+  );
+
+  const skipMax = useCallback(
+    async (id: string): Promise<void> => {
+      const serverId = jobsRef.current.find((j) => j.id === id)?.serverId;
+      if (!serverId) return;
+      try {
+        await fetch("/api/figure-jobs", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: serverId, action: "skipMax" }),
+        });
+      } catch {
+        return;
+      }
+      patchJob(id, { stage: undefined, note: "max 없이 지금 그림으로 두었어요" });
+    },
+    [patchJob],
+  );
+
   const activeCount = jobs.filter(
     (j) => j.status === "pending" || j.status === "running",
   ).length;
@@ -879,6 +937,9 @@ export default function FigureJobsProvider({
         spentKrw,
         krwRate,
         spentTokens,
+        maxTokens,
+        confirmMax,
+        skipMax,
         enqueue,
         retry,
         dismiss,

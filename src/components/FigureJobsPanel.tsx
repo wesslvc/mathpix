@@ -15,6 +15,7 @@ const STATUS_TEXT = {
  * 옮겨적는중이라고"). 서버가 알려 주는 단계로 지금 무엇을 하는지 적는다.
  */
 function statusText(j: FigureJob): string {
+  if (j.status === "done" && j.stage === "max-offer") return "완료 · 글자·도형 차이가 남았어요";
   if (j.status !== "running" && j.status !== "pending") return STATUS_TEXT[j.status];
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계로 돈다(`gen:N` / `verify:N`).
   if (j.mode === "problem" && j.stage) {
@@ -51,12 +52,12 @@ function statusText(j: FigureJob): string {
 function remainingSeconds(j: FigureJob): number {
   if (j.status !== "running" && j.status !== "pending") return 0;
   if (j.mode === "problem") {
-    // 전 단계 기대값: 그리기 low + 검수, 30% 는 medium 으로 한 번 더, 그중 일부는 max 까지.
+    // 전 단계 기대값: 그리기 low + 검수, 30% 는 medium 으로 한 번 더. max 는 사용자 확인 뒤에만 돈다.
     const stage = j.stage ?? "gen:0";
     const gen = /^gen:(\d+)$/.exec(stage);
     const ver = /^verify:(\d+)$/.exec(stage);
     const n = gen ? Number(gen[1]) : ver ? Number(ver[1]) : 0;
-    const left = [35 + 15 + 0.3 * (45 + 15) + 0.1 * (90 + 15), 45 + 15 + 0.3 * (90 + 15), 90 + 15][Math.min(n, 2)];
+    const left = [35 + 15 + 0.3 * (45 + 15), 45 + 15, 90 + 15][Math.min(n, 2)];
     return Math.round(ver ? left - (n === 0 ? 35 : n === 1 ? 45 : 90) : left);
   }
   if (j.mode === "passage") {
@@ -92,10 +93,37 @@ export default function FigureJobsPanel() {
     spentTokens,
     retry,
     dismiss,
+    maxTokens,
+    confirmMax,
+    skipMax,
   } = useFigureJobs();
   const [open, setOpen] = useState(false);
+  const [maxBusy, setMaxBusy] = useState(false);
+  const [maxError, setMaxError] = useState<string | null>(null);
 
   if (jobs.length === 0) return null;
+
+  // medium 까지 해도 차이가 남아 **max 확인을 기다리는** 문제들. max 는 사용자가 확인해야만 돈다.
+  const offers = jobs.filter((j) => j.status === "done" && j.stage === "max-offer");
+  const idle = activeCount === 0 && submitting === 0;
+
+  async function runMax(list: FigureJob[]) {
+    setMaxBusy(true);
+    setMaxError(null);
+    for (const j of list) {
+      const err = await confirmMax(j.id);
+      if (err) {
+        setMaxError(err);
+        break;
+      }
+    }
+    setMaxBusy(false);
+  }
+  async function closeOffers(list: FigureJob[]) {
+    setMaxBusy(true);
+    for (const j of list) await skipMax(j.id);
+    setMaxBusy(false);
+  }
 
   const failed = jobs.filter((j) => j.status === "error").length;
   // 줄 전체가 끝나기까지 어림(한 사람은 한 번에 하나씩 돈다 — 앞 작업이 끝나야 다음이 시작).
@@ -122,6 +150,36 @@ export default function FigureJobsPanel() {
             )}
           </p>
         ) : null}
+        {/* **max 는 마지막에 사용자 확인을 받고 돌린다.** 다른 작업이 다 끝나 줄이 비었을 때 한 번에 묻는다. */}
+        {idle && offers.length > 0 && (
+          <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-900">
+            <p>
+              <b>글자·도형 차이가 남은 문제 {offers.length}개</b>가 있어요. 지금 저장된 그림은 그대로 두고, max 로 한 번 더
+              고쳐 그려 볼까요? 문제당 <b>{maxTokens}토큰</b>
+              {offers.length > 1 && <> (합계 {(offers.length * maxTokens).toLocaleString()}토큰)</>}이고, 그리기에 실패하면
+              돌려드려요.
+            </p>
+            {maxError && <p className="mt-1 text-red-700">{maxError}</p>}
+            <div className="mt-1.5 flex gap-1.5">
+              <button
+                type="button"
+                disabled={maxBusy}
+                onClick={() => void runMax(offers)}
+                className="rounded bg-amber-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {maxBusy ? "처리 중…" : "모두 max 로 고쳐 그리기"}
+              </button>
+              <button
+                type="button"
+                disabled={maxBusy}
+                onClick={() => void closeOffers(offers)}
+                className="rounded border border-amber-300 bg-white px-2 py-1 text-[11px] text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+              >
+                이대로 두기
+              </button>
+            </div>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -131,6 +189,8 @@ export default function FigureJobsPanel() {
             <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
           ) : failed > 0 ? (
             <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
+          ) : offers.length > 0 ? (
+            <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
           ) : (
             <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
           )}
@@ -139,7 +199,9 @@ export default function FigureJobsPanel() {
               ? `AI 작업 ${activeCount}개 진행 중`
               : failed > 0
                 ? `${failed}개 실패`
-                : "AI 작업 완료"}
+                : offers.length > 0
+                  ? `AI 작업 완료 · max 확인 대기 ${offers.length}개`
+                  : "AI 작업 완료"}
           </span>
           {/* 실제로 나간 유료 호출 수. 문제 수보다 많아지면(재시도가 쌓이면)
               그만큼 요금이 더 나간 것인데 지금까지 아무 단서가 없었다.
@@ -217,6 +279,16 @@ export default function FigureJobsPanel() {
                   )}
                 </div>
                 <div className="flex shrink-0 gap-1">
+                  {j.status === "done" && j.stage === "max-offer" && (
+                    <button
+                      type="button"
+                      disabled={maxBusy}
+                      onClick={() => void runMax([j])}
+                      className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                    >
+                      max {maxTokens}
+                    </button>
+                  )}
                   {j.status === "error" && (
                     <button
                       type="button"

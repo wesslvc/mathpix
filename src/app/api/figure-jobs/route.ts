@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redirectBase } from "@/app/auth/redirectBase";
 import { getBillingContext } from "@/lib/byok";
-import { FIGURE_TOKEN_DEPOSIT } from "@/lib/tokens";
+import { FIGURE_TOKEN_DEPOSIT, MAX_REDRAW_TOKENS } from "@/lib/tokens";
 import { removeStored, splitDataUrl, storeBytes } from "@/lib/figureRun";
 import { JOB_COLUMNS, kickWorker, type FigureJobRow } from "@/lib/figureJobsServer";
 import { passageDepositFrom, passageInputPaths, type PassagePayload } from "@/lib/passageRun";
-import { problemLoopPaths, problemLoopStarted } from "@/lib/problemLoopRun";
+import {
+  PROBLEM_LADDER,
+  problemLoopPaths,
+  problemLoopStarted,
+  type ProblemLoopState,
+} from "@/lib/problemLoopRun";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -49,7 +54,7 @@ export async function GET() {
     .order("created_at", { ascending: true })
     .limit(100);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ jobs: data ?? [] });
+  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS });
 }
 
 export async function POST(req: NextRequest) {
@@ -66,6 +71,8 @@ export async function POST(req: NextRequest) {
     height?: number;
     inputPath?: unknown;
     payload?: unknown;
+    /** 수정 모드 다시 그리기 — 우리 프로세스(검수 반복) 없이 quality=auto 로 한 번만. */
+    auto?: boolean;
   };
   try {
     body = await req.json();
@@ -154,6 +161,7 @@ export async function POST(req: NextRequest) {
           ? body.instruction.slice(0, 500).trim() || null
           : null,
       input_path: inputPath,
+      ...(mode === "problem" && body.auto === true ? { payload: { auto: true } } : {}),
       width: typeof body.width === "number" && body.width > 0 ? Math.round(body.width) : null,
       height:
         typeof body.height === "number" && body.height > 0 ? Math.round(body.height) : null,
@@ -273,6 +281,99 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ job: data, claimed: claim ? !!data : undefined });
   }
 
+  // **max 로 고쳐 그리기 확인.** medium 까지 해도 차이가 남은 문제는 가장 나은 그림이 이미 저장돼 있고
+  // 작업이 `max-offer` 로 멈춰 있다. 여기서 확인하면 토큰을 걷고 max 라운드를 이어서 돌린다.
+  if (body.action === "max") {
+    const { data: row } = await admin
+      .from("figure_jobs")
+      .select("id, status, stage, mode, state")
+      .eq("id", body.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!row) return NextResponse.json({ error: "작업을 찾지 못했어요." }, { status: 404 });
+    if (row.status !== "done" || row.stage !== "max-offer" || !row.state) {
+      return NextResponse.json({ error: "max 로 고쳐 그릴 수 있는 작업이 아니에요." }, { status: 409 });
+    }
+    const billing = await getBillingContext(supabase, user.id);
+    if (billing.byok && !billing.byokApiKey) {
+      return NextResponse.json(
+        { error: "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요." },
+        { status: 402 },
+      );
+    }
+    const charge = !billing.unlimited && !billing.byok;
+    if (charge) {
+      const { data, error } = await supabase.rpc("consume_recognition_credit", {
+        p_amount: MAX_REDRAW_TOKENS,
+      });
+      if (error || data === null) {
+        return NextResponse.json(
+          {
+            error: error
+              ? error.message
+              : `토큰이 부족해요. max 로 고쳐 그리려면 ${MAX_REDRAW_TOKENS}토큰이 필요합니다.`,
+          },
+          { status: error ? 500 : 402 },
+        );
+      }
+    }
+    const { data, error } = await admin
+      .from("figure_jobs")
+      .update({
+        status: "pending",
+        stage: `gen:${PROBLEM_LADDER.length - 1}`,
+        state: { ...(row.state as ProblemLoopState), maxPhase: true },
+        note: "max 로 고쳐 그리는 중",
+        error: null,
+        started_at: null,
+        finished_at: null,
+        charged: charge,
+        charged_tokens: charge ? MAX_REDRAW_TOKENS : 0,
+      })
+      .eq("id", body.id)
+      .eq("user_id", user.id)
+      .eq("status", "done")
+      .eq("stage", "max-offer")
+      .select(JOB_COLUMNS)
+      .maybeSingle();
+    if (error || !data) {
+      // 기기 둘에서 동시에 눌렀거나 그 사이 닫혔다 — 방금 건 토큰은 돌려준다.
+      if (charge) {
+        await admin.rpc("refund_recognition_credit_for", {
+          p_user_id: user.id,
+          p_amount: MAX_REDRAW_TOKENS,
+        });
+      }
+      return NextResponse.json({ error: "이미 처리됐거나 닫힌 작업이에요." }, { status: 409 });
+    }
+    await kickWorker(admin, redirectBase(req), user.id);
+    return NextResponse.json({ job: data });
+  }
+
+  // max 는 안 돌리고 지금 저장된 그림으로 둔다 — 붙들고 있던 입력·중간 그림을 지운다.
+  if (body.action === "skipMax") {
+    const { data: row } = await admin
+      .from("figure_jobs")
+      .select("input_path, state")
+      .eq("id", body.id)
+      .eq("user_id", user.id)
+      .eq("status", "done")
+      .eq("stage", "max-offer")
+      .maybeSingle();
+    if (!row) return NextResponse.json({ error: "닫을 작업이 없어요." }, { status: 409 });
+    const { data: closed } = await admin
+      .from("figure_jobs")
+      .update({ stage: "done", state: null, note: "max 없이 지금 그림으로 두었어요" })
+      .eq("id", body.id)
+      .eq("user_id", user.id)
+      .eq("status", "done")
+      .eq("stage", "max-offer")
+      .select("id")
+      .maybeSingle();
+    if (closed) await removeStored(admin, [row.input_path as string, ...problemLoopPaths(row.state)]);
+    return NextResponse.json({ ok: true });
+  }
+
   if (body.action === "retry") {
     const { data: row } = await admin
       .from("figure_jobs")
@@ -374,7 +475,10 @@ export async function DELETE(req: NextRequest) {
   if (removed) {
     // 그리기가 이미 시작된 작업(단계 사이에 줄에 서 있는 것)은 **돈이 나간 뒤**라 돌려주지 않는다 —
     // 치우기만 해도 전액이 돌아오면 그려 놓고 취소하는 길이 열린다.
-    const spent = problemLoopStarted(removed.state);
+    // max 를 확인받고 줄에 선 작업(아직 max 를 안 그렸다)은 걷은 200토큰을 돌려준다.
+    const st = removed.state as ProblemLoopState | null;
+    const maxNotDrawn = st?.maxPhase === true && (st.rounds?.length ?? 0) < PROBLEM_LADDER.length;
+    const spent = problemLoopStarted(removed.state) && !maxNotDrawn;
     if (removed.charged && removed.charged_tokens > 0 && !spent) {
       await admin.rpc("refund_recognition_credit_for", {
         p_user_id: user.id,
@@ -401,10 +505,11 @@ export async function DELETE(req: NextRequest) {
     .eq("id", id)
     .eq("user_id", user.id)
     .in("status", ["done", "error"])
-    .select("status, input_path, payload, state")
+    .select("status, stage, input_path, payload, state")
     .maybeSingle();
   // 실패한 작업은 다시 시도하려고 입력을 남겨 뒀다 — 치웠으니 지운다(중간 그림도).
-  if (finished?.status === "error") {
+  // max 확인을 기다리던 작업도 입력·중간 그림을 들고 있었다.
+  if (finished?.status === "error" || finished?.stage === "max-offer") {
     await removeStored(admin, [...passageInputPaths(finished), ...problemLoopPaths(finished.state)]);
   }
   return NextResponse.json({ ok: true });

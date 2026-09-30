@@ -23,6 +23,7 @@ import {
   type PassageState,
 } from "@/lib/passageRun";
 import {
+  PROBLEM_LADDER,
   problemLoopEnabled,
   problemLoopPaths,
   runProblemStage,
@@ -59,7 +60,7 @@ type ClaimedJob = {
   charged: boolean;
   charged_tokens: number;
   dismissed: boolean;
-  payload: PassagePayload | null;
+  payload: (PassagePayload & { auto?: boolean }) | null;
   stage: string | null;
   state: PassageState | ProblemLoopState | null;
 };
@@ -265,7 +266,10 @@ async function fail(admin: Admin, job: ClaimedJob, message: string) {
 async function runJob(admin: Admin, job: ClaimedJob) {
   if (job.mode === "passage") return runPassageJob(admin, job);
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계별로 돈다.
-  if (job.mode === "problem" && problemLoopEnabled()) return runProblemLoopJob(admin, job);
+  // **수정 모드의 다시 그리기는 우리 프로세스(그리기 → sol 검수 → 고쳐 그리기)를 타지 않는다**(사용자 —
+  // "수정모드에서는 우리 프로세스가 아니라 auto 로 해서 sol 검증 없이 가는 거고"). 한 번, quality=auto.
+  const auto = job.payload?.auto === true;
+  if (job.mode === "problem" && problemLoopEnabled() && !auto) return runProblemLoopJob(admin, job);
   const tag = `figure-jobs/run ${job.id.slice(0, 8)}`;
   const image = await loadAsDataUrl(admin, job.input_path);
   if (!image) {
@@ -294,6 +298,7 @@ async function runJob(admin: Admin, job: ClaimedJob) {
     byokApiKey: billing.byokApiKey ?? undefined,
     deadlineMs: GENERATION_MS,
     tag,
+    ...(auto ? { quality: "auto" } : {}),
   });
   if (!outcome.ok) {
     await fail(admin, job, outcome.error);
@@ -325,7 +330,16 @@ async function runJob(admin: Admin, job: ClaimedJob) {
 async function finishJob(
   admin: Admin,
   job: ClaimedJob,
-  out: { dataUrl: string; modelId: string; usage?: FigureUsage; showMoney: boolean; tag: string; note?: string },
+  out: {
+    dataUrl: string;
+    modelId: string;
+    usage?: FigureUsage;
+    showMoney: boolean;
+    tag: string;
+    note?: string;
+    /** max 확인을 기다리는 상태(입력·중간 그림을 남기고 `max-offer` 로 끝낸다). */
+    offer?: ProblemLoopState;
+  },
 ) {
   const { tag } = out;
   // 문제 전체는 결과가 곧 카드다 — 그 행에 바로 저장하면 끝난다.
@@ -370,7 +384,11 @@ async function finishJob(
       model: out.modelId,
       usage: visibleUsage(out.usage, out.showMoney) ?? null,
       finished_at: now,
-      ...(out.note !== undefined ? { note: out.note, stage: "done", state: null } : {}),
+      ...(out.note !== undefined
+        ? out.offer
+          ? { note: out.note, stage: "max-offer", state: out.offer }
+          : { note: out.note, stage: "done", state: null }
+        : {}),
     })
     .eq("id", job.id)
     .eq("status", "running")
@@ -383,8 +401,41 @@ async function finishJob(
     console.warn(`[${tag}] 이미 정리된 작업이라 결과 기록을 건너뜀`);
     return;
   }
-  // 성공했으면 입력은 더 쓸 일이 없다(다시 그리기는 새 작업이다).
-  await removeStored(admin, [job.input_path]);
+  // 성공했으면 입력은 더 쓸 일이 없다(다시 그리기는 새 작업이다). max 확인을 기다리는 작업은
+  // 이어서 그리려면 입력이 필요하니 남긴다.
+  if (!out.offer) await removeStored(admin, [job.input_path]);
+}
+
+/**
+ * max 다시 그리기가 **그림을 못 만들었을 때**: 걷은 토큰을 돌려주고 확인 대기(`max-offer`)로 되돌린다.
+ * 문제에는 이미 medium 까지의 가장 나은 그림이 저장돼 있어 잃는 것이 없다. 입력·중간 그림은 그대로 둔다.
+ */
+async function revertMax(admin: Admin, job: ClaimedJob, why: string, tag: string) {
+  const state = (job.state ?? null) as ProblemLoopState | null;
+  const refund = job.charged ? job.charged_tokens : 0;
+  const now = new Date().toISOString();
+  const { data } = await admin
+    .from("figure_jobs")
+    .update({
+      status: "done",
+      stage: "max-offer",
+      state: state ? { ...state, maxPhase: false } : null,
+      note: `max 그리기에 실패했어요${refund > 0 ? ` — ${refund}토큰은 돌려드렸어요` : ""} · 다시 시도할 수 있어요 (${why.slice(0, 120)})`,
+      charged: false,
+      charged_tokens: 0,
+      finished_at: now,
+    })
+    .eq("id", job.id)
+    .eq("status", "running")
+    .select("id")
+    .maybeSingle();
+  if (!data) {
+    console.warn(`[${tag}] 이미 정리된 작업이라 max 되돌리기를 건너뜀`);
+    return;
+  }
+  if (refund > 0) {
+    await admin.rpc("refund_recognition_credit_for", { p_user_id: job.user_id, p_amount: refund });
+  }
 }
 
 /**
@@ -412,12 +463,23 @@ async function runProblemLoopJob(admin: Admin, job: ClaimedJob) {
       tag,
     },
   );
+  const inMax = (job.state as ProblemLoopState | null)?.maxPhase === true;
   if (out.kind === "fail") {
+    if (inMax) {
+      // max 그리기가 안 됐다 — 이미 저장된 그림은 그대로다. 걷은 토큰을 돌려주고 확인 상태로 돌아간다.
+      await revertMax(admin, job, out.error, tag);
+      return;
+    }
     await removeStored(admin, out.cleanup);
     await fail(admin, job, out.error);
     return;
   }
   if (out.kind === "done") {
+    // max 를 확인받고 돌렸는데 max 그림이 안 나왔다(그리기 실패) — 돈을 받을 일이 아니다.
+    if (inMax && out.rounds < PROBLEM_LADDER.length) {
+      await revertMax(admin, job, out.note, tag);
+      return;
+    }
     await finishJob(admin, job, {
       dataUrl: out.dataUrl,
       modelId: out.modelId,
@@ -425,8 +487,9 @@ async function runProblemLoopJob(admin: Admin, job: ClaimedJob) {
       showMoney: billing.unlimited || billing.byok,
       tag,
       note: out.note,
+      offer: out.offer,
     });
-    await removeStored(admin, out.cleanup);
+    if (!out.offer) await removeStored(admin, out.cleanup);
     return;
   }
   const { data: saved } = await admin
@@ -525,6 +588,22 @@ async function runPassageJob(admin: Admin, job: ClaimedJob) {
  */
 async function sweepOldInputs(admin: Admin) {
   const before = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
+  // max 확인을 3일 넘게 안 받은 작업: 입력·중간 그림을 지우고 확인 대기를 닫는다(그림은 이미 저장돼 있다).
+  const { data: offers } = await admin
+    .from("figure_jobs")
+    .select("id, input_path, state")
+    .eq("status", "done")
+    .eq("stage", "max-offer")
+    .lt("finished_at", before)
+    .limit(20);
+  for (const o of offers ?? []) {
+    await removeStored(admin, [o.input_path as string, ...problemLoopPaths(o.state)]);
+    await admin
+      .from("figure_jobs")
+      .update({ stage: "done", state: null, note: "max 확인 기간이 지나 닫혔어요" })
+      .eq("id", o.id as string)
+      .eq("stage", "max-offer");
+  }
   const { data } = await admin
     .from("figure_jobs")
     .select("id, input_path, payload, state")

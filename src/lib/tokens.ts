@@ -78,6 +78,17 @@ export const PASSAGE_MARKS_DEPOSIT = 30;
 export const TOKEN_GAUGE_FULL = 1000;
 
 /**
+ * **max 로 다시 그리기**의 토큰(사용자 — "max 는 마지막에 사용자한테 최종 컨펌받고 돌려, 이거 돌릴 땐
+ * 200토큰 걷고"). 문제 통째로 그리기는 low → medium 까지 자동으로 돌고, 그래도 글자·도형 차이가 남으면
+ * 그림은 그때까지 나온 것 중 가장 나은 것으로 저장해 두고 **확인을 받은 뒤에만** max 로 한 번 더
+ * 그린다. 확인하는 순간 이만큼을 걷는다(무제한·BYOK 는 안 걷는다). 그리기가 실패하면 돌려준다.
+ */
+export const MAX_REDRAW_TOKENS = (() => {
+  const raw = Number(process.env.MAX_REDRAW_TOKENS);
+  return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : 200;
+})();
+
+/**
  * luna 를 쓰는 호출(자동채점·답지 인식·제목 짓기) 1회의 **고정 차감액**.
  *
  * **실사용량 정산에서 고정 1토큰으로 바꿨다**(사용자 결정, 2026-09-26 —
