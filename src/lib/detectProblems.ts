@@ -471,7 +471,7 @@ const OPENAI_CHAT = "https://api.openai.com/v1/chat/completions";
 export const OPENAI_DETECT_MODEL = process.env.OPENAI_DETECT_MODEL ?? "gpt-6-luna";
 
 /**
- * **영역 찾기의 추론 강도**(`reasoning.effort`). 기본 `medium`. 같은 날 처음엔
+ * **영역 찾기의 추론 강도**(`reasoning.effort`). 기본 `high`(2026-09-30 사용자 — "luna 오릴 때 미디움 말고 high 로"; 그 전엔 medium). 2026-09-25 처음엔
  * `xhigh` 로 올렸다가("지문 영역 설정이랑 문제 자르는 거 전부 luna6 xhigh 가"),
  * 비교 화면에서 강도별로 돌려 본 뒤 사용자가 medium 으로 정했다("자리 잡는
  * 거는 luna medium 으로 가고"). gpt-6-luna 가 받는 값은
@@ -482,7 +482,7 @@ export const OPENAI_DETECT_MODEL = process.env.OPENAI_DETECT_MODEL ?? "gpt-6-lun
  * `OPENAI_DETECT_EFFORT` 로 바꾼다(`default` 를 넣으면 강도를 안 보내 모델 기본값이 된다).
  */
 export const OPENAI_DETECT_EFFORT = (() => {
-  const v = (process.env.OPENAI_DETECT_EFFORT ?? "medium").trim();
+  const v = (process.env.OPENAI_DETECT_EFFORT ?? "high").trim();
   return v === "" || v === "default" ? undefined : v;
 })();
 

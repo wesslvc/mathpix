@@ -291,11 +291,11 @@ function readerTitle(r: Reader): string {
 
 export default function CompareKoreanPage() {
   const [readers, setReaders] = useState<Reader[]>(DEFAULT_READERS);
-  // 기본은 운영과 같은 값(gpt-6-luna medium, `OPENAI_DETECT_EFFORT`).
+  // 기본은 운영과 같은 값(gpt-6-luna high, `OPENAI_DETECT_EFFORT`).
   const [detector, setDetector] = useState<Detector>({
     provider: "openai",
     model: "gpt-6-luna",
-    effort: "medium",
+    effort: "high",
   });
   /** 새로 그리는 네모가 지문인가 그림인가. */
   const [drawKind, setDrawKind] = useState<"passage" | "figure">("passage");
@@ -579,7 +579,7 @@ export default function CompareKoreanPage() {
                       ...d,
                       provider: pv,
                       model: pv === "openai" ? OPENAI_PRESETS[0] : "gemini-3.8-flash",
-                      effort: pv === "openai" ? "medium" : "",
+                      effort: pv === "openai" ? "high" : "",
                     }))
                   }
                   className={`rounded-lg border px-2 py-1 ${

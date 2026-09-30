@@ -87,25 +87,24 @@ export async function fileToDataUrl(file: File): Promise<string> {
     throw new Error("이미지 파일만 사용할 수 있습니다.");
   }
 
-  const objectUrl = URL.createObjectURL(file);
+  // 64MP 같은 큰 원본을 `<img>` 로 열면 메모리 때문에 실패하는 기기가 있다 —
+  // 자르기 재료를 여는 것과 같은 튼튼한 열기(`loadDrawableFromFile`)를 쓴다.
+  const d = await loadDrawableFromFile(file);
   try {
-    const img = await loadImage(objectUrl);
-    const scale = Math.min(
-      1,
-      MAX_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight),
-    );
-    const width = Math.max(1, Math.round(img.naturalWidth * scale));
-    const height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(d.width, d.height));
+    const width = Math.max(1, Math.round(d.width * scale));
+    const height = Math.max(1, Math.round(d.height * scale));
 
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("캔버스 컨텍스트를 생성할 수 없습니다.");
-    ctx.drawImage(img, 0, 0, width, height);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(d.src, 0, 0, width, height);
     return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
   } finally {
-    URL.revokeObjectURL(objectUrl);
+    d.close();
   }
 }
 
@@ -150,6 +149,9 @@ export type Drawable = {
  */
 const DECODE_MAX_DIM = 3000;
 
+/** 원본으로 못 열 때 차례로 시도하는 디코딩 폭(마지막이 `DECODE_MAX_DIM`). */
+const DECODE_STEPS = [6000, 4500, DECODE_MAX_DIM];
+
 /**
  * 사용자가 고른 사진 파일을 **여러 방법으로** 열어 본다. 하나라도 되면 그걸 쓴다.
  *
@@ -193,18 +195,22 @@ export async function loadDrawableFromFile(file: File): Promise<Drawable> {
     } catch {
       // 원본 크기로는 못 열었다 = 너무 큰 사진이다(갤럭시 카메라 원본 등).
     }
-    try {
-      // 디코딩하면서 바로 줄인다. resizeWidth 하나만 주면 세로는 비율에
-      // 맞춰 따라온다.
-      return asBitmap(
-        await createImageBitmap(file, {
-          imageOrientation: "from-image",
-          resizeWidth: DECODE_MAX_DIM,
-          resizeQuality: "high",
-        }),
-      );
-    } catch {
-      // 다음 방법으로.
+    // 디코딩하면서 바로 줄인다. resizeWidth 하나만 주면 세로는 비율에 맞춰
+    // 따라온다. **한 번에 3000 으로 떨어지지 않고 단계적으로** 내려간다 — 64MP
+    // (9248×6936)가 원본으로는 안 열려도 6000·4500px 로는 열리는 기기가 많고,
+    // 그러면 조각이 그만큼 또렷하다.
+    for (const w of DECODE_STEPS) {
+      try {
+        return asBitmap(
+          await createImageBitmap(file, {
+            imageOrientation: "from-image",
+            resizeWidth: w,
+            resizeQuality: "high",
+          }),
+        );
+      } catch {
+        // 더 작게 다시.
+      }
     }
   }
 

@@ -103,6 +103,10 @@ export default function BatchSplitPanel({
   answerByNumber = {},
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const moreRef = useRef<HTMLInputElement>(null);
+  /** 아직 안 연 다음 지면들과 처음 고른 장수(여러 장을 연달아 처리한다). */
+  const [queue, setQueue] = useState<File[]>([]);
+  const [totalPages, setTotalPages] = useState(0);
   /**
    * 고른 사진 **원본**. 자르는 재료는 이것이다.
    *
@@ -132,24 +136,94 @@ export default function BatchSplitPanel({
   /** 조각마다 실제 픽셀 크기(그림이 뜨면 잰다). 흐린지 눈으로 짐작하지 말고 숫자로 본다. */
   const [pieceSizes, setPieceSizes] = useState<Record<string, string>>({});
 
-  async function pick(file: File | undefined) {
-    if (!file) return;
+  /**
+   * 지면을 **여러 장** 고르면 첫 장부터 차례로 처리한다. 한 장을 넣고 나면(그대로 넣기·
+   * AI 재생성) 곧바로 다음 지면이 열려 이어서 자를 수 있다 — AI 는 뒤에서 돌므로
+   * 기다릴 것이 없다. 열지 못하는 사진(HEIC 등)은 건너뛰고 알린다.
+   */
+  async function pick(list: FileList | null | undefined) {
+    const files = Array.from(list ?? []);
+    if (files.length === 0) return;
     setError(null);
+    setNumberNote(null);
+    setTotalPages(files.length);
+    await loadFrom(files);
+  }
+
+  /** 대기열 끝에 지면을 더 붙인다(지금 지면이 없으면 그것부터 연다). */
+  async function addMore(list: FileList | null | undefined) {
+    const files = Array.from(list ?? []);
+    if (moreRef.current) moreRef.current.value = "";
+    if (files.length === 0) return;
+    if (!pageImage) {
+      setTotalPages(files.length);
+      await loadFrom(files);
+      return;
+    }
+    setQueue((q) => [...q, ...files]);
+    setTotalPages((t) => t + files.length);
+  }
+
+  /** 이 목록의 첫 번째로 열리는 사진을 지금 지면으로 삼고 나머지는 대기열에 둔다. */
+  async function loadFrom(files: File[]) {
+    setBusy("지면을 여는 중...");
+    const skipped: string[] = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (isHeicFile(file)) {
+          skipped.push(`${file.name}(HEIC)`);
+          continue;
+        }
+        try {
+          // 화면 표시·영역 감지에는 축소본이면 충분하다(자르기는 원본에서 한다).
+          const url = await fileToDataUrl(file);
+          setPieces([]);
+          setPicked(new Set());
+          setBoxes([]);
+          setUsedModel(null);
+          setSourceInfo(null);
+          setPageImage(url);
+          setPageFile(file);
+          setQueue(files.slice(i + 1));
+          setError(skipped.length ? `열지 못해 건너뛴 사진: ${skipped.join(", ")}` : null);
+          return;
+        } catch {
+          skipped.push(file.name);
+        }
+      }
+      // 하나도 못 열었다.
+      setPieces([]);
+      setPicked(new Set());
+      setBoxes([]);
+      setPageImage(null);
+      setPageFile(null);
+      setQueue([]);
+      setError(
+        skipped.length
+          ? `사진을 열지 못했습니다: ${skipped.join(", ")}. HEIC 는 JPG 로 바꾸고, 안 열리는 사진은 캡처하거나 갤러리에서 다시 저장해 올려주세요.`
+          : null,
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** 지금 지면을 끝냈다(또는 건너뛴다) — 다음 지면이 있으면 이어서 연다. */
+  function nextPage() {
     setPieces([]);
     setPicked(new Set());
     setBoxes([]);
     setUsedModel(null);
-    if (isHeicFile(file)) {
-      setError("HEIC 사진은 아직 지원하지 않습니다. JPG나 PNG로 바꿔 올려주세요.");
+    if (queue.length > 0) {
+      void loadFrom(queue);
       return;
     }
-    try {
-      // 화면 표시·영역 감지에는 축소본이면 충분하다(자르기는 원본에서 한다).
-      setPageImage(await fileToDataUrl(file));
-      setPageFile(file);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "사진을 불러오지 못했습니다.");
-    }
+    setPageImage(null);
+    setPageFile(null);
+    setQueue([]);
+    setTotalPages(0);
+    if (fileRef.current) fileRef.current.value = "";
   }
 
   /**
@@ -444,16 +518,21 @@ export default function BatchSplitPanel({
       // **번호가 몇 개 붙었는지 알려 준다.** 조용히 넘어가면 목록에서
       // 1번부터 새로 매겨진 걸 보고서야 알게 되고, 그때는 이미 늦다.
       setNumberNote(
-        (numbered === done
+        (totalPages > 1 ? `지면 ${Math.max(1, totalPages - queue.length)}: ` : "") +
+          (numbered === done
           ? `${done}개를 넣고 번호도 전부 인식했어요.`
           : `${done}개를 넣었어요. 번호는 ${numbered}개만 인식돼서 나머지는 "수정"에서 직접 적어야 해요.`) +
           (answered > 0 ? ` 정답 ${answered}개를 붙였어요.` : ""),
       );
-      setPieces([]);
-      setPageImage(null);
-      setPageFile(null);
-      setBoxes([]);
-      setPicked(new Set());
+      if (done === pieces.length) {
+        nextPage();
+      } else {
+        setPieces([]);
+        setPageImage(null);
+        setPageFile(null);
+        setBoxes([]);
+        setPicked(new Set());
+      }
     }
   }
 
@@ -489,7 +568,7 @@ export default function BatchSplitPanel({
         enqueue({
           id: piece.id,
           problemKey: `batch:${problemId}`,
-          label: `${done + 1}번째 문제`,
+          label: totalPages > 1 ? `지면 ${Math.max(1, totalPages - queue.length)} · ${done + 1}번째 문제` : `${done + 1}번째 문제`,
           crop: piece.crop,
           mode: "problem",
           problemId,
@@ -505,13 +584,18 @@ export default function BatchSplitPanel({
     }
     setBusy(null);
     if (done > 0) {
-      // 넣은 것은 목록에서 뺀다(같은 것을 두 번 넣지 않게).
-      setPieces((prev) => prev.slice(done));
-      setPicked(new Set());
-      setBoxes([]);
-      setPageImage(null);
-      setPageFile(null);
-      if (fileRef.current) fileRef.current.value = "";
+      if (done === pieces.length) {
+        // 다 넣었다 — 다음 지면이 있으면 곧바로 이어서 연다(AI 는 뒤에서 돈다).
+        nextPage();
+      } else {
+        // 넣은 것은 목록에서 뺀다(같은 것을 두 번 넣지 않게).
+        setPieces((prev) => prev.slice(done));
+        setPicked(new Set());
+        setBoxes([]);
+        setPageImage(null);
+        setPageFile(null);
+        if (fileRef.current) fileRef.current.value = "";
+      }
     }
   }
 
@@ -526,11 +610,73 @@ export default function BatchSplitPanel({
           ref={fileRef}
           type="file"
           accept="image/*"
-          onChange={(e) => void pick(e.target.files?.[0])}
+          multiple
+          onChange={(e) => void pick(e.target.files)}
           className="g-file min-w-0 flex-1"
         />
+        <input
+          ref={moreRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(e) => void addMore(e.target.files)}
+          className="hidden"
+        />
+        {pageImage && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy !== null}
+            onClick={() => moreRef.current?.click()}
+          >
+            + 지면 더 추가
+          </Button>
+        )}
         {pageImage && <CropShapeToggle value={shape} onChange={setShape} />}
       </div>
+
+      {pageImage && totalPages > 1 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+          <span className="font-medium text-slate-800">
+            지면 {Math.max(1, totalPages - queue.length)}/{totalPages}
+          </span>
+          {queue.length > 0 ? (
+            <>
+              <span className="text-slate-400">다음:</span>
+              {queue.map((f, i) => (
+                <span
+                  key={`${f.name}-${i}`}
+                  className="inline-flex max-w-[10rem] items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5"
+                >
+                  <span className="truncate">{f.name}</span>
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    aria-label={`${f.name} 빼기`}
+                    className="text-slate-400 hover:text-red-600 disabled:opacity-40"
+                    onClick={() => setQueue((q) => q.filter((_, j) => j !== i))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </>
+          ) : (
+            <span className="text-slate-400">마지막 지면이에요.</span>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="ml-auto"
+            disabled={busy !== null}
+            onClick={nextPage}
+          >
+            {queue.length > 0 ? "이 지면 건너뛰기" : "지면 닫기"}
+          </Button>
+        </div>
+      )}
 
       {pageImage && (
         <>
