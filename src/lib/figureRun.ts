@@ -51,6 +51,8 @@ export type RunInput = {
   deadlineMs: number;
   /** 로그 머리말. */
   tag: string;
+  /** 출력 품질. 운영은 안 넘긴다 — 비교 화면 전용(`generateFigureImage` 참고). */
+  quality?: string;
 };
 
 export type RunOutcome =
@@ -86,6 +88,7 @@ export async function runFigureGeneration(input: RunInput): Promise<RunOutcome> 
           input.inputSize,
           input.instruction,
           input.byokApiKey,
+          input.quality,
         );
         if (!result) {
           return {

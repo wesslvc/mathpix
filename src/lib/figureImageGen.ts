@@ -330,13 +330,15 @@ function logUsage(
     size: string;
     width?: number;
     height?: number;
+    quality?: string;
   },
 ): void {
   if (!u) return;
   const input =
     info.width && info.height ? `${info.width}x${info.height}` : "?";
   console.info(
-    `[figureImageGen] usage model=${info.modelId} mode=${info.mode} size=${info.size} 입력=${input} ` +
+    `[figureImageGen] usage model=${info.modelId} mode=${info.mode} size=${info.size}` +
+      `${info.quality ? ` quality=${info.quality}` : ""} 입력=${input} ` +
       `in=${u.inputText + u.inputImage}(text=${u.inputText} image=${u.inputImage}) ` +
       `out=${u.output}${u.cached > 0 ? ` cached=${u.cached}` : ""} ` +
       `est=$${u.estUsd.toFixed(4)}(${u.estKrw}원)`,
@@ -749,6 +751,12 @@ export async function generateFigureImage(
    * 값으로 부른다 — 비용이 그 사람 계정으로 직접 나가고 우리 토큰은 안 든다.
    */
   apiKeyOverride?: string,
+  /**
+   * 출력 품질(`low`·`medium`·`high`·`auto`). **운영은 넘기지 않는다**(위
+   * `PARAM_VARIANTS` 주석 — 모델 기본값을 쓴다). 문제 글자 정확도 비교 화면
+   * (`/admin/compare-problem`)이 "올리면 글자가 나아지는가"를 재 볼 때만 쓴다.
+   */
+  quality?: string,
 ): Promise<FigureImageResult | null> {
   const apiKey = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -782,6 +790,7 @@ export async function generateFigureImage(
   for (let i = 0; i < order.length; i++) {
     const params = { ...order[i] };
     if (wanted && "size" in params) params.size = wanted;
+    if (quality) params.quality = quality;
 
     const form = new FormData();
     form.append("model", modelId);
@@ -826,6 +835,16 @@ export async function generateFigureImage(
       );
     }
 
+    // quality 를 콕 집어 거부했으면 조합을 바꿔도 소용없다(모든 조합에 붙는다).
+    // 몰래 빼고 다시 보내면 무엇을 쟀는지 알 수 없어지므로 그대로 알린다.
+    if (quality && res.status === 400 && /quality/i.test(body)) {
+      throw new FigureImageError(
+        `이 모델(${modelId})이 quality="${quality}" 를 받지 않습니다: ${body.slice(0, 300)}`,
+        res.status,
+        modelId,
+      );
+    }
+
     if (isUnsupportedParamError(res.status, body)) {
       console.warn(
         `[figureImageGen] ${modelId}이 ${JSON.stringify(params)}를 거부함, 다음 조합 시도: ${body.slice(0, 300)}`,
@@ -858,6 +877,7 @@ export async function generateFigureImage(
     size: wanted ?? "auto",
     width: size?.width,
     height: size?.height,
+    quality,
   });
   const first = json?.data?.[0];
   const b64: string | undefined = first?.b64_json;

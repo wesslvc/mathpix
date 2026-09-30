@@ -151,10 +151,8 @@ const GRADING_PRICES: Record<string, ModelPrice> = {
   // 기본 모델이라, 이 줄이 생기면서 그쪽이 보증금 고정 → 실사용량 정산으로 바뀐다.
   "gpt-6-luna": { input: 0.1, output: 0.5 },
   "gpt-6-sol": { input: 2.0, output: 10.0 },
-  // `gpt-6.1-sol`(운영 지문 인식·서식 검수 기본, 2026-09-30)은 **일부러 비워 뒀다** —
-  // 단가를 아직 못 받았고 짐작한 값을 넣었다가 데인 자리다. 표에 없으면 예전
-  // 환경변수(`GRADING_PRICE_*`), 그것도 없으면 보증금 고정으로 정산된다(지문 인식은
-  // 원래 고정 100, 서식 검수는 보증금 30). 공표 단가를 알게 되면 여기 한 줄을 더할 것.
+  // 2026-09-30 사용자 확인 — 6.1 단가는 6 과 같다. 운영 지문 인식·서식 검수 기본 모델.
+  "gpt-6.1-sol": { input: 2.0, output: 10.0 },
 };
 
 function priceFor(model?: string): ModelPrice | null {
