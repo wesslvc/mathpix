@@ -109,35 +109,81 @@ export function parseVerify(text: string): TextDiff[] {
   return out;
 }
 
+/** 한 라운드(그 quality 로 그린 그림)를 검수해 나온 차이. */
+export type RoundDiffs = { quality: string; diffs: TextDiff[] };
+
 /**
- * ② 두 번째 그리기에 붙일 지시. `withInstruction` 이 "그리는 방식만 받는다,
- * 원본 베끼기가 이긴다"로 감싸므로, 여기서는 **원본대로 고치라는** 말만 한다
- * (내용을 바꾸라는 요청이 아니다 — 원본과 같게 되돌리라는 요청이다).
+ * 차이 하나를 "원본대로 고치라"는 한 줄로. 내용을 바꾸라는 요청이 아니라 원본과 같게 되돌리라는
+ * 요청이다(`withInstruction` 이 "그리는 방식만 받는다, 원본 베끼기가 이긴다"로 감싼다).
  */
-export function correctionInstruction(diffs: TextDiff[]): string {
-  const lines = diffs.slice(0, 20).map((d, i) => {
-    const got = d.recreated ? `"${d.recreated}"` : "(빠짐)";
-    const at = d.where ? `[${d.where}] ` : "";
-    if (d.kind === "figure") {
-      return `${i + 1}. ${at}도형: 원본은 "${d.original}" 인데 지난번에는 ${got} 였다 — 원본 그림과 똑같이 그린다.`;
-    }
-    if (d.kind === "handwriting") {
-      const under = d.original && d.original !== "빈 자리" ? ` 그 밑에 가려져 있던 인쇄 내용("${d.original}")은 또렷하게 되살려 그린다.` : " 그 자리는 깨끗한 흰 종이로 둔다.";
-      return `${i + 1}. ${at}손글씨 잔재: ${got} 는 학생이 손으로 쓴 필기이므로 완전히 지운다(흔적·번짐도 남기지 않는다).${under} 인쇄된 밑줄·굵은 글씨는 지우지 않는다.`;
-    }
-    if (d.kind === "glyph") {
-      return `${i + 1}. ${at}깨진 글자: 원본 "${d.original}" 을(를) 지난번에 ${got} 로 뭉개 그렸다 — 획 하나하나 또렷한 진짜 글자로 그린다.`;
-    }
-    return `${i + 1}. ${at}원본 "${d.original}" 인데 지난번에 ${got} 로 그렸다.`;
-  });
+function describeDiff(d: TextDiff, n: number): string {
+  const got = d.recreated ? `"${d.recreated}"` : "(빠짐)";
+  const at = d.where ? `[${d.where}] ` : "";
+  if (d.kind === "figure") {
+    return `${n}. ${at}도형: 원본은 "${d.original}" 인데 앞선 시도에서는 ${got} 였다 — 원본 그림과 똑같이 그린다.`;
+  }
+  if (d.kind === "handwriting") {
+    const under =
+      d.original && d.original !== "빈 자리"
+        ? ` 그 밑에 가려져 있던 인쇄 내용("${d.original}")은 또렷하게 되살려 그린다.`
+        : " 그 자리는 깨끗한 흰 종이로 둔다.";
+    return `${n}. ${at}손글씨 잔재: ${got} 는 학생이 손으로 쓴 필기이므로 완전히 지운다(흔적·번짐도 남기지 않는다).${under} 인쇄된 밑줄·굵은 글씨는 지우지 않는다.`;
+  }
+  if (d.kind === "glyph") {
+    return `${n}. ${at}깨진 글자: 원본 "${d.original}" 을(를) 앞선 시도에서 ${got} 로 뭉개 그렸다 — 획 하나하나 또렷한 진짜 글자로 그린다.`;
+  }
+  return `${n}. ${at}원본 "${d.original}" 인데 앞선 시도에서 ${got} 로 그렸다.`;
+}
+
+function correctionBody(diffs: TextDiff[], intro: string): string {
+  const lines = diffs.slice(0, 20).map((d, i) => describeDiff(d, i + 1));
   // 그림 모델은 원문자 그리는 법을 프롬프트로 못 받는다(원문자는 sol 이 지킨다). 그래서 틀린 원문자가
   // 있으면 **여기서** 안쪽 글자를 짚어 준다 — 동그라미 안에 무엇인지가 핵심이다.
   const circled = circledCharsIn(diffs.filter((d) => d.kind !== "handwriting").map((d) => d.original).join(" "));
   const circledLine = circled.length
     ? `\n원문자는 글자 하나로 외워 그리지 말고 얇은 원을 긋고 그 안 가운데에 글자를 넣어 그린다: ${circledPairs(circled)}. 같은 표지는 어디서나 똑같이, 계열(㉠→①)을 넘나들지 말 것.`
     : "";
-  return `지난번 결과에서 아래가 원본 사진과 달랐다(글자·깨진 글자·도형·남은 손글씨). 이번에는 사진과 똑같이 그려라(나머지도 그대로 베낀다):
+  return `${intro}
 ${lines.join("\n")}${circledLine}`;
+}
+
+/** ② 다시 그리기에 붙일 지시(방금 검수가 찾은 차이만). */
+export function correctionInstruction(diffs: TextDiff[]): string {
+  return correctionBody(
+    diffs,
+    "앞선 시도에서 아래가 원본 사진과 달랐다(글자·깨진 글자·도형·남은 손글씨). 이번에는 사진과 똑같이 그려라(나머지도 그대로 베낀다):",
+  );
+}
+
+/**
+ * **앞선 모든 시도의 실수를 한데 모은 지시.** 다시 그릴 때 입력은 늘 **원본**이고 앞 시도가 그린 그림은
+ * 모델에게 보여 주지 않는다(폐기) — 그림을 다시 입력으로 넣으면 고친 그림을 또 베끼면서 흐려지는
+ * "풍화"가 생긴다(사용자 지적). 대신 **지난 시도들이 어디서 틀렸는지만** 주의사항으로 넘긴다.
+ * 여러 라운드에서 되풀이된 실수는 이 모델이 특히 잘 틀리는 자리라 앞에 놓는다.
+ */
+export function accumulatedCorrection(history: RoundDiffs[]): string {
+  type Item = { diff: TextDiff; rounds: Set<string>; recreated: Set<string> };
+  const byKey = new Map<string, Item>();
+  for (const h of history) {
+    for (const d of h.diffs) {
+      const key = `${d.kind ?? "text"}|${d.original}`;
+      const cur = byKey.get(key) ?? { diff: d, rounds: new Set<string>(), recreated: new Set<string>() };
+      cur.rounds.add(h.quality);
+      if (d.recreated) cur.recreated.add(d.recreated);
+      byKey.set(key, cur);
+    }
+  }
+  const items = [...byKey.values()].sort((a, b) => b.rounds.size - a.rounds.size);
+  const merged: TextDiff[] = items.map((it) => ({
+    ...it.diff,
+    recreated: [...it.recreated].join("\" 또는 \""),
+    where: it.rounds.size > 1 ? `${it.diff.where ? `${it.diff.where}, ` : ""}${[...it.rounds].join("·")} 에서 되풀이` : it.diff.where,
+  }));
+  const tried = history.map((h) => h.quality).join("·");
+  return correctionBody(
+    merged,
+    `앞선 시도(${tried})에서 아래가 원본 사진과 달랐다(글자·깨진 글자·도형·남은 손글씨). 앞선 그림은 버렸다 — 이번에는 사진만 보고, 아래 실수를 되풀이하지 말고 사진과 똑같이 그려라(나머지도 그대로 베낀다):`,
+  );
 }
 
 function parseJsonObject(text: string): unknown {

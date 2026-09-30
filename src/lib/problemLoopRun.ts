@@ -32,7 +32,7 @@ import {
   pollVisionBackground,
   startVisionBackground,
 } from "./gradeExam";
-import { correctionInstruction, parseVerify, VERIFY_PROMPT, type TextDiff } from "./problemCompare";
+import { accumulatedCorrection, parseVerify, VERIFY_PROMPT, type RoundDiffs, type TextDiff } from "./problemCompare";
 import { gradingEstKrw } from "./tokens";
 import { logAiCost } from "./costLog";
 
@@ -67,8 +67,10 @@ type Round = {
 
 export type ProblemLoopState = {
   rounds: Round[];
-  /** 다음 그리기에 붙일 지시(방금 검수가 찾은 차이). */
+  /** 다음 그리기에 붙일 지시(앞선 **모든** 시도가 틀린 곳을 모은 것). */
   instruction?: string;
+  /** 라운드마다 검수가 찾은 차이 목록. 다음 그리기의 지시를 만드는 재료(그림은 폐기하고 실수만 넘긴다). */
+  history?: RoundDiffs[];
   /** 지금까지 그림 호출의 사용량 합. */
   usage?: FigureUsage;
   /** sol 검수 원가 합(원). */
@@ -399,11 +401,17 @@ async function runVerify(
     return finalize(admin, checked, bestRound(rounds), ctx, "");
   }
 
+  // 다음 라운드는 **원본만 보고** 새로 그린다 — 앞 라운드 그림은 입력으로 안 넣는다(고친 그림을 또
+  // 베끼면 흐려진다). 대신 low·medium 이 틀린 곳을 전부 모아 주의사항으로 넘긴다.
+  const history: RoundDiffs[] = [
+    ...(state.history ?? []).filter((h) => h.quality !== round.quality),
+    { quality: round.quality, diffs: diffs.slice(0, 20) },
+  ];
   const nextQ = PROBLEM_LADDER[i + 1];
   return {
     kind: "next",
     stage: `gen:${i + 1}`,
-    state: { ...checked, instruction: correctionInstruction(diffs) },
+    state: { ...checked, history, instruction: accumulatedCorrection(history) },
     note: `${round.quality}: 차이 ${diffs.length}곳 → ${nextQ} 로 고쳐 그립니다`,
   };
 }

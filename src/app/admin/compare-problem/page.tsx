@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { fileToDataUrl, loadImage } from "@/lib/cropImage";
 import { imageSizeOf, prepareProblemForModel } from "@/lib/figureImage";
-import { correctionInstruction, type TextDiff } from "@/lib/problemCompare";
+import { accumulatedCorrection, type RoundDiffs, type TextDiff } from "@/lib/problemCompare";
 import { Button } from "@/components/ui/button";
 import { cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
  * **원문자(㉠ ① ⓐ)는 sol 이 지킨다**(사용자 — "원문자 주의를 선버스트에게 보내던 걸 sol 에게").
  * 이 화면의 sunburst 프롬프트에서는 원문자 지시(`CIRCLED_CHARS`)를 뺀다(`skipCircled`) — 운영
  * 프롬프트는 그대로다. 대신 sol 대조가 원문자를 안쪽 글자로 하나씩 세어 견주고, 틀린 원문자가
- * 있으면 다시 그릴 때 지시에 안쪽 글자 표가 붙는다(`correctionInstruction`).
+ * 있으면 다시 그릴 때 지시에 안쪽 글자 표가 붙는다(`accumulatedCorrection`).
  *
  * 조절하는 것: 시작·끝 quality, sol 의 추론 강도. sol 모델(`gpt-6.1-sol`)과 출력 크기(운영과 같은
  * 비율 맞춤)는 고정이다.
@@ -182,6 +182,8 @@ export default function CompareProblemPage() {
     try {
       const size = await imageSizeOf(original);
       let instruction: string | undefined;
+      // 앞선 모든 시도의 실수를 모은다 — 그림은 버리고(입력은 늘 원본) 실수만 주의사항으로 넘긴다.
+      const history: RoundDiffs[] = [];
 
       for (let i = 0; i < ladder.length; i++) {
         const n = i + 1;
@@ -222,7 +224,8 @@ export default function CompareProblemPage() {
         setRounds([...done]);
 
         if (diffs.length === 0) break;
-        instruction = correctionInstruction(diffs);
+        history.push({ quality: q, diffs });
+        instruction = accumulatedCorrection(history);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
