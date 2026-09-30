@@ -34,10 +34,11 @@ import { cn } from "@/lib/utils";
 const SOL_MODEL = "gpt-6.1-sol";
 const EFFORTS = ["low", "medium", "high"];
 /**
- * sunburst 출력 품질 사다리(사용자가 확인해 준 값들, 낮은 것부터). 한 번 그릴 때마다 한 칸
- * 올린다. `auto` 는 높낮이를 알 수 없어 뺐다. 차이가 0곳이면 끝까지 안 가고 멈춘다.
+ * sunburst 출력 품질 사다리 — **low → medium → max 세 단계로 고정**이다(사용자 — "low min max
+ * 3단계로 고정해서 고정배포하자"; `min` 은 `medium` 으로 읽었다). 한 번 그릴 때마다 한 칸
+ * 올리고, 차이가 0곳이면 끝까지 안 가고 멈춘다. 그리기는 많아야 3번이다.
  */
-const LADDER = ["low", "medium", "high", "xhigh", "max"];
+const LADDER = ["low", "medium", "max"];
 
 type Step = {
   label: string;
@@ -118,9 +119,8 @@ const secs = (ms: number | undefined) => (ms == null ? "…" : `${(ms / 1000).to
 export default function CompareProblemPage() {
   const [name, setName] = useState("");
   const [prepared, setPrepared] = useState<string | null>(null);
-  const [effort, setEffort] = useState("medium");
-  const [startQ, setStartQ] = useState("low");
-  const [endQ, setEndQ] = useState("max");
+  // 글자·도형을 세부까지 보게 하려고 기본을 high 로 둔다(사용자 — "sol 이 세부적으로 검토").
+  const [effort, setEffort] = useState("high");
   const [steps, setSteps] = useState<Step[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [result, setResult] = useState<Result | null>(null);
@@ -176,9 +176,7 @@ export default function CompareProblemPage() {
     }
 
     const original = prepared;
-    // 시작 quality 부터 끝 quality 까지. 끝이 시작보다 낮으면 시작 하나만 그린다.
-    const from = LADDER.indexOf(startQ);
-    const ladder = LADDER.slice(from, Math.max(from, LADDER.indexOf(endQ)) + 1);
+    const ladder = LADDER;
     const done: Round[] = [];
     const t0 = performance.now();
     try {
@@ -257,9 +255,10 @@ export default function CompareProblemPage() {
       <div>
         <h1 className="text-xl font-bold text-slate-900">sol 이 읽고 sunburst 가 고쳐 그리기</h1>
         <p className="mt-1 text-sm text-slate-600">
-          sunburst 가 낮은 quality 로 그리면 sol 이 원본과 대조해 글자가 다른 곳을 찾고, 있으면 그 목록을
-          붙여 quality 를 한 단계 올려 다시 그립니다. 차이가 없어지거나 끝 quality 까지 그리면 멈추고, 남은
-          차이가 가장 적은 그림을 남깁니다. 원문자(㉠ ① ⓐ)는 sunburst 에게 따로 알려 주지 않고 sol 이 대조로
+          sunburst 가 low 로 그리면 sol 이 원본과 대조해 글자가 다른 곳 · 깨진 글자 · 도형(모양·개수·위치·
+          표시)이 다른 곳을 세부까지 찾고, 있으면 그 목록을 붙여 quality 를 한 단계(low → medium → max)
+          올려 다시 그립니다. 차이가 없어지거나 max 까지 그리면 멈추고, 남은 차이가 가장 적은 그림을
+          남깁니다. 원문자(㉠ ① ⓐ)는 sunburst 에게 따로 알려 주지 않고 sol 이 대조로
           지킵니다. 토큰은 차감하지 않습니다(무제한 계정 전용).
         </p>
       </div>
@@ -271,22 +270,6 @@ export default function CompareProblemPage() {
         </label>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
           <label className="flex items-center gap-1.5">
-            시작 quality
-            <select value={startQ} onChange={(e) => setStartQ(e.target.value)} className="rounded border px-2 py-1 font-mono text-xs">
-              {LADDER.map((m) => (
-                <option key={m}>{m}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5">
-            끝 quality
-            <select value={endQ} onChange={(e) => setEndQ(e.target.value)} className="rounded border px-2 py-1 font-mono text-xs">
-              {LADDER.map((m) => (
-                <option key={m}>{m}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5">
             sol 추론 강도
             <select value={effort} onChange={(e) => setEffort(e.target.value)} className="rounded border px-2 py-1 text-xs">
               {EFFORTS.map((m) => (
@@ -296,7 +279,7 @@ export default function CompareProblemPage() {
           </label>
         </div>
         <p className="text-xs text-slate-500">
-          그리는 차례: {LADDER.slice(LADDER.indexOf(startQ), Math.max(LADDER.indexOf(startQ), LADDER.indexOf(endQ)) + 1).join(" → ")}
+          그리는 차례(고정): {LADDER.join(" → ")}
         </p>
         <div>
           <Button variant="primary" disabled={!prepared || busy} onClick={run}>
@@ -322,7 +305,7 @@ export default function CompareProblemPage() {
       {result && (
         <section className={cn(cardClass, "flex flex-wrap items-baseline gap-x-6 gap-y-1 p-4 text-sm")}>
           <span className="font-semibold text-ink">
-            최종: 그리기 {result.pick + 1}(quality={result.rounds[result.pick].quality}) · 남은 글자 차이{" "}
+            최종: 그리기 {result.pick + 1}(quality={result.rounds[result.pick].quality}) · 남은 차이{" "}
             <span className={result.rounds[result.pick].diffs!.length ? "text-red-700" : "text-emerald-700"}>
               {result.rounds[result.pick].diffs!.length}곳
             </span>
@@ -407,13 +390,22 @@ function Steps({ steps }: { steps: Step[] }) {
 }
 
 function DiffList({ diffs }: { diffs: TextDiff[] }) {
-  if (diffs.length === 0) return <p className="text-xs font-medium text-emerald-700">대조: 글자 차이 없음</p>;
+  if (diffs.length === 0) return <p className="text-xs font-medium text-emerald-700">대조: 글자·도형 차이 없음</p>;
   return (
     <div className="rounded-lg border border-red-200 bg-red-50/60 p-2 text-xs">
-      <p className="mb-1 font-semibold text-red-700">대조: 글자 차이 {diffs.length}곳</p>
+      <p className="mb-1 font-semibold text-red-700">
+        대조: 차이 {diffs.length}곳
+        <span className="ml-1 font-normal text-slate-600">
+          (글자 {diffs.filter((d) => (d.kind ?? "text") === "text").length} · 깨진 글자{" "}
+          {diffs.filter((d) => d.kind === "glyph").length} · 도형 {diffs.filter((d) => d.kind === "figure").length})
+        </span>
+      </p>
       <ul className="flex flex-col gap-0.5">
         {diffs.map((d, i) => (
           <li key={i}>
+            <span className="mr-1 rounded bg-white px-1 text-[10px] font-semibold text-red-700 ring-1 ring-red-200">
+              {d.kind === "glyph" ? "깨진 글자" : d.kind === "figure" ? "도형" : "글자"}
+            </span>
             {d.where && <span className="text-slate-500">[{d.where}] </span>}
             원본 <b>{d.original || "∅"}</b> → <span className="text-red-700">{d.recreated || "(빠짐)"}</span>
           </li>
