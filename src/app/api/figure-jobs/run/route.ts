@@ -13,7 +13,7 @@ import {
   visibleUsage,
 } from "@/lib/figureRun";
 import { logAiCost } from "@/lib/costLog";
-import { kickWorker, workerToken } from "@/lib/figureJobsServer";
+import { GLOBAL_CONCURRENCY, UNLIMITED_CONCURRENCY, kickWorker, workerToken } from "@/lib/figureJobsServer";
 import { callOpenAIVision } from "@/lib/detectProblems";
 import { pollKoreanTextBackground, startKoreanTextBackground } from "@/lib/gradeExam";
 import {
@@ -212,6 +212,8 @@ export async function POST(req: NextRequest) {
 
   const { data: claimed, error: claimErr } = await admin.rpc("claim_figure_job", {
     p_prefer_user: preferUser,
+    p_unlimited_cap: UNLIMITED_CONCURRENCY,
+    p_global_cap: GLOBAL_CONCURRENCY,
   });
   if (claimErr) {
     console.error("[figure-jobs/run] claim 실패:", claimErr.message);
@@ -224,6 +226,10 @@ export async function POST(req: NextRequest) {
   }
 
   const base = redirectBase(req);
+  // **집자마자 다음 일꾼을 하나 더 깨운다** — 무제한 계정은 여러 개를 동시에 돌리므로(위 상한), 끝나기를
+  // 기다렸다 하나씩 깨우면 동시성이 안 늘어난다. 더 집을 게 없거나 상한이 찼으면 그 일꾼은 idle 로 끝나
+  // 사슬이 멈춘다. 응답은 기다리지 않고 작업이 끝날 때 함께 거둔다.
+  const fanOut = kickWorker(admin, base, job.user_id);
   try {
     await runJob(admin, job);
   } catch (err) {
@@ -233,6 +239,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 다음 사람(같은 사람을 먼저) 작업을 이어서 집게 한다.
+  await fanOut;
   await kickWorker(admin, base, job.user_id);
   return NextResponse.json({ ok: true, id: job.id });
 }

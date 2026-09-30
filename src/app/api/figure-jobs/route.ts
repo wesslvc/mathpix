@@ -3,7 +3,7 @@ import { redirectBase } from "@/app/auth/redirectBase";
 import { getBillingContext } from "@/lib/byok";
 import { FIGURE_TOKEN_DEPOSIT, MAX_REDRAW_TOKENS } from "@/lib/tokens";
 import { removeStored, splitDataUrl, storeBytes } from "@/lib/figureRun";
-import { JOB_COLUMNS, kickWorker, type FigureJobRow } from "@/lib/figureJobsServer";
+import { JOB_COLUMNS, UNLIMITED_CONCURRENCY, kickWorker, type FigureJobRow } from "@/lib/figureJobsServer";
 import { passageDepositFrom, passageInputPaths, type PassagePayload } from "@/lib/passageRun";
 import {
   PROBLEM_LADDER,
@@ -73,6 +73,8 @@ export async function GET(req: NextRequest) {
       }),
     });
   }
+  // 이 계정이 동시에 돌릴 수 있는 작업 수(화면의 예상 시간 계산용).
+  const concurrency = (await getBillingContext(supabase, user.id)).unlimited ? UNLIMITED_CONCURRENCY : 1;
   const since = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
   // 읽기는 RLS(본인 것만)로 충분하다.
   const { data, error } = await supabase
@@ -83,7 +85,7 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: true })
     .limit(100);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS, patchTokens: FIGURE_TOKEN_DEPOSIT, topQuality: TOP_QUALITY });
+  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS, patchTokens: FIGURE_TOKEN_DEPOSIT, topQuality: TOP_QUALITY, concurrency });
 }
 
 export async function POST(req: NextRequest) {

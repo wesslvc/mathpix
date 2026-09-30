@@ -104,6 +104,7 @@ export default function FigureJobsPanel() {
     retry,
     dismiss,
     topQuality,
+    concurrency,
     maxTokens,
     patchTokens,
     confirmPatch,
@@ -168,8 +169,13 @@ export default function FigureJobsPanel() {
   }
 
   const failed = jobs.filter((j) => j.status === "error").length;
-  // 줄 전체가 끝나기까지 어림(한 사람은 한 번에 하나씩 돈다 — 앞 작업이 끝나야 다음이 시작).
-  const waitSec = jobs.reduce((sum, j) => sum + remainingSeconds(j), 0);
+  // 줄 전체가 끝나기까지 어림(일반 계정은 한 번에 하나씩, 무제한 계정은 여러 개가 동시에).
+  // 무제한 계정은 여러 개를 동시에 돌리므로 그만큼 나눈다(가장 긴 한 개보다 짧아질 수는 없다).
+  const remaining = jobs.map(remainingSeconds).filter((n) => n > 0);
+  const waitSec =
+    remaining.length === 0
+      ? 0
+      : Math.max(Math.max(...remaining), remaining.reduce((a, b) => a + b, 0) / Math.min(concurrency, remaining.length));
 
   return (
     <div className="fixed bottom-4 right-4 z-40 w-[min(20rem,calc(100vw-2rem))]">

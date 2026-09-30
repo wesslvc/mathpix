@@ -188,6 +188,8 @@ type Ctx = {
   spentTokens: number;
   /** 맨 위 단계(확인 뒤에만 돈다)의 quality 이름과 그 확인 1건에 걷는 토큰(서버가 알려 준다). */
   topQuality: string;
+  /** 이 계정이 동시에 돌리는 작업 수(무제한 계정은 여러 개). 예상 시간 계산에 쓴다. */
+  concurrency: number;
   maxTokens: number;
   /** **수정**(일부만 고치기) 1건에 걷는 토큰. */
   patchTokens: number;
@@ -303,6 +305,7 @@ export default function FigureJobsProvider({
   const [maxTokens, setMaxTokens] = useState(200);
   const [topQuality, setTopQuality] = useState("high");
   const [patchTokens, setPatchTokens] = useState(120);
+  const [concurrency, setConcurrency] = useState(1);
 
   const putSnapshot = useCallback(
     (problemKey: string, snapshot: ProblemSnapshot) => {
@@ -507,7 +510,8 @@ export default function FigureJobsProvider({
         return;
       }
       if (!res.ok) return;
-      const body = await jsonOf<{ jobs?: ServerJob[]; maxRedrawTokens?: number; patchTokens?: number; topQuality?: string }>(res);
+      const body = await jsonOf<{ jobs?: ServerJob[]; maxRedrawTokens?: number; patchTokens?: number; topQuality?: string; concurrency?: number }>(res);
+      if (typeof body.concurrency === "number" && body.concurrency >= 1) setConcurrency(body.concurrency);
       if (typeof body.patchTokens === "number") setPatchTokens(body.patchTokens);
       if (typeof body.topQuality === "string") setTopQuality(body.topQuality);
       rows = body.jobs ?? [];
@@ -1009,6 +1013,7 @@ export default function FigureJobsProvider({
         krwRate,
         spentTokens,
         topQuality,
+        concurrency,
         maxTokens,
         patchTokens,
         confirmPatch,

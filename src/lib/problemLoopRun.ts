@@ -29,6 +29,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FigureUsage } from "./figureImageGen";
 import { loadAsDataUrl, removeStored, runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
 import {
+  GradeError,
   OPENAI_TEXT_MODEL,
   deleteVisionResponse,
   pollVisionBackground,
@@ -446,13 +447,24 @@ async function runVerify(
   // BYOK 계정은 본인 키로만 부른다(서버 키를 쓰지 않는다). 저장된 응답은 끝나는 즉시 지운다.
   let respId: string | null = null;
   try {
-    const id = await startVisionBackground(
-      VERIFY_PROMPT,
-      [original, candidate],
-      OPENAI_TEXT_MODEL,
-      VERIFY_EFFORT,
-      ctx.byokApiKey,
-    );
+    // 동시에 여러 개를 돌리면 sol 쪽 분당 한도(429)에 닿을 수 있다 — 잠깐 기다렸다 두 번까지 다시 건다.
+    let id = "";
+    for (let attempt = 0; ; attempt++) {
+      try {
+        id = await startVisionBackground(
+          VERIFY_PROMPT,
+          [original, candidate],
+          OPENAI_TEXT_MODEL,
+          VERIFY_EFFORT,
+          ctx.byokApiKey,
+        );
+        break;
+      } catch (err) {
+        const limited = err instanceof GradeError && err.status === 429 && !/quota|billing|balance/i.test(err.message);
+        if (!limited || attempt >= 2 || Date.now() - t0 > ctx.deadlineMs / 2) throw err;
+        await new Promise((r) => setTimeout(r, 6000 * (attempt + 1)));
+      }
+    }
     respId = id;
     for (;;) {
       if (Date.now() - t0 > ctx.deadlineMs) {

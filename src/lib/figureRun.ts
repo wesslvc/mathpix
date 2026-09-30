@@ -76,6 +76,7 @@ export async function runFigureGeneration(input: RunInput): Promise<RunOutcome> 
 
   // 시간이 다 되면 우리가 먼저 끊는다. **Vercel 이 함수를 죽이면 환불 코드가
   // 아예 돌지 못한다** — 토큰만 나가고 아무것도 안 남는다.
+  const startedAt = Date.now();
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), input.deadlineMs);
   const seconds = Math.round(input.deadlineMs / 1000);
@@ -84,21 +85,46 @@ export async function runFigureGeneration(input: RunInput): Promise<RunOutcome> 
     for (let i = 0; i < Math.min(modelIds.length, MAX_MODEL_ATTEMPTS); i++) {
       const modelId = modelIds[i];
       try {
-        const result = await generateFigureImage(
-          input.image,
-          modelId,
-          input.mode,
-          input.korean,
-          undefined,
-          deadline.signal,
-          input.inputSize,
-          input.instruction,
-          input.byokApiKey,
-          input.quality,
-          input.outputSize,
-          input.skipCircled,
-          input.patchNote,
-        );
+        // **429(분당 한도)는 잠깐 기다렸다 같은 모델로 다시 보낸다.** 동시에 여러 개를 돌리면(무제한 계정은 10개)
+        // 이미지 분당 한도(IPM)에 닿을 수 있다 — Tier 2 는 20. 돈이 모자란 429(insufficient_quota)는 기다려도
+        // 소용없으니 바로 실패로 둔다. 남은 시간이 모자라면 기다리지 않는다.
+        let result: Awaited<ReturnType<typeof generateFigureImage>> = null;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            result = await generateFigureImage(
+              input.image,
+              modelId,
+              input.mode,
+              input.korean,
+              undefined,
+              deadline.signal,
+              input.inputSize,
+              input.instruction,
+              input.byokApiKey,
+              input.quality,
+              input.outputSize,
+              input.skipCircled,
+              input.patchNote,
+            );
+            break;
+          } catch (err) {
+            const waitMs = [8_000, 20_000, 40_000][attempt];
+            const timeLeft = input.deadlineMs - (Date.now() - startedAt);
+            if (
+              err instanceof FigureImageError &&
+              err.status === 429 &&
+              !/quota|billing|balance/i.test(err.message) &&
+              waitMs !== undefined &&
+              timeLeft > waitMs + 60_000 &&
+              !deadline.signal.aborted
+            ) {
+              console.warn(`[${tag}] 429 한도 — ${waitMs / 1000}초 뒤 다시 보냄(${attempt + 1}번째)`);
+              await new Promise((r) => setTimeout(r, waitMs));
+              continue;
+            }
+            throw err;
+          }
+        }
         if (!result) {
           return {
             ok: false,
