@@ -17,14 +17,14 @@ import { circledCharsIn, circledPairs } from "./circledChars";
  * 글자를 지어낸 것) · `figure` **도형·그림**의 모양·개수·위치·표시가 다르다.
  * 모델이 안 적으면 `text` 로 본다(옛 응답과 같다).
  */
-export type DiffKind = "text" | "glyph" | "figure";
+export type DiffKind = "text" | "glyph" | "figure" | "handwriting";
 
-/** 원본과 다시 만든 것 사이의 차이 하나(글자·깨진 글자·도형). */
+/** 원본과 다시 만든 것 사이의 차이 하나(글자·깨진 글자·도형·손글씨 잔재). */
 export type TextDiff = {
   kind?: DiffKind;
-  /** 원본(사진 1)에 인쇄된 글자. */
+  /** 원본(사진 1)에 인쇄된 글자. 손글씨 잔재면 그 자리에 **가려져 있던 인쇄 내용**(없으면 "빈 자리"). */
   original: string;
-  /** 다시 만든 것(사진 2)에 보이는 글자. 빠졌으면 빈 글자. */
+  /** 다시 만든 것(사진 2)에 보이는 글자. 빠졌으면 빈 글자. 손글씨 잔재면 남아 있는 필기의 모양. */
   recreated: string;
   /** 어디쯤인지(짧게). */
   where: string;
@@ -38,11 +38,12 @@ export type TextDiff = {
  * 손글씨는 원본에만 있고 지우는 게 맞으므로 차이로 치지 않는다.
  */
 export const VERIFY_PROMPT = `task: proofread a re-created Korean exam question against the original photo.
-image 1 = ORIGINAL photo of the printed question (may contain a student's handwriting — pencil/pen marks, circles, scribbles; IGNORE handwriting entirely, it is supposed to be removed).
-image 2 = RE-CREATED version of the same question.
+image 1 = ORIGINAL photo of the printed question (may contain a student's handwriting — pencil/pen marks, circles, scribbles, answers, working).
+image 2 = RE-CREATED version of the same question. it must contain the PRINTED content only: all handwriting must be gone.
 
-find every place where image 2 differs from image 1. three kinds — set "kind" for each:
-"text"   = printed text differs, "glyph" = broken/garbled characters, "figure" = a figure/diagram/graph/table drawing differs.
+find every place where image 2 differs from image 1. four kinds — set "kind" for each:
+"text"   = printed text differs, "glyph" = broken/garbled characters, "figure" = a figure/diagram/graph/table drawing differs,
+"handwriting" = student handwriting from image 1 is still visible in image 2 (or a printed mark was wrongly erased with it).
 
 kind "text" — the PRINTED TEXT of image 2 differs from image 1:
 - wrong, missing or extra characters (한글, 한자, 영문), words, numbers, units, signs
@@ -68,18 +69,24 @@ kind "figure" — FIGURE DETAIL. compare every graph, geometric figure, diagram,
 - a table drawing has wrong cell contents, merged cells split/merged wrongly, or a row/column missing
 describe both sides concretely ("원본: 점 P 가 직선 l 위에 있음" / "그림: P 가 l 에서 떨어져 있음"). colour or line-thickness differences alone are NOT differences.
 
+kind "handwriting" — YOU decide what is handwriting, and it must be ERASED. first scan image 1 for every handwritten mark: pencil/pen/highlighter notes, working, answers written in margins or blanks, circles/ellipses around choices or words, ticks/crosses/stars/arrows, underlines drawn by hand, scribbled-out text, grading marks. black ballpoint counts as handwriting too — do NOT use colour as the test. tell handwriting from print by: uneven stroke width, slightly wavy/slanted lines, letterforms unlike the type, pencil grey or coloured pen, marks that start mid-word or spill outside the printed layout / ruled boxes, anything overlapping printed text. then check image 2 at the same spots:
+- the mark (or a cleaned-up copy of it) is still there → report kind "handwriting": "recreated" = what remains ("선택지 ③ 둘레의 손으로 그린 동그라미"), "original" = the PRINTED content that sits under it ("선택지 ③ 본문", or "빈 자리" if nothing is printed there)
+- the region under a removed mark is blank/garbled instead of the printed content that was hidden → report it as kind "text" (or "glyph")
+- a PRINTED underline / bold / box / circled marker that image 1 really has (perfectly straight, same stroke as the type, aligned to the text) is missing in image 2 → kind "text": printed emphasis is part of the question. never confuse it with a hand-drawn underline
+- when a student wrote the answer into a printed blank or box, the blank/box must be empty in image 2
+
 circled markers (㉠㉡㉢ / ㉮㉯㉰ / ①②③ / ⓐⓑⓒ) — YOU are the only one checking these. the drawing model was NOT told how to draw them, so expect mistakes:
 - first list every circled marker in image 1 in reading order (stem, boxes, <보기>, tables, choices) by its INNER glyph: ㉠㉡㉢㉣㉤㉥㉦㉧㉨㉩㉪㉫㉬㉭=ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ; ㉮㉯㉰㉱㉲=가나다라마; ①..⑳=1..20; ⓐⓑⓒⓓⓔ=a b c d e. read each circle separately, zoomed in. never infer one from its neighbours (a question may use only ㉡ and ㉣, or repeat ㉠ four times)
 - list image 2 the same way and compare position by position
 - report a difference when the inner glyph differs, the family changes (㉠→① / ㉠→㉮), a marker is missing / extra / renumbered, a circle is drawn as a square / parenthesis / bare character, or the same marker looks different in different places
 - in "recreated" write the inner glyph you actually see, e.g. "㉡ (inner ㄴ)"
 
-do NOT report: font, size, spacing, line breaks, alignment, box/table border style, line thickness / colour / shading style of figures, handwriting, image quality, the same math written in different but equivalent notation.
+do NOT report: font, size, spacing, line breaks, alignment, box/table border style, line thickness / colour / shading style of figures, image quality, the same math written in different but equivalent notation. handwriting that image 2 correctly removed is NOT a difference.
 be precise — quote the exact characters. if you are not sure a difference exists, do not report it.
 
 return JSON only:
-{"diffs":[{"kind":"text|glyph|figure","original":"exact printed text (or figure detail) in image 1","recreated":"what image 2 shows instead (\\"\\" if missing)","where":"short location, e.g. 발문 2줄 / 선택지 ③ / 표 2행 / 그래프 왼쪽"}]}
-return {"diffs":[]} if image 2 matches image 1 in text, glyphs and figures.`;
+{"diffs":[{"kind":"text|glyph|figure|handwriting","original":"exact printed text (or figure detail) in image 1","recreated":"what image 2 shows instead (\\"\\" if missing)","where":"short location, e.g. 발문 2줄 / 선택지 ③ / 표 2행 / 그래프 왼쪽"}]}
+return {"diffs":[]} if image 2 matches image 1 in text, glyphs and figures and no handwriting remains.`;
 
 /** 대조 결과를 읽는다. 모양이 이상한 항목은 버린다. */
 export function parseVerify(text: string): TextDiff[] {
@@ -93,7 +100,8 @@ export function parseVerify(text: string): TextDiff[] {
     const original = typeof r.original === "string" ? r.original : "";
     const recreated = typeof r.recreated === "string" ? r.recreated : "";
     const where = typeof r.where === "string" ? r.where : "";
-    const kind: DiffKind = r.kind === "glyph" || r.kind === "figure" ? r.kind : "text";
+    const kind: DiffKind =
+      r.kind === "glyph" || r.kind === "figure" || r.kind === "handwriting" ? r.kind : "text";
     if (!original && !recreated) continue;
     if (original === recreated) continue;
     out.push({ kind, original, recreated, where });
@@ -113,6 +121,10 @@ export function correctionInstruction(diffs: TextDiff[]): string {
     if (d.kind === "figure") {
       return `${i + 1}. ${at}도형: 원본은 "${d.original}" 인데 지난번에는 ${got} 였다 — 원본 그림과 똑같이 그린다.`;
     }
+    if (d.kind === "handwriting") {
+      const under = d.original && d.original !== "빈 자리" ? ` 그 밑에 가려져 있던 인쇄 내용("${d.original}")은 또렷하게 되살려 그린다.` : " 그 자리는 깨끗한 흰 종이로 둔다.";
+      return `${i + 1}. ${at}손글씨 잔재: ${got} 는 학생이 손으로 쓴 필기이므로 완전히 지운다(흔적·번짐도 남기지 않는다).${under} 인쇄된 밑줄·굵은 글씨는 지우지 않는다.`;
+    }
     if (d.kind === "glyph") {
       return `${i + 1}. ${at}깨진 글자: 원본 "${d.original}" 을(를) 지난번에 ${got} 로 뭉개 그렸다 — 획 하나하나 또렷한 진짜 글자로 그린다.`;
     }
@@ -120,11 +132,11 @@ export function correctionInstruction(diffs: TextDiff[]): string {
   });
   // 그림 모델은 원문자 그리는 법을 프롬프트로 못 받는다(원문자는 sol 이 지킨다). 그래서 틀린 원문자가
   // 있으면 **여기서** 안쪽 글자를 짚어 준다 — 동그라미 안에 무엇인지가 핵심이다.
-  const circled = circledCharsIn(diffs.map((d) => d.original).join(" "));
+  const circled = circledCharsIn(diffs.filter((d) => d.kind !== "handwriting").map((d) => d.original).join(" "));
   const circledLine = circled.length
     ? `\n원문자는 글자 하나로 외워 그리지 말고 얇은 원을 긋고 그 안 가운데에 글자를 넣어 그린다: ${circledPairs(circled)}. 같은 표지는 어디서나 똑같이, 계열(㉠→①)을 넘나들지 말 것.`
     : "";
-  return `지난번 결과에서 아래가 원본 사진과 달랐다(글자·깨진 글자·도형). 이번에는 사진과 똑같이 그려라(나머지도 그대로 베낀다):
+  return `지난번 결과에서 아래가 원본 사진과 달랐다(글자·깨진 글자·도형·남은 손글씨). 이번에는 사진과 똑같이 그려라(나머지도 그대로 베낀다):
 ${lines.join("\n")}${circledLine}`;
 }
 

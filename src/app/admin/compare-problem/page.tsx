@@ -397,14 +397,15 @@ function DiffList({ diffs }: { diffs: TextDiff[] }) {
         대조: 차이 {diffs.length}곳
         <span className="ml-1 font-normal text-slate-600">
           (글자 {diffs.filter((d) => (d.kind ?? "text") === "text").length} · 깨진 글자{" "}
-          {diffs.filter((d) => d.kind === "glyph").length} · 도형 {diffs.filter((d) => d.kind === "figure").length})
+          {diffs.filter((d) => d.kind === "glyph").length} · 도형 {diffs.filter((d) => d.kind === "figure").length} · 손글씨{" "}
+          {diffs.filter((d) => d.kind === "handwriting").length})
         </span>
       </p>
       <ul className="flex flex-col gap-0.5">
         {diffs.map((d, i) => (
           <li key={i}>
             <span className="mr-1 rounded bg-white px-1 text-[10px] font-semibold text-red-700 ring-1 ring-red-200">
-              {d.kind === "glyph" ? "깨진 글자" : d.kind === "figure" ? "도형" : "글자"}
+              {d.kind === "glyph" ? "깨진 글자" : d.kind === "figure" ? "도형" : d.kind === "handwriting" ? "손글씨" : "글자"}
             </span>
             {d.where && <span className="text-slate-500">[{d.where}] </span>}
             원본 <b>{d.original || "∅"}</b> → <span className="text-red-700">{d.recreated || "(빠짐)"}</span>
