@@ -42,6 +42,36 @@ function statusText(j: FigureJob): string {
   return j.status === "pending" && stage === "read" ? "차례 기다리는 중 · 지문 글자로 옮기기" : what;
 }
 
+
+/**
+ * 남은 시간 어림(초). 운영 로그로 잰 값이다 — 문제 통째로 그리기: low 그리기 ~35초 · medium ~45초 ·
+ * sol 검수 ~15초, 열 문제 중 일곱쯤은 low 한 번에 끝난다. 지문은 읽기·서식 검수·그림. 어림일 뿐이라
+ * 화면에는 "약 N분"으로만 적는다(정확한 시간인 척하지 않는다).
+ */
+function remainingSeconds(j: FigureJob): number {
+  if (j.status !== "running" && j.status !== "pending") return 0;
+  if (j.mode === "problem") {
+    // 전 단계 기대값: 그리기 low + 검수, 30% 는 medium 으로 한 번 더, 그중 일부는 max 까지.
+    const stage = j.stage ?? "gen:0";
+    const gen = /^gen:(\d+)$/.exec(stage);
+    const ver = /^verify:(\d+)$/.exec(stage);
+    const n = gen ? Number(gen[1]) : ver ? Number(ver[1]) : 0;
+    const left = [35 + 15 + 0.3 * (45 + 15) + 0.1 * (90 + 15), 45 + 15 + 0.3 * (90 + 15), 90 + 15][Math.min(n, 2)];
+    return Math.round(ver ? left - (n === 0 ? 35 : n === 1 ? 45 : 90) : left);
+  }
+  if (j.mode === "passage") {
+    const stage = j.stage ?? "read";
+    return stage === "read" ? 150 : stage === "marks" ? 90 : 60;
+  }
+  return 45; // 그림 하나
+}
+
+function formatWait(sec: number): string {
+  if (sec < 60) return "1분 안팎";
+  const m = Math.round(sec / 60);
+  return `약 ${m}분`;
+}
+
 /**
  * AI 그림 작업 현황을 화면 구석에 띄우는 패널.
  *
@@ -68,6 +98,8 @@ export default function FigureJobsPanel() {
   if (jobs.length === 0) return null;
 
   const failed = jobs.filter((j) => j.status === "error").length;
+  // 줄 전체가 끝나기까지 어림(한 사람은 한 번에 하나씩 돈다 — 앞 작업이 끝나야 다음이 시작).
+  const waitSec = jobs.reduce((sum, j) => sum + remainingSeconds(j), 0);
 
   return (
     <div className="fixed bottom-4 right-4 z-40 w-[min(20rem,calc(100vw-2rem))]">
@@ -80,8 +112,14 @@ export default function FigureJobsPanel() {
           </p>
         ) : serverActive ? (
           <p className="border-b border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-snug text-emerald-800">
-            ✓ 서버로 다 보냈어요. 이제 서버에서 그리니까 창을 닫거나 오프라인이어도 계속돼요. 나중에 다시 들어오면
-            결과가 저장돼 있어요.
+            ✓ 서버로 다 보냈어요. 이제 서버에서 그리니까 창을 닫거나 오프라인이어도 계속돼요.
+            {activeCount > 0 && (
+              <>
+                {" "}
+                <b>예상 {formatWait(waitSec)}</b> 걸려요 — 기다리지 말고 다른 문제를 넣거나 잠깐 쉬다 오세요. 나중에 다시
+                들어오면 결과가 저장돼 있어요.
+              </>
+            )}
           </p>
         ) : null}
         <button
@@ -148,6 +186,9 @@ export default function FigureJobsPanel() {
                     } ${j.status === "running" ? "animate-soft-pulse" : ""}`}
                   >
                     {statusText(j)}
+                    {(j.status === "running" || j.status === "pending") && (
+                      <span className="text-slate-400"> · 예상 {formatWait(remainingSeconds(j))}</span>
+                    )}
                   </p>
                   {(j.mode === "passage" || j.mode === "problem") && j.note && (
                     <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{j.note}</p>
