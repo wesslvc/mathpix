@@ -877,8 +877,10 @@ export async function startVisionBackground(
   images: string | string[],
   model: string,
   effort?: string,
+  /** BYOK 계정의 키. 있으면 서버 키를 **아예 쓰지 않는다**. */
+  apiKeyOverride?: string,
 ): Promise<string> {
-  const key = process.env.OPENAI_API_KEY;
+  const key = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
   const res = await fetch(OPENAI_RESPONSES, {
     method: "POST",
@@ -935,14 +937,37 @@ export async function pollKoreanTextBackground(id: string): Promise<BackgroundPo
   }
 }
 
+/**
+ * 저장해 둔 백그라운드 응답을 OpenAI 에서 지운다. `store:true` 로 걸면 입력 사진이 OpenAI 에
+ * (기본 30일) 남는데, 결과를 받은 뒤에는 필요가 없다 — 받자마자 지운다(하루보다 엄격하다).
+ * 실패해도 흐름을 막지 않는다. 아직 도는 중이면 먼저 취소한다.
+ */
+export async function deleteVisionResponse(
+  id: string,
+  apiKeyOverride?: string,
+  cancelFirst = false,
+): Promise<void> {
+  const key = apiKeyOverride || process.env.OPENAI_API_KEY;
+  if (!key) return;
+  const headers = { Authorization: `Bearer ${key}` };
+  const base = `${OPENAI_RESPONSES}/${encodeURIComponent(id)}`;
+  try {
+    if (cancelFirst) await fetch(`${base}/cancel`, { method: "POST", headers }).catch(() => undefined);
+    const res = await fetch(base, { method: "DELETE", headers });
+    if (!res.ok) console.warn(`[vision] 저장된 응답 삭제 실패 HTTP ${res.status}`);
+  } catch (err) {
+    console.warn("[vision] 저장된 응답 삭제 실패", err);
+  }
+}
+
 export type VisionPoll =
   | { status: "running"; openaiStatus: string }
   | { status: "done"; text: string; usage?: GradeUsage; model: string }
   | { status: "error"; message: string };
 
 /** 백그라운드 작업을 한 번 묻고, 끝났으면 **글자 그대로** 돌려준다. */
-export async function pollVisionBackground(id: string): Promise<VisionPoll> {
-  const key = process.env.OPENAI_API_KEY;
+export async function pollVisionBackground(id: string, apiKeyOverride?: string): Promise<VisionPoll> {
+  const key = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
   const res = await fetch(`${OPENAI_RESPONSES}/${encodeURIComponent(id)}`, {
     headers: { Authorization: `Bearer ${key}` },

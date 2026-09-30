@@ -26,7 +26,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FigureUsage } from "./figureImageGen";
 import { loadAsDataUrl, removeStored, runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
-import { OPENAI_TEXT_MODEL, pollVisionBackground, startVisionBackground } from "./gradeExam";
+import {
+  OPENAI_TEXT_MODEL,
+  deleteVisionResponse,
+  pollVisionBackground,
+  startVisionBackground,
+} from "./gradeExam";
 import { correctionInstruction, parseVerify, VERIFY_PROMPT, type TextDiff } from "./problemCompare";
 import { gradingEstKrw } from "./tokens";
 
@@ -319,15 +324,24 @@ async function runVerify(
   let diffs: TextDiff[] | null = null;
   let solKrw = 0;
   let fail = "";
+  // BYOK 계정은 본인 키로만 부른다(서버 키를 쓰지 않는다). 저장된 응답은 끝나는 즉시 지운다.
+  let respId: string | null = null;
   try {
-    const id = await startVisionBackground(VERIFY_PROMPT, [original, candidate], OPENAI_TEXT_MODEL, VERIFY_EFFORT);
+    const id = await startVisionBackground(
+      VERIFY_PROMPT,
+      [original, candidate],
+      OPENAI_TEXT_MODEL,
+      VERIFY_EFFORT,
+      ctx.byokApiKey,
+    );
+    respId = id;
     for (;;) {
       if (Date.now() - t0 > ctx.deadlineMs) {
         fail = "sol 검수가 시간 안에 끝나지 않음";
         break;
       }
       await new Promise((r) => setTimeout(r, 4000));
-      const poll = await pollVisionBackground(id);
+      const poll = await pollVisionBackground(id, ctx.byokApiKey);
       if (poll.status === "running") continue;
       if (poll.status === "error") {
         fail = poll.message;
@@ -339,6 +353,8 @@ async function runVerify(
     }
   } catch (err) {
     fail = err instanceof Error ? err.message : "sol 검수 실패";
+  } finally {
+    if (respId) await deleteVisionResponse(respId, ctx.byokApiKey, fail !== "");
   }
 
   const withCost: ProblemLoopState = { ...state, solKrw: (state.solKrw ?? 0) + solKrw };
