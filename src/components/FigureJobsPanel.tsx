@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useFigureJobs, type FigureJob } from "./FigureJobsProvider";
+import { useFigureJobs, type FigureJob, type OfferDiffs } from "./FigureJobsProvider";
 
 const STATUS_TEXT = {
   pending: "차례 기다리는 중",
@@ -73,6 +73,14 @@ function formatWait(sec: number): string {
   return `약 ${m}분`;
 }
 
+const KIND_LABEL = { text: "글자", glyph: "깨진 글자", figure: "도형", handwriting: "손글씨" } as const;
+const KIND_STYLE = {
+  text: "bg-blue-50 text-blue-700",
+  glyph: "bg-purple-50 text-purple-700",
+  figure: "bg-emerald-50 text-emerald-700",
+  handwriting: "bg-amber-50 text-amber-800",
+} as const;
+
 /**
  * AI 그림 작업 현황을 화면 구석에 띄우는 패널.
  *
@@ -95,12 +103,16 @@ export default function FigureJobsPanel() {
     dismiss,
     topQuality,
     maxTokens,
+    loadOfferDiffs,
     confirmMax,
     skipMax,
   } = useFigureJobs();
   const [open, setOpen] = useState(false);
   const [maxBusy, setMaxBusy] = useState(false);
   const [maxError, setMaxError] = useState<string | null>(null);
+  // "이게 다릅니다, 진행하시겠어요?" 확인 창.
+  const [confirming, setConfirming] = useState<FigureJob[] | null>(null);
+  const [details, setDetails] = useState<Record<string, OfferDiffs> | null>(null);
 
   if (jobs.length === 0) return null;
 
@@ -108,17 +120,27 @@ export default function FigureJobsPanel() {
   const offers = jobs.filter((j) => j.status === "done" && j.stage === "max-offer");
   const idle = activeCount === 0 && submitting === 0;
 
+  /** 누르면 바로 걷지 않고 **무엇이 다른지 먼저 보여 준다.** */
+  async function openConfirm(list: FigureJob[]) {
+    setMaxError(null);
+    setDetails(null);
+    setConfirming(list);
+    setDetails(await loadOfferDiffs());
+  }
   async function runMax(list: FigureJob[]) {
     setMaxBusy(true);
     setMaxError(null);
+    let ok = true;
     for (const j of list) {
       const err = await confirmMax(j.id);
       if (err) {
         setMaxError(err);
+        ok = false;
         break;
       }
     }
     setMaxBusy(false);
+    if (ok) setConfirming(null);
   }
   async function closeOffers(list: FigureJob[]) {
     setMaxBusy(true);
@@ -165,10 +187,10 @@ export default function FigureJobsPanel() {
               <button
                 type="button"
                 disabled={maxBusy}
-                onClick={() => void runMax(offers)}
+                onClick={() => void openConfirm(offers)}
                 className="rounded bg-amber-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-amber-700 disabled:opacity-50"
               >
-                {maxBusy ? "처리 중…" : `모두 ${topQuality} 로 고쳐 그리기`}
+                {maxBusy ? "처리 중…" : `차이 확인하고 ${topQuality} 로 고쳐 그리기`}
               </button>
               <button
                 type="button"
@@ -284,7 +306,8 @@ export default function FigureJobsPanel() {
                     <button
                       type="button"
                       disabled={maxBusy}
-                      onClick={() => void runMax([j])}
+                      title="무엇이 다른지 보고 진행 여부를 정해요"
+                      onClick={() => void openConfirm([j])}
                       className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 hover:bg-amber-100 disabled:opacity-50"
                     >
                       {topQuality} {maxTokens}
@@ -341,6 +364,97 @@ export default function FigureJobsPanel() {
           </p>
         )}
       </div>
+
+      {/* **누르면 바로 걷지 않는다** — 무엇이 다른지 먼저 보여 주고 확인을 받는다. */}
+      {confirming && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center"
+          onClick={() => !maxBusy && setConfirming(null)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-slate-200 px-4 py-3">
+              <h3 className="text-sm font-semibold text-slate-900">이게 다릅니다 — {topQuality} 로 고쳐 그릴까요?</h3>
+              <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                지금 저장된 그림은 원본과 아래가 달라요. {topQuality} 로 한 번 더 그리면 이 부분을 고치도록 알려 주고,
+                더 나은 쪽을 저장해요.
+              </p>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
+              {details === null ? (
+                <p className="py-4 text-center text-xs text-slate-400">불러오는 중…</p>
+              ) : (
+                confirming.map((j) => {
+                  const d = details[j.id];
+                  return (
+                    <div key={j.id} className="border-b border-slate-100 py-2 last:border-b-0">
+                      <p className="text-xs font-medium text-slate-800">
+                        {j.label}
+                        {d && <span className="ml-1 font-normal text-slate-400">· 차이 {d.diffs.length}곳</span>}
+                      </p>
+                      {!d || d.diffs.length === 0 ? (
+                        <p className="mt-0.5 text-[11px] text-slate-400">
+                          {d ? "차이 목록이 남아 있지 않아요." : "차이 목록을 불러오지 못했어요."}
+                        </p>
+                      ) : (
+                        <ul className="mt-1 flex flex-col gap-1">
+                          {d.diffs.map((x, i) => (
+                            <li key={i} className="text-[11px] leading-snug text-slate-700">
+                              <span className={`mr-1 rounded px-1 py-px text-[10px] ${KIND_STYLE[x.kind ?? "text"]}`}>
+                                {KIND_LABEL[x.kind ?? "text"]}
+                              </span>
+                              {x.where && <span className="text-slate-400">[{x.where}] </span>}
+                              {x.kind === "handwriting" ? (
+                                <>
+                                  손글씨가 남았어요: <b>{x.recreated || "(필기)"}</b>
+                                  {x.original && x.original !== "빈 자리" && (
+                                    <> → 그 밑의 인쇄 &quot;{x.original}&quot; 이 보여야 해요</>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  원본 <b>&quot;{x.original}&quot;</b> → 그림 <b>{x.recreated ? `"${x.recreated}"` : "(빠짐)"}</b>
+                                </>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            {maxError && <p className="border-t border-red-100 bg-red-50 px-4 py-1.5 text-[11px] text-red-700">{maxError}</p>}
+            <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-4 py-3">
+              <span className="text-[11px] text-slate-500">
+                {maxTokens.toLocaleString()}토큰{confirming.length > 1 && ` × ${confirming.length}`}
+                {confirming.length > 1 && ` = ${(maxTokens * confirming.length).toLocaleString()}토큰`}
+              </span>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  disabled={maxBusy}
+                  onClick={() => setConfirming(null)}
+                  className="rounded border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  disabled={maxBusy || details === null}
+                  onClick={() => void runMax(confirming)}
+                  className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {maxBusy ? "시작하는 중…" : "진행"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

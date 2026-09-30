@@ -10,6 +10,7 @@ import {
   TOP_QUALITY,
   problemLoopPaths,
   problemLoopStarted,
+  remainingDiffs,
   type ProblemLoopState,
 } from "@/lib/problemLoopRun";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -39,11 +40,34 @@ async function sessionUser() {
   return { supabase, user };
 }
 
-/** 지금 보여줄 작업들. 치운 것과 이틀 넘은 것은 뺀다. */
-export async function GET() {
+/** 지금 보여줄 작업들. 치운 것과 이틀 넘은 것은 뺀다. `?offers=1` 이면 max 확인 대기 작업의 남은 차이 목록. */
+export async function GET(req: NextRequest) {
   const { supabase, user } = await sessionUser();
   if (!supabase || !user) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  }
+  if (req.nextUrl.searchParams.get("offers") === "1") {
+    // "이게 다릅니다, 진행하시겠어요?" 창에 보여 줄 것. state 는 화면에 안 내려보내는 칸이라
+    // 서비스 키로 읽되 **본인 것만** 걸러 준다.
+    const { data, error } = await createAdminClient()
+      .from("figure_jobs")
+      .select("id, label, state")
+      .eq("user_id", user.id)
+      .eq("status", "done")
+      .eq("stage", "max-offer")
+      .limit(100);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({
+      offers: (data ?? []).map((r) => {
+        const rem = remainingDiffs(r.state);
+        return {
+          id: r.id as string,
+          label: r.label as string,
+          quality: rem?.quality ?? null,
+          diffs: (rem?.diffs ?? []).slice(0, 30),
+        };
+      }),
+    });
   }
   const since = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
   // 읽기는 RLS(본인 것만)로 충분하다.

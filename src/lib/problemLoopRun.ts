@@ -173,6 +173,19 @@ export function problemLoopStarted(state: unknown): boolean {
   return problemLoopPaths(state).length > 0;
 }
 
+/**
+ * max(맨 위 단계) 확인 대기 중인 작업에 **지금 저장된 그림에 남은 차이**들 — 확인 창이 "이게 다릅니다"로 보여 준다.
+ * 저장된 그림은 남은 차이가 가장 적은 라운드(`bestRound`)이고, 그 라운드의 차이 목록은 `history` 에 있다.
+ */
+export function remainingDiffs(state: unknown): { quality: string; diffs: TextDiff[] } | null {
+  const st = state as ProblemLoopState | null;
+  if (!st || !Array.isArray(st.rounds) || st.rounds.length === 0) return null;
+  const best = st.rounds[bestRound(st.rounds)];
+  if (!best) return null;
+  const hit = (st.history ?? []).find((h) => h.quality === best.quality);
+  return hit ? { quality: hit.quality, diffs: hit.diffs } : null;
+}
+
 /** 남은 차이가 가장 적은 라운드(같으면 앞). 검수 못 한 라운드는 뒤로 미룬다. */
 function bestRound(rounds: Round[]): number {
   let best = -1;

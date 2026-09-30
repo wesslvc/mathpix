@@ -159,6 +159,12 @@ export type ProblemSnapshot = {
   spec: CardSpec;
 };
 
+/** 지금 저장된 그림에 남은 차이(글자·깨진 글자·도형·손글씨 잔재). */
+export type OfferDiffs = {
+  quality: string | null;
+  diffs: { kind?: "text" | "glyph" | "figure" | "handwriting"; original: string; recreated: string; where: string }[];
+};
+
 type Ctx = {
   jobs: FigureJob[];
   /** 진행 중이거나 대기 중인 작업 수. */
@@ -180,6 +186,8 @@ type Ctx = {
   /** 맨 위 단계(확인 뒤에만 돈다)의 quality 이름과 그 확인 1건에 걷는 토큰(서버가 알려 준다). */
   topQuality: string;
   maxTokens: number;
+  /** max 확인 대기 중인 문제들에 **남은 차이**(확인 창에 보여 준다). 키는 로컬 작업 id. */
+  loadOfferDiffs: () => Promise<Record<string, OfferDiffs>>;
   /** max 를 확인받고 돌린다. 실패하면 이유를 돌려준다(토큰 부족 등). */
   confirmMax: (id: string) => Promise<string | null>;
   /** max 는 안 돌리고 지금 그림으로 둔다. */
@@ -819,6 +827,24 @@ export default function FigureJobsProvider({
     [runOnChain, setJobs],
   );
 
+  const loadOfferDiffs = useCallback(async (): Promise<Record<string, OfferDiffs>> => {
+    try {
+      const res = await fetch("/api/figure-jobs?offers=1", { cache: "no-store" });
+      if (!res.ok) return {};
+      const json = await jsonOf<{
+        offers?: { id: string; quality: string | null; diffs: OfferDiffs["diffs"] }[];
+      }>(res);
+      const out: Record<string, OfferDiffs> = {};
+      for (const o of json.offers ?? []) {
+        const local = jobsRef.current.find((j) => j.serverId === o.id);
+        if (local) out[local.id] = { quality: o.quality, diffs: o.diffs };
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }, []);
+
   const confirmMax = useCallback(
     async (id: string): Promise<string | null> => {
       const job = jobsRef.current.find((j) => j.id === id);
@@ -942,6 +968,7 @@ export default function FigureJobsProvider({
         spentTokens,
         topQuality,
         maxTokens,
+        loadOfferDiffs,
         confirmMax,
         skipMax,
         enqueue,
