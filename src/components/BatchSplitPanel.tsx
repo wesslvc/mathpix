@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NO_CROP_LIMIT, cropImageToDataUrl, fileToDataUrl, isHeicFile, openPageSource, type PageSource } from "@/lib/cropImage";
 import { cropRegionToDataUrl, isRealPolygon, type Region } from "@/lib/polygon";
 import { useCropShape } from "@/lib/cropShape";
@@ -107,6 +107,12 @@ export default function BatchSplitPanel({
   /** 아직 안 연 다음 지면들과 처음 고른 장수(여러 장을 연달아 처리한다). */
   const [queue, setQueue] = useState<File[]>([]);
   const [totalPages, setTotalPages] = useState(0);
+  /** 뒤에서 도는 저장 줄. 한 번에 하나씩 이어 붙인다. */
+  const bgRef = useRef<Promise<void>>(Promise.resolve());
+  const [bg, setBg] = useState({ pending: 0, done: 0, numbered: 0, answered: 0 });
+  const [failedItems, setFailedItems] = useState<
+    { kind: "asis" | "ai"; piece: Piece; label: string; msg: string }[]
+  >([]);
   /**
    * 고른 사진 **원본**. 자르는 재료는 이것이다.
    *
@@ -129,8 +135,6 @@ export default function BatchSplitPanel({
   /** 어떤 모델이 영역을 잡았는지. 모델을 바꿔 가며 견줄 때 필요하다. */
   const [usedModel, setUsedModel] = useState<string | null>(null);
   const { enqueue } = useFigureJobs();
-  /** "그대로 넣기" 뒤에 번호가 몇 개 인식됐는지 알려 주는 한 줄. */
-  const [numberNote, setNumberNote] = useState<string | null>(null);
   /** 지금 자르는 재료의 크기와, 원본을 못 열어 축소본으로 내려갔는지. */
   const [sourceInfo, setSourceInfo] = useState<{ w: number; h: number; degraded: boolean } | null>(null);
   /** 조각마다 실제 픽셀 크기(그림이 뜨면 잰다). 흐린지 눈으로 짐작하지 말고 숫자로 본다. */
@@ -141,11 +145,21 @@ export default function BatchSplitPanel({
    * AI 재생성) 곧바로 다음 지면이 열려 이어서 자를 수 있다 — AI 는 뒤에서 돌므로
    * 기다릴 것이 없다. 열지 못하는 사진(HEIC 등)은 건너뛰고 알린다.
    */
+  // 뒤에서 저장 중일 때 탭을 닫으면 아직 안 넣은 조각이 사라진다 — 브라우저가 되묻게 한다.
+  useEffect(() => {
+    if (bg.pending === 0) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [bg.pending]);
+
   async function pick(list: FileList | null | undefined) {
     const files = Array.from(list ?? []);
     if (files.length === 0) return;
     setError(null);
-    setNumberNote(null);
     setTotalPages(files.length);
     await loadFrom(files);
   }
@@ -466,31 +480,40 @@ export default function BatchSplitPanel({
   }
 
   /**
-   * 잘린 것을 **그대로** 문제로 저장한다(AI 생성 없음).
+   * 잘린 것들을 **뒤에서** 저장하고 곧바로 다음 지면으로 넘어간다.
    *
-   * 지면을 잘라 넣는 자료는 이미 인쇄물이라 다시 그릴 이유가 없는 경우가
-   * 많다 — 그럴 때 문제당 50토큰짜리 생성을 강제할 이유가 없다. 크롭한
-   * 그림 한 장이 곧 카드다(`initialFigures` 와 같은 모양).
+   * 예전에는 저장이 끝날 때까지 화면이 잠겨(`busy`) 다음 지면을 자를 수 없었다. 저장은
+   * 카드 그리기 + 번호 읽기 + 업로드라 문제당 몇 초씩 걸리는데, 사람은 그동안 놀고
+   * 있었다. 지금은 조각을 **저장 줄(`bgRef`)에 넘기고** 바로 다음 지면을 연다 — 줄은 한
+   * 번에 하나씩만 돈다(동시에 저장하면 `sort_order` 가 겹친다).
    *
-   * **번호만 Mathpix 로 읽어 붙인다.** 통째로 넣은 문제는 본문이 비어 있어
-   * (`isImageOnly`) 본문에서 번호를 뽑을 수가 없다 — 그러면 목록·PDF 에서
-   * 번호가 없어 차례대로 1번부터 매겨진다. 인식 한 번은 1토큰이라 생성(50)에
-   * 비하면 거의 공짜고, 원래 시험지의 번호를 그대로 살릴 수 있다.
-   * 못 읽어도 그냥 넘어간다 — 번호가 없을 뿐 저장은 성공해야 한다.
+   * - `asis`: AI 로 다시 그리지 않고 잘린 그림 그대로 저장한다. 번호만 Mathpix 로 읽어
+   *   붙인다(통째로 넣은 문제는 본문이 비어 있어 번호를 뽑을 데가 없다).
+   * - `ai`: 저장 뒤 **행 id 를 달아** 다시 그리기 큐에 넣는다(탭을 닫아도 서버가 그 행에
+   *   결과를 쓴다). 저장되는 그림은 우선 원본 크롭이라 그리기 전에 봐도 빈 자리가 아니다.
+   *
+   * 실패한 조각은 버리지 않고 `failedItems` 에 남겨 "다시 시도"할 수 있게 한다.
    */
-  async function saveAsIs() {
-    if (pieces.length === 0) return;
+  function submit(kind: "asis" | "ai", batch: Piece[] = pieces, pageNo?: number) {
+    if (batch.length === 0) return;
     setError(null);
-    setNumberNote(null);
-    let done = 0;
-    let numbered = 0;
-    let answered = 0;
-    for (const piece of pieces) {
-      setBusy(`문제를 넣는 중... (${done + 1}/${pieces.length})`);
+    const page = pageNo ?? Math.max(1, totalPages - queue.length);
+    const pageTag = totalPages > 1 ? `지면 ${page} · ` : "";
+    setBg((b) => ({ ...b, pending: b.pending + batch.length }));
+    bgRef.current = bgRef.current
+      .then(() => runBatch(kind, batch, pageTag))
+      .catch(() => undefined);
+    // 넘긴 조각은 화면에서 뺀다(같은 것을 두 번 넣지 않게). 다음 지면이 있으면 곧바로 연다.
+    nextPage();
+  }
+
+  async function runBatch(kind: "asis" | "ai", batch: Piece[], pageTag: string) {
+    for (let i = 0; i < batch.length; i++) {
+      const piece = batch[i];
       try {
+        // 번호는 원본 크롭에서 곧바로 읽기 시작한다 — 저장·다시 그리기를 기다릴 이유가 없다.
+        const numberP = readNumberWithMathpix(piece.crop);
         const card = await wholeProblemCard(piece.id, piece.crop);
-        const number = await readNumberWithMathpix(piece.crop);
-        if (number != null) numbered += 1;
         const problemId = await onSave({
           pngDataUrl: card.pngDataUrl,
           text: "",
@@ -498,104 +521,47 @@ export default function BatchSplitPanel({
           answerType: "choice",
           boxRange: card.boxRange,
         });
-        // 번호와 그 번호의 정답을 함께 붙인다. 실패해도 저장은 된 것이다.
-        if (number != null) {
-          if (await attachNumberAndAnswer(problemId, number, answerByNumber).catch(() => null)) {
-            answered += 1;
-          }
+        if (kind === "ai") {
+          enqueue({
+            id: piece.id,
+            problemKey: `batch:${problemId}`,
+            label: `${pageTag}${i + 1}번째 문제`,
+            crop: piece.crop,
+            mode: "problem",
+            problemId,
+          });
         }
-        done += 1;
+        const number = await numberP;
+        let answered = 0;
+        if (number != null) {
+          const entry = await attachNumberAndAnswer(problemId, number, answerByNumber).catch(() => null);
+          if (entry) answered = 1;
+        }
+        setBg((b) => ({
+          ...b,
+          pending: b.pending - 1,
+          done: b.done + 1,
+          numbered: b.numbered + (number != null ? 1 : 0),
+          answered: b.answered + answered,
+        }));
       } catch (err) {
-        setError(
-          `${done + 1}번째 문제에서 멈췄습니다: ` +
-            (err instanceof Error ? err.message : "알 수 없는 오류"),
-        );
-        break;
-      }
-    }
-    setBusy(null);
-    if (done > 0) {
-      // **번호가 몇 개 붙었는지 알려 준다.** 조용히 넘어가면 목록에서
-      // 1번부터 새로 매겨진 걸 보고서야 알게 되고, 그때는 이미 늦다.
-      setNumberNote(
-        (totalPages > 1 ? `지면 ${Math.max(1, totalPages - queue.length)}: ` : "") +
-          (numbered === done
-          ? `${done}개를 넣고 번호도 전부 인식했어요.`
-          : `${done}개를 넣었어요. 번호는 ${numbered}개만 인식돼서 나머지는 "수정"에서 직접 적어야 해요.`) +
-          (answered > 0 ? ` 정답 ${answered}개를 붙였어요.` : ""),
-      );
-      if (done === pieces.length) {
-        nextPage();
-      } else {
-        setPieces([]);
-        setPageImage(null);
-        setPageFile(null);
-        setBoxes([]);
-        setPicked(new Set());
+        const msg = err instanceof Error ? err.message : "알 수 없는 오류";
+        setFailedItems((f) => [...f, { kind, piece, label: `${pageTag}${i + 1}번째`, msg }]);
+        setBg((b) => ({ ...b, pending: b.pending - 1 }));
       }
     }
   }
 
-  /**
-   * 잘린 것들을 문제로 저장하고 다시 그리기 큐에 넣는다.
-   *
-   * 저장을 **먼저** 한다. 그래야 행 id를 큐에 함께 넘길 수 있고, 브라우저를
-   * 닫아도 서버가 결과를 그 행에 직접 저장한다(`persistWholeProblem`).
-   * 저장되는 그림은 우선 원본 크롭이라, 다시 그리기가 끝나기 전에 봐도
-   * 빈 자리가 아니라 멀쩡한 문제가 들어 있다.
-   */
-  async function regenerateAll() {
-    if (pieces.length === 0) return;
-    setError(null);
-    let done = 0;
-    for (const piece of pieces) {
-      setBusy(`문제를 넣는 중... (${done + 1}/${pieces.length})`);
-      try {
-        // 번호는 원본 크롭에서 **곧바로** 읽기 시작한다 — 다시 그리기를 기다릴
-        // 이유가 없다(같은 번호다). 저장이 끝나면 그 행에 번호·정답을 붙인다.
-        const number = readNumberWithMathpix(piece.crop);
-        const card = await wholeProblemCard(piece.id, piece.crop);
-        const problemId = await onSave({
-          pngDataUrl: card.pngDataUrl,
-          text: "",
-          answer: "",
-          answerType: "choice",
-          boxRange: card.boxRange,
-        });
-        void number.then((n) =>
-          n != null ? attachNumberAndAnswer(problemId, n, answerByNumber).catch(() => null) : null,
-        );
-        enqueue({
-          id: piece.id,
-          problemKey: `batch:${problemId}`,
-          label: totalPages > 1 ? `지면 ${Math.max(1, totalPages - queue.length)} · ${done + 1}번째 문제` : `${done + 1}번째 문제`,
-          crop: piece.crop,
-          mode: "problem",
-          problemId,
-        });
-        done += 1;
-      } catch (err) {
-        setError(
-          `${done + 1}번째 문제에서 멈췄습니다: ` +
-            (err instanceof Error ? err.message : "알 수 없는 오류"),
-        );
-        break;
-      }
-    }
-    setBusy(null);
-    if (done > 0) {
-      if (done === pieces.length) {
-        // 다 넣었다 — 다음 지면이 있으면 곧바로 이어서 연다(AI 는 뒤에서 돈다).
-        nextPage();
-      } else {
-        // 넣은 것은 목록에서 뺀다(같은 것을 두 번 넣지 않게).
-        setPieces((prev) => prev.slice(done));
-        setPicked(new Set());
-        setBoxes([]);
-        setPageImage(null);
-        setPageFile(null);
-        if (fileRef.current) fileRef.current.value = "";
-      }
+  /** 실패한 조각들을 다시 저장 줄에 넣는다. */
+  function retryFailed() {
+    const items = failedItems;
+    if (items.length === 0) return;
+    setFailedItems([]);
+    for (const kind of ["asis", "ai"] as const) {
+      const batch = items.filter((f) => f.kind === kind).map((f) => f.piece);
+      if (batch.length === 0) continue;
+      setBg((b) => ({ ...b, pending: b.pending + batch.length }));
+      bgRef.current = bgRef.current.then(() => runBatch(kind, batch, "다시 · ")).catch(() => undefined);
     }
   }
 
@@ -737,7 +703,7 @@ export default function BatchSplitPanel({
           {pieces.length > 0 && (
             <Button
               type="button"
-              onClick={() => void saveAsIs()}
+              onClick={() => submit("asis")}
               disabled={busy !== null}
               variant="dark"
               title="AI로 다시 그리지 않고 잘린 그림 그대로 저장합니다. 문제 번호만 인식해서 붙입니다."
@@ -748,7 +714,7 @@ export default function BatchSplitPanel({
           {pieces.length > 0 && (
             <Button
               type="button"
-              onClick={() => void regenerateAll()}
+              onClick={() => submit("ai")}
               disabled={busy !== null}
               variant="soft"
             >
@@ -765,7 +731,28 @@ export default function BatchSplitPanel({
           {usedModel} 로 {pieces.length}개를 잡았습니다
         </p>
       )}
-      {numberNote && <p className="text-sm text-emerald-700">{numberNote}</p>}
+      {(bg.pending > 0 || bg.done > 0) && (
+        <p className="text-sm text-emerald-700">
+          {bg.pending > 0 && `뒤에서 저장 중 ${bg.pending}개 · `}
+          {bg.done}개 저장 완료
+          {bg.done > 0 &&
+            (bg.numbered === bg.done
+              ? " · 번호 전부 인식"
+              : ` · 번호 ${bg.numbered}개 인식(나머지는 “수정”에서 직접)`)}
+          {bg.answered > 0 && ` · 정답 ${bg.answered}개 붙임`}
+        </p>
+      )}
+      {failedItems.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-red-600">
+          <span>
+            저장 못 한 {failedItems.length}개 ({failedItems[0].label}
+            {failedItems.length > 1 ? " 외" : ""}): {failedItems[0].msg}
+          </span>
+          <Button type="button" size="xs" variant="outline" onClick={retryFailed}>
+            다시 시도
+          </Button>
+        </div>
+      )}
       {pieces.length > 0 && sourceInfo && (
         <p
           className={

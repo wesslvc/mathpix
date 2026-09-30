@@ -87,9 +87,25 @@ export async function fileToDataUrl(file: File): Promise<string> {
     throw new Error("이미지 파일만 사용할 수 있습니다.");
   }
 
-  // 64MP 같은 큰 원본을 `<img>` 로 열면 메모리 때문에 실패하는 기기가 있다 —
-  // 자르기 재료를 여는 것과 같은 튼튼한 열기(`loadDrawableFromFile`)를 쓴다.
-  const d = await loadDrawableFromFile(file);
+  // 화면에 띄울 축소본만 필요하다. 64MP 를 통째로 펴면 RGBA 로 256MB 라 휴대폰 탭이
+  // 죽을 수 있으므로 **디코딩하면서 바로 줄여** 연다(원본 크기 메모리가 아예 안 든다).
+  // 세로 사진이 90° 돌아 있을 수 있어 넉넉히 2400 으로 받고 아래에서 1600 으로 맞춘다.
+  // 안 되면 자르기 재료를 여는 튼튼한 열기(`loadDrawableFromFile`)로 내려간다.
+  let d: Drawable | null = null;
+  // 작은 사진은 이 길을 타지 않는다(resizeWidth 는 키우기도 해서 흐려진다).
+  if (typeof createImageBitmap === "function" && file.size > 2_000_000) {
+    try {
+      const bmp = await createImageBitmap(file, {
+        imageOrientation: "from-image",
+        resizeWidth: 2400,
+        resizeQuality: "high",
+      });
+      d = { src: bmp, width: bmp.width, height: bmp.height, close: () => bmp.close() };
+    } catch {
+      // 아래로.
+    }
+  }
+  if (!d) d = await loadDrawableFromFile(file);
   try {
     const scale = Math.min(1, MAX_DIMENSION / Math.max(d.width, d.height));
     const width = Math.max(1, Math.round(d.width * scale));
