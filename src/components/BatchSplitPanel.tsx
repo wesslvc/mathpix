@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage } from "@/lib/cropImage";
+import { cropImageToDataUrl, fileToDataUrl, isHeicFile, openPageSource, type PageSource } from "@/lib/cropImage";
 import { cropRegionToDataUrl, isRealPolygon, type Region } from "@/lib/polygon";
 import { useCropShape } from "@/lib/cropShape";
 import BoxEditor, { type EditBox } from "./BoxEditor";
@@ -129,6 +129,10 @@ export default function BatchSplitPanel({
   const { enqueue } = useFigureJobs();
   /** "그대로 넣기" 뒤에 번호가 몇 개 인식됐는지 알려 주는 한 줄. */
   const [numberNote, setNumberNote] = useState<string | null>(null);
+  /** 지금 자르는 재료의 크기와, 원본을 못 열어 축소본으로 내려갔는지. */
+  const [sourceInfo, setSourceInfo] = useState<{ w: number; h: number; degraded: boolean } | null>(null);
+  /** 조각마다 실제 픽셀 크기(그림이 뜨면 잰다). 흐린지 눈으로 짐작하지 말고 숫자로 본다. */
+  const [pieceSizes, setPieceSizes] = useState<Record<string, string>>({});
 
   async function pick(file: File | undefined) {
     if (!file) return;
@@ -162,17 +166,12 @@ export default function BatchSplitPanel({
    * 원본을 못 여는 경우에는 **축소본으로라도 자른다.** 흐릴지언정 아무것도
    * 못 하는 것보다는 낫다.
    */
-  async function openSource(): Promise<{ img: HTMLImageElement; revoke: () => void }> {
-    if (pageFile) {
-      const url = URL.createObjectURL(pageFile);
-      try {
-        return { img: await loadImage(url), revoke: () => URL.revokeObjectURL(url) };
-      } catch {
-        URL.revokeObjectURL(url);
-      }
-    }
+  async function openSource(): Promise<PageSource> {
     if (!pageImage) throw new Error("사진을 먼저 골라주세요.");
-    return { img: await loadImage(pageImage), revoke: () => {} };
+    const s = await openPageSource(pageFile, pageImage);
+    // 어느 크기의 사진에서 잘랐는지, 축소본으로 내려갔는지를 화면에 남긴다.
+    setSourceInfo({ w: s.width, h: s.height, degraded: s.degraded });
+    return s;
   }
 
   /**
@@ -181,7 +180,7 @@ export default function BatchSplitPanel({
    * 폭을 지켜서 자른다 — 긴 변 기준으로 줄이면 세로로 긴 문제의 폭이 무너져
    * 본문 글자가 뭉개진다.
    */
-  function cutBox(img: HTMLImageElement, b: Region, pad: number): string {
+  function cutBox(img: HTMLImageElement | ImageBitmap, b: Region, pad: number): string {
     // 다각형이면 바깥을 흰색으로 지우고 자른다(`polygon.ts`).
     return cropRegionToDataUrl(img, b, pad, {
       maxWidth: PROBLEM_INPUT_DIM,
@@ -198,7 +197,7 @@ export default function BatchSplitPanel({
     if (boxes.length === 0) return;
     setError(null);
     setBusy("사진을 여는 중...");
-    let source: { img: HTMLImageElement; revoke: () => void };
+    let source: PageSource;
     try {
       source = await openSource();
     } catch (err) {
@@ -239,8 +238,9 @@ export default function BatchSplitPanel({
    * 다만 요청 본문에는 상한이 있어(Vercel 4.5MB) 넘으면 요청 자체가 실패한다 —
    * 그래서 실제 길이를 보고 들어갈 때까지 한 단씩 낮춘다.
    */
-  async function detectImage(img: HTMLImageElement): Promise<string> {
-    const whole = { x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight };
+  async function detectImage(src: PageSource): Promise<string> {
+    const img = src.img;
+    const whole = { x: 0, y: 0, width: src.width, height: src.height };
     let last = "";
     for (const dim of [DETECT_INPUT_DIM, 2400, 2000, 1600, 1200]) {
       last = cropImageToDataUrl(img, whole, { maxWidth: dim, maxHeight: dim });
@@ -257,7 +257,7 @@ export default function BatchSplitPanel({
     setBusy("사진을 여는 중...");
     setError(null);
 
-    let source: { img: HTMLImageElement; revoke: () => void };
+    let source: PageSource;
     try {
       source = await openSource();
     } catch (err) {
@@ -275,7 +275,7 @@ export default function BatchSplitPanel({
         const res = await fetch("/api/detect-problems", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: await detectImage(source.img) }),
+          body: JSON.stringify({ image: await detectImage(source) }),
         });
         const json: { problems?: DetectedProblem[]; model?: string; error?: string } =
           await res.json();
@@ -344,7 +344,7 @@ export default function BatchSplitPanel({
     setError(null);
     setBusy("사진을 여는 중...");
 
-    let source: { img: HTMLImageElement; revoke: () => void };
+    let source: PageSource;
     try {
       source = await openSource();
     } catch (err) {
@@ -625,6 +625,17 @@ export default function BatchSplitPanel({
         </p>
       )}
       {numberNote && <p className="text-sm text-emerald-700">{numberNote}</p>}
+      {pieces.length > 0 && sourceInfo && (
+        <p
+          className={
+            "text-xs " + (sourceInfo.degraded ? "font-medium text-amber-700" : "text-slate-500")
+          }
+        >
+          {sourceInfo.degraded
+            ? `⚠ 원본 사진을 열지 못해 화면용 축소본(${sourceInfo.w}×${sourceInfo.h})에서 잘랐어요. 조각이 흐릴 수 있어요 — 사진을 캡처하거나 갤러리에서 다시 저장해 올리면 원본 해상도로 잘려요.`
+            : `원본 ${sourceInfo.w}×${sourceInfo.h} 사진에서 잘랐어요. 조각 왼쪽 아래 숫자가 실제 픽셀 크기예요(글이 또렷하려면 폭 1000px 이상).`}
+        </p>
+      )}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {pieces.length > 0 && (
@@ -656,7 +667,21 @@ export default function BatchSplitPanel({
               }
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.crop} alt="" className="w-full object-contain" />
+              <img
+                src={p.crop}
+                alt=""
+                className="w-full object-contain"
+                onLoad={(e) => {
+                  const t = e.currentTarget;
+                  const label = `${t.naturalWidth}×${t.naturalHeight}`;
+                  setPieceSizes((prev) => (prev[p.id] === label ? prev : { ...prev, [p.id]: label }));
+                }}
+              />
+              {pieceSizes[p.id] && (
+                <span className="absolute bottom-1 left-1 rounded bg-black/55 px-1.5 text-[10px] tabular-nums text-white">
+                  {pieceSizes[p.id]}
+                </span>
+              )}
               <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 text-[11px] text-white">
                 {picked.has(p.id) ? "✓ " : ""}
                 {i + 1}

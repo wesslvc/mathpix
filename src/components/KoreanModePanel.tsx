@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage } from "@/lib/cropImage";
+import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage, openPageSource, type PageSource } from "@/lib/cropImage";
 import {
   DETECT_INPUT_DIM,
   MAX_UPLOAD_CHARS,
@@ -191,19 +191,18 @@ export default function KoreanModePanel({
   }
 
   /** 자를 재료. 원본이 있으면 원본에서 잘라야 조각이 흐려지지 않는다. */
-  async function openSource(page: Page): Promise<{ img: HTMLImageElement; revoke: () => void }> {
-    if (page.file) {
-      const url = URL.createObjectURL(page.file);
-      try {
-        return { img: await loadImage(url), revoke: () => URL.revokeObjectURL(url) };
-      } catch {
-        URL.revokeObjectURL(url);
-      }
+  async function openSource(page: Page): Promise<PageSource> {
+    const s = await openPageSource(page.file, page.dataUrl);
+    // 원본을 못 열어 축소본으로 내려갔으면 알린다 — 말없이 흐려지면 원인을 모른다.
+    if (s.degraded) {
+      setError(
+        `"${page.file?.name ?? "사진"}" 원본을 열지 못해 화면용 축소본(${s.width}×${s.height})에서 잘랐어요. 조각이 흐릴 수 있어요 — 사진을 캡처하거나 갤러리에서 다시 저장해 올려주세요.`,
+      );
     }
-    return { img: await loadImage(page.dataUrl), revoke: () => {} };
+    return s;
   }
 
-  function cutBox(img: HTMLImageElement, b: Region, pad: number): string {
+  function cutBox(img: HTMLImageElement | ImageBitmap, b: Region, pad: number): string {
     // 손으로 그린 다각형이면 바깥을 흰색으로 지우고 자른다(`polygon.ts`).
     return cropRegionToDataUrl(img, b, pad, {
       maxWidth: PROBLEM_INPUT_DIM,
@@ -215,8 +214,9 @@ export default function KoreanModePanel({
    * 영역을 찾을 때 보낼 이미지. **원본에서 만들되 요청 상한에 맞춰 줄인다**
    * (Vercel 4.5MB). 배치 패널과 같은 방식이다.
    */
-  async function detectImage(img: HTMLImageElement): Promise<string> {
-    const whole = { x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight };
+  async function detectImage(src: PageSource): Promise<string> {
+    const img = src.img;
+    const whole = { x: 0, y: 0, width: src.width, height: src.height };
     let last = "";
     for (const dim of [DETECT_INPUT_DIM, 2400, 2000, 1600, 1200]) {
       last = cropImageToDataUrl(img, whole, { maxWidth: dim, maxHeight: dim });
@@ -247,7 +247,7 @@ export default function KoreanModePanel({
       setBusy(
         `${kind === "passage" ? "지문" : "문제"} 자리를 찾는 중... (${pages.indexOf(page) + 1}/${pages.length})`,
       );
-      let source: { img: HTMLImageElement; revoke: () => void };
+      let source: PageSource;
       try {
         source = await openSource(page);
       } catch {
@@ -262,7 +262,7 @@ export default function KoreanModePanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            image: await detectImage(source.img),
+            image: await detectImage(source),
             mode: kind === "passage" ? "korean-passage" : "korean-question",
             ...(kind === "question" ? { passages: passagesHere } : {}),
           }),
@@ -390,7 +390,7 @@ export default function KoreanModePanel({
     setError(null);
     setBusy("사진을 여는 중...");
     // 쪽마다 한 번만 열고 다 자를 때까지 들고 있는다(여러 번 열면 느리다).
-    const opened: { page: Page; img: HTMLImageElement; revoke: () => void }[] = [];
+    const opened: (PageSource & { page: Page })[] = [];
     try {
       for (const page of pages) {
         const s = await openSource(page);

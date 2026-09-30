@@ -222,6 +222,49 @@ export async function loadDrawableFromFile(file: File): Promise<Drawable> {
 }
 
 /**
+ * 지면 사진을 **자를 재료**로 연다(지면 통째로 넣기·국어 모드).
+ *
+ * 원본 파일을 `loadDrawableFromFile`(createImageBitmap → `<img>` → FileReader)로
+ * 튼튼하게 열고, 그래도 안 되면 화면용 축소본으로 내려간다. **내려갔다는 사실을
+ * `degraded` 로 알린다** — 예전에는 `<img>` 한 가지로만 열다가 큰 사진(휴대폰
+ * 원본)에서 실패하면 **아무 말 없이 긴 변 1600px 축소본에서** 잘랐다. 지면 한 장이
+ * 1600px 이면 문제 하나는 폭 450~800px 이라, 사용자 눈에는 "자른 조각이 실제
+ * 크롭 해상도보다 떨어진다"로 보였다(2026-09-30 사용자 지적).
+ */
+export type PageSource = {
+  /** 자르기·영역 찾기에 쓰는 그림. `<img>` 일 수도 `ImageBitmap` 일 수도 있다. */
+  img: HTMLImageElement | ImageBitmap;
+  width: number;
+  height: number;
+  /** 원본을 못 열어 화면용 축소본으로 내려갔다 = 조각이 흐리다. */
+  degraded: boolean;
+  /** 다 쓰면 부른다(ImageBitmap 은 닫아야 메모리가 풀린다). */
+  revoke: () => void;
+};
+
+export async function openPageSource(
+  file: File | null | undefined,
+  fallbackDataUrl: string,
+): Promise<PageSource> {
+  if (file) {
+    try {
+      const d = await loadDrawableFromFile(file);
+      return { img: d.src as HTMLImageElement | ImageBitmap, width: d.width, height: d.height, degraded: false, revoke: d.close };
+    } catch {
+      // 축소본으로 내려간다(아래). 흐릴지언정 아무것도 못 하는 것보다는 낫다.
+    }
+  }
+  const img = await loadImage(fallbackDataUrl);
+  return {
+    img,
+    width: img.naturalWidth,
+    height: img.naturalHeight,
+    degraded: !!file,
+    revoke: () => {},
+  };
+}
+
+/**
  * 사진을 90°씩 돌려 새 data URL 로 돌려준다.
  *
  * **돌린 결과를 또 돌리지 않는다.** 부르는 쪽이 회전 횟수만 세어 두고 늘
