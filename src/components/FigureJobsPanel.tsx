@@ -19,7 +19,8 @@ function statusText(j: FigureJob, top: string): string {
   if (j.status !== "running" && j.status !== "pending") return STATUS_TEXT[j.status];
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계로 돈다(`gen:N` / `verify:N`).
   if (j.mode === "problem" && j.stage) {
-    if (j.stage === "patch") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}적어 주신 곳을 수정하는 중`;
+    if (j.stage === "patch-plan") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}sol 이 수정 요청을 해석하는 중`;
+    if (j.stage === "patch") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}수정하고 sol 이 다시 검수하는 중`;
     const gen = /^gen:(\d+)$/.exec(j.stage);
     const ver = /^verify:(\d+)$/.exec(j.stage);
     const q = ["low", "medium", top];
@@ -55,7 +56,8 @@ function remainingSeconds(j: FigureJob): number {
   if (j.mode === "problem") {
     // 전 단계 기대값: 그리기 low + 검수, 30% 는 medium 으로 한 번 더. max 는 사용자 확인 뒤에만 돈다.
     const stage = j.stage ?? "gen:0";
-    if (stage === "patch") return 45;
+    if (stage === "patch-plan") return 90;
+    if (stage === "patch") return 120;
     const gen = /^gen:(\d+)$/.exec(stage);
     const ver = /^verify:(\d+)$/.exec(stage);
     const n = gen ? Number(gen[1]) : ver ? Number(ver[1]) : 0;
@@ -544,13 +546,13 @@ export default function FigureJobsPanel() {
                 {choice === "patch" && (
                   <div className="mt-2">
                     <p className="mb-1 text-[11px] text-slate-500">
-                      지금 저장된 그림(medium 결과)을 <b>다시 그리지 않고</b> 적은 곳만 고쳐요. 나머지는 그대로 둬요.
+                      지금 저장된 그림을 <b>다시 그리지 않고</b> 적은 곳만 고쳐요. <b>sol 이 원본과 지금 그림을 보고 요청을 위치·좌표까지 풀어 써서</b> 그림 모델에 전달하고, 고친 뒤 다시 검수해요. 마음에 안 들면 또 수정할 수 있어요.
                     </p>
                     <textarea
                       value={patchText}
                       onChange={(e) => setPatchText(e.target.value.slice(0, 1000))}
                       rows={3}
-                      placeholder="고칠 곳을 적어 주세요. 예) 3번 선지의 ㉡ 을 ㉢ 으로 · 그래프의 점 P 를 직선 l 위로 · 지도 B 옆 손글씨 지우기"
+                      placeholder="고칠 곳을 편하게 적어 주세요. 예) 3번 선지의 ㉡ 을 ㉢ 으로 · B 점이 원본보다 왼쪽이야 · 지도 A 옆 손글씨 지우기 (위치는 sol 이 원본과 비교해 정확히 잡아요)"
                       className="w-full resize-none rounded border border-slate-300 px-2 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:border-amber-500 focus:outline-none"
                     />
                     <label className="mt-1 flex items-start gap-1.5 text-[11px] text-slate-600">

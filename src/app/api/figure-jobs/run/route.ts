@@ -484,7 +484,7 @@ async function runProblemLoopJob(admin: Admin, job: ClaimedJob) {
   }
   if (out.kind === "done") {
     // max 를 확인받고 돌렸는데 max 그림이 안 나왔다(그리기 실패) — 돈을 받을 일이 아니다.
-    if (inMax && out.rounds < PROBLEM_LADDER.length) {
+    if (inMax && !out.maxDrawn) {
       await revertMax(admin, job, out.note, tag);
       return;
     }

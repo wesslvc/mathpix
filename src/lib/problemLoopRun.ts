@@ -35,7 +35,17 @@ import {
   pollVisionBackground,
   startVisionBackground,
 } from "./gradeExam";
-import { accumulatedCorrection, correctionInstruction, parseVerify, VERIFY_PROMPT, type RoundDiffs, type TextDiff } from "./problemCompare";
+import {
+  accumulatedCorrection,
+  correctionInstruction,
+  parsePatchPlan,
+  parseVerify,
+  patchPlanPrompt,
+  planToChanges,
+  VERIFY_PROMPT,
+  type RoundDiffs,
+  type TextDiff,
+} from "./problemCompare";
 import { gradingEstKrw } from "./tokens";
 import { logAiCost } from "./costLog";
 
@@ -87,7 +97,19 @@ export type ProblemLoopState = {
    * 적어 준 곳만 고친다(quality 미지정, sol 검수 없음). 실패하면 환불하고 offer 로 돌아간다.
    */
   patchPhase?: boolean;
-  patch?: { instruction: string; includeDiffs: boolean };
+  patch?: {
+    instruction: string;
+    includeDiffs: boolean;
+    /** sol 이 사용자 요청을 구체적인 편집 지시로 풀어 쓴 것(`patch-plan` 단계가 채운다). 못 풀었으면 없다. */
+    plan?: string;
+    /** 사용자에게 보여 줄 "이렇게 이해했어요". */
+    understood?: string;
+  };
+  /**
+   * 지금 문제에 **저장돼 있는 그림**이 어느 라운드인가. 없으면 남은 차이가 가장 적은 라운드다. 수정(patch)을 하면 그
+   * 결과가 (차이가 더 많더라도) 사용자가 고른 그림이므로 이 값이 그 라운드를 가리킨다 — 다음 수정은 이 그림에서 이어 간다.
+   */
+  current?: number;
   /** 사용자가 max 다시 그리기를 확인해 돌고 있다(`max-offer` 에서 넘어온 것). 실패하면 환불하고 offer 로 돌아간다. */
   maxPhase?: boolean;
   /** 라운드마다 검수가 찾은 차이 목록. 다음 그리기의 지시를 만드는 재료(그림은 폐기하고 실수만 넘긴다). */
@@ -121,8 +143,10 @@ export type ProblemLoopOutcome =
       note: string;
       /** 지울 중간 파일. */
       cleanup: string[];
-      /** 그린 라운드 수(max 까지 그렸는지 가릴 때 쓴다). */
+      /** 그린 라운드 수. */
       rounds: number;
+      /** 맨 위 단계(확인 뒤에만 도는 것)의 그림이 실제로 나왔는가 — 안 나왔으면 걷은 토큰을 돌려준다. */
+      maxDrawn: boolean;
       /**
        * 차이가 남았지만 max 는 **사용자 확인 뒤에** 돌린다 — 이 상태를 작업에 그대로 남기고(입력·중간 그림
        * 유지) 일꾼은 여기서 멈춘다.
@@ -187,7 +211,7 @@ export function problemLoopStarted(state: unknown): boolean {
 export function remainingDiffs(state: unknown): { quality: string; diffs: TextDiff[]; path: string } | null {
   const st = state as ProblemLoopState | null;
   if (!st || !Array.isArray(st.rounds) || st.rounds.length === 0) return null;
-  const best = st.rounds[bestRound(st.rounds)];
+  const best = st.rounds[st.current !== undefined && st.rounds[st.current] ? st.current : bestRound(st.rounds)];
   if (!best) return null;
   const hit = (st.history ?? []).find((h) => h.quality === best.quality);
   return hit ? { quality: hit.quality, diffs: hit.diffs, path: best.path } : null;
@@ -236,6 +260,7 @@ async function finalize(
           note: `${why} (그림 ${i + 1} 사용)`,
           cleanup,
           rounds: state.rounds.length,
+          maxDrawn: maxRoundDrawn(state),
         };
       }
     }
@@ -256,7 +281,18 @@ async function finalize(
     note: `${round.quality} 그림 저장 · ${summary}${why ? ` · ${why}` : ""}`,
     cleanup,
     rounds: state.rounds.length,
+    maxDrawn: maxRoundDrawn(state),
   };
+}
+
+/**
+ * 맨 위 단계 그림이 나왔는가. 그 자리(사다리 마지막 칸)에 **수정 라운드(`patch<k>`)가 아닌** 그림이 있어야 한다 — 수정이 쌓이면
+ * 라운드 수만으로는 가릴 수 없다.
+ */
+export function maxRoundDrawn(state: unknown): boolean {
+  const rounds = (state as ProblemLoopState | null)?.rounds;
+  const r = Array.isArray(rounds) ? rounds[PROBLEM_LADDER.length - 1] : undefined;
+  return !!r && !String(r.quality).startsWith("patch");
 }
 
 /** 그림 사용량에 sol 검수 원가를 더해 화면에 보이는 합계로 만든다. */
@@ -284,6 +320,7 @@ export async function runProblemStage(
   const genIdx = indexOf(stage, "gen");
   if (genIdx !== null) return runGen(admin, job, state, genIdx, ctx);
 
+  if (stage === "patch-plan") return runPatchPlan(admin, job, state, ctx);
   if (stage === "patch") return runPatch(admin, job, state, ctx);
 
   const verIdx = indexOf(stage, "verify");
@@ -293,10 +330,79 @@ export async function runProblemStage(
   return runGen(admin, job, { rounds: [] }, 0, ctx);
 }
 
+/** 수정의 바탕이 되는 그림 = 지금 저장돼 있는 라운드(`state.current`, 없으면 남은 차이가 가장 적은 것). */
+function baseIndex(state: ProblemLoopState): number {
+  return state.current !== undefined && state.rounds[state.current] ? state.current : bestRound(state.rounds);
+}
+
+/** 사용자 글과(원하면) sol 이 찾은 남은 차이를 한 덩어리로. */
+function patchRequestText(state: ProblemLoopState): { user: string; findings: string } {
+  const user = state.patch?.instruction?.trim() ?? "";
+  let findings = "";
+  if (state.patch?.includeDiffs) {
+    const rem = remainingDiffs(state);
+    if (rem && rem.diffs.length > 0) findings = correctionInstruction(rem.diffs);
+  }
+  return { user, findings };
+}
+
 /**
- * **수정** — 지금 저장된 그림(남은 차이가 가장 적은 라운드, 보통 medium)을 입력으로 넣고 사용자가 적은 곳(과
- * 원하면 sol 이 찾은 남은 차이)만 고친다. quality 는 안 보낸다(미지정). sol 검수는 안 한다 — 사용자가 결과를 본다.
- * 성공하면 그 그림이 최종이고 작업이 끝난다(중간 그림·입력은 정리).
+ * **수정 1단계 — sol 이 요청을 해석한다.** 그림 편집 모델은 "B 지점을 조금 오른쪽으로" 같은 말을 못 알아듣는다(사용자 —
+ * "지점 위치 같은 거 내가 계속 얘기해도 못 알아듣는데"). sol 이 원본과 지금 그림을 둘 다 보고 **어디를 어떻게**를 기준물·퍼센트
+ * 좌표로 못박은 편집 지시로 풀어 쓴다. 풀어 쓰지 못하면 사용자가 쓴 글 그대로 다음 단계로 간다(수정이 막히면 안 된다).
+ */
+async function runPatchPlan(
+  admin: SupabaseClient,
+  job: ProblemLoopJob,
+  state: ProblemLoopState,
+  ctx: Ctx,
+): Promise<ProblemLoopOutcome> {
+  const baseIdx = baseIndex(state);
+  const base = state.rounds[baseIdx];
+  const [original, current] = await Promise.all([
+    loadAsDataUrl(admin, job.input_path),
+    base ? loadAsDataUrl(admin, base.path) : Promise.resolve(null),
+  ]);
+  if (!original || !current) return { kind: "fail", error: "고칠 그림을 찾지 못했어요.", cleanup: [] };
+
+  const { user, findings } = patchRequestText(state);
+  if (!user && !findings) return { kind: "fail", error: "고칠 내용이 없어요.", cleanup: [] };
+
+  const ask = await askSol(patchPlanPrompt(user, findings), [original, current], ctx, "수정 해석");
+  if (ask.krw > 0 && !ctx.byokApiKey) {
+    await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "problem", what: "sol 수정 해석", krw: ask.krw });
+  }
+  let plan: string | undefined;
+  let understood: string | undefined;
+  let note = "sol 이 요청을 해석하지 못해 적어 주신 글 그대로 그려요";
+  if (ask.text !== null) {
+    try {
+      const parsed = parsePatchPlan(ask.text);
+      plan = planToChanges(parsed);
+      understood = parsed.understood || undefined;
+      note = `sol 이 이렇게 이해했어요: ${parsed.understood || `${parsed.edits.length}곳 수정`}`;
+    } catch (err) {
+      console.warn(`[${ctx.tag}] 수정 해석 결과를 못 읽음: ${err instanceof Error ? err.message : err}`);
+    }
+  } else {
+    console.warn(`[${ctx.tag}] 수정 해석 실패, 사용자 글 그대로 진행: ${ask.fail.slice(0, 200)}`);
+  }
+  return {
+    kind: "next",
+    stage: "patch",
+    state: {
+      ...state,
+      solKrw: (state.solKrw ?? 0) + ask.krw,
+      patch: { instruction: user, includeDiffs: state.patch?.includeDiffs ?? false, plan, understood },
+    },
+    note,
+  };
+}
+
+/**
+ * **수정 2단계 — 그리고 검수한다.** 지금 저장된 그림을 입력으로 넣고 sol 이 풀어 쓴 지시대로 그 곳만 고친다(quality 는 안 보낸다,
+ * 미지정). 그린 뒤 sol 이 원본과 다시 견줘 **남은 차이**를 새로 찾는다 — 사용자가 결과를 보고 또 고칠 수 있게 작업은 확인 대기
+ * (`max-offer`)로 돌아가고, 바탕 그림은 방금 고친 것이 된다(`current`). 검수가 안 돼도 고친 그림은 저장한다.
  */
 async function runPatch(
   admin: SupabaseClient,
@@ -304,19 +410,17 @@ async function runPatch(
   state: ProblemLoopState,
   ctx: Ctx,
 ): Promise<ProblemLoopOutcome> {
-  const pick = bestRound(state.rounds);
-  const base = state.rounds[pick];
+  const baseIdx = baseIndex(state);
+  const base = state.rounds[baseIdx];
   const image = base ? await loadAsDataUrl(admin, base.path) : null;
   if (!image) return { kind: "fail", error: "고칠 그림을 찾지 못했어요.", cleanup: [] };
 
-  const parts: string[] = [];
-  const own = state.patch?.instruction?.trim();
-  if (own) parts.push(`user's requested fixes (Korean):\n${own}`);
-  if (state.patch?.includeDiffs) {
-    const rem = remainingDiffs(state);
-    if (rem && rem.diffs.length > 0) parts.push(correctionInstruction(rem.diffs));
-  }
-  if (parts.length === 0) return { kind: "fail", error: "고칠 내용이 없어요.", cleanup: [] };
+  // sol 이 풀어 쓴 지시가 있으면 그걸, 없으면 사용자 글(+ 남은 차이)을 그대로.
+  const { user, findings } = patchRequestText(state);
+  const changes =
+    state.patch?.plan ??
+    [user && `user's requested fixes (Korean):\n${user}`, findings].filter(Boolean).join("\n\n");
+  if (!changes) return { kind: "fail", error: "고칠 내용이 없어요.", cleanup: [] };
 
   const out = await runFigureGeneration({
     image,
@@ -327,7 +431,7 @@ async function runPatch(
     byokApiKey: ctx.byokApiKey,
     deadlineMs: ctx.deadlineMs,
     tag: `${ctx.tag} 수정`,
-    patchNote: parts.join("\n\n"),
+    patchNote: changes,
   });
   if (!out.ok) return { kind: "fail", error: out.error, cleanup: [] };
 
@@ -342,14 +446,61 @@ async function runPatch(
     });
   }
   const usage = addUsage(state.usage, out.usage);
+
+  // 고친 그림을 새 라운드로 남긴다. 파일 이름은 `-p<k>` — 다시 그리기 라운드(`-r<i>`)와 겹치지 않는다.
+  const k = state.rounds.filter((r) => r.quality.startsWith("patch")).length + 1;
+  const quality = `patch${k}`;
+  const parts = splitDataUrl(out.dataUrl);
+  const path = parts ? `${job.user_id}/_jobs/${job.id}-p${k}.${parts.ext}` : "";
+  const stored = parts ? await storeBytes(admin, path, parts.bytes, parts.mime) : false;
+  if (!parts || !stored) return { kind: "fail", error: "고친 그림을 저장하지 못했어요.", cleanup: [] };
+
+  // 같은 시간 안에서 sol 이 원본과 다시 견줘 남은 차이를 새로 찾는다(실패해도 고친 그림은 그대로 둔다).
+  let diffs: TextDiff[] | null = null;
+  let solKrw = 0;
+  const original = await loadAsDataUrl(admin, job.input_path);
+  if (original) {
+    const ask = await askSol(VERIFY_PROMPT, [original, out.dataUrl], ctx, "검수");
+    solKrw = ask.krw;
+    if (ask.text !== null) {
+      try {
+        diffs = parseVerify(ask.text);
+      } catch {
+        diffs = null;
+      }
+    }
+    if (solKrw > 0 && !ctx.byokApiKey) {
+      await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "problem", what: "sol 검수", krw: solKrw });
+    }
+  }
+
+  const rounds = [...state.rounds, { quality, path, ...(diffs ? { diffs: diffs.length } : {}) }];
+  const history: RoundDiffs[] = diffs
+    ? [...(state.history ?? []).filter((h) => h.quality !== quality), { quality, diffs: diffs.slice(0, 20) }]
+    : (state.history ?? []);
+  const next: ProblemLoopState = {
+    ...state,
+    rounds,
+    history,
+    current: rounds.length - 1,
+    usage,
+    solKrw: (state.solKrw ?? 0) + solKrw,
+    patchPhase: false,
+    patch: undefined,
+    instruction: history.length ? accumulatedCorrection(history) : state.instruction,
+  };
+  const summary = diffs === null ? "검수는 못 했어요" : diffs.length === 0 ? "글자·도형 차이 없음" : `남은 차이 ${diffs.length}곳`;
+  const understood = state.patch?.understood;
   return {
     kind: "done",
     dataUrl: out.dataUrl,
     modelId: ctx.modelIds[0] ?? "",
-    usage: usage ? { ...usage, estKrw: usage.estKrw + (state.solKrw ?? 0), estUsd: usage.estUsd + (usage.krwRate > 0 ? (state.solKrw ?? 0) / usage.krwRate : 0) } : undefined,
-    note: `${base.quality} 그림에서 고칠 곳만 수정했어요`,
-    cleanup: pathsOf(state),
-    rounds: state.rounds.length,
+    usage: withSol(next),
+    note: `수정 ${k}차 반영 · ${summary}${understood ? ` · 이해한 내용: ${understood}` : ""} · 또 고치거나 다시 그릴 수 있어요`,
+    cleanup: [],
+    rounds: rounds.length,
+    maxDrawn: false,
+    offer: next,
   };
 }
 
@@ -409,10 +560,14 @@ async function runGen(
     return finalize(admin, { ...state, usage }, bestRound(state.rounds), ctx, "중간 그림 저장 실패");
   }
 
+  // 다시 그리기는 앞 라운드 뒤를 새로 쓴다 — 수정(`-p<k>`)으로 쌓인 라운드가 잘려 나가면 그 파일도 지운다.
+  const dropped = state.rounds.slice(i).map((r) => r.path).filter((pth) => pth !== path);
+  if (dropped.length) await removeStored(admin, dropped);
   const next: ProblemLoopState = {
     ...state,
     usage,
     rounds: [...state.rounds.slice(0, i), { quality, path }],
+    current: undefined,
   };
   return {
     kind: "next",
@@ -420,6 +575,64 @@ async function runGen(
     state: next,
     note: `${quality} 로 그렸어요 · sol 이 글자·도형을 검수합니다`,
   };
+}
+
+/**
+ * sol(`OPENAI_TEXT_MODEL`)에게 사진들과 프롬프트를 보내 글을 받는다 — 백그라운드로 걸고 묻는다(강도를 올리면 오래
+ * 걸린다). 분당 한도(429)는 6·12초 뒤 두 번까지 다시 걸고, **응답은 받자마자(실패·시간 초과면 취소 뒤) 지운다.**
+ * BYOK 계정은 본인 키로만 부른다. 실패는 던지지 않고 `fail` 로 돌려준다(부르는 쪽이 정한다).
+ */
+async function askSol(
+  prompt: string,
+  images: string[],
+  ctx: Ctx,
+  label: string,
+): Promise<{ text: string | null; krw: number; fail: string }> {
+  const t0 = Date.now();
+  let text: string | null = null;
+  let krw = 0;
+  let fail = "";
+  let respId: string | null = null;
+  try {
+    let id = "";
+    for (let attempt = 0; ; attempt++) {
+      try {
+        id = await startVisionBackground(prompt, images, OPENAI_TEXT_MODEL, VERIFY_EFFORT, ctx.byokApiKey);
+        break;
+      } catch (err) {
+        const limited = err instanceof GradeError && err.status === 429 && !/quota|billing|balance/i.test(err.message);
+        if (!limited || attempt >= 2 || Date.now() - t0 > ctx.deadlineMs / 2) throw err;
+        await new Promise((r) => setTimeout(r, 6000 * (attempt + 1)));
+      }
+    }
+    respId = id;
+    for (;;) {
+      if (Date.now() - t0 > ctx.deadlineMs) {
+        fail = `sol ${label}가 시간 안에 끝나지 않음`;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 4000));
+      const poll = await pollVisionBackground(id, ctx.byokApiKey);
+      if (poll.status === "running") continue;
+      if (poll.status === "error") {
+        fail = poll.message;
+        break;
+      }
+      if (poll.usage) {
+        krw = gradingEstKrw(poll.usage, poll.model) ?? 0;
+        console.info(
+          `[${ctx.tag}] sol ${label} usage model=${poll.model} in=${poll.usage.inputTokens} out=${poll.usage.outputTokens} est=${krw.toFixed(1)}원`,
+        );
+      }
+      text = poll.text;
+      break;
+    }
+  } catch (err) {
+    fail = err instanceof Error ? err.message : `sol ${label} 실패`;
+  } finally {
+    if (respId) await deleteVisionResponse(respId, ctx.byokApiKey, fail !== "");
+  }
+  return { text, krw, fail };
 }
 
 async function runVerify(
@@ -440,57 +653,16 @@ async function runVerify(
   if (!original || !candidate) return finalize(admin, state, i, ctx, "검수 재료를 못 읽음");
 
   // sol 은 백그라운드로 걸고 묻는다(강도를 올리면 오래 걸린다). 시간이 다 되면 검수를 포기한다.
-  const t0 = Date.now();
+  const ask = await askSol(VERIFY_PROMPT, [original, candidate], ctx, "검수");
   let diffs: TextDiff[] | null = null;
-  let solKrw = 0;
-  let fail = "";
-  // BYOK 계정은 본인 키로만 부른다(서버 키를 쓰지 않는다). 저장된 응답은 끝나는 즉시 지운다.
-  let respId: string | null = null;
-  try {
-    // 동시에 여러 개를 돌리면 sol 쪽 분당 한도(429)에 닿을 수 있다 — 잠깐 기다렸다 두 번까지 다시 건다.
-    let id = "";
-    for (let attempt = 0; ; attempt++) {
-      try {
-        id = await startVisionBackground(
-          VERIFY_PROMPT,
-          [original, candidate],
-          OPENAI_TEXT_MODEL,
-          VERIFY_EFFORT,
-          ctx.byokApiKey,
-        );
-        break;
-      } catch (err) {
-        const limited = err instanceof GradeError && err.status === 429 && !/quota|billing|balance/i.test(err.message);
-        if (!limited || attempt >= 2 || Date.now() - t0 > ctx.deadlineMs / 2) throw err;
-        await new Promise((r) => setTimeout(r, 6000 * (attempt + 1)));
-      }
+  let fail = ask.fail;
+  const solKrw = ask.krw;
+  if (ask.text !== null) {
+    try {
+      diffs = parseVerify(ask.text);
+    } catch (err) {
+      fail = err instanceof Error ? err.message : "sol 검수 결과를 읽지 못함";
     }
-    respId = id;
-    for (;;) {
-      if (Date.now() - t0 > ctx.deadlineMs) {
-        fail = "sol 검수가 시간 안에 끝나지 않음";
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 4000));
-      const poll = await pollVisionBackground(id, ctx.byokApiKey);
-      if (poll.status === "running") continue;
-      if (poll.status === "error") {
-        fail = poll.message;
-        break;
-      }
-      if (poll.usage) {
-        solKrw = gradingEstKrw(poll.usage, poll.model) ?? 0;
-        console.info(
-          `[${ctx.tag}] sol 검수 usage model=${poll.model} in=${poll.usage.inputTokens} out=${poll.usage.outputTokens} est=${solKrw.toFixed(1)}원`,
-        );
-      }
-      diffs = parseVerify(poll.text);
-      break;
-    }
-  } catch (err) {
-    fail = err instanceof Error ? err.message : "sol 검수 실패";
-  } finally {
-    if (respId) await deleteVisionResponse(respId, ctx.byokApiKey, fail !== "");
   }
 
   if (solKrw > 0 && !ctx.byokApiKey) {

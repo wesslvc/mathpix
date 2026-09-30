@@ -193,6 +193,70 @@ export function accumulatedCorrection(history: RoundDiffs[]): string {
   );
 }
 
+/** sol 이 사용자의 수정 요청을 그림 모델이 알아들을 **구체적인 편집 지시**로 풀어 쓴 것. */
+export type PatchPlan = {
+  /** 사용자에게 보여 줄 한두 문장("이렇게 이해했어요"). */
+  understood: string;
+  edits: { where: string; current: string; target: string; how: string }[];
+  keep: string;
+};
+
+/**
+ * **수정 요청 해석 프롬프트**(사용자 — "수정하기 누를 때 sol 이 도와주면 안 돼? 지점 위치 같은 거 내가 계속 얘기해도 못
+ * 알아들어"). 그림 편집 모델은 "B 지점을 조금 오른쪽으로" 같은 말을 못 알아듣는다 — 그래서 sol 이 원본과 지금 그림을 둘 다
+ * 보고 **어디를 어떻게**를 기준물·퍼센트 좌표로 못박아 준다. 원본(사진 1)이 진실이다.
+ */
+export function patchPlanPrompt(userText: string, findings: string): string {
+  return `task: someone wants to FIX a re-drawn Korean exam question. image 1 = ORIGINAL photo (the truth). image 2 = CURRENT re-drawn version (this is what an image-editing model will edit in place).
+the person wrote what to fix, in Korean, possibly vaguely:
+"""
+${userText.trim() || "(nothing written — use the findings below)"}
+"""
+${findings ? `earlier automatic findings (image 2 vs image 1):\n${findings}\n` : ""}
+you translate this into PRECISE edit instructions for an image-editing model that cannot understand vague location words ("here", "a bit to the right", "near B") and only sees image 2.
+for EACH fix:
+- find the thing in BOTH images.
+- POINTS / DOTS / MARKERS on maps, graphs, figures: give its position in image 1 (the target) and in image 2 (the current) relative to printed landmarks (a coastline bend, an island, a river or border, a printed grid / latitude–longitude line, an axis, a labelled neighbour, nearby printed text) AND as % of the figure box (x from the left edge, y from the top edge). then say exactly how to move it: direction + distance in % of the figure width/height + the landmark it must end up on or beside ("move point B about 6% of the figure width to the left so it sits exactly on the crossing of the 37°N line and the coast").
+- TEXT: quote the exact current text and the exact target text (from image 1), and where it sits.
+- HANDWRITING: say which marks to erase and where; what printed content is under them (or "clean white paper").
+- say what must NOT change around it.
+if the request is ambiguous or contradicts image 1, pick the reading that makes image 2 match image 1 and say so in "understood". if it asks for something that is not visible / not possible, say so instead of inventing.
+write "understood" in Korean (1–2 short sentences: what you understood, so the person can check). write edits in English or Korean, whichever is clearer, but keep quotes exact.
+return JSON only:
+{"understood":"...","edits":[{"where":"short location","current":"what image 2 has now (with position)","target":"what it must be (with position, from image 1)","how":"the concrete edit"}],"keep":"what to leave untouched"}`;
+}
+
+/** 해석 결과를 읽는다. 모양이 이상하면 던진다(부르는 쪽이 사용자 글 그대로 진행한다). */
+export function parsePatchPlan(text: string): PatchPlan {
+  const obj = parseJsonObject(text) as Record<string, unknown> | null;
+  const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const list = Array.isArray(obj?.edits) ? (obj!.edits as unknown[]) : [];
+  const edits: PatchPlan["edits"] = [];
+  for (const e of list.slice(0, 20)) {
+    const r = e as Record<string, unknown> | null;
+    if (!r || typeof r !== "object") continue;
+    const item = {
+      where: str(r.where, 200),
+      current: str(r.current, 400),
+      target: str(r.target, 400),
+      how: str(r.how, 500),
+    };
+    if (item.target || item.how) edits.push(item);
+  }
+  if (edits.length === 0) throw new Error("수정 해석 결과에 고칠 곳이 없습니다.");
+  return { understood: str(obj?.understood, 400), edits, keep: str(obj?.keep, 400) };
+}
+
+/** 해석 결과를 그림 편집 모델에 줄 지시 글로. */
+export function planToChanges(plan: PatchPlan): string {
+  const lines = plan.edits.map(
+    (e, i) =>
+      `${i + 1}. ${e.where ? `[${e.where}] ` : ""}${e.how || `change "${e.current}" → "${e.target}"`}` +
+      `${e.current ? ` | now: ${e.current}` : ""}${e.target ? ` | must be: ${e.target}` : ""}`,
+  );
+  return `${lines.join("\n")}${plan.keep ? `\nkeep unchanged: ${plan.keep}` : ""}`;
+}
+
 function parseJsonObject(text: string): unknown {
   try {
     return JSON.parse(text);

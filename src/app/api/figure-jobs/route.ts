@@ -10,6 +10,7 @@ import {
   TOP_QUALITY,
   problemLoopPaths,
   problemLoopStarted,
+  maxRoundDrawn,
   remainingDiffs,
   type ProblemLoopState,
 } from "@/lib/problemLoopRun";
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest) {
         return {
           id: r.id as string,
           label: r.label as string,
-          quality: rem?.quality ?? null,
+          quality: rem ? qualityLabel(rem.quality) : null,
           diffs: (rem?.diffs ?? []).slice(0, 30),
           // 양쪽을 나란히 보여 주려고 — 원본(넣을 때 올린 입력)과 지금 저장된 생성 그림.
           originalUrl: cardUrl(r.input_path as string),
@@ -423,9 +424,9 @@ export async function PATCH(req: NextRequest) {
       .from("figure_jobs")
       .update({
         status: "pending",
-        stage: "patch",
+        stage: "patch-plan",
         state: { ...(row.state as ProblemLoopState), patchPhase: true, patch: { instruction, includeDiffs } },
-        note: "적어 주신 곳을 수정하는 중",
+        note: "sol 이 요청을 해석하는 중",
         error: null,
         started_at: null,
         finished_at: null,
@@ -575,8 +576,7 @@ export async function DELETE(req: NextRequest) {
     // 치우기만 해도 전액이 돌아오면 그려 놓고 취소하는 길이 열린다.
     // max 를 확인받고 줄에 선 작업(아직 max 를 안 그렸다)은 걷은 200토큰을 돌려준다.
     const st = removed.state as ProblemLoopState | null;
-    const maxNotDrawn =
-      st?.patchPhase === true || (st?.maxPhase === true && (st.rounds?.length ?? 0) < PROBLEM_LADDER.length);
+    const maxNotDrawn = st?.patchPhase === true || (st?.maxPhase === true && !maxRoundDrawn(st));
     const spent = problemLoopStarted(removed.state) && !maxNotDrawn;
     if (removed.charged && removed.charged_tokens > 0 && !spent) {
       await admin.rpc("refund_recognition_credit_for", {
@@ -612,6 +612,12 @@ export async function DELETE(req: NextRequest) {
     await removeStored(admin, [...passageInputPaths(finished), ...problemLoopPaths(finished.state)]);
   }
   return NextResponse.json({ ok: true });
+}
+
+/** 수정 라운드(`patch1`)는 "수정 1차"로 보여 준다. */
+function qualityLabel(q: string): string {
+  const m = /^patch(\d+)$/.exec(q);
+  return m ? `수정 ${m[1]}차` : q;
 }
 
 /** 지문 입력 경로는 **자기 `_jobs/` 아래**만 받는다 — 남의 파일을 읽히면 안 된다. */
