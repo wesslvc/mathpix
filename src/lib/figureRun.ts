@@ -53,6 +53,8 @@ export type RunInput = {
   tag: string;
   /** 출력 품질. 운영은 안 넘긴다 — 비교 화면 전용(`generateFigureImage` 참고). */
   quality?: string;
+  /** 출력 캔버스 크기(예 `2048x2048`). 운영은 안 넘긴다 — 비교 화면 전용. */
+  outputSize?: string;
 };
 
 export type RunOutcome =
@@ -89,6 +91,7 @@ export async function runFigureGeneration(input: RunInput): Promise<RunOutcome> 
           input.instruction,
           input.byokApiKey,
           input.quality,
+          input.outputSize,
         );
         if (!result) {
           return {

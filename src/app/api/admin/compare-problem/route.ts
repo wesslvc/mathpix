@@ -25,7 +25,7 @@ export const maxDuration = 300;
  *
  * `task`:
  *  - `generate`  : sunburst 로 그리기(문제 통째로 `problem` · 그림 하나 `figure`).
- *                  `quality` 를 주면 그 값을 보낸다(운영은 안 보낸다 — 올려서 재 보는 용도).
+ *                  `quality`(low~max)·`outputSize` 를 주면 그 값을 보낸다(운영은 안 보낸다 — 올려서 재 보는 용도).
  *                  운영과 **같은 알맹이**(`runFigureGeneration`)라 결과가 운영과 같다.
  *  - `verify`    : sol 이 원본과 다시 만든 것을 대조(백그라운드).
  *  - `transcribe`: sol 이 본문을 글자·LaTeX 로 옮기고 그림 자리를 짚는다(백그라운드).
@@ -52,8 +52,12 @@ export async function POST(req: NextRequest) {
     const w = Number(body.width);
     const h = Number(body.height);
     const quality =
-      typeof body.quality === "string" && ["low", "medium", "high", "auto"].includes(body.quality)
+      typeof body.quality === "string" && ["low", "medium", "high", "xhigh", "max", "auto"].includes(body.quality)
         ? body.quality
+        : undefined;
+    const outputSize =
+      typeof body.outputSize === "string" && /^\d{3,4}x\d{3,4}$/.test(body.outputSize)
+        ? body.outputSize
         : undefined;
     const t0 = Date.now();
     const out = await runFigureGeneration({
@@ -66,17 +70,19 @@ export async function POST(req: NextRequest) {
       deadlineMs: (maxDuration - 15) * 1000,
       tag: "compare-problem",
       quality,
+      outputSize,
     });
     const ms = Date.now() - t0;
     if (!out.ok) return NextResponse.json({ error: out.error, ms }, { status: out.status });
     console.info(
-      `[compare-problem] generate mode=${mode} quality=${quality ?? "-"} ms=${ms} krw=${out.usage?.estKrw ?? "?"}`,
+      `[compare-problem] generate mode=${mode} quality=${quality ?? "-"} size=${outputSize ?? "auto"} ms=${ms} krw=${out.usage?.estKrw ?? "?"}`,
     );
     return NextResponse.json({
       image: out.dataUrl,
       model: out.modelId,
       usage: out.usage ?? null,
       quality: quality ?? null,
+      outputSize: outputSize ?? null,
       ms,
     });
   }

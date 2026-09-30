@@ -757,6 +757,11 @@ export async function generateFigureImage(
    * (`/admin/compare-problem`)이 "올리면 글자가 나아지는가"를 재 볼 때만 쓴다.
    */
   quality?: string,
+  /**
+   * 출력 캔버스를 못박는다(예 `2048x2048`). 없으면 입력 비율에 맞춰 고른다
+   * (`pickOutputSize`). 운영은 안 넘긴다 — 비교 화면 전용.
+   */
+  outputSize?: string,
 ): Promise<FigureImageResult | null> {
   const apiKey = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -785,11 +790,11 @@ export async function generateFigureImage(
   let usedVariant = startAt;
 
   // 비율에 맞는 캔버스를 고른다. 못 고르면 조합에 적힌 값(대개 auto)을 그대로 쓴다.
-  const wanted = pickOutputSize(size?.width, size?.height);
+  const wanted = outputSize || pickOutputSize(size?.width, size?.height);
 
   for (let i = 0; i < order.length; i++) {
     const params = { ...order[i] };
-    if (wanted && "size" in params) params.size = wanted;
+    if (wanted && ("size" in params || outputSize)) params.size = wanted;
     if (quality) params.quality = quality;
 
     const form = new FormData();

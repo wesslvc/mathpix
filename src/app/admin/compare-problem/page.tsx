@@ -51,7 +51,9 @@ import { cn } from "@/lib/utils";
 const SOL_MODELS = ["gpt-6.1-sol", "gpt-6-sol"];
 const EFFORTS = ["low", "medium", "high"];
 /** sunburst 출력 품질. 운영은 아무것도 안 보낸다(모델 기본값). */
-const QUALITIES = ["high", "medium", "low", "auto"];
+const QUALITIES = ["high", "xhigh", "max", "medium", "low", "auto"];
+/** 출력 캔버스. "auto" 는 운영과 같이 입력 비율에 맞춘다. 2048x2048 은 사용자가 확인해 준 값. */
+const OUTPUT_SIZES = ["auto", "2048x2048"];
 
 type Step = {
   label: string;
@@ -174,6 +176,7 @@ export default function CompareProblemPage() {
   const [retry, setRetry] = useState(true);
   const [redrawFigures, setRedrawFigures] = useState(true);
   const [quality, setQuality] = useState(QUALITIES[0]);
+  const [outSize, setOutSize] = useState(OUTPUT_SIZES[0]);
   const [t1, setT1] = useState<Track1>({ steps: [] });
   const [t2, setT2] = useState<Track2>({ steps: [] });
   const [t3, setT3] = useState<Track3>({ steps: [] });
@@ -223,7 +226,13 @@ export default function CompareProblemPage() {
     }
   }
 
-  async function generate(image: string, mode: "problem" | "figure", instruction?: string, q?: string) {
+  async function generate(
+    image: string,
+    mode: "problem" | "figure",
+    instruction?: string,
+    q?: string,
+    outputSize?: string,
+  ) {
     const size = await imageSizeOf(image);
     const out = await postJson<GenResponse>({
       task: "generate",
@@ -231,6 +240,7 @@ export default function CompareProblemPage() {
       mode,
       instruction,
       quality: q,
+      outputSize: outputSize && outputSize !== "auto" ? outputSize : undefined,
       width: size?.width,
       height: size?.height,
     });
@@ -250,7 +260,7 @@ export default function CompareProblemPage() {
   }
 
   /** ① — 운영과 같은 한 번 그리기에 quality 만 올린다. */
-  async function run1(image: string, q: string): Promise<Pick<HistoryRow, "m1" | "m1Quality">> {
+  async function run1(image: string, q: string, os: string): Promise<Pick<HistoryRow, "m1" | "m1Quality">> {
     const steps: Step[] = [];
     const set = (fn: (s: Step[]) => Step[]) => {
       const next = fn(steps);
@@ -259,12 +269,14 @@ export default function CompareProblemPage() {
     };
     setT1({ steps: [] });
     try {
-      const img = await step(set, `그리기 (sunburst · quality=${q})`, () => generate(image, "problem", undefined, q));
+      const img = await step(set, `그리기 (sunburst · quality=${q} · size=${os})`, () =>
+        generate(image, "problem", undefined, q, os),
+      );
       setT1((t) => ({ ...t, img }));
       const diffs = await step(set, `대조 (${solModel} ${effort}) — 측정용`, () => verify(image, img), true);
       const totals = sumSteps(steps, diffs.length);
       setT1((t) => ({ ...t, diffs, totals }));
-      return { m1: totals, m1Quality: q };
+      return { m1: totals, m1Quality: os === "auto" ? q : `${q} · ${os}` };
     } catch (err) {
       setT1((t) => ({ ...t, error: err instanceof Error ? err.message : String(err) }));
       return {};
@@ -411,7 +423,7 @@ export default function CompareProblemPage() {
     try {
       // "운영 vs ①" 은 운영 한 번만 돌린다(② 의 다시 그리기는 빼서 값을 아낀다).
       const [a, b, c] = await Promise.all([
-        which === "all" || which === "1" ? run1(prepared, quality) : Promise.resolve({}),
+        which === "all" || which === "1" ? run1(prepared, quality, outSize) : Promise.resolve({}),
         which !== "3" ? run2(prepared, which !== "1" && retry) : Promise.resolve({}),
         which === "all" || which === "3" ? run3(prepared) : Promise.resolve({}),
       ]);
@@ -463,6 +475,16 @@ export default function CompareProblemPage() {
             </select>
           </label>
           <label className="flex items-center gap-1.5">
+            ① 출력 크기
+            <select value={outSize} onChange={(e) => setOutSize(e.target.value)} className="rounded border px-2 py-1 font-mono text-xs">
+              {OUTPUT_SIZES.map((m) => (
+                <option key={m} value={m}>
+                  {m === "auto" ? "운영과 같게(비율 맞춤)" : m}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5">
             <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} />② 차이가 있으면 한 번 다시 그리기
           </label>
           <label className="flex items-center gap-1.5">
@@ -476,6 +498,7 @@ export default function CompareProblemPage() {
           </Button>
           <Button variant="outline" disabled={!prepared || busy} onClick={() => runAll("1")}>
             운영 vs ① quality={quality}
+            {outSize !== "auto" ? ` · ${outSize}` : ""}
           </Button>
           <Button variant="outline" disabled={!prepared || busy} onClick={() => runAll("2")}>
             운영 + ②만
@@ -498,7 +521,7 @@ export default function CompareProblemPage() {
         <Summary
           baseline={t2.baseline}
           m1={t1.totals}
-          m1Quality={quality}
+          m1Quality={outSize === "auto" ? quality : `${quality} · ${outSize}`}
           m2={t2.totals}
           m3={t3.totals}
         />

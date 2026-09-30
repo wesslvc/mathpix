@@ -2828,9 +2828,11 @@ latest 로 바꿔 봐 ... flash 써 보고 안 되면 테라로 넘어가게")
 토큰을 안 뗀다(`requireFontAdmin`).
 
 - **지금 운영**: sunburst 가 문제를 통째로 한 번(`quality` 안 보냄 — 모델 기본값).
-- **① sunburst 단독 · quality 올림**: 같은 한 번 그리기에 `quality`(high/medium/low/auto)만
-  보낸다. 이미지 모델의 "강도"로 확인된 손잡이는 `quality` 하나다 — 따로 추론 강도라는
-  파라미터 이름은 확인한 적이 없어 지어내지 않았다. `generateFigureImage`·`runFigureGeneration`
+- **① sunburst 단독 · quality 올림**: 같은 한 번 그리기에 `quality` 만 보낸다. 받는 값은
+  사용자가 확인해 줬다 — low·medium·high·**xhigh·max**·auto, 그리고 `size="2048x2048"` 도
+  된다(2026-09-30). 그래서 ① 에는 출력 크기도 고른다(운영과 같은 비율 맞춤 / 2048x2048 —
+  확인된 값만 넣었다). 이미지 모델의 "강도"는 이 `quality` 다(따로 추론 강도 파라미터는
+  확인한 적이 없어 지어내지 않았다). `outputSize` 도 `generateFigureImage` 까지 이어진다. `generateFigureImage`·`runFigureGeneration`
   에 `quality` 인자가 생겼지만 **운영 호출부는 안 넘긴다**(위 "quality 는 보내지 않는다").
   모델이 quality 를 콕 집어 거부하면 조합 캐스케이드를 돌지 않고 곧바로 그 오류를 알린다
   (몰래 빼고 다시 보내면 무엇을 쟀는지 알 수 없다).
