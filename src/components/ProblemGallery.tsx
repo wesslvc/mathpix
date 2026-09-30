@@ -55,7 +55,8 @@ const DiagramAdjuster = dynamic(() => import("./DiagramAdjuster"), { ssr: false 
 const DraggableCard = dynamic(() => import("./DraggableCard"), { ssr: false });
 const DiagramCropModal = dynamic(() => import("./DiagramCropModal"), { ssr: false });
 import { useFigureJobs } from "./FigureJobsProvider";
-import { rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
+import { ensureDataUrl, prepareFigureForModel, prepareProblemForModel, rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
+import { SolChat } from "@/components/SolChat";
 import { keepOrigin } from "@/lib/figureOrigin";
 import { thumbPathFor } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
@@ -363,6 +364,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   const [redrawNote, setRedrawNote] = useState<Record<string, string>>({});
   // "AI로 다시 그리기"를 눌렀을 때 **sol 을 쓸지 묻는** 중인 그림(id → 보낼 그림). 문제 통째로 그린 그림에만 묻는다.
   const [redrawAsk, setRedrawAsk] = useState<Record<string, string>>({});
+  // sol 과 대화로 다시 그릴 곳을 정하는 창이 열려 있는 그림.
+  const [redrawChat, setRedrawChat] = useState<Record<string, boolean>>({});
 
   /**
    * 큐에 넣는다.
@@ -398,13 +401,18 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     return drawings.length === 1 && drawings[0].id === id;
   }
 
-  function requestRedraw(id: string, crop: string, useSol = false) {
+  function requestRedraw(id: string, crop: string, useSol = false, extra?: string) {
     setRedrawAsk((prev) => {
       const { [id]: _drop, ...rest } = prev;
       return rest;
     });
+    setRedrawChat((prev) => {
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
     dismiss(id);
-    const instruction = redrawNote[id]?.trim() || undefined;
+    // 사용자가 적은 요청 + (있으면) sol 과 대화로 확정한 수정 사항.
+    const instruction = [redrawNote[id]?.trim(), extra?.trim()].filter(Boolean).join("\n\n").slice(0, 2500) || undefined;
     enqueue({
       id,
       problemKey,
@@ -1349,9 +1357,17 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                     type="button"
                                     size="xs"
                                     variant="dark"
+                                    onClick={() => setRedrawChat((prev) => ({ ...prev, [f.id]: true }))}
+                                  >
+                                    sol 과 대화하며 정하기
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="xs"
+                                    variant="outline"
                                     onClick={() => requestRedraw(f.id, redrawAsk[f.id], true)}
                                   >
-                                    sol 쓰기 (정확)
+                                    sol 검수만 (대화 없이)
                                   </Button>
                                   <Button
                                     type="button"
@@ -1365,16 +1381,40 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                     type="button"
                                     size="xs"
                                     variant="ghost"
-                                    onClick={() =>
+                                    onClick={() => {
                                       setRedrawAsk((prev) => {
                                         const { [f.id]: _drop, ...rest } = prev;
                                         return rest;
-                                      })
-                                    }
+                                      });
+                                      setRedrawChat((prev) => {
+                                        const { [f.id]: _drop, ...rest } = prev;
+                                        return rest;
+                                      });
+                                    }}
                                   >
                                     취소
                                   </Button>
                                 </div>
+                                {redrawChat[f.id] && (
+                                  <div className="mt-1.5">
+                                    <p className="mb-1 text-[11px] text-slate-500">
+                                      sol 이 원본과 지금 그림을 같이 보며 어디를 바로잡을지 대화로 정해요. <b>확정</b>하면 그 내용을 지시로 붙여 원본에서
+                                      다시 그려요(medium → 필요하면 high).
+                                    </p>
+                                    <SolChat
+                                      goal="redraw"
+                                      confirmLabel="확정하고 그리기"
+                                      getImages={async () => {
+                                        const prep = (u: string) =>
+                                          isWholeProblemFigure(f.id) ? prepareProblemForModel(u) : prepareFigureForModel(u, 1280);
+                                        const cur = await ensureDataUrl(raster);
+                                        const org = await ensureDataUrl(f.origin ?? raster);
+                                        return [await prep(org), await prep(cur)];
+                                      }}
+                                      onConfirm={(plan) => requestRedraw(f.id, f.origin ?? raster, true, plan.text)}
+                                    />
+                                  </div>
+                                )}
                               </div>
                             )}
                             {job?.status === "error" && (

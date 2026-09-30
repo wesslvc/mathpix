@@ -10,7 +10,7 @@ export async function logAiCost(
   admin: SupabaseClient,
   row: {
     userId: string;
-    jobId: string;
+    jobId: string | null;
     kind: "problem" | "figure" | "passage";
     what: string;
     krw: number;

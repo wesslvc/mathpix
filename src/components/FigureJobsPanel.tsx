@@ -1,5 +1,6 @@
 "use client";
 
+import { SolChat } from "@/components/SolChat";
 import { useState } from "react";
 import { useFigureJobs, type FigureJob, type OfferDiffs } from "./FigureJobsProvider";
 
@@ -127,7 +128,8 @@ export default function FigureJobsPanel() {
   const [patchText, setPatchText] = useState("");
   const [patchDiffs, setPatchDiffs] = useState(true);
   // sol 이 지점 위치 등을 원본과 자세히 비교해 그림 모델에 강하게 지시할지(사용자가 고른다).
-  const [patchSol, setPatchSol] = useState(true);
+  // 수정은 기본이 **sol 과 대화**다(사용자 — "수정모드 때는 sol 과 LLM 형태로 대화해서 최종 확정"). 글로만 적어 바로 고치는 길도 남겨 둔다.
+  const [patchMode, setPatchMode] = useState<"chat" | "text">("chat");
 
   if (jobs.length === 0) return null;
 
@@ -143,7 +145,7 @@ export default function FigureJobsPanel() {
     setPicked(new Set(list.map((j) => j.id)));
     setPatchText("");
     setPatchDiffs(true);
-    setPatchSol(true);
+    setPatchMode("chat");
     setConfirming(list);
     setDetails(await loadOfferDiffs());
   }
@@ -162,10 +164,10 @@ export default function FigureJobsPanel() {
     setMaxBusy(false);
     if (ok) setConfirming(null);
   }
-  async function runPatch(j: FigureJob) {
+  async function runPatch(j: FigureJob, chat?: { text: string; understood: string }) {
     setMaxBusy(true);
     setMaxError(null);
-    const err = await confirmPatch(j.id, patchText, patchDiffs, patchSol);
+    const err = await confirmPatch(j.id, chat ? "" : patchText, chat ? false : patchDiffs, !!chat, chat);
     setMaxBusy(false);
     if (err) setMaxError(err);
     else setConfirming(null);
@@ -546,30 +548,41 @@ export default function FigureJobsPanel() {
                     </button>
                   ))}
                 </div>
-                {choice === "patch" && (
+                {choice === "patch" && patchMode === "chat" && (
                   <div className="mt-2">
                     <p className="mb-1 text-[11px] text-slate-500">
-                      지금 저장된 그림을 <b>다시 그리지 않고</b> 적은 곳만 고쳐요. 마음에 안 들면 또 수정할 수 있어요.
+                      지금 저장된 그림을 <b>다시 그리지 않고</b> 고쳐요. sol 과 대화로 고칠 곳을 정하고 <b>확정</b>하면 그대로 그림 모델에 가요. 마음에 안 들면 또
+                      수정할 수 있어요.
+                    </p>
+                    <SolChat
+                      goal="patch"
+                      jobId={confirming[0].serverId}
+                      confirmLabel="이 내용으로 확정"
+                      busy={maxBusy}
+                      onConfirm={(plan) => void runPatch(confirming[0], { text: plan.text, understood: plan.understood })}
+                    />
+                    <button
+                      type="button"
+                      disabled={maxBusy}
+                      onClick={() => setPatchMode("text")}
+                      className="mt-1 text-[11px] text-slate-500 underline hover:text-slate-700"
+                    >
+                      대화 없이 글로만 적어 바로 고치기
+                    </button>
+                  </div>
+                )}
+                {choice === "patch" && patchMode === "text" && (
+                  <div className="mt-2">
+                    <p className="mb-1 text-[11px] text-slate-500">
+                      지금 저장된 그림을 <b>다시 그리지 않고</b> 적은 곳만 고쳐요(sol 도움 없이 적은 글 그대로).
                     </p>
                     <textarea
                       value={patchText}
                       onChange={(e) => setPatchText(e.target.value.slice(0, 1000))}
                       rows={3}
-                      placeholder="고칠 곳을 편하게 적어 주세요. 예) 3번 선지의 ㉡ 을 ㉢ 으로 · B 점이 원본보다 왼쪽이야 · 지도 A 옆 손글씨 지우기 (위치는 sol 이 원본과 비교해 정확히 잡아요)"
+                      placeholder="고칠 곳을 적어 주세요. 예) 3번 선지의 ㉡ 을 ㉢ 으로 · 지도 A 옆 손글씨 지우기"
                       className="w-full resize-none rounded border border-slate-300 px-2 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:border-amber-500 focus:outline-none"
                     />
-                    <label className="mt-1 flex items-start gap-1.5 rounded border border-amber-200 bg-amber-50/60 px-1.5 py-1 text-[11px] text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={patchSol}
-                        onChange={(e) => setPatchSol(e.target.checked)}
-                        className="mt-0.5"
-                      />
-                      <span>
-                        <b>sol 이 자세히 비교해서 강하게 지시하기</b> — 점 위치 같은 것을 원본과 견줘 기준물·좌표(%)까지 재고, 그림 모델에
-                        &quot;정확히 여기로&quot; 하고 못박아요. 고친 뒤 다시 검수도 해요. (추천 · 1~2분 더 · 위치가 자꾸 안 맞을 때)
-                      </span>
-                    </label>
                     <label className="mt-1 flex items-start gap-1.5 text-[11px] text-slate-600">
                       <input
                         type="checkbox"
@@ -579,6 +592,14 @@ export default function FigureJobsPanel() {
                       />
                       <span>위에 나온 차이도 함께 고치기</span>
                     </label>
+                    <button
+                      type="button"
+                      disabled={maxBusy}
+                      onClick={() => setPatchMode("chat")}
+                      className="mt-1 text-[11px] text-slate-500 underline hover:text-slate-700"
+                    >
+                      sol 과 대화로 정하기
+                    </button>
                   </div>
                 )}
               </div>
@@ -608,7 +629,7 @@ export default function FigureJobsPanel() {
             <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-4 py-3">
               <span className="text-[11px] text-slate-500">
                 {confirming.length === 1 && choice === "patch"
-                  ? `${patchTokens.toLocaleString()}토큰`
+                  ? `${patchTokens.toLocaleString()}토큰${patchMode === "chat" ? " · 대화는 쓴 만큼 따로" : ""}`
                   : confirming.length > 1
                     ? `${picked.size}개 선택 · ${maxTokens.toLocaleString()}토큰 × ${picked.size} = ${(maxTokens * picked.size).toLocaleString()}토큰`
                     : `${maxTokens.toLocaleString()}토큰`}
@@ -627,7 +648,8 @@ export default function FigureJobsPanel() {
                   disabled={
                     maxBusy ||
                     details === null ||
-                    (confirming.length === 1 && choice === "patch" && !patchText.trim() && !patchDiffs) ||
+                    (confirming.length === 1 && choice === "patch" && patchMode === "chat") ||
+                    (confirming.length === 1 && choice === "patch" && patchMode === "text" && !patchText.trim() && !patchDiffs) ||
                     (confirming.length > 1 && picked.size === 0)
                   }
                   onClick={() =>

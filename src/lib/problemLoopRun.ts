@@ -171,7 +171,7 @@ export type ProblemLoopOutcome =
     }
   | { kind: "fail"; error: string; cleanup: string[] };
 
-type Ctx = {
+export type Ctx = {
   byokApiKey?: string;
   modelIds: string[];
   /** 이 단계에 쓸 시간(ms). */
@@ -349,6 +349,23 @@ export async function runProblemStage(
 /** 수정의 바탕이 되는 그림 = 지금 저장돼 있는 라운드(`state.current`, 없으면 남은 차이가 가장 적은 것). */
 function baseIndex(state: ProblemLoopState): number {
   return state.current !== undefined && state.rounds[state.current] ? state.current : bestRound(state.rounds);
+}
+
+/** 수정 대화용 그림 둘 — 원본과 지금 저장된 그림. 없으면 null. */
+export async function loadPatchImages(
+  admin: SupabaseClient,
+  row: { input_path: string; state: unknown },
+): Promise<{ original: string; current: string; findings: string } | null> {
+  const state = row.state as ProblemLoopState | null;
+  if (!state || !Array.isArray(state.rounds) || state.rounds.length === 0) return null;
+  const base = state.rounds[baseIndex(state)];
+  const [original, current] = await Promise.all([
+    loadAsDataUrl(admin, row.input_path),
+    base ? loadAsDataUrl(admin, base.path) : Promise.resolve(null),
+  ]);
+  if (!original || !current) return null;
+  const rem = remainingDiffs(state);
+  return { original, current, findings: rem && rem.diffs.length > 0 ? correctionInstruction(rem.diffs) : "" };
 }
 
 /** 사용자 글과(원하면) sol 이 찾은 남은 차이를 한 덩어리로. */
@@ -601,11 +618,13 @@ async function runGen(
  * 걸린다). 분당 한도(429)는 6·12초 뒤 두 번까지 다시 걸고, **응답은 받자마자(실패·시간 초과면 취소 뒤) 지운다.**
  * BYOK 계정은 본인 키로만 부른다. 실패는 던지지 않고 `fail` 로 돌려준다(부르는 쪽이 정한다).
  */
-async function askSol(
+export async function askSol(
   prompt: string,
   images: string[],
   ctx: Ctx,
   label: string,
+  /** 추론 강도를 아예 보내지 않는다(수정 대화 — 사용자 지시). 기본은 검수 강도. */
+  opts?: { noEffort?: boolean },
 ): Promise<{ text: string | null; krw: number; fail: string }> {
   const t0 = Date.now();
   let text: string | null = null;
@@ -616,7 +635,7 @@ async function askSol(
     let id = "";
     for (let attempt = 0; ; attempt++) {
       try {
-        id = await startVisionBackground(prompt, images, OPENAI_TEXT_MODEL, VERIFY_EFFORT, ctx.byokApiKey);
+        id = await startVisionBackground(prompt, images, OPENAI_TEXT_MODEL, opts?.noEffort ? undefined : VERIFY_EFFORT, ctx.byokApiKey);
         break;
       } catch (err) {
         const limited = err instanceof GradeError && err.status === 429 && !/quota|billing|balance/i.test(err.message);

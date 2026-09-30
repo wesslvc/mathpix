@@ -248,6 +248,54 @@ export function parsePatchPlan(text: string): PatchPlan {
   return { understood: str(obj?.understood, 400), edits, keep: str(obj?.keep, 400) };
 }
 
+/** 수정 대화 한 마디. */
+export type ChatTurn = { role: "user" | "assistant"; text: string };
+
+/**
+ * **수정 대화 프롬프트**(사용자 — "수정모드 때는 sol 과 LLM 형태로 대화해서 수정사항을 최종 확정시키자"). sol 이 원본(사진 1)과 지금
+ * 그림(사진 2)을 보며 사용자와 **주고받는다**: 무엇이 어떻게 다른지 보이는 대로 말하고, 위치가 모호하면 되묻고, 합의된 수정 사항을
+ * 매번 `plan` 으로 정리해 돌려준다. 사용자가 그 plan 을 보고 "확정"을 누르면 그대로 그림 모델에 간다.
+ *  - `patch`  : 사진 2 를 **그 자리에서 고친다**(수정 사항 = 사진 2 에 가할 편집).
+ *  - `redraw` : 사진 1 에서 **처음부터 다시 그린다**(사진 2 는 지난 시도 — 수정 사항 = 이번에 틀리지 말아야 할 곳).
+ */
+export function solChatPrompt(goal: "patch" | "redraw", turns: ChatTurn[], findings: string): string {
+  const what =
+    goal === "patch"
+      ? "image 2 will be EDITED IN PLACE by an image-editing model, so every plan item is an edit to image 2."
+      : "image 2 is only the previous attempt; the next drawing is made from image 1 again, so every plan item is something the NEXT drawing must get right (based on what went wrong in image 2)."
+  ;
+  const talk = turns.map((t) => `${t.role === "user" ? "PERSON" : "YOU"}: ${t.text.trim().slice(0, 1500)}`).join("\n");
+  return `task: you are chatting (in Korean) with a person who is fixing a re-drawn Korean exam question. image 1 = ORIGINAL photo (the truth). image 2 = the CURRENT re-drawn version. ${what}
+${findings ? `automatic findings from an earlier comparison (may help, may be incomplete):\n${findings}\n` : ""}
+conversation so far:
+${talk}
+
+reply to the LAST person message like a careful assistant:
+- LOOK at both images. say what you actually see that is different around what they mean ("점 B 는 원본에서 해안선 꺾이는 곳 위인데 지금 그림은 약 6% 오른쪽에 있어요"). be concrete: printed landmarks + % of the figure box.
+- if the location / target is ambiguous, or you cannot see it, ASK one short question instead of guessing. never invent what is not in the images.
+- if they ask for something that makes the drawing differ from image 1 (changing question text / numbers / answer choices), say that the drawing must match the original and offer the reading that does.
+- keep it short (2–5 sentences). no markdown headings.
+also, every turn, output the CURRENT AGREED PLAN as "plan" — everything agreed so far in this conversation (not only the last message), as PRECISE, FORCEFUL instructions an image model can follow (MOVE/ERASE/REPLACE … exactly, with numeric % positions and a landmark; quote exact text). "understood" = 1–2 Korean sentences summarising the plan. if nothing concrete is agreed yet (you are asking a question), set "plan" to null.
+return JSON only:
+{"reply":"한국어 답변","plan":null or {"understood":"...","edits":[{"where":"short location","current":"what image 2 has now (with position)","target":"what it must be (with position, from image 1)","how":"the concrete edit"}],"keep":"what to leave untouched"}}`;
+}
+
+/** 대화 답을 읽는다. `plan` 이 이상하면 없는 것으로 친다(답변 글은 살린다). */
+export function parseSolChat(text: string): { reply: string; plan: PatchPlan | null } {
+  const obj = parseJsonObject(text) as Record<string, unknown> | null;
+  const reply = typeof obj?.reply === "string" ? obj.reply.trim().slice(0, 2000) : "";
+  if (!reply) throw new Error("sol 답변이 비어 있습니다.");
+  let plan: PatchPlan | null = null;
+  if (obj?.plan && typeof obj.plan === "object") {
+    try {
+      plan = parsePatchPlan(JSON.stringify(obj.plan));
+    } catch {
+      plan = null;
+    }
+  }
+  return { reply, plan };
+}
+
 /** 해석 결과를 그림 편집 모델에 줄 지시 글로. */
 export function planToChanges(plan: PatchPlan): string {
   const lines = plan.edits.map(

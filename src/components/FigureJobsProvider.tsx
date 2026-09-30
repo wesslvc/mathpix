@@ -47,6 +47,8 @@ export type JobMode = FigureMode | "passage";
 
 export type FigureJob = {
   id: string;
+  /** 서버 작업 id(서버에 들어간 뒤에 생긴다). 수정 대화(`SolChat`)가 서버 쪽 그림을 찾는 데 쓴다. */
+  serverId?: string;
   /** 어느 문제의 그림인가. 화면이 닫힌 뒤 저장본을 갱신할 때 쓴다. */
   problemKey: string;
   /** 목록에 보여줄 이름(문제 번호 등). */
@@ -198,7 +200,14 @@ type Ctx = {
   /** max 확인 대기 중인 문제들에 **남은 차이**(확인 창에 보여 준다). 키는 로컬 작업 id. */
   loadOfferDiffs: () => Promise<Record<string, OfferDiffs>>;
   /** 다시 그리지 않고 저장된 그림에서 적은 곳만 고친다. 실패하면 이유를 돌려준다. */
-  confirmPatch: (id: string, instruction: string, includeDiffs: boolean, useSol: boolean) => Promise<string | null>;
+  confirmPatch: (
+    id: string,
+    instruction: string,
+    includeDiffs: boolean,
+    useSol: boolean,
+    /** sol 과 대화로 확정한 수정 사항. 있으면 해석 걸음 없이 그 지시로 곧바로 고친다. */
+    chat?: { text: string; understood: string },
+  ) => Promise<string | null>;
   /** max 를 확인받고 돌린다. 실패하면 이유를 돌려준다(토큰 부족 등). */
   confirmMax: (id: string) => Promise<string | null>;
   /** max 는 안 돌리고 지금 그림으로 둔다. */
@@ -897,14 +906,28 @@ export default function FigureJobsProvider({
   );
 
   const confirmPatch = useCallback(
-    async (id: string, instruction: string, includeDiffs: boolean, useSol: boolean): Promise<string | null> => {
+    async (
+      id: string,
+      instruction: string,
+      includeDiffs: boolean,
+      useSol: boolean,
+      chat?: { text: string; understood: string },
+    ): Promise<string | null> => {
       const serverId = jobsRef.current.find((j) => j.id === id)?.serverId;
       if (!serverId) return "서버 작업을 찾지 못했어요.";
       try {
         const res = await fetch("/api/figure-jobs", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: serverId, action: "patch", instruction, includeDiffs, useSol }),
+          body: JSON.stringify({
+            id: serverId,
+            action: "patch",
+            instruction,
+            includeDiffs,
+            useSol,
+            plan: chat?.text,
+            understood: chat?.understood,
+          }),
         });
         const json = await jsonOf<{ job?: ServerJob; error?: string }>(res);
         if (!res.ok || !json.job) return json.error ?? "수정을 시작하지 못했어요.";

@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
       korean: body.korean === true,
       instruction:
         typeof body.instruction === "string"
-          ? body.instruction.slice(0, 500).trim() || null
+          ? body.instruction.slice(0, 2500).trim() || null
           : null,
       input_path: inputPath,
       ...(mode === "problem" && body.auto === true ? { payload: { auto: true } } : {}),
@@ -266,7 +266,7 @@ export async function POST(req: NextRequest) {
  *  - `releaseApply` : 반영에 실패해 찜을 푼다.
  */
 export async function PATCH(req: NextRequest) {
-  let body: { id?: string; action?: string; problemId?: string; instruction?: string; includeDiffs?: boolean; useSol?: boolean };
+  let body: { id?: string; action?: string; problemId?: string; instruction?: string; includeDiffs?: boolean; useSol?: boolean; plan?: unknown; understood?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -389,9 +389,12 @@ export async function PATCH(req: NextRequest) {
   // 없음. PATCH_REDRAW_TOKENS(150)를 걷는다.
   if (body.action === "patch") {
     const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 1000) : "";
-    const includeDiffs = body.includeDiffs !== false;
-    const useSol = body.useSol !== false;
-    if (!instruction && !includeDiffs) {
+    // **sol 과 대화로 확정한 수정 사항**(`SolChat`). 있으면 해석 걸음을 건너뛰고 곧바로 강한 편집 지시로 그린다.
+    const chatPlan = typeof body.plan === "string" ? body.plan.trim().slice(0, 4000) : "";
+    const chatUnderstood = typeof body.understood === "string" ? body.understood.trim().slice(0, 400) : "";
+    const includeDiffs = chatPlan ? false : body.includeDiffs !== false;
+    const useSol = chatPlan ? true : body.useSol !== false;
+    if (!chatPlan && !instruction && !includeDiffs) {
       return NextResponse.json({ error: "고칠 내용을 적거나 남은 차이를 함께 고치도록 골라주세요." }, { status: 400 });
     }
     const { data: row } = await admin
@@ -429,9 +432,19 @@ export async function PATCH(req: NextRequest) {
       .update({
         status: "pending",
         // sol 을 고르면 해석 걸음부터, 아니면 곧바로 그린다.
-        stage: useSol ? "patch-plan" : "patch",
-        state: { ...(row.state as ProblemLoopState), patchPhase: true, patch: { instruction, includeDiffs, useSol } },
-        note: useSol ? "sol 이 원본과 비교해 요청을 해석하는 중" : "적어 주신 곳을 수정하는 중",
+        stage: useSol && !chatPlan ? "patch-plan" : "patch",
+        state: {
+          ...(row.state as ProblemLoopState),
+          patchPhase: true,
+          patch: chatPlan
+            ? { instruction, includeDiffs: false, useSol: true, plan: chatPlan, understood: chatUnderstood || undefined }
+            : { instruction, includeDiffs, useSol },
+        },
+        note: chatPlan
+          ? `확정한 수정 사항대로 고치는 중${chatUnderstood ? ` · ${chatUnderstood}` : ""}`
+          : useSol
+            ? "sol 이 원본과 비교해 요청을 해석하는 중"
+            : "적어 주신 곳을 수정하는 중",
         error: null,
         started_at: null,
         finished_at: null,
