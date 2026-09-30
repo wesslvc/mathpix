@@ -57,6 +57,15 @@ export const FIGURE_TOKEN_DEPOSIT = (() => {
 })();
 
 /**
+ * **수정**(확인 창에서 저장된 그림의 일부만 고치기, `PATCH action:"patch"`) 1건에 걷는 토큰(사용자 — "수정 150 받자").
+ * sol 해석·강한 지시·재검수까지 붙으면 원가가 그리기 한 번보다 크다.
+ */
+export const PATCH_REDRAW_TOKENS = (() => {
+  const raw = Number(process.env.PATCH_REDRAW_TOKENS);
+  return Number.isInteger(raw) && raw > 0 ? raw : 150;
+})();
+
+/**
  * 이번 생성에 물릴 토큰. **고정값이라 원가(`estKrw`)는 더 이상 안 본다** —
  * 매개변수는 호출부(`/api/figure`)와의 호환을 위해 남겨 뒀다. 실제 원가는
  * 로그(`[figureImageGen] usage`)에서 여전히 볼 수 있다.

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redirectBase } from "@/app/auth/redirectBase";
 import { getBillingContext } from "@/lib/byok";
-import { FIGURE_TOKEN_DEPOSIT, MAX_REDRAW_TOKENS } from "@/lib/tokens";
+import { FIGURE_TOKEN_DEPOSIT, MAX_REDRAW_TOKENS, PATCH_REDRAW_TOKENS } from "@/lib/tokens";
 import { removeStored, splitDataUrl, storeBytes } from "@/lib/figureRun";
 import { JOB_COLUMNS, UNLIMITED_CONCURRENCY, kickWorker, type FigureJobRow } from "@/lib/figureJobsServer";
 import { passageDepositFrom, passageInputPaths, type PassagePayload } from "@/lib/passageRun";
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: true })
     .limit(100);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS, patchTokens: FIGURE_TOKEN_DEPOSIT, topQuality: TOP_QUALITY, concurrency });
+  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS, patchTokens: PATCH_REDRAW_TOKENS, topQuality: TOP_QUALITY, concurrency });
 }
 
 export async function POST(req: NextRequest) {
@@ -383,7 +383,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   // **수정**: 다시 그리지 않고 지금 저장된 그림(보통 medium)에서 사용자가 적은 곳만 고친다. quality 미지정, sol 검수
-  // 없음. 다른 다시 그리기와 같은 값(FIGURE_TOKEN_DEPOSIT)을 걷는다.
+  // 없음. PATCH_REDRAW_TOKENS(150)를 걷는다.
   if (body.action === "patch") {
     const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 1000) : "";
     const includeDiffs = body.includeDiffs !== false;
@@ -413,10 +413,10 @@ export async function PATCH(req: NextRequest) {
     }
     const charge = !billing.unlimited && !billing.byok;
     if (charge) {
-      const { data, error } = await supabase.rpc("consume_recognition_credit", { p_amount: FIGURE_TOKEN_DEPOSIT });
+      const { data, error } = await supabase.rpc("consume_recognition_credit", { p_amount: PATCH_REDRAW_TOKENS });
       if (error || data === null) {
         return NextResponse.json(
-          { error: error ? error.message : `토큰이 부족해요. 수정하려면 ${FIGURE_TOKEN_DEPOSIT}토큰이 필요합니다.` },
+          { error: error ? error.message : `토큰이 부족해요. 수정하려면 ${PATCH_REDRAW_TOKENS}토큰이 필요합니다.` },
           { status: error ? 500 : 402 },
         );
       }
@@ -433,7 +433,7 @@ export async function PATCH(req: NextRequest) {
         started_at: null,
         finished_at: null,
         charged: charge,
-        charged_tokens: charge ? FIGURE_TOKEN_DEPOSIT : 0,
+        charged_tokens: charge ? PATCH_REDRAW_TOKENS : 0,
       })
       .eq("id", body.id)
       .eq("user_id", user.id)
@@ -443,7 +443,7 @@ export async function PATCH(req: NextRequest) {
       .maybeSingle();
     if (error || !data) {
       if (charge) {
-        await admin.rpc("refund_recognition_credit_for", { p_user_id: user.id, p_amount: FIGURE_TOKEN_DEPOSIT });
+        await admin.rpc("refund_recognition_credit_for", { p_user_id: user.id, p_amount: PATCH_REDRAW_TOKENS });
       }
       return NextResponse.json({ error: "이미 처리됐거나 닫힌 작업이에요." }, { status: 409 });
     }

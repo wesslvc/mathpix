@@ -361,6 +361,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
    * 저장하지 않는다.
    */
   const [redrawNote, setRedrawNote] = useState<Record<string, string>>({});
+  // "AI로 다시 그리기"를 눌렀을 때 **sol 을 쓸지 묻는** 중인 그림(id → 보낼 그림). 문제 통째로 그린 그림에만 묻는다.
+  const [redrawAsk, setRedrawAsk] = useState<Record<string, string>>({});
 
   /**
    * 큐에 넣는다.
@@ -396,7 +398,11 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     return drawings.length === 1 && drawings[0].id === id;
   }
 
-  function requestRedraw(id: string, crop: string) {
+  function requestRedraw(id: string, crop: string, useSol = false) {
+    setRedrawAsk((prev) => {
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
     dismiss(id);
     const instruction = redrawNote[id]?.trim() || undefined;
     enqueue({
@@ -408,9 +414,10 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       // 지문은 이 버튼이 아예 안 뜨지만(그쪽은 "다시 인식하기"다) 조건을
       // 그대로 적어 둔다 — 나중에 버튼이 옮겨 다녀도 안전하게.
       mode: isWholeProblemFigure(id) ? "problem" : undefined,
-      // **수정 모드의 다시 그리기는 우리 프로세스(그리기 → sol 검수 → 고쳐 그리기)를 안 탄다** — quality=auto
-      // 로 한 번만 그리고 sol 검증도 없다(사용자 지시). 사용자가 결과를 눈으로 보고 다시 고를 수 있어서다.
-      auto: true,
+      // **sol 을 쓸지는 사용자가 고른다**(사용자 — "AI로 다시 생성하기 누르면 sol 쓸지 말지 물어봐"). sol 을 고르면
+      // 우리 프로세스(그리기 → sol 검수 → 고쳐 그리기), 안 고르면 quality=auto 로 한 번만 그리고 sol 검증 없이 끝난다.
+      // 그림 하나(도형) 다시 그리기는 그 프로세스가 없어 늘 한 번이다.
+      auto: !(useSol && isWholeProblemFigure(id)),
       // 국어 문항은 거의 글자뿐이라 서버가 프롬프트 톤을 고를 때 참고한다
       // (Mathpix 참고 글 자체는 더 이상 안 쓴다 — 위 FigureJobsProvider 참고).
       korean: editing?.korean ? true : undefined,
@@ -1300,12 +1307,12 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 그림이 나올 수 있다(사용자 요청, 2026-09-19). */}
                             <Button
                               type="button"
-                              onClick={() =>
-                                requestRedraw(
-                                  f.id,
-                                  redrawNote[f.id]?.trim() ? raster : (f.origin ?? raster),
-                                )
-                              }
+                              onClick={() => {
+                                const crop = redrawNote[f.id]?.trim() ? raster : (f.origin ?? raster);
+                                // 문제 통째로 그린 그림이면 sol 을 쓸지 먼저 묻는다. 그림 하나는 바로 그린다.
+                                if (isWholeProblemFigure(f.id)) setRedrawAsk((prev) => ({ ...prev, [f.id]: crop }));
+                                else requestRedraw(f.id, crop);
+                              }}
                               disabled={busy || (f.ai === true && !f.origin)}
                               variant="outline" size="xs"
                             >
@@ -1326,6 +1333,46 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 이미 AI로 그린 그림입니다. 다시 오려내면
                                 원본으로 돌아가 다시 그릴 수 있어요.
                               </span>
+                            )}
+                            {redrawAsk[f.id] !== undefined && (
+                              <div className="w-full rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-slate-700">
+                                <p className="font-medium">sol 을 쓸까요?</p>
+                                <p className="mt-0.5 leading-snug text-slate-500">
+                                  <b>쓰면</b> 그린 뒤 sol 이 원본과 글자·도형(점 위치 포함)·손글씨를 대조해서 틀린 곳을 알려 주고, 차이가 있으면
+                                  다시 그려요(더 정확하지만 몇 분 걸려요). <b>안 쓰면</b> 한 번만 그리고 바로 끝나요(빠르지만 검수 없음).
+                                </p>
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                  <Button
+                                    type="button"
+                                    size="xs"
+                                    variant="dark"
+                                    onClick={() => requestRedraw(f.id, redrawAsk[f.id], true)}
+                                  >
+                                    sol 쓰기 (정확)
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="xs"
+                                    variant="outline"
+                                    onClick={() => requestRedraw(f.id, redrawAsk[f.id], false)}
+                                  >
+                                    sol 없이 빠르게
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="xs"
+                                    variant="ghost"
+                                    onClick={() =>
+                                      setRedrawAsk((prev) => {
+                                        const { [f.id]: _drop, ...rest } = prev;
+                                        return rest;
+                                      })
+                                    }
+                                  >
+                                    취소
+                                  </Button>
+                                </div>
+                              </div>
                             )}
                             {job?.status === "error" && (
                               <span className="text-[11px] text-red-600">

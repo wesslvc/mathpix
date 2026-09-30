@@ -304,7 +304,7 @@ export default function FigureJobsProvider({
   const [tick, setTick] = useState(0);
   const [maxTokens, setMaxTokens] = useState(200);
   const [topQuality, setTopQuality] = useState("high");
-  const [patchTokens, setPatchTokens] = useState(120);
+  const [patchTokens, setPatchTokens] = useState(150);
   const [concurrency, setConcurrency] = useState(1);
 
   const putSnapshot = useCallback(
