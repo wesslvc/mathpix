@@ -57,6 +57,8 @@ export type RunInput = {
   outputSize?: string;
   /** 원문자 지시를 프롬프트에서 뺀다. 운영은 안 넘긴다 — 비교 화면 전용. */
   skipCircled?: boolean;
+  /** 다시 그리지 않고 이 내용만 고친다(입력이 이미 다시 그려진 그림일 때). */
+  patchNote?: string;
 };
 
 export type RunOutcome =
@@ -95,6 +97,7 @@ export async function runFigureGeneration(input: RunInput): Promise<RunOutcome> 
           input.quality,
           input.outputSize,
           input.skipCircled,
+          input.patchNote,
         );
         if (!result) {
           return {

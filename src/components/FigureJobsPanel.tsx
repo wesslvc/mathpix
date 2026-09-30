@@ -19,6 +19,7 @@ function statusText(j: FigureJob, top: string): string {
   if (j.status !== "running" && j.status !== "pending") return STATUS_TEXT[j.status];
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계로 돈다(`gen:N` / `verify:N`).
   if (j.mode === "problem" && j.stage) {
+    if (j.stage === "patch") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}적어 주신 곳을 수정하는 중`;
     const gen = /^gen:(\d+)$/.exec(j.stage);
     const ver = /^verify:(\d+)$/.exec(j.stage);
     const q = ["low", "medium", top];
@@ -54,6 +55,7 @@ function remainingSeconds(j: FigureJob): number {
   if (j.mode === "problem") {
     // 전 단계 기대값: 그리기 low + 검수, 30% 는 medium 으로 한 번 더. max 는 사용자 확인 뒤에만 돈다.
     const stage = j.stage ?? "gen:0";
+    if (stage === "patch") return 45;
     const gen = /^gen:(\d+)$/.exec(stage);
     const ver = /^verify:(\d+)$/.exec(stage);
     const n = gen ? Number(gen[1]) : ver ? Number(ver[1]) : 0;
@@ -103,6 +105,8 @@ export default function FigureJobsPanel() {
     dismiss,
     topQuality,
     maxTokens,
+    patchTokens,
+    confirmPatch,
     loadOfferDiffs,
     confirmMax,
     skipMax,
@@ -113,6 +117,10 @@ export default function FigureJobsPanel() {
   // "이게 다릅니다, 진행하시겠어요?" 확인 창.
   const [confirming, setConfirming] = useState<FigureJob[] | null>(null);
   const [details, setDetails] = useState<Record<string, OfferDiffs> | null>(null);
+  // 한 문제만 볼 때는 두 길을 고른다: 수정(저장된 그림에서 적은 곳만 고침) / 맨 위 화질로 처음부터 다시 그리기.
+  const [choice, setChoice] = useState<"patch" | "redraw">("patch");
+  const [patchText, setPatchText] = useState("");
+  const [patchDiffs, setPatchDiffs] = useState(true);
 
   if (jobs.length === 0) return null;
 
@@ -124,6 +132,9 @@ export default function FigureJobsPanel() {
   async function openConfirm(list: FigureJob[]) {
     setMaxError(null);
     setDetails(null);
+    setChoice(list.length === 1 ? "patch" : "redraw");
+    setPatchText("");
+    setPatchDiffs(true);
     setConfirming(list);
     setDetails(await loadOfferDiffs());
   }
@@ -141,6 +152,14 @@ export default function FigureJobsPanel() {
     }
     setMaxBusy(false);
     if (ok) setConfirming(null);
+  }
+  async function runPatch(j: FigureJob) {
+    setMaxBusy(true);
+    setMaxError(null);
+    const err = await confirmPatch(j.id, patchText, patchDiffs);
+    setMaxBusy(false);
+    if (err) setMaxError(err);
+    else setConfirming(null);
   }
   async function closeOffers(list: FigureJob[]) {
     setMaxBusy(true);
@@ -376,10 +395,14 @@ export default function FigureJobsPanel() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="border-b border-slate-200 px-4 py-3">
-              <h3 className="text-sm font-semibold text-slate-900">이게 다릅니다 — {topQuality} 로 고쳐 그릴까요?</h3>
+              <h3 className="text-sm font-semibold text-slate-900">
+                이게 다릅니다 — {confirming.length === 1 ? "어떻게 할까요?" : `${topQuality} 로 고쳐 그릴까요?`}
+              </h3>
               <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                지금 저장된 그림은 원본과 아래가 달라요. {topQuality} 로 한 번 더 그리면 이 부분을 고치도록 알려 주고,
-                더 나은 쪽을 저장해요.
+                지금 저장된 그림은 원본과 아래가 달라요.
+                {confirming.length === 1
+                  ? " 저장된 그림에서 일부만 고치거나, 더 높은 화질로 처음부터 다시 그릴 수 있어요."
+                  : ` ${topQuality} 로 한 번 더 그리면 이 부분을 고치도록 알려 주고, 더 나은 쪽을 저장해요.`}
               </p>
             </div>
             <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
@@ -427,11 +450,60 @@ export default function FigureJobsPanel() {
                 })
               )}
             </div>
+            {confirming.length === 1 && (
+              <div className="border-t border-slate-200 px-4 py-2">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(
+                    [
+                      ["patch", "수정 (일부만)", `${patchTokens.toLocaleString()}토큰 · 화질 지정 없음`],
+                      ["redraw", `${topQuality} 로 다시 그리기`, `${maxTokens.toLocaleString()}토큰 · 처음부터`],
+                    ] as const
+                  ).map(([k, title, sub]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      disabled={maxBusy}
+                      onClick={() => setChoice(k)}
+                      className={`rounded-lg border px-2 py-1.5 text-left ${
+                        choice === k ? "border-amber-500 bg-amber-50" : "border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="block text-xs font-medium text-slate-800">{title}</span>
+                      <span className="block text-[10px] text-slate-500">{sub}</span>
+                    </button>
+                  ))}
+                </div>
+                {choice === "patch" && (
+                  <div className="mt-2">
+                    <p className="mb-1 text-[11px] text-slate-500">
+                      지금 저장된 그림(medium 결과)을 <b>다시 그리지 않고</b> 적은 곳만 고쳐요. 나머지는 그대로 둬요.
+                    </p>
+                    <textarea
+                      value={patchText}
+                      onChange={(e) => setPatchText(e.target.value.slice(0, 1000))}
+                      rows={3}
+                      placeholder="고칠 곳을 적어 주세요. 예) 3번 선지의 ㉡ 을 ㉢ 으로 · 그래프의 점 P 를 직선 l 위로 · 지도 B 옆 손글씨 지우기"
+                      className="w-full resize-none rounded border border-slate-300 px-2 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:border-amber-500 focus:outline-none"
+                    />
+                    <label className="mt-1 flex items-start gap-1.5 text-[11px] text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={patchDiffs}
+                        onChange={(e) => setPatchDiffs(e.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>위에 나온 차이도 함께 고치기</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
             {maxError && <p className="border-t border-red-100 bg-red-50 px-4 py-1.5 text-[11px] text-red-700">{maxError}</p>}
             <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-4 py-3">
               <span className="text-[11px] text-slate-500">
-                {maxTokens.toLocaleString()}토큰{confirming.length > 1 && ` × ${confirming.length}`}
-                {confirming.length > 1 && ` = ${(maxTokens * confirming.length).toLocaleString()}토큰`}
+                {confirming.length === 1 && choice === "patch"
+                  ? `${patchTokens.toLocaleString()}토큰`
+                  : `${maxTokens.toLocaleString()}토큰${confirming.length > 1 ? ` × ${confirming.length} = ${(maxTokens * confirming.length).toLocaleString()}토큰` : ""}`}
               </span>
               <div className="flex gap-1.5">
                 <button
@@ -444,8 +516,12 @@ export default function FigureJobsPanel() {
                 </button>
                 <button
                   type="button"
-                  disabled={maxBusy || details === null}
-                  onClick={() => void runMax(confirming)}
+                  disabled={
+                    maxBusy || details === null || (confirming.length === 1 && choice === "patch" && !patchText.trim() && !patchDiffs)
+                  }
+                  onClick={() =>
+                    confirming.length === 1 && choice === "patch" ? void runPatch(confirming[0]) : void runMax(confirming)
+                  }
                   className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
                 >
                   {maxBusy ? "시작하는 중…" : "진행"}

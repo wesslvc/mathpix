@@ -710,6 +710,20 @@ function stripCircled(prompt: string): string {
   return prompt.replace(`${CIRCLED_CHARS}\n\n`, "");
 }
 
+/**
+ * **일부만 고치는 편집 프롬프트**(사용자 — "수정 선택지도 줘, 퀄리티 미지정, 사용자 지시사항 작성 가능, medium 에서
+ * 일부 수정하는 구조"). 입력은 원본 사진이 아니라 **이미 다시 그려진 그림**(거의 맞은 것)이고, 다시 그리지 않고
+ * 적힌 곳만 고친다 — 나머지는 글자 하나·픽셀 위치까지 그대로 둬야 한다(다시 그리면 멀쩡하던 곳이 틀어진다).
+ */
+export function patchPrompt(changes: string): string {
+  return `task: this image = a RE-DRAWN Korean exam question that is ALMOST correct. EDIT it — do NOT redraw it. apply ONLY the changes below and keep EVERYTHING else exactly as it is: every other character, number, choice, table, figure, position, size, spacing, the layout, the page size and the white background. do not re-typeset, do not "improve" or tidy anything, do not touch text that is not mentioned.
+changes to make:
+"""
+${changes.trim()}
+"""
+rules: fix only the named places; when an item is ambiguous change the smallest possible area; circled markers (㉠ ① ⓐ) not listed stay exactly as they are (a thin circle with the inner glyph centered); handwriting that is mentioned must be erased completely (restore the printed content under it, or clean white paper); output = the same image with only those fixes.`;
+}
+
 function withInstruction(prompt: string, instruction?: string): string {
   const text = instruction?.trim();
   if (!text) return prompt;
@@ -772,6 +786,8 @@ export async function generateFigureImage(
    * 이 지시가 원문자를 지키는 유일한 장치다. 비교 화면이 "원문자는 sol 이 지킨다"를 시험할 때만 쓴다.
    */
   skipCircled?: boolean,
+  /** 있으면 다시 그리지 않고 **이 내용만 고치는** 편집 프롬프트를 쓴다(`patchPrompt`). */
+  patchNote?: string,
 ): Promise<FigureImageResult | null> {
   const apiKey = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -812,7 +828,9 @@ export async function generateFigureImage(
     form.append("image", source.blob, source.filename);
     form.append(
       "prompt",
-      withInstruction(
+      patchNote !== undefined
+        ? patchPrompt(patchNote)
+        : withInstruction(
         mode === "problem"
           ? withReference(
               skipCircled ? stripCircled(WHOLE_PROBLEM_PROMPT) : WHOLE_PROBLEM_PROMPT,

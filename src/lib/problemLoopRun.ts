@@ -34,7 +34,7 @@ import {
   pollVisionBackground,
   startVisionBackground,
 } from "./gradeExam";
-import { accumulatedCorrection, parseVerify, VERIFY_PROMPT, type RoundDiffs, type TextDiff } from "./problemCompare";
+import { accumulatedCorrection, correctionInstruction, parseVerify, VERIFY_PROMPT, type RoundDiffs, type TextDiff } from "./problemCompare";
 import { gradingEstKrw } from "./tokens";
 import { logAiCost } from "./costLog";
 
@@ -81,6 +81,12 @@ export type ProblemLoopState = {
   rounds: Round[];
   /** 다음 그리기에 붙일 지시(앞선 **모든** 시도가 틀린 곳을 모은 것). */
   instruction?: string;
+  /**
+   * 사용자가 **수정**을 골랐다(`max-offer` 에서 넘어온 것) — 다시 그리지 않고 지금 저장된 그림을 입력으로 넣어
+   * 적어 준 곳만 고친다(quality 미지정, sol 검수 없음). 실패하면 환불하고 offer 로 돌아간다.
+   */
+  patchPhase?: boolean;
+  patch?: { instruction: string; includeDiffs: boolean };
   /** 사용자가 max 다시 그리기를 확인해 돌고 있다(`max-offer` 에서 넘어온 것). 실패하면 환불하고 offer 로 돌아간다. */
   maxPhase?: boolean;
   /** 라운드마다 검수가 찾은 차이 목록. 다음 그리기의 지시를 만드는 재료(그림은 폐기하고 실수만 넘긴다). */
@@ -277,11 +283,73 @@ export async function runProblemStage(
   const genIdx = indexOf(stage, "gen");
   if (genIdx !== null) return runGen(admin, job, state, genIdx, ctx);
 
+  if (stage === "patch") return runPatch(admin, job, state, ctx);
+
   const verIdx = indexOf(stage, "verify");
   if (verIdx !== null) return runVerify(admin, job, state, verIdx, ctx);
 
   // 모르는 단계(옛 데이터)면 처음부터.
   return runGen(admin, job, { rounds: [] }, 0, ctx);
+}
+
+/**
+ * **수정** — 지금 저장된 그림(남은 차이가 가장 적은 라운드, 보통 medium)을 입력으로 넣고 사용자가 적은 곳(과
+ * 원하면 sol 이 찾은 남은 차이)만 고친다. quality 는 안 보낸다(미지정). sol 검수는 안 한다 — 사용자가 결과를 본다.
+ * 성공하면 그 그림이 최종이고 작업이 끝난다(중간 그림·입력은 정리).
+ */
+async function runPatch(
+  admin: SupabaseClient,
+  job: ProblemLoopJob,
+  state: ProblemLoopState,
+  ctx: Ctx,
+): Promise<ProblemLoopOutcome> {
+  const pick = bestRound(state.rounds);
+  const base = state.rounds[pick];
+  const image = base ? await loadAsDataUrl(admin, base.path) : null;
+  if (!image) return { kind: "fail", error: "고칠 그림을 찾지 못했어요.", cleanup: [] };
+
+  const parts: string[] = [];
+  const own = state.patch?.instruction?.trim();
+  if (own) parts.push(`user's requested fixes (Korean):\n${own}`);
+  if (state.patch?.includeDiffs) {
+    const rem = remainingDiffs(state);
+    if (rem && rem.diffs.length > 0) parts.push(correctionInstruction(rem.diffs));
+  }
+  if (parts.length === 0) return { kind: "fail", error: "고칠 내용이 없어요.", cleanup: [] };
+
+  const out = await runFigureGeneration({
+    image,
+    mode: "problem",
+    korean: job.korean,
+    inputSize: job.width && job.height ? { width: job.width, height: job.height } : undefined,
+    modelIds: ctx.modelIds,
+    byokApiKey: ctx.byokApiKey,
+    deadlineMs: ctx.deadlineMs,
+    tag: `${ctx.tag} 수정`,
+    patchNote: parts.join("\n\n"),
+  });
+  if (!out.ok) return { kind: "fail", error: out.error, cleanup: [] };
+
+  if (out.usage && !ctx.byokApiKey) {
+    await logAiCost(admin, {
+      userId: job.user_id,
+      jobId: job.id,
+      kind: "problem",
+      what: "그림 수정(quality 미지정)",
+      krw: out.usage.estKrw,
+      usd: out.usage.estUsd,
+    });
+  }
+  const usage = addUsage(state.usage, out.usage);
+  return {
+    kind: "done",
+    dataUrl: out.dataUrl,
+    modelId: ctx.modelIds[0] ?? "",
+    usage: usage ? { ...usage, estKrw: usage.estKrw + (state.solKrw ?? 0), estUsd: usage.estUsd + (usage.krwRate > 0 ? (state.solKrw ?? 0) / usage.krwRate : 0) } : undefined,
+    note: `${base.quality} 그림에서 고칠 곳만 수정했어요`,
+    cleanup: pathsOf(state),
+    rounds: state.rounds.length,
+  };
 }
 
 async function runGen(

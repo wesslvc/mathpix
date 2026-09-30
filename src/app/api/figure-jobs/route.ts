@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: true })
     .limit(100);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS, topQuality: TOP_QUALITY });
+  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS, patchTokens: FIGURE_TOKEN_DEPOSIT, topQuality: TOP_QUALITY });
 }
 
 export async function POST(req: NextRequest) {
@@ -256,7 +256,7 @@ export async function POST(req: NextRequest) {
  *  - `releaseApply` : 반영에 실패해 찜을 푼다.
  */
 export async function PATCH(req: NextRequest) {
-  let body: { id?: string; action?: string; problemId?: string };
+  let body: { id?: string; action?: string; problemId?: string; instruction?: string; includeDiffs?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -368,6 +368,73 @@ export async function PATCH(req: NextRequest) {
           p_user_id: user.id,
           p_amount: MAX_REDRAW_TOKENS,
         });
+      }
+      return NextResponse.json({ error: "이미 처리됐거나 닫힌 작업이에요." }, { status: 409 });
+    }
+    await kickWorker(admin, redirectBase(req), user.id);
+    return NextResponse.json({ job: data });
+  }
+
+  // **수정**: 다시 그리지 않고 지금 저장된 그림(보통 medium)에서 사용자가 적은 곳만 고친다. quality 미지정, sol 검수
+  // 없음. 다른 다시 그리기와 같은 값(FIGURE_TOKEN_DEPOSIT)을 걷는다.
+  if (body.action === "patch") {
+    const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 1000) : "";
+    const includeDiffs = body.includeDiffs !== false;
+    if (!instruction && !includeDiffs) {
+      return NextResponse.json({ error: "고칠 내용을 적거나 남은 차이를 함께 고치도록 골라주세요." }, { status: 400 });
+    }
+    const { data: row } = await admin
+      .from("figure_jobs")
+      .select("id, status, stage, state")
+      .eq("id", body.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!row) return NextResponse.json({ error: "작업을 찾지 못했어요." }, { status: 404 });
+    if (row.status !== "done" || row.stage !== "max-offer" || !row.state) {
+      return NextResponse.json({ error: "수정할 수 있는 작업이 아니에요." }, { status: 409 });
+    }
+    if (includeDiffs && !instruction && !remainingDiffs(row.state)?.diffs.length) {
+      return NextResponse.json({ error: "함께 고칠 남은 차이가 없어요. 고칠 내용을 적어주세요." }, { status: 400 });
+    }
+    const billing = await getBillingContext(supabase, user.id);
+    if (billing.byok && !billing.byokApiKey) {
+      return NextResponse.json(
+        { error: "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요." },
+        { status: 402 },
+      );
+    }
+    const charge = !billing.unlimited && !billing.byok;
+    if (charge) {
+      const { data, error } = await supabase.rpc("consume_recognition_credit", { p_amount: FIGURE_TOKEN_DEPOSIT });
+      if (error || data === null) {
+        return NextResponse.json(
+          { error: error ? error.message : `토큰이 부족해요. 수정하려면 ${FIGURE_TOKEN_DEPOSIT}토큰이 필요합니다.` },
+          { status: error ? 500 : 402 },
+        );
+      }
+    }
+    const { data, error } = await admin
+      .from("figure_jobs")
+      .update({
+        status: "pending",
+        stage: "patch",
+        state: { ...(row.state as ProblemLoopState), patchPhase: true, patch: { instruction, includeDiffs } },
+        note: "적어 주신 곳을 수정하는 중",
+        error: null,
+        started_at: null,
+        finished_at: null,
+        charged: charge,
+        charged_tokens: charge ? FIGURE_TOKEN_DEPOSIT : 0,
+      })
+      .eq("id", body.id)
+      .eq("user_id", user.id)
+      .eq("status", "done")
+      .eq("stage", "max-offer")
+      .select(JOB_COLUMNS)
+      .maybeSingle();
+    if (error || !data) {
+      if (charge) {
+        await admin.rpc("refund_recognition_credit_for", { p_user_id: user.id, p_amount: FIGURE_TOKEN_DEPOSIT });
       }
       return NextResponse.json({ error: "이미 처리됐거나 닫힌 작업이에요." }, { status: 409 });
     }
@@ -502,7 +569,8 @@ export async function DELETE(req: NextRequest) {
     // 치우기만 해도 전액이 돌아오면 그려 놓고 취소하는 길이 열린다.
     // max 를 확인받고 줄에 선 작업(아직 max 를 안 그렸다)은 걷은 200토큰을 돌려준다.
     const st = removed.state as ProblemLoopState | null;
-    const maxNotDrawn = st?.maxPhase === true && (st.rounds?.length ?? 0) < PROBLEM_LADDER.length;
+    const maxNotDrawn =
+      st?.patchPhase === true || (st?.maxPhase === true && (st.rounds?.length ?? 0) < PROBLEM_LADDER.length);
     const spent = problemLoopStarted(removed.state) && !maxNotDrawn;
     if (removed.charged && removed.charged_tokens > 0 && !spent) {
       await admin.rpc("refund_recognition_credit_for", {
