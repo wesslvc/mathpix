@@ -4,12 +4,7 @@ import { GradeError, pollVisionBackground, startVisionBackground } from "@/lib/g
 import { figureImageModelIds } from "@/lib/figureImageGen";
 import { runFigureGeneration } from "@/lib/figureRun";
 import { gradingEstKrw } from "@/lib/tokens";
-import {
-  parseTranscription,
-  parseVerify,
-  TRANSCRIBE_PROMPT,
-  VERIFY_PROMPT,
-} from "@/lib/problemCompare";
+import { parseVerify, VERIFY_PROMPT } from "@/lib/problemCompare";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +23,6 @@ export const maxDuration = 300;
  *                  `quality`(low~max)·`outputSize` 를 주면 그 값을 보낸다(운영은 안 보낸다 — 올려서 재 보는 용도).
  *                  운영과 **같은 알맹이**(`runFigureGeneration`)라 결과가 운영과 같다.
  *  - `verify`    : sol 이 원본과 다시 만든 것을 대조(백그라운드).
- *  - `transcribe`: sol 이 본문을 글자·LaTeX 로 옮기고 그림 자리를 짚는다(백그라운드).
  * sol 호출은 백그라운드로 건다 — 강도를 올리면 300초를 넘길 수 있다.
  */
 export async function POST(req: NextRequest) {
@@ -109,13 +103,6 @@ export async function POST(req: NextRequest) {
       );
       return NextResponse.json({ jobId });
     }
-    if (task === "transcribe") {
-      if (!isImage(body.image)) {
-        return NextResponse.json({ error: "문제 사진이 필요합니다." }, { status: 400 });
-      }
-      const jobId = await startVisionBackground(TRANSCRIBE_PROMPT, body.image, model, effort || undefined);
-      return NextResponse.json({ jobId });
-    }
   } catch (err) {
     const status = err instanceof GradeError ? err.status : 500;
     return NextResponse.json(
@@ -126,12 +113,11 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ error: "task 가 이상합니다." }, { status: 400 });
 }
 
-/** 백그라운드 sol 작업을 묻는다. `?id=resp_...&task=verify|transcribe` */
+/** 백그라운드 sol 작업을 묻는다. `?id=resp_...&task=verify` */
 export async function GET(req: NextRequest) {
   const gate = await requireFontAdmin();
   if (!gate.ok) return gate.response;
   const id = req.nextUrl.searchParams.get("id") ?? "";
-  const task = req.nextUrl.searchParams.get("task");
   if (!/^resp_[\w-]{8,200}$/.test(id)) {
     return NextResponse.json({ error: "id 가 이상합니다." }, { status: 400 });
   }
@@ -144,10 +130,7 @@ export async function GET(req: NextRequest) {
       estKrw: poll.usage ? (gradingEstKrw(poll.usage, poll.model) ?? null) : null,
     };
     try {
-      if (task === "verify") {
-        return NextResponse.json({ status: "done", diffs: parseVerify(poll.text), ...cost });
-      }
-      return NextResponse.json({ status: "done", ...parseTranscription(poll.text), raw: poll.text, ...cost });
+      return NextResponse.json({ status: "done", diffs: parseVerify(poll.text), ...cost });
     } catch (err) {
       return NextResponse.json({
         status: "error",

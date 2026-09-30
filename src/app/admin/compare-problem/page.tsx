@@ -1,27 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { fileToDataUrl, cropImageToDataUrl, loadImage } from "@/lib/cropImage";
-import {
-  imageSizeOf,
-  MODEL_INPUT_DIM,
-  prepareFigureForModel,
-  prepareProblemForModel,
-  rasterToSvg,
-  trimBlankBorder,
-} from "@/lib/figureImage";
-import { renderMathTextWithInfo } from "@/lib/renderMathText";
-import { buildAnchors, cardHtmlFromSpec, type CardFigure, type CardSpec } from "@/lib/cardHtml";
-import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
-import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
-import { PROBLEM_CARD_WIDTH } from "@/lib/layout";
-import {
-  correctionInstruction,
-  splitFigureMarkers,
-  type TextDiff,
-  type TranscribedFigure,
-} from "@/lib/problemCompare";
-import ScaledCard from "@/components/ScaledCard";
+import { fileToDataUrl, loadImage } from "@/lib/cropImage";
+import { imageSizeOf, prepareProblemForModel } from "@/lib/figureImage";
+import { correctionInstruction, type TextDiff } from "@/lib/problemCompare";
 import { Button } from "@/components/ui/button";
 import { cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -29,20 +11,20 @@ import { cn } from "@/lib/utils";
 /**
  * **문제 글자 정확도 비교** — 무제한 계정 전용 시험 화면.
  *
- * 2026-09-30 사용자 요청 — "2번과 3번을 테스트해서 대조 가능한 창을 만들어 보고
- * 비용·소요 시간을 재 보자". 문제 사진 한 장을 세 갈래로 견준다:
+ * 2026-09-30 사용자 요청. 문제 사진 한 장을 세 갈래로 견준다:
  *
- *  - **지금 운영**: sunburst 가 문제를 통째로 그린다(한 번). 남은 글자 차이는 sol
- *    대조로 잰다 — 이 대조는 **측정용**이라 이 줄의 비용·시간에 안 넣는다.
- *  - **② 검수 후 다시 그리기**: 위 결과를 sol 이 대조해 다른 곳이 있으면 그 목록을
- *    지시로 붙여 한 번 더 그리고, 다시 대조해 차이가 적은 쪽을 남긴다.
- *  - **③ sol 이 옮겨 적고 우리가 조판**: sol 이 본문을 글자·LaTeX 로 옮기고 그림
- *    자리를 짚는다. 그림은 잘라 내(켜면 sunburst 로 다시 그려) 카드에 붙인다.
- *    조판한 카드를 같은 대조로 잰다(측정용).
+ *  - **지금 운영**: sunburst 가 문제를 통째로 한 번 그린다(`quality` 안 보냄 — 모델
+ *    기본값). 남은 글자 차이는 sol 대조로 잰다 — 이 대조는 **측정용**이라 이 줄의
+ *    비용·시간에 안 넣는다.
+ *  - **① sunburst 단독**: 운영과 같은 한 번 그리기인데 `quality`·출력 크기를 **①만의
+ *    값으로** 보낸다. "품질만 올려도 글자가 나아지는가".
+ *  - **② 검수 후 다시 그리기**: **②만의 quality·크기**로 그린 뒤 sol 이 원본과 대조해
+ *    다른 곳이 있으면 그 목록을 지시로 붙여 한 번 더 그리고, 다시 대조해 차이가 적은
+ *    쪽을 남긴다. 대조가 방식의 일부라 비용·시간에 든다.
  *
- *  - **① sunburst 단독 · quality 올림**: 운영과 같은 한 번 그리기인데 `quality` 만
- *    보낸다(운영은 안 보낸다 — 모델 기본값). "품질만 올려도 글자가 나아지는가"를
- *    운영 줄과 나란히 잰다. 대조는 역시 측정용이다(2026-09-30 사용자 요청).
+ * ① 과 ② 의 품질·크기는 서로 독립이다(사용자 — "sunburst 추론강도를 1번과 2번 다르게
+ * 만들 수 있게"). 그래서 ② 는 운영 결과를 재사용하지 않고 **자기 값으로 처음부터**
+ * 그린다. (③ "sol 이 옮겨 적고 조판" 은 폐기했다 — git 이력에 있다.)
  *
  * 모든 줄이 **같은 대조 프롬프트**로 센 차이다 — 잣대가 같아야 견줄 수 있다.
  * 시간은 화면에서 잰 벽시계 시간(네트워크 포함)이다. 토큰은 차감하지 않는다.
@@ -67,17 +49,7 @@ type Step = {
 
 type Totals = { ms: number; krw: number; measureKrw: number; diffs: number | null; unknownCost: boolean };
 
-type Track2 = {
-  steps: Step[];
-  img1?: string;
-  img2?: string;
-  diffs1?: TextDiff[];
-  diffs2?: TextDiff[];
-  pick?: 1 | 2;
-  error?: string;
-  baseline?: Totals;
-  totals?: Totals;
-};
+type Gen = { quality?: string; size?: string };
 
 type Track1 = {
   steps: Step[];
@@ -87,28 +59,43 @@ type Track1 = {
   totals?: Totals;
 };
 
-type Track3 = {
+type Track2 = {
   steps: Step[];
-  text?: string;
-  raw?: string;
-  cardHtml?: string;
-  figures?: number;
+  img1?: string;
+  img2?: string;
+  diffs1?: TextDiff[];
+  diffs2?: TextDiff[];
+  pick?: 1 | 2;
+  error?: string;
+  totals?: Totals;
+};
+
+type TrackBase = {
+  steps: Step[];
+  img?: string;
   diffs?: TextDiff[];
   error?: string;
   totals?: Totals;
 };
 
-type HistoryRow = { name: string; baseline?: Totals; m1?: Totals; m1Quality?: string; m2?: Totals; m3?: Totals };
-type Which = "all" | "1" | "2" | "3";
+type HistoryRow = {
+  name: string;
+  base?: Totals;
+  m1?: Totals;
+  m1Label?: string;
+  m2?: Totals;
+  m2Label?: string;
+};
+type Which = "all" | "base1" | "2";
 
 /** 백그라운드 sol 작업이 끝날 때까지 기다린다. */
-async function waitJob<T>(jobId: string, task: "verify" | "transcribe"): Promise<T> {
+async function waitJob<T>(jobId: string): Promise<T> {
   const until = Date.now() + 20 * 60_000;
   for (;;) {
     await new Promise((r) => setTimeout(r, 2500));
     let poll: { status?: string; message?: string; error?: string } & T;
     try {
-      const res = await fetch(`/api/admin/compare-problem?id=${encodeURIComponent(jobId)}&task=${task}`, {
+      const res = await fetch(`/api/admin/compare-problem?id=${encodeURIComponent(jobId)}&task=verify`, {
         cache: "no-store",
       });
       poll = await res.json();
@@ -152,7 +139,6 @@ async function toJpeg(dataUrl: string, maxW = 1536): Promise<string> {
 
 type GenResponse = { image: string; model: string; usage: { estKrw: number } | null; ms: number };
 type VerifyResponse = { diffs: TextDiff[]; estKrw: number | null };
-type TranscribeResponse = { text: string; figures: TranscribedFigure[]; raw: string; estKrw: number | null };
 
 const won = (krw: number | null | undefined) => (krw == null ? "?" : `${Math.round(krw).toLocaleString()}원`);
 const secs = (ms: number | undefined) => (ms == null ? "…" : `${(ms / 1000).toFixed(1)}초`);
@@ -168,28 +154,34 @@ function sumSteps(steps: Step[], diffs: number | null): Totals {
   };
 }
 
+/** "quality=xhigh · 2048x2048" — 요약·기록에 붙는 이름표. */
+const genLabel = (g: Gen) =>
+  `quality=${g.quality ?? "기본"}${g.size && g.size !== "auto" ? ` · ${g.size}` : ""}`;
+
 export default function CompareProblemPage() {
   const [name, setName] = useState("");
   const [prepared, setPrepared] = useState<string | null>(null);
   const [solModel, setSolModel] = useState(SOL_MODELS[0]);
   const [effort, setEffort] = useState("medium");
   const [retry, setRetry] = useState(true);
-  const [redrawFigures, setRedrawFigures] = useState(true);
-  const [quality, setQuality] = useState(QUALITIES[0]);
-  const [outSize, setOutSize] = useState(OUTPUT_SIZES[0]);
+  /** ① 과 ② 는 서로 독립이다. */
+  const [g1, setG1] = useState<Gen>({ quality: "xhigh", size: "auto" });
+  const [g2, setG2] = useState<Gen>({ quality: "high", size: "auto" });
+  const [tb, setTb] = useState<TrackBase>({ steps: [] });
   const [t1, setT1] = useState<Track1>({ steps: [] });
   const [t2, setT2] = useState<Track2>({ steps: [] });
-  const [t3, setT3] = useState<Track3>({ steps: [] });
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 요약 표에 쓸 이번 판의 이름표(돌린 시점의 값). */
+  const [labels, setLabels] = useState<{ m1: string; m2: string }>({ m1: "", m2: "" });
 
   async function pick(f: File | null) {
     setPrepared(null);
     setError(null);
+    setTb({ steps: [] });
     setT1({ steps: [] });
     setT2({ steps: [] });
-    setT3({ steps: [] });
     if (!f) return;
     setName(f.name);
     try {
@@ -226,21 +218,15 @@ export default function CompareProblemPage() {
     }
   }
 
-  async function generate(
-    image: string,
-    mode: "problem" | "figure",
-    instruction?: string,
-    q?: string,
-    outputSize?: string,
-  ) {
+  async function generate(image: string, g: Gen, instruction?: string) {
     const size = await imageSizeOf(image);
     const out = await postJson<GenResponse>({
       task: "generate",
       image,
-      mode,
+      mode: "problem",
       instruction,
-      quality: q,
-      outputSize: outputSize && outputSize !== "auto" ? outputSize : undefined,
+      quality: g.quality,
+      outputSize: g.size && g.size !== "auto" ? g.size : undefined,
       width: size?.width,
       height: size?.height,
     });
@@ -255,12 +241,34 @@ export default function CompareProblemPage() {
       model: solModel,
       effort,
     });
-    const out = await waitJob<VerifyResponse>(jobId, "verify");
+    const out = await waitJob<VerifyResponse>(jobId);
     return { value: out.diffs, krw: out.estKrw, note: `차이 ${out.diffs.length}곳` };
   }
 
-  /** ① — 운영과 같은 한 번 그리기에 quality 만 올린다. */
-  async function run1(image: string, q: string, os: string): Promise<Pick<HistoryRow, "m1" | "m1Quality">> {
+  /** 지금 운영 — quality 를 안 보내고 한 번 그린다. */
+  async function runBase(image: string): Promise<Pick<HistoryRow, "base">> {
+    const steps: Step[] = [];
+    const set = (fn: (s: Step[]) => Step[]) => {
+      const next = fn(steps);
+      steps.splice(0, steps.length, ...next);
+      setTb((t) => ({ ...t, steps: [...next] }));
+    };
+    setTb({ steps: [] });
+    try {
+      const img = await step(set, "그리기 (sunburst · quality 안 보냄)", () => generate(image, {}));
+      setTb((t) => ({ ...t, img }));
+      const diffs = await step(set, `대조 (${solModel} ${effort}) — 측정용`, () => verify(image, img), true);
+      const totals = sumSteps(steps, diffs.length);
+      setTb((t) => ({ ...t, diffs, totals }));
+      return { base: totals };
+    } catch (err) {
+      setTb((t) => ({ ...t, error: err instanceof Error ? err.message : String(err) }));
+      return {};
+    }
+  }
+
+  /** ① — 운영과 같은 한 번 그리기에 ① 의 quality·크기만 다르게. */
+  async function run1(image: string, g: Gen): Promise<Pick<HistoryRow, "m1" | "m1Label">> {
     const steps: Step[] = [];
     const set = (fn: (s: Step[]) => Step[]) => {
       const next = fn(steps);
@@ -269,22 +277,20 @@ export default function CompareProblemPage() {
     };
     setT1({ steps: [] });
     try {
-      const img = await step(set, `그리기 (sunburst · quality=${q} · size=${os})`, () =>
-        generate(image, "problem", undefined, q, os),
-      );
+      const img = await step(set, `그리기 (sunburst · ${genLabel(g)})`, () => generate(image, g));
       setT1((t) => ({ ...t, img }));
       const diffs = await step(set, `대조 (${solModel} ${effort}) — 측정용`, () => verify(image, img), true);
       const totals = sumSteps(steps, diffs.length);
       setT1((t) => ({ ...t, diffs, totals }));
-      return { m1: totals, m1Quality: os === "auto" ? q : `${q} · ${os}` };
+      return { m1: totals, m1Label: genLabel(g) };
     } catch (err) {
       setT1((t) => ({ ...t, error: err instanceof Error ? err.message : String(err) }));
       return {};
     }
   }
 
-  /** ② — 지금 운영 한 번 + 검수 후 다시 그리기. `retryOn` 이 거짓이면 운영 한 번만. */
-  async function run2(image: string, retryOn: boolean): Promise<Pick<HistoryRow, "baseline" | "m2">> {
+  /** ② — ② 의 quality·크기로 그리고, 대조해서 틀린 곳이 있으면 지시로 붙여 한 번 더. */
+  async function run2(image: string, g: Gen): Promise<Pick<HistoryRow, "m2" | "m2Label">> {
     const steps: Step[] = [];
     const set = (fn: (s: Step[]) => Step[]) => {
       const next = fn(steps);
@@ -293,121 +299,26 @@ export default function CompareProblemPage() {
     };
     setT2({ steps: [] });
     try {
-      const img1 = await step(set, "그리기 1 (sunburst · 문제 통째로)", () => generate(image, "problem"));
+      const img1 = await step(set, `그리기 1 (sunburst · ${genLabel(g)})`, () => generate(image, g));
       setT2((t) => ({ ...t, img1 }));
       const diffs1 = await step(set, `대조 1 (${solModel} ${effort})`, () => verify(image, img1));
       setT2((t) => ({ ...t, diffs1 }));
-      // "지금 운영" 줄 — 그리기 1 만이 방식이고 대조 1 은 측정이다.
-      const baseline: Totals = {
-        ...sumSteps([steps[0]], diffs1.length),
-        measureKrw: steps[1]?.krw ?? 0,
-      };
-      if (!retryOn) {
-        // ② 를 안 돌린 것이다(운영 한 번만) — ② 줄을 만들지 않는다.
-        setT2((t) => ({ ...t, pick: 1, baseline }));
-        return { baseline };
-      }
-      if (diffs1.length === 0) {
+      if (diffs1.length === 0 || !retry) {
         const totals = sumSteps(steps, diffs1.length);
-        setT2((t) => ({ ...t, pick: 1, baseline, totals }));
-        return { baseline, m2: totals };
+        setT2((t) => ({ ...t, pick: 1, totals }));
+        return { m2: totals, m2Label: genLabel(g) };
       }
-      const img2 = await step(set, "그리기 2 (틀린 곳을 지시로 붙여)", () =>
-        generate(image, "problem", correctionInstruction(diffs1)),
+      const img2 = await step(set, `그리기 2 (같은 값 · 틀린 곳을 지시로 붙여)`, () =>
+        generate(image, g, correctionInstruction(diffs1)),
       );
       setT2((t) => ({ ...t, img2 }));
       const diffs2 = await step(set, `대조 2 (${solModel} ${effort})`, () => verify(image, img2));
       const pickN: 1 | 2 = diffs2.length <= diffs1.length ? 2 : 1;
       const totals = sumSteps(steps, Math.min(diffs1.length, diffs2.length));
-      setT2((t) => ({ ...t, diffs2, pick: pickN, baseline, totals }));
-      return { baseline, m2: totals };
+      setT2((t) => ({ ...t, diffs2, pick: pickN, totals }));
+      return { m2: totals, m2Label: genLabel(g) };
     } catch (err) {
       setT2((t) => ({ ...t, error: err instanceof Error ? err.message : String(err) }));
-      return {};
-    }
-  }
-
-  /** ③ — sol 이 옮겨 적고 우리가 조판. */
-  async function run3(image: string): Promise<Pick<HistoryRow, "m3">> {
-    const steps: Step[] = [];
-    const set = (fn: (s: Step[]) => Step[]) => {
-      const next = fn(steps);
-      steps.splice(0, steps.length, ...next);
-      setT3((t) => ({ ...t, steps: [...next] }));
-    };
-    setT3({ steps: [] });
-    try {
-      const tr = await step(set, `옮겨 적기 (${solModel} ${effort})`, async () => {
-        const { jobId } = await postJson<{ jobId: string }>({
-          task: "transcribe",
-          image,
-          model: solModel,
-          effort,
-        });
-        const out = await waitJob<TranscribeResponse>(jobId, "transcribe");
-        return { value: out, krw: out.estKrw, note: `${out.text.length}자 · 그림 ${out.figures.length}개` };
-      });
-      setT3((t) => ({ ...t, text: tr.text, raw: tr.raw }));
-
-      // 그림: sol 이 짚은 자리를 보낸 사진에서 잘라 낸다(켜면 sunburst 로 다시 그린다).
-      const src = await loadImage(image);
-      const W = src.naturalWidth;
-      const H = src.naturalHeight;
-      const crops = tr.figures.map((f) => ({
-        f,
-        crop: cropImageToDataUrl(src, { x: f.x * W, y: f.y * H, width: f.w * W, height: f.h * H }),
-      }));
-      let drawn: { f: TranscribedFigure; data: string }[] = crops.map(({ f, crop }) => ({ f, data: crop }));
-      if (crops.length > 0) {
-        drawn = await step(
-          set,
-          redrawFigures ? `그림 ${crops.length}개 다시 그리기 (sunburst · 동시에)` : `그림 ${crops.length}개 원본 붙이기`,
-          async () => {
-            if (!redrawFigures) return { value: drawn, krw: 0 };
-            let krw = 0;
-            const out = await Promise.all(
-              crops.map(async ({ f, crop }) => {
-                const forModel = await prepareFigureForModel(crop, MODEL_INPUT_DIM);
-                const g = await generate(forModel, "figure");
-                krw += g.krw ?? 0;
-                return { f, data: await trimBlankBorder(g.value) };
-              }),
-            );
-            return { value: out, krw };
-          },
-        );
-      }
-
-      // 조판 — 운영 카드 조립(`cardHtmlFromSpec`)을 그대로 쓴다.
-      const html = await step(set, "조판 (카드 조립 + 캡처)", async () => {
-        const { text, markers } = splitFigureMarkers(tr.text);
-        const anchorsBefore = (before: string) =>
-          before.trim() ? buildAnchors(renderMathTextWithInfo(before).blocks).length - 1 : 0;
-        const figures: CardFigure[] = await Promise.all(
-          drawn.map(async ({ f, data }) => {
-            const m = markers.find((x) => x.id === f.id);
-            return {
-              id: f.id,
-              markup: await rasterToSvg(data),
-              // 원본에서 차지하던 폭 비율을 그대로 쓴다.
-              layout: { scale: Math.min(100, Math.max(25, Math.round(f.w * 100))), offsetX: 0, offsetY: 12 },
-              position: m ? anchorsBefore(m.before) : 9999,
-            };
-          }),
-        );
-        const spec: CardSpec = { text, boxOverride: undefined, fontSizePx: ptToPx(DEFAULT_FONT_PT), figures };
-        const cardHtml = cardHtmlFromSpec(spec);
-        const png = await renderCardOffscreen(spec);
-        return { value: { cardHtml, png }, krw: 0 };
-      });
-      setT3((t) => ({ ...t, cardHtml: html.cardHtml, figures: drawn.length }));
-
-      const diffs = await step(set, `대조 (${solModel} ${effort}) — 측정용`, () => verify(image, html.png), true);
-      const totals = sumSteps(steps, diffs.length);
-      setT3((t) => ({ ...t, diffs, totals }));
-      return { m3: totals };
-    } catch (err) {
-      setT3((t) => ({ ...t, error: err instanceof Error ? err.message : String(err) }));
       return {};
     }
   }
@@ -416,16 +327,19 @@ export default function CompareProblemPage() {
     if (!prepared || busy) return;
     setBusy(true);
     setError(null);
+    setLabels({ m1: genLabel(g1), m2: genLabel(g2) });
     // 안 돌리는 칸은 비운다 — 지난 결과가 남으면 이번 것과 섞여 보인다.
-    if (which === "2" || which === "3") setT1({ steps: [] });
-    if (which === "3") setT2({ steps: [] });
-    if (which === "1" || which === "2") setT3({ steps: [] });
+    if (which === "2") {
+      setTb({ steps: [] });
+      setT1({ steps: [] });
+    } else if (which === "base1") {
+      setT2({ steps: [] });
+    }
     try {
-      // "운영 vs ①" 은 운영 한 번만 돌린다(② 의 다시 그리기는 빼서 값을 아낀다).
       const [a, b, c] = await Promise.all([
-        which === "all" || which === "1" ? run1(prepared, quality, outSize) : Promise.resolve({}),
-        which !== "3" ? run2(prepared, which !== "1" && retry) : Promise.resolve({}),
-        which === "all" || which === "3" ? run3(prepared) : Promise.resolve({}),
+        which !== "2" ? runBase(prepared) : Promise.resolve({}),
+        which !== "2" ? run1(prepared, g1) : Promise.resolve({}),
+        which !== "base1" ? run2(prepared, g2) : Promise.resolve({}),
       ]);
       setHistory((h) => [...h, { name: name || `문제 ${h.length + 1}`, ...a, ...b, ...c }]);
     } finally {
@@ -438,9 +352,10 @@ export default function CompareProblemPage() {
       <div>
         <h1 className="text-xl font-bold text-slate-900">문제 글자 정확도 비교</h1>
         <p className="mt-1 text-sm text-slate-600">
-          문제 사진 한 장으로 <b>지금 운영</b>(sunburst 가 통째로 그림) · <b>① 같은 그리기에 quality 만 올림</b> ·{" "}
-          <b>② 검수 후 다시 그리기</b> · <b>③ sol 이 옮겨 적고 조판</b>을 돌려 시간·원가·남은 글자 차이를 견줍니다. 차이는 셋 다 같은
-          sol 대조로 셉니다. 운영은 quality 를 보내지 않습니다(모델 기본값). 토큰은 차감하지 않습니다(무제한 계정 전용).
+          문제 사진 한 장으로 <b>지금 운영</b>(sunburst 가 통째로 그림, quality 안 보냄) ·{" "}
+          <b>① 같은 그리기에 quality·크기만 다르게</b> · <b>② 검수 후 다시 그리기</b>(② 만의 quality·크기)를
+          돌려 시간·원가·남은 글자 차이를 견줍니다. ① 과 ② 의 값은 서로 독립입니다. 차이는 셋 다 같은 sol
+          대조로 셉니다. 토큰은 차감하지 않습니다(무제한 계정 전용).
         </p>
       </div>
 
@@ -449,9 +364,15 @@ export default function CompareProblemPage() {
           문제 사진 (문제 하나만 잘라 둔 것)
           <input type="file" accept="image/*" onChange={(e) => pick(e.target.files?.[0] ?? null)} className="text-sm" />
         </label>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <GenPicker title="① sunburst 단독" value={g1} onChange={setG1} />
+          <GenPicker title="② 검수 후 다시 그리기" value={g2} onChange={setG2} />
+        </div>
+
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <label className="flex items-center gap-1.5">
-            sol 모델
+            대조 sol 모델
             <select value={solModel} onChange={(e) => setSolModel(e.target.value)} className="rounded border px-2 py-1 font-mono text-xs">
               {SOL_MODELS.map((m) => (
                 <option key={m}>{m}</option>
@@ -467,44 +388,18 @@ export default function CompareProblemPage() {
             </select>
           </label>
           <label className="flex items-center gap-1.5">
-            ① sunburst quality
-            <select value={quality} onChange={(e) => setQuality(e.target.value)} className="rounded border px-2 py-1 font-mono text-xs">
-              {QUALITIES.map((m) => (
-                <option key={m}>{m}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5">
-            ① 출력 크기
-            <select value={outSize} onChange={(e) => setOutSize(e.target.value)} className="rounded border px-2 py-1 font-mono text-xs">
-              {OUTPUT_SIZES.map((m) => (
-                <option key={m} value={m}>
-                  {m === "auto" ? "운영과 같게(비율 맞춤)" : m}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5">
             <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} />② 차이가 있으면 한 번 다시 그리기
-          </label>
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={redrawFigures} onChange={(e) => setRedrawFigures(e.target.checked)} />
-            ③ 그림을 sunburst 로 다시 그리기 (끄면 원본 크롭)
           </label>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" disabled={!prepared || busy} onClick={() => runAll("all")}>
             {busy ? "돌리는 중…" : "전부 돌리기"}
           </Button>
-          <Button variant="outline" disabled={!prepared || busy} onClick={() => runAll("1")}>
-            운영 vs ① quality={quality}
-            {outSize !== "auto" ? ` · ${outSize}` : ""}
+          <Button variant="outline" disabled={!prepared || busy} onClick={() => runAll("base1")}>
+            운영 vs ①
           </Button>
           <Button variant="outline" disabled={!prepared || busy} onClick={() => runAll("2")}>
-            운영 + ②만
-          </Button>
-          <Button variant="outline" disabled={!prepared || busy} onClick={() => runAll("3")}>
-            ③만
+            ②만
           </Button>
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -517,82 +412,75 @@ export default function CompareProblemPage() {
         )}
       </section>
 
-      {(t1.totals || t2.baseline || t3.totals) && (
-        <Summary
-          baseline={t2.baseline}
-          m1={t1.totals}
-          m1Quality={outSize === "auto" ? quality : `${quality} · ${outSize}`}
-          m2={t2.totals}
-          m3={t3.totals}
-        />
+      {(tb.totals || t1.totals || t2.totals) && (
+        <Summary base={tb.totals} m1={t1.totals} m1Label={labels.m1} m2={t2.totals} m2Label={labels.m2} />
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {(t1.steps.length > 0 || t1.error) && (
-          <section className={cn(cardClass, "flex min-w-0 flex-col gap-3 p-4")}>
-            <h2 className="font-semibold text-ink">① sunburst 단독 · quality 올림</h2>
-            <Steps steps={t1.steps} />
-            {t1.error && <p className="text-sm text-red-600">{t1.error}</p>}
-            {t1.img && <Shot title="그리기 (quality 지정)" src={t1.img} diffs={t1.diffs} />}
-          </section>
-        )}
-
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <section className={cn(cardClass, "flex min-w-0 flex-col gap-3 p-4")}>
-          <h2 className="font-semibold text-ink">지금 운영 → ② 검수 후 다시 그리기</h2>
-          <Steps steps={t2.steps} />
-          {t2.error && <p className="text-sm text-red-600">{t2.error}</p>}
-          {t2.img1 && (
-            <Shot
-              title={`그리기 1${t2.pick === 1 ? " · 최종" : ""}`}
-              src={t2.img1}
-              diffs={t2.diffs1}
-            />
-          )}
-          {t2.img2 && (
-            <Shot
-              title={`그리기 2${t2.pick === 2 ? " · 최종" : ""}`}
-              src={t2.img2}
-              diffs={t2.diffs2}
-            />
-          )}
+          <h2 className="font-semibold text-ink">지금 운영</h2>
+          <Steps steps={tb.steps} />
+          {tb.error && <p className="text-sm text-red-600">{tb.error}</p>}
+          {tb.img && <Shot title="그리기 (quality 안 보냄)" src={tb.img} diffs={tb.diffs} />}
         </section>
 
         <section className={cn(cardClass, "flex min-w-0 flex-col gap-3 p-4")}>
-          <h2 className="font-semibold text-ink">③ sol 이 옮겨 적고 조판</h2>
-          <Steps steps={t3.steps} />
-          {t3.error && <p className="text-sm text-red-600">{t3.error}</p>}
-          {t3.cardHtml && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-medium text-slate-600">조판 결과 (그림 {t3.figures ?? 0}개)</p>
-              <ScaledCard width={PROBLEM_CARD_WIDTH}>
-                <div
-                  className="problem-surface rounded-2xl border border-slate-200 bg-white p-8"
-                  style={{ width: PROBLEM_CARD_WIDTH }}
-                >
-                  <div
-                    className="font-serif leading-relaxed text-ink"
-                    style={{ fontSize: ptToPx(DEFAULT_FONT_PT) }}
-                    dangerouslySetInnerHTML={{ __html: t3.cardHtml }}
-                  />
-                </div>
-              </ScaledCard>
-              {t3.diffs && <DiffList diffs={t3.diffs} />}
-            </div>
+          <h2 className="font-semibold text-ink">① sunburst 단독{labels.m1 && ` · ${labels.m1}`}</h2>
+          <Steps steps={t1.steps} />
+          {t1.error && <p className="text-sm text-red-600">{t1.error}</p>}
+          {t1.img && <Shot title="그리기" src={t1.img} diffs={t1.diffs} />}
+        </section>
+
+        <section className={cn(cardClass, "flex min-w-0 flex-col gap-3 p-4")}>
+          <h2 className="font-semibold text-ink">② 검수 후 다시 그리기{labels.m2 && ` · ${labels.m2}`}</h2>
+          <Steps steps={t2.steps} />
+          {t2.error && <p className="text-sm text-red-600">{t2.error}</p>}
+          {t2.img1 && (
+            <Shot title={`그리기 1${t2.pick === 1 ? " · 최종" : ""}`} src={t2.img1} diffs={t2.diffs1} />
           )}
-          {t3.text && (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-slate-500">옮겨 적은 글 / 원본 JSON</summary>
-              <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2">{t3.text}</pre>
-              <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-[11px] text-slate-500">
-                {t3.raw}
-              </pre>
-            </details>
+          {t2.img2 && (
+            <Shot title={`그리기 2${t2.pick === 2 ? " · 최종" : ""}`} src={t2.img2} diffs={t2.diffs2} />
           )}
         </section>
       </div>
 
       {history.length > 0 && <History rows={history} />}
     </main>
+  );
+}
+
+/** 한 방식의 sunburst 품질·출력 크기 고르기. */
+function GenPicker({ title, value, onChange }: { title: string; value: Gen; onChange: (g: Gen) => void }) {
+  return (
+    <fieldset className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-slate-200 p-3 text-sm">
+      <legend className="px-1 text-xs font-semibold text-slate-600">{title}</legend>
+      <label className="flex items-center gap-1.5">
+        quality
+        <select
+          value={value.quality}
+          onChange={(e) => onChange({ ...value, quality: e.target.value })}
+          className="rounded border px-2 py-1 font-mono text-xs"
+        >
+          {QUALITIES.map((m) => (
+            <option key={m}>{m}</option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1.5">
+        출력 크기
+        <select
+          value={value.size}
+          onChange={(e) => onChange({ ...value, size: e.target.value })}
+          className="rounded border px-2 py-1 font-mono text-xs"
+        >
+          {OUTPUT_SIZES.map((m) => (
+            <option key={m} value={m}>
+              {m === "auto" ? "운영과 같게(비율 맞춤)" : m}
+            </option>
+          ))}
+        </select>
+      </label>
+    </fieldset>
   );
 }
 
@@ -644,28 +532,23 @@ function DiffList({ diffs }: { diffs: TextDiff[] }) {
   );
 }
 
-function row(label: string, t: Totals | undefined, note: string) {
-  return { label, t, note };
-}
-
 function Summary({
-  baseline,
+  base,
   m1,
-  m1Quality,
+  m1Label,
   m2,
-  m3,
+  m2Label,
 }: {
-  baseline?: Totals;
+  base?: Totals;
   m1?: Totals;
-  m1Quality?: string;
+  m1Label?: string;
   m2?: Totals;
-  m3?: Totals;
+  m2Label?: string;
 }) {
   const rows = [
-    row("지금 운영", baseline, "그리기 1번 · quality 안 보냄"),
-    row(`① quality=${m1Quality ?? "?"}`, m1, "그리기 1번 · 대조는 측정용"),
-    row("② 검수 후 다시 그리기", m2, "대조가 방식에 포함"),
-    row("③ sol 옮겨 적기 + 조판", m3, "마지막 대조는 측정용"),
+    { label: "지금 운영", t: base, note: "quality 안 보냄 · 대조는 측정용" },
+    { label: `① ${m1Label ?? ""}`, t: m1, note: "그리기 1번 · 대조는 측정용" },
+    { label: `② ${m2Label ?? ""}`, t: m2, note: "대조가 방식에 포함" },
   ].filter((r) => r.t);
   return (
     <section className={cn(cardClass, "overflow-x-auto p-4")}>
@@ -708,14 +591,13 @@ function History({ rows }: { rows: HistoryRow[] }) {
     const vals = rows.map(pick).filter((t): t is Totals => !!t).map(f).filter((v): v is number => v != null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   };
-  const cols: [string, (r: HistoryRow) => Totals | undefined][] = [
-    ["지금 운영", (r) => r.baseline],
-    ["① quality", (r) => r.m1],
-    ["②", (r) => r.m2],
-    ["③", (r) => r.m3],
+  const cols: [string, (r: HistoryRow) => Totals | undefined, (r: HistoryRow) => string | undefined][] = [
+    ["지금 운영", (r) => r.base, () => undefined],
+    ["①", (r) => r.m1, (r) => r.m1Label],
+    ["②", (r) => r.m2, (r) => r.m2Label],
   ];
-  const cell = (t: Totals | undefined, q?: string) =>
-    t ? `${q ? `[${q}] ` : ""}${secs(t.ms)} · ${won(t.krw)} · ${t.diffs ?? "?"}곳` : "—";
+  const cell = (t: Totals | undefined, label?: string) =>
+    t ? `${label ? `[${label}] ` : ""}${secs(t.ms)} · ${won(t.krw)} · ${t.diffs ?? "?"}곳` : "—";
   return (
     <section className={cn(cardClass, "overflow-x-auto p-4")}>
       <h2 className="mb-2 font-semibold text-ink">이번 세션 기록 ({rows.length}문제)</h2>
@@ -732,9 +614,9 @@ function History({ rows }: { rows: HistoryRow[] }) {
           {rows.map((r, i) => (
             <tr key={i} className="border-t">
               <td className="max-w-[160px] truncate py-1.5">{r.name}</td>
-              {cols.map(([l, p]) => (
+              {cols.map(([l, p, lab]) => (
                 <td key={l} className="tabular-nums">
-                  {cell(p(r), p === cols[1][1] ? r.m1Quality : undefined)}
+                  {cell(p(r), lab(r))}
                 </td>
               ))}
             </tr>
@@ -754,7 +636,10 @@ function History({ rows }: { rows: HistoryRow[] }) {
           </tr>
         </tbody>
       </table>
-      <p className="mt-2 text-xs text-slate-400">새로고침하면 사라져요. 원가는 공표 단가로 계산한 값이에요.</p>
+      <p className="mt-2 text-xs text-slate-400">
+        새로고침하면 사라져요. 원가는 공표 단가로 계산한 값이에요. ①·② 는 돌릴 때마다 quality·크기를 바꿀 수
+        있으니 [ ] 안의 값을 함께 보세요.
+      </p>
     </section>
   );
 }

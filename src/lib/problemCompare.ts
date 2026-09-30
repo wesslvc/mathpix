@@ -1,15 +1,11 @@
 // **문제 글자 정확도 비교**(`/admin/compare-problem`)의 프롬프트와 해석.
 //
 // 2026-09-30 사용자 요청 — "이미지 생성 방식이라 텍스트 정확도가 많이 떨어진다,
-// sol 6.1 로 개선하는 방안" → 두 방식을 한 화면에서 돌려 **비용·시간·남은 글자
-// 차이**를 재 보기로 했다.
+// sol 6.1 로 개선하는 방안". 운영(sunburst 한 번) · ① 같은 그리기에 quality 만 올림 ·
+// ② sol 이 원본과 대조해 틀린 곳을 지시로 붙여 다시 그리기 를 견준다.
+// (③ "sol 이 본문을 글자로 옮기고 우리가 조판" 은 폐기했다 — git 이력에 있다.)
 //
-//  ② 검수 후 다시 그리기 — sunburst 가 문제를 통째로 그린 뒤 sol 이 원본과
-//     대조해 글자가 다른 곳을 찾고, 있으면 그 목록을 지시로 붙여 한 번 더 그린다.
-//  ③ 글자는 sol 이 읽고 우리가 조판 — sol 이 본문을 글자·LaTeX 로 옮기고 그림
-//     자리만 짚는다. 그림은 잘라 내(원하면 sunburst 로 다시 그려) 카드에 붙인다.
-//
-// 두 방식의 결과를 **같은 대조 프롬프트**(`VERIFY_PROMPT`)로 원본과 견준다 —
+// 세 방식의 결과를 **같은 대조 프롬프트**(`VERIFY_PROMPT`)로 원본과 견준다 —
 // 그래야 "남은 차이"가 같은 잣대로 센 숫자가 된다.
 //
 // 이 파일에는 네트워크 호출도 환경변수도 없다(화면과 서버가 같이 쓴다).
@@ -81,100 +77,6 @@ export function correctionInstruction(diffs: TextDiff[]): string {
   });
   return `지난번 결과에서 아래 글자가 원본 사진과 달랐다. 이번에는 사진과 똑같이 그려라(나머지도 그대로 베낀다):
 ${lines.join("\n")}`;
-}
-
-/** ③ sol 이 짚은 그림 자리. 좌표는 sol 이 본 사진 대비 0~1. */
-export type TranscribedFigure = {
-  id: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-};
-
-export type Transcription = {
-  /** Mathpix mmd 와 같은 꼴의 본문(`renderMathText` 가 그대로 그린다). */
-  text: string;
-  figures: TranscribedFigure[];
-};
-
-/**
- * ③ 옮겨 적기 프롬프트. 출력 글은 **이 앱의 인식 경로가 이미 그리는 꼴**
- * (Mathpix mmd)에 맞춘다 — 그래야 `renderMathText`·카드 조립을 그대로 쓴다:
- * `$…$`/`$$…$$` 수식, 빈 줄로 문단, `> ` 로 조건 박스, `<보기>` 머리글과
- * ㄱ. ㄴ. ㄷ. 항목, 마크다운 표.
- *
- * 그림은 글자로 못 옮기는 것(그래프·도형·지도·사진·도식)만이다. 글자만 든 표는
- * 표로 옮긴다 — 그림으로 넘기면 표 안 글자가 다시 이미지 모델 손에 들어간다.
- */
-export const TRANSCRIBE_PROMPT = `task: transcribe ONE Korean exam question from the photo so it can be re-typeset. text accuracy is the whole point — every printed character exactly as printed.
-
-ignore handwriting (student's pencil/pen marks, circles, check marks, scribbles, written answers). keep only what is PRINTED.
-
-output format for "text" (markdown-like, rendered by our typesetter):
-- question number at the start as printed, e.g. "17. " .
-- paragraphs separated by one blank line. do not add line breaks inside a sentence.
-- ALL math in LaTeX: inline $...$, display $$...$$ on its own line. numbers inside sentences that are part of math (e.g. $f(x)$, $x=3$, $\\frac{1}{2}$) go in $...$. plain Korean numbers like "3개" may stay plain.
-- a condition box printed with a border: each line prefixed with "> ". (가)/(나) conditions keep their markers "(가)", "(나)".
-- <보기> box: a line "<보기>" then one item per line: "ㄱ. ...", "ㄴ. ...", "ㄷ. ...".
-- a table made only of text/numbers: markdown table ("| a | b |" rows, second row "| --- | --- |"). keep every cell.
-- choices: each on its own line as printed, e.g. "① 1  ② 2  ③ 3  ④ 4  ⑤ 5" on one line if printed on one line.
-- circled markers (㉠㉡㉢ ①② ⓐⓑ ㉮㉯) as those exact unicode characters. read the character INSIDE each circle carefully; never guess from neighbours.
-- printed underline: \\underline{...} inside $...$ only for math; for Korean words write them plainly.
-- a fraction whose numerator/denominator are Korean words: $\\frac{\\text{분자}}{\\text{분모}}$.
-
-figures: anything that cannot be written as text or a simple table — graph, geometric figure, diagram, map, photo, chart, apparatus, a table containing pictures. for each figure:
-- put a line "[[FIG fN]]" (N = 1,2,…) as its own paragraph where it sits in the reading order.
-- give its box in "figures" with box_2d [ymin, xmin, ymax, xmax] normalised 0-1000 to THIS image, tight around the figure including its labels/caption.
-- do NOT also transcribe the text drawn inside the figure (axis labels, numbers on the graph) — it stays in the picture.
-
-return JSON only:
-{"text":"...","figures":[{"id":"f1","box_2d":[ymin,xmin,ymax,xmax]}]}`;
-
-/** 옮겨 적기 결과를 읽는다. 자리 표시가 없는 그림·본문에만 있는 표시는 서로 맞춘다. */
-export function parseTranscription(text: string): Transcription {
-  const obj = parseJsonObject(text) as { text?: unknown; figures?: unknown };
-  const body = typeof obj?.text === "string" ? obj.text : "";
-  if (!body.trim()) throw new Error("옮겨 적은 글이 비어 있습니다.");
-  const figures: TranscribedFigure[] = [];
-  if (Array.isArray(obj.figures)) {
-    for (const f of obj.figures.slice(0, 12)) {
-      if (!f || typeof f !== "object") continue;
-      const r = f as { id?: unknown; box_2d?: unknown };
-      const id = typeof r.id === "string" && /^f\d{1,2}$/.test(r.id) ? r.id : null;
-      const b = Array.isArray(r.box_2d) ? r.box_2d.map(Number) : null;
-      if (!id || !b || b.length !== 4 || b.some((n) => !Number.isFinite(n))) continue;
-      const [y0, x0, y1, x1] = b.map((n) => Math.min(1000, Math.max(0, n)) / 1000);
-      if (x1 - x0 < 0.01 || y1 - y0 < 0.01) continue;
-      figures.push({ id, x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
-    }
-  }
-  return { text: body, figures };
-}
-
-/** 본문에서 그림 자리 표시 줄. */
-export const FIG_MARKER = /^\s*\[\[FIG (f\d{1,2})\]\]\s*$/;
-
-/**
- * 본문을 그림 자리 표시 기준으로 나눈다. `before` 는 그 그림 앞까지의 본문
- * (자리 계산용), `text` 는 표시를 뺀 본문 전체다.
- */
-export function splitFigureMarkers(text: string): {
-  text: string;
-  markers: { id: string; before: string }[];
-} {
-  const paras = text.replace(/\r\n/g, "\n").split(/\n\s*\n/);
-  const kept: string[] = [];
-  const markers: { id: string; before: string }[] = [];
-  for (const p of paras) {
-    const m = p.match(FIG_MARKER);
-    if (m) {
-      markers.push({ id: m[1], before: kept.join("\n\n") });
-      continue;
-    }
-    kept.push(p);
-  }
-  return { text: kept.join("\n\n"), markers };
 }
 
 function parseJsonObject(text: string): unknown {
