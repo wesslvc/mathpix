@@ -21,6 +21,12 @@ import {
   type PassagePayload,
   type PassageState,
 } from "@/lib/passageRun";
+import {
+  problemLoopEnabled,
+  runProblemStage,
+  type ProblemLoopState,
+} from "@/lib/problemLoopRun";
+import type { FigureUsage } from "@/lib/figureImageGen";
 
 /** 확인용 64×64 PNG(청크 CRC 까지 검사한 것 — `/api/figure/models` 와 같은 파일). */
 const PROBE_PNG =
@@ -53,7 +59,7 @@ type ClaimedJob = {
   dismissed: boolean;
   payload: PassagePayload | null;
   stage: string | null;
-  state: PassageState | null;
+  state: PassageState | ProblemLoopState | null;
 };
 
 /**
@@ -256,6 +262,8 @@ async function fail(admin: Admin, job: ClaimedJob, message: string) {
 
 async function runJob(admin: Admin, job: ClaimedJob) {
   if (job.mode === "passage") return runPassageJob(admin, job);
+  // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계별로 돈다.
+  if (job.mode === "problem" && problemLoopEnabled()) return runProblemLoopJob(admin, job);
   const tag = `figure-jobs/run ${job.id.slice(0, 8)}`;
   const image = await loadAsDataUrl(admin, job.input_path);
   if (!image) {
@@ -289,7 +297,25 @@ async function runJob(admin: Admin, job: ClaimedJob) {
     await fail(admin, job, outcome.error);
     return;
   }
+  await finishJob(admin, job, {
+    dataUrl: outcome.dataUrl,
+    modelId: outcome.modelId,
+    usage: outcome.usage,
+    showMoney: billing.unlimited || billing.byok,
+    tag,
+  });
+}
 
+/**
+ * 다 그린 그림을 저장하고 작업을 끝낸다. 한 번에 그리는 길과 그리기·검수를 반복하는 길이
+ * 같이 쓴다 — 저장 규칙이 두 벌이 되면 한쪽만 고쳐진다.
+ */
+async function finishJob(
+  admin: Admin,
+  job: ClaimedJob,
+  out: { dataUrl: string; modelId: string; usage?: FigureUsage; showMoney: boolean; tag: string; note?: string },
+) {
+  const { tag } = out;
   // 문제 전체는 결과가 곧 카드다 — 그 행에 바로 저장하면 끝난다.
   // 그림 하나는 결과만 따로 두고 재료(box_range)에 먼저 넣는다. 카드 PNG 는
   // 앱이 열려 있을 때 브라우저가 다시 그린다(`FigureJobsProvider`).
@@ -300,13 +326,13 @@ async function runJob(admin: Admin, job: ClaimedJob) {
       admin,
       job.problem_id,
       job.figure_id,
-      outcome.dataUrl,
+      out.dataUrl,
       job.user_id,
     );
     applied = resultPath !== null;
   }
   if (!resultPath) {
-    const parts = splitDataUrl(outcome.dataUrl);
+    const parts = splitDataUrl(out.dataUrl);
     if (!parts) {
       await fail(admin, job, "서버가 이미지를 돌려주지 않았어요.");
       return;
@@ -329,9 +355,10 @@ async function runJob(admin: Admin, job: ClaimedJob) {
       status: "done",
       result_path: resultPath,
       applied_at: applied ? now : null,
-      model: outcome.modelId,
-      usage: visibleUsage(outcome.usage, billing.unlimited || billing.byok) ?? null,
+      model: out.modelId,
+      usage: visibleUsage(out.usage, out.showMoney) ?? null,
       finished_at: now,
+      ...(out.note !== undefined ? { note: out.note, stage: "done", state: null } : {}),
     })
     .eq("id", job.id)
     .eq("status", "running")
@@ -349,6 +376,68 @@ async function runJob(admin: Admin, job: ClaimedJob) {
 }
 
 /**
+ * 문제 통째로 그리기의 **한 단계**(그리기 또는 sol 검수)를 돌린다(`problemLoopRun.ts`).
+ * 다음 단계가 있으면 줄에 되돌려 세우고(pending), 다음 일꾼이 이어서 집는다.
+ */
+async function runProblemLoopJob(admin: Admin, job: ClaimedJob) {
+  const tag = `figure-jobs/run ${job.id.slice(0, 8)} 문제`;
+  const billing = await getBillingContext(admin, job.user_id);
+  if (billing.byok && !billing.byokApiKey) {
+    await fail(
+      admin,
+      job,
+      "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.",
+    );
+    return;
+  }
+  const out = await runProblemStage(
+    admin,
+    { ...job, state: (job.state ?? null) as ProblemLoopState | null },
+    {
+      byokApiKey: billing.byokApiKey ?? undefined,
+      modelIds: pickModelIds(billing.byok, billing.byokModel),
+      deadlineMs: GENERATION_MS,
+      tag,
+    },
+  );
+  if (out.kind === "fail") {
+    await removeStored(admin, out.cleanup);
+    await fail(admin, job, out.error);
+    return;
+  }
+  if (out.kind === "done") {
+    await finishJob(admin, job, {
+      dataUrl: out.dataUrl,
+      modelId: out.modelId,
+      usage: out.usage,
+      showMoney: billing.unlimited || billing.byok,
+      tag,
+      note: out.note,
+    });
+    await removeStored(admin, out.cleanup);
+    return;
+  }
+  const { data: saved } = await admin
+    .from("figure_jobs")
+    .update({
+      status: "pending",
+      stage: out.stage,
+      state: out.state,
+      note: out.note,
+      started_at: null,
+    })
+    .eq("id", job.id)
+    .eq("status", "running")
+    .select("id")
+    .maybeSingle();
+  if (!saved) {
+    // 멈춘 작업 정리가 먼저 오류로 돌려놓고 환불했다 — 만든 중간 그림만 치운다.
+    console.warn(`[${tag}] 이미 정리된 작업이라 기록을 건너뜀`);
+    await removeStored(admin, out.state.rounds.map((r) => r.path));
+  }
+}
+
+/**
  * 지문 작업의 **한 단계**를 돌린다(`passageRun.ts`). 다음 단계가 있으면 줄에
  * 되돌려 세우고(pending), 다음 일꾼이 이어서 집는다.
  */
@@ -363,7 +452,7 @@ async function runPassageJob(admin: Admin, job: ClaimedJob) {
     );
     return;
   }
-  const out = await runPassageStage(admin, job, {
+  const out = await runPassageStage(admin, { ...job, state: (job.state ?? null) as PassageState | null }, {
     byokApiKey: billing.byokApiKey ?? undefined,
     modelIds: pickModelIds(billing.byok, billing.byokModel),
     deadlineMs: PASSAGE_STAGE_MS,

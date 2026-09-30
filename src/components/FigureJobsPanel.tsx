@@ -15,9 +15,20 @@ const STATUS_TEXT = {
  * 옮겨적는중이라고"). 서버가 알려 주는 단계로 지금 무엇을 하는지 적는다.
  */
 function statusText(j: FigureJob): string {
-  if (j.mode !== "passage" || (j.status !== "running" && j.status !== "pending")) {
+  if (j.status !== "running" && j.status !== "pending") return STATUS_TEXT[j.status];
+  // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계로 돈다(`gen:N` / `verify:N`).
+  if (j.mode === "problem" && j.stage) {
+    const gen = /^gen:(\d+)$/.exec(j.stage);
+    const ver = /^verify:(\d+)$/.exec(j.stage);
+    const q = ["low", "medium", "max"];
+    if (gen) {
+      const n = Number(gen[1]);
+      return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}${n === 0 ? "" : "고쳐 "}그리는 중 (${q[Math.min(n, 2)]})`;
+    }
+    if (ver) return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}sol 이 글자·도형 검수 중`;
     return STATUS_TEXT[j.status];
   }
+  if (j.mode !== "passage") return STATUS_TEXT[j.status];
   const stage = j.stage ?? "read";
   const fig = /^figure:(\d+)$/.exec(stage);
   const what =
@@ -124,7 +135,7 @@ export default function FigureJobsPanel() {
                   >
                     {statusText(j)}
                   </p>
-                  {j.mode === "passage" && j.note && (
+                  {(j.mode === "passage" || j.mode === "problem") && j.note && (
                     <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{j.note}</p>
                   )}
                   {/* 어느 문제가 비쌌는지 보이게 한다. 캐시에 걸린 작업에는

@@ -297,6 +297,8 @@ export async function PATCH(req: NextRequest) {
       error: null,
       finished_at: null,
       started_at: null,
+      // 문제 통째로 그리기는 그리기·검수를 단계로 도는데, 다시 시도는 깨끗이 처음부터 한다.
+      ...(row.mode === "problem" ? { stage: null, state: null, note: null } : {}),
     };
     if (!billing.unlimited && !billing.byok && !row.charged) {
       const { data, error } = await supabase.rpc("consume_recognition_credit", {
