@@ -419,7 +419,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       // 그림 하나(도형) 다시 그리기는 그 프로세스가 없어 늘 한 번이다.
       auto: !(useSol && isWholeProblemFigure(id)),
       // 그림 하나(도형)는 "sol 쓰기"를 고르면 같은 검수 흐름을 탄다(그리기 → sol 대조 → 고쳐 그리기, medium 까지).
-      sol: useSol && !isWholeProblemFigure(id) ? true : undefined,
+      // 문제 통째로도 수정 창에서 sol 을 골랐으면 medium → high 사다리를 탄다(low 없음).
+      sol: useSol ? true : undefined,
       // 국어 문항은 거의 글자뿐이라 서버가 프롬프트 톤을 고를 때 참고한다
       // (Mathpix 참고 글 자체는 더 이상 안 쓴다 — 위 FigureJobsProvider 참고).
       korean: editing?.korean ? true : undefined,

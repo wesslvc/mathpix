@@ -196,7 +196,7 @@ export async function POST(req: NextRequest) {
           : null,
       input_path: inputPath,
       ...(mode === "problem" && body.auto === true ? { payload: { auto: true } } : {}),
-      ...(mode === "figure" && body.sol === true ? { payload: { sol: true } } : {}),
+      ...(body.sol === true && (mode === "figure" || (mode === "problem" && body.auto !== true)) ? { payload: { sol: true } } : {}),
       width: typeof body.width === "number" && body.width > 0 ? Math.round(body.width) : null,
       height:
         typeof body.height === "number" && body.height > 0 ? Math.round(body.height) : null,

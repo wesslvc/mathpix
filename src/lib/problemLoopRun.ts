@@ -62,6 +62,16 @@ export const TOP_QUALITY = (() => {
 /** 그리는 차례(고정 앞 둘 + 확인 뒤 맨 위). 앞에서 차이가 없어지면 거기서 멈춘다. */
 export const PROBLEM_LADDER = ["low", "medium", TOP_QUALITY] as const;
 
+/**
+ * 수정 창에서 "sol 쓰기"를 골라 다시 그릴 때의 사다리 — **low 없이 medium → high**(사용자 — "수정 프로세스 중에서는
+ * med → high 로, low 부터 해서 올리지 말고"). 확인 대기(max-offer) 없이 high 까지 자동으로 간다(이미 사용자가 고른 길이다).
+ */
+export const EDIT_LADDER = ["medium", TOP_QUALITY] as const;
+
+function ladderOf(job: { edit?: boolean }): readonly string[] {
+  return job.edit ? EDIT_LADDER : PROBLEM_LADDER;
+}
+
 /** sol 검수의 추론 강도. 재배포 없이 `OPENAI_VERIFY_EFFORT` 로 바꾼다(`default` 면 안 보낸다). */
 const VERIFY_EFFORT = (() => {
   const v = (process.env.OPENAI_VERIFY_EFFORT ?? "high").trim();
@@ -126,6 +136,8 @@ export type ProblemLoopJob = {
   id: string;
   /** 그림 하나(figure)를 이 흐름으로 그릴 때도 있다(수정 창의 "sol 쓰기"). 없으면 문제 통째로. */
   mode?: "figure" | "problem" | "passage";
+  /** 수정 창에서 sol 쓰기를 골랐다 — 사다리가 medium → high 다(low 없음, 확인 대기 없음). */
+  edit?: boolean;
   user_id: string;
   korean: boolean;
   instruction: string | null;
@@ -517,7 +529,8 @@ async function runGen(
   i: number,
   ctx: Ctx,
 ): Promise<ProblemLoopOutcome> {
-  const quality = PROBLEM_LADDER[Math.min(i, PROBLEM_LADDER.length - 1)];
+  const ladder = ladderOf(job);
+  const quality = ladder[Math.min(i, ladder.length - 1)];
   const original = await loadAsDataUrl(admin, job.input_path);
   if (!original) {
     return { kind: "fail", error: "올려 둔 그림을 찾지 못했어요. 다시 넣어주세요.", cleanup: pathsOf(state) };
@@ -691,7 +704,8 @@ async function runVerify(
   console.info(`[${ctx.tag}] 검수 ${round.quality} 차이 ${diffs.length}곳`);
 
   // 차이가 없거나 마지막 라운드면 끝. 그림 하나(figure)는 low → medium 까지만 돌고 맨 위 단계·확인 대기는 없다.
-  const lastAuto = job.mode === "figure" ? PROBLEM_LADDER.length - 2 : PROBLEM_LADDER.length - 1;
+  const ladder = ladderOf(job);
+  const lastAuto = job.edit ? ladder.length - 1 : job.mode === "figure" ? ladder.length - 2 : ladder.length - 1;
   if (diffs.length === 0 || i >= lastAuto) {
     return finalize(admin, checked, bestRound(rounds), ctx, "");
   }
@@ -707,7 +721,7 @@ async function runVerify(
   // **max 는 바로 돌리지 않는다**(사용자 — "딴 거 먼저 한 다음에 마지막에 최종 컨펌받고 돌려").
   // medium 까지 해도 차이가 남으면 지금까지 나온 것 중 가장 나은 그림을 **먼저 저장**하고, 입력·중간
   // 그림·지시를 작업에 남겨 둔 채 멈춘다. 사용자가 패널에서 확인하면 그때 200토큰을 걷고 이어 돌린다.
-  if (i === PROBLEM_LADDER.length - 2 && !state.maxPhase) {
+  if (!job.edit && i === ladder.length - 2 && !state.maxPhase) {
     const saved = await finalize(admin, withHistory, bestRound(rounds), ctx, "");
     if (saved.kind === "done") {
       return {
@@ -720,7 +734,7 @@ async function runVerify(
     return saved;
   }
 
-  const nextQ = PROBLEM_LADDER[i + 1];
+  const nextQ = ladder[i + 1];
   return {
     kind: "next",
     stage: `gen:${i + 1}`,

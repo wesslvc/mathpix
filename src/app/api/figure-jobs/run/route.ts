@@ -464,7 +464,7 @@ async function runProblemLoopJob(admin: Admin, job: ClaimedJob) {
   }
   const out = await runProblemStage(
     admin,
-    { ...job, state: (job.state ?? null) as ProblemLoopState | null },
+    { ...job, edit: job.payload?.sol === true, state: (job.state ?? null) as ProblemLoopState | null },
     {
       byokApiKey: billing.byokApiKey ?? undefined,
       modelIds: pickModelIds(billing.byok, billing.byokModel),
