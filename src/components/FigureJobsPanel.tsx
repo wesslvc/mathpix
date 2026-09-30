@@ -117,6 +117,8 @@ export default function FigureJobsPanel() {
   const [maxError, setMaxError] = useState<string | null>(null);
   // "이게 다릅니다, 진행하시겠어요?" 확인 창.
   const [confirming, setConfirming] = useState<FigureJob[] | null>(null);
+  // 여러 문제를 한꺼번에 볼 때 **진행할 것만 골라** 돌린다(나머지는 확인 대기로 남는다).
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState<Record<string, OfferDiffs> | null>(null);
   // 한 문제만 볼 때는 두 길을 고른다: 수정(저장된 그림에서 적은 곳만 고침) / 맨 위 화질로 처음부터 다시 그리기.
   const [choice, setChoice] = useState<"patch" | "redraw">("patch");
@@ -134,6 +136,7 @@ export default function FigureJobsPanel() {
     setMaxError(null);
     setDetails(null);
     setChoice(list.length === 1 ? "patch" : "redraw");
+    setPicked(new Set(list.map((j) => j.id)));
     setPatchText("");
     setPatchDiffs(true);
     setConfirming(list);
@@ -419,10 +422,40 @@ export default function FigureJobsPanel() {
                   const d = details[j.id];
                   return (
                     <div key={j.id} className="border-b border-slate-100 py-2 last:border-b-0">
-                      <p className="text-xs font-medium text-slate-800">
-                        {j.label}
-                        {d && <span className="ml-1 font-normal text-slate-400">· 차이 {d.diffs.length}곳</span>}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        {confirming.length > 1 && (
+                          <input
+                            type="checkbox"
+                            aria-label={`${j.label} 진행`}
+                            checked={picked.has(j.id)}
+                            disabled={maxBusy}
+                            onChange={(e) =>
+                              setPicked((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(j.id);
+                                else next.delete(j.id);
+                                return next;
+                              })
+                            }
+                            className="h-4 w-4 shrink-0"
+                          />
+                        )}
+                        <p className="min-w-0 flex-1 truncate text-xs font-medium text-slate-800">
+                          {j.label}
+                          {d && <span className="ml-1 font-normal text-slate-400">· 차이 {d.diffs.length}곳</span>}
+                        </p>
+                        {confirming.length > 1 && (
+                          <button
+                            type="button"
+                            disabled={maxBusy}
+                            onClick={() => void openConfirm([j])}
+                            title="이 문제만 열어서 수정하거나 다시 그려요"
+                            className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                          >
+                            이것만 (수정 가능)
+                          </button>
+                        )}
+                      </div>
                       {d && (d.originalUrl || d.generatedUrl) && (
                         // 원본과 지금 저장된 생성 그림을 **나란히** — 차이를 눈으로 대 볼 수 있게. 누르면 크게 열린다.
                         <div className="mt-1.5 grid grid-cols-2 gap-2">
@@ -534,11 +567,34 @@ export default function FigureJobsPanel() {
               </div>
             )}
             {maxError && <p className="border-t border-red-100 bg-red-50 px-4 py-1.5 text-[11px] text-red-700">{maxError}</p>}
+            {confirming.length > 1 && (
+              <div className="flex items-center gap-2 border-t border-slate-200 px-4 py-1.5 text-[11px] text-slate-500">
+                <button
+                  type="button"
+                  disabled={maxBusy}
+                  onClick={() => setPicked(new Set(confirming.map((j) => j.id)))}
+                  className="underline hover:text-slate-700"
+                >
+                  전체 선택
+                </button>
+                <button
+                  type="button"
+                  disabled={maxBusy}
+                  onClick={() => setPicked(new Set())}
+                  className="underline hover:text-slate-700"
+                >
+                  전체 해제
+                </button>
+                <span className="text-slate-400">고른 것만 진행하고, 나머지는 확인 대기로 남아요.</span>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-4 py-3">
               <span className="text-[11px] text-slate-500">
                 {confirming.length === 1 && choice === "patch"
                   ? `${patchTokens.toLocaleString()}토큰`
-                  : `${maxTokens.toLocaleString()}토큰${confirming.length > 1 ? ` × ${confirming.length} = ${(maxTokens * confirming.length).toLocaleString()}토큰` : ""}`}
+                  : confirming.length > 1
+                    ? `${picked.size}개 선택 · ${maxTokens.toLocaleString()}토큰 × ${picked.size} = ${(maxTokens * picked.size).toLocaleString()}토큰`
+                    : `${maxTokens.toLocaleString()}토큰`}
               </span>
               <div className="flex gap-1.5">
                 <button
@@ -552,10 +608,13 @@ export default function FigureJobsPanel() {
                 <button
                   type="button"
                   disabled={
-                    maxBusy || details === null || (confirming.length === 1 && choice === "patch" && !patchText.trim() && !patchDiffs)
+                    maxBusy ||
+                    details === null ||
+                    (confirming.length === 1 && choice === "patch" && !patchText.trim() && !patchDiffs) ||
+                    (confirming.length > 1 && picked.size === 0)
                   }
                   onClick={() =>
-                    confirming.length === 1 && choice === "patch" ? void runPatch(confirming[0]) : void runMax(confirming)
+                    confirming.length === 1 && choice === "patch" ? void runPatch(confirming[0]) : void runMax(confirming.filter((j) => picked.has(j.id)))
                   }
                   className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
                 >
