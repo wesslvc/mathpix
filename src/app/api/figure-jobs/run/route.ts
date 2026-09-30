@@ -60,7 +60,7 @@ type ClaimedJob = {
   charged: boolean;
   charged_tokens: number;
   dismissed: boolean;
-  payload: (PassagePayload & { auto?: boolean }) | null;
+  payload: (PassagePayload & { auto?: boolean; sol?: boolean }) | null;
   stage: string | null;
   state: PassageState | ProblemLoopState | null;
 };
@@ -276,7 +276,9 @@ async function runJob(admin: Admin, job: ClaimedJob) {
   // **수정 모드의 다시 그리기는 우리 프로세스(그리기 → sol 검수 → 고쳐 그리기)를 타지 않는다**(사용자 —
   // "수정모드에서는 우리 프로세스가 아니라 auto 로 해서 sol 검증 없이 가는 거고"). 한 번, quality=auto.
   const auto = job.payload?.auto === true;
-  if (job.mode === "problem" && problemLoopEnabled() && !auto) return runProblemLoopJob(admin, job);
+  // 그림 하나도 사용자가 "sol 쓰기"를 골랐으면(수정 창) 같은 흐름(그리기 → sol 검수 → 고쳐 그리기)을 탄다.
+  const solFigure = job.mode === "figure" && job.payload?.sol === true;
+  if (((job.mode === "problem" && !auto) || solFigure) && problemLoopEnabled()) return runProblemLoopJob(admin, job);
   const tag = `figure-jobs/run ${job.id.slice(0, 8)}`;
   const image = await loadAsDataUrl(admin, job.input_path);
   if (!image) {

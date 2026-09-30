@@ -18,7 +18,7 @@ function statusText(j: FigureJob, top: string): string {
   if (j.status === "done" && j.stage === "max-offer") return "완료 · 글자·도형 차이가 남았어요";
   if (j.status !== "running" && j.status !== "pending") return STATUS_TEXT[j.status];
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계로 돈다(`gen:N` / `verify:N`).
-  if (j.mode === "problem" && j.stage) {
+  if (j.mode !== "passage" && j.stage) {
     if (j.stage === "patch-plan") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}sol 이 수정 요청을 해석하는 중`;
     if (j.stage === "patch") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}수정하는 중`;
     const gen = /^gen:(\d+)$/.exec(j.stage);
@@ -53,7 +53,7 @@ function statusText(j: FigureJob, top: string): string {
  */
 function remainingSeconds(j: FigureJob): number {
   if (j.status !== "running" && j.status !== "pending") return 0;
-  if (j.mode === "problem") {
+  if (j.mode === "problem" || (j.mode !== "passage" && j.stage)) {
     // 전 단계 기대값: 그리기 low + 검수, 30% 는 medium 으로 한 번 더. max 는 사용자 확인 뒤에만 돈다.
     const stage = j.stage ?? "gen:0";
     if (stage === "patch-plan") return 90;
@@ -308,7 +308,7 @@ export default function FigureJobsPanel() {
                       <span className="text-slate-400"> · 예상 {formatWait(remainingSeconds(j))}</span>
                     )}
                   </p>
-                  {(j.mode === "passage" || j.mode === "problem") && j.note && (
+                  {j.note && (
                     <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{j.note}</p>
                   )}
                   {/* 어느 문제가 비쌌는지 보이게 한다. 캐시에 걸린 작업에는

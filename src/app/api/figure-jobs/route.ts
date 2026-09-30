@@ -105,6 +105,8 @@ export async function POST(req: NextRequest) {
     payload?: unknown;
     /** 수정 모드 다시 그리기 — 우리 프로세스(검수 반복) 없이 quality=auto 로 한 번만. */
     auto?: boolean;
+    /** 수정 창에서 그림 하나를 다시 그릴 때 sol 검수 흐름을 고른다. */
+    sol?: boolean;
   };
   try {
     body = await req.json();
@@ -194,6 +196,7 @@ export async function POST(req: NextRequest) {
           : null,
       input_path: inputPath,
       ...(mode === "problem" && body.auto === true ? { payload: { auto: true } } : {}),
+      ...(mode === "figure" && body.sol === true ? { payload: { sol: true } } : {}),
       width: typeof body.width === "number" && body.width > 0 ? Math.round(body.width) : null,
       height:
         typeof body.height === "number" && body.height > 0 ? Math.round(body.height) : null,
@@ -501,7 +504,7 @@ export async function PATCH(req: NextRequest) {
       finished_at: null,
       started_at: null,
       // 문제 통째로 그리기는 그리기·검수를 단계로 도는데, 다시 시도는 깨끗이 처음부터 한다.
-      ...(row.mode === "problem" ? { stage: null, state: null, note: null } : {}),
+      ...(row.mode === "problem" || (row.payload as { sol?: boolean } | null)?.sol ? { stage: null, state: null, note: null } : {}),
     };
     if (!billing.unlimited && !billing.byok && !row.charged) {
       const { data, error } = await supabase.rpc("consume_recognition_credit", {

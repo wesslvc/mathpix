@@ -124,6 +124,8 @@ export type ProblemLoopState = {
 
 export type ProblemLoopJob = {
   id: string;
+  /** 그림 하나(figure)를 이 흐름으로 그릴 때도 있다(수정 창의 "sol 쓰기"). 없으면 문제 통째로. */
+  mode?: "figure" | "problem" | "passage";
   user_id: string;
   korean: boolean;
   instruction: string | null;
@@ -372,7 +374,7 @@ async function runPatchPlan(
 
   const ask = await askSol(patchPlanPrompt(user, findings), [original, current], ctx, "수정 해석");
   if (ask.krw > 0 && !ctx.byokApiKey) {
-    await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "problem", what: "sol 수정 해석", krw: ask.krw });
+    await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: job.mode === "figure" ? "figure" : "problem", what: "sol 수정 해석", krw: ask.krw });
   }
   let plan: string | undefined;
   let understood: string | undefined;
@@ -442,7 +444,7 @@ async function runPatch(
     await logAiCost(admin, {
       userId: job.user_id,
       jobId: job.id,
-      kind: "problem",
+      kind: job.mode === "figure" ? "figure" : "problem",
       what: "그림 수정(quality 미지정)",
       krw: out.usage.estKrw,
       usd: out.usage.estUsd,
@@ -474,7 +476,7 @@ async function runPatch(
       }
     }
     if (solKrw > 0 && !ctx.byokApiKey) {
-      await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "problem", what: "sol 검수", krw: solKrw });
+      await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: job.mode === "figure" ? "figure" : "problem", what: "sol 검수", krw: solKrw });
     }
   }
 
@@ -523,7 +525,7 @@ async function runGen(
 
   const out = await runFigureGeneration({
     image: original,
-    mode: "problem",
+    mode: job.mode === "figure" ? "figure" : "problem",
     korean: job.korean,
     instruction: joinInstructions(job.instruction, i === 0 ? undefined : state.instruction),
     inputSize: job.width && job.height ? { width: job.width, height: job.height } : undefined,
@@ -546,7 +548,7 @@ async function runGen(
     await logAiCost(admin, {
       userId: job.user_id,
       jobId: job.id,
-      kind: "problem",
+      kind: job.mode === "figure" ? "figure" : "problem",
       what: `그림 ${quality}`,
       krw: out.usage.estKrw,
       usd: out.usage.estUsd,
@@ -673,7 +675,7 @@ async function runVerify(
     await logAiCost(admin, {
       userId: job.user_id,
       jobId: job.id,
-      kind: "problem",
+      kind: job.mode === "figure" ? "figure" : "problem",
       what: "sol 검수",
       krw: solKrw,
     });
@@ -688,8 +690,9 @@ async function runVerify(
   const checked: ProblemLoopState = { ...withCost, rounds };
   console.info(`[${ctx.tag}] 검수 ${round.quality} 차이 ${diffs.length}곳`);
 
-  // 차이가 없거나 마지막 라운드면 끝.
-  if (diffs.length === 0 || i >= PROBLEM_LADDER.length - 1) {
+  // 차이가 없거나 마지막 라운드면 끝. 그림 하나(figure)는 low → medium 까지만 돌고 맨 위 단계·확인 대기는 없다.
+  const lastAuto = job.mode === "figure" ? PROBLEM_LADDER.length - 2 : PROBLEM_LADDER.length - 1;
+  if (diffs.length === 0 || i >= lastAuto) {
     return finalize(admin, checked, bestRound(rounds), ctx, "");
   }
 

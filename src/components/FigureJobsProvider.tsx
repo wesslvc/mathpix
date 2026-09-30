@@ -89,6 +89,8 @@ export type FigureJob = {
    * quality=auto 로 **한 번만** 그린다(사용자 지시). 서버가 작업 payload 로 기억한다.
    */
   auto?: boolean;
+  /** 수정 창에서 그림 하나를 다시 그릴 때 **sol 검수 흐름**을 골랐다(그리기 → sol 대조 → 고쳐 그리기). */
+  sol?: boolean;
   status: "pending" | "running" | "done" | "error";
   /** 이 작업에 실제로 든 **추정** 비용(달러). 캐시에 걸렸으면 없다. */
   costUsd?: number;
@@ -709,7 +711,7 @@ export default function FigureJobsProvider({
         // 같은 그림을 이미 그린 적이 있으면 그대로 쓴다(세트 문항 대비).
         // 모드·모델·지시를 키에 넣는다 — 하나라도 빠지면 바꿨는데도 옛 결과가 나온다.
         const cacheKey = await figureCacheKey(
-          `${mode}${mode === "problem" && job.auto ? ":auto" : ""}:${DEFAULT_FIGURE_MODEL}:${job.instruction ?? ""}:${forModel}`,
+          `${mode}${mode === "problem" && job.auto ? ":auto" : ""}${mode === "figure" && job.sol ? ":sol" : ""}:${DEFAULT_FIGURE_MODEL}:${job.instruction ?? ""}:${forModel}`,
         );
         const cached = readFigureCache(cacheKey);
         if (cached) {
@@ -737,6 +739,7 @@ export default function FigureJobsProvider({
             korean: job.korean ? true : undefined,
             instruction: job.instruction,
             auto: mode === "problem" && job.auto ? true : undefined,
+            sol: mode === "figure" && job.sol ? true : undefined,
             // 넣을 때 아직 저장 전일 수 있다 — 화면이 계속 갱신해 주는
             // 스냅샷에서 지금 아는 값을 읽는다. 나중에 생기면 sync 가 알려 준다.
             problemId:

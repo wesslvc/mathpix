@@ -418,6 +418,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       // 우리 프로세스(그리기 → sol 검수 → 고쳐 그리기), 안 고르면 quality=auto 로 한 번만 그리고 sol 검증 없이 끝난다.
       // 그림 하나(도형) 다시 그리기는 그 프로세스가 없어 늘 한 번이다.
       auto: !(useSol && isWholeProblemFigure(id)),
+      // 그림 하나(도형)는 "sol 쓰기"를 고르면 같은 검수 흐름을 탄다(그리기 → sol 대조 → 고쳐 그리기, medium 까지).
+      sol: useSol && !isWholeProblemFigure(id) ? true : undefined,
       // 국어 문항은 거의 글자뿐이라 서버가 프롬프트 톤을 고를 때 참고한다
       // (Mathpix 참고 글 자체는 더 이상 안 쓴다 — 위 FigureJobsProvider 참고).
       korean: editing?.korean ? true : undefined,
@@ -1309,9 +1311,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                               type="button"
                               onClick={() => {
                                 const crop = redrawNote[f.id]?.trim() ? raster : (f.origin ?? raster);
-                                // 문제 통째로 그린 그림이면 sol 을 쓸지 먼저 묻는다. 그림 하나는 바로 그린다.
-                                if (isWholeProblemFigure(f.id)) setRedrawAsk((prev) => ({ ...prev, [f.id]: crop }));
-                                else requestRedraw(f.id, crop);
+                                // 문제 통째로 그린 그림이든 그림 하나(도형)든 sol 을 쓸지 먼저 묻는다.
+                                setRedrawAsk((prev) => ({ ...prev, [f.id]: crop }));
                               }}
                               disabled={busy || (f.ai === true && !f.origin)}
                               variant="outline" size="xs"
@@ -1340,6 +1341,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 <p className="mt-0.5 leading-snug text-slate-500">
                                   <b>쓰면</b> 그린 뒤 sol 이 원본과 글자·도형(점 위치 포함)·손글씨를 대조해서 틀린 곳을 알려 주고, 차이가 있으면
                                   다시 그려요(더 정확하지만 몇 분 걸려요). <b>안 쓰면</b> 한 번만 그리고 바로 끝나요(빠르지만 검수 없음).
+                                  {isWholeProblemFigure(f.id) ? "" : " (도형은 두 번까지 그려요)"}
                                 </p>
                                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                                   <Button
