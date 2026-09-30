@@ -13,6 +13,7 @@ import {
   remainingDiffs,
   type ProblemLoopState,
 } from "@/lib/problemLoopRun";
+import { cardUrl } from "@/lib/cardUrl";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
     // 서비스 키로 읽되 **본인 것만** 걸러 준다.
     const { data, error } = await createAdminClient()
       .from("figure_jobs")
-      .select("id, label, state")
+      .select("id, label, input_path, state")
       .eq("user_id", user.id)
       .eq("status", "done")
       .eq("stage", "max-offer")
@@ -65,6 +66,9 @@ export async function GET(req: NextRequest) {
           label: r.label as string,
           quality: rem?.quality ?? null,
           diffs: (rem?.diffs ?? []).slice(0, 30),
+          // 양쪽을 나란히 보여 주려고 — 원본(넣을 때 올린 입력)과 지금 저장된 생성 그림.
+          originalUrl: cardUrl(r.input_path as string),
+          generatedUrl: rem?.path ? cardUrl(rem.path) : null,
         };
       }),
     });

@@ -162,6 +162,9 @@ export type ProblemSnapshot = {
 /** 지금 저장된 그림에 남은 차이(글자·깨진 글자·도형·손글씨 잔재). */
 export type OfferDiffs = {
   quality: string | null;
+  /** 원본(넣을 때 올린 사진)과 지금 저장된 생성 그림의 주소 — 확인 창이 나란히 보여 준다. */
+  originalUrl?: string;
+  generatedUrl?: string | null;
   diffs: { kind?: "text" | "glyph" | "figure" | "handwriting"; original: string; recreated: string; where: string }[];
 };
 
@@ -838,12 +841,23 @@ export default function FigureJobsProvider({
       const res = await fetch("/api/figure-jobs?offers=1", { cache: "no-store" });
       if (!res.ok) return {};
       const json = await jsonOf<{
-        offers?: { id: string; quality: string | null; diffs: OfferDiffs["diffs"] }[];
+        offers?: {
+          id: string;
+          quality: string | null;
+          diffs: OfferDiffs["diffs"];
+          originalUrl?: string;
+          generatedUrl?: string | null;
+        }[];
       }>(res);
       const out: Record<string, OfferDiffs> = {};
       for (const o of json.offers ?? []) {
         const local = jobsRef.current.find((j) => j.serverId === o.id);
-        if (local) out[local.id] = { quality: o.quality, diffs: o.diffs };
+        if (local) out[local.id] = {
+          quality: o.quality,
+          diffs: o.diffs,
+          originalUrl: o.originalUrl,
+          generatedUrl: o.generatedUrl,
+        };
       }
       return out;
     } catch {

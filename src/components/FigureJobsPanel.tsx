@@ -391,7 +391,7 @@ export default function FigureJobsPanel() {
           onClick={() => !maxBusy && setConfirming(null)}
         >
           <div
-            className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl bg-white shadow-xl"
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="border-b border-slate-200 px-4 py-3">
@@ -417,6 +417,35 @@ export default function FigureJobsPanel() {
                         {j.label}
                         {d && <span className="ml-1 font-normal text-slate-400">· 차이 {d.diffs.length}곳</span>}
                       </p>
+                      {d && (d.originalUrl || d.generatedUrl) && (
+                        // 원본과 지금 저장된 생성 그림을 **나란히** — 차이를 눈으로 대 볼 수 있게. 누르면 크게 열린다.
+                        <div className="mt-1.5 grid grid-cols-2 gap-2">
+                          {(
+                            [
+                              ["원본", d.originalUrl],
+                              [`생성${d.quality ? ` (${d.quality})` : ""}`, d.generatedUrl],
+                            ] as const
+                          ).map(([cap, url]) => (
+                            <figure key={cap} className="min-w-0">
+                              <figcaption className="mb-0.5 text-[10px] font-medium text-slate-500">{cap}</figcaption>
+                              {url ? (
+                                <a href={url} target="_blank" rel="noreferrer" title="누르면 크게 열려요">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={url}
+                                    alt={cap}
+                                    className="max-h-64 w-full rounded border border-slate-200 bg-white object-contain"
+                                  />
+                                </a>
+                              ) : (
+                                <p className="rounded border border-dashed border-slate-200 px-2 py-6 text-center text-[10px] text-slate-400">
+                                  그림을 불러오지 못했어요
+                                </p>
+                              )}
+                            </figure>
+                          ))}
+                        </div>
+                      )}
                       {!d || d.diffs.length === 0 ? (
                         <p className="mt-0.5 text-[11px] text-slate-400">
                           {d ? "차이 목록이 남아 있지 않아요." : "차이 목록을 불러오지 못했어요."}
