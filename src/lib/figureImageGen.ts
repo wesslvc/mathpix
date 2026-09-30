@@ -715,13 +715,16 @@ function stripCircled(prompt: string): string {
  * 일부 수정하는 구조"). 입력은 원본 사진이 아니라 **이미 다시 그려진 그림**(거의 맞은 것)이고, 다시 그리지 않고
  * 적힌 곳만 고친다 — 나머지는 글자 하나·픽셀 위치까지 그대로 둬야 한다(다시 그리면 멀쩡하던 곳이 틀어진다).
  */
-export function patchPrompt(changes: string): string {
+export function patchPrompt(changes: string, strong = false): string {
+  const force = strong
+    ? `\nIMPORTANT — these edits are MANDATORY and were measured against the original photo by a reviewer: the previous attempt did NOT follow them. carry out EVERY numbered edit exactly at the stated position (a point moved by the stated distance must land within about 2% of the stated target position, on the stated landmark). do NOT leave any item unchanged, do NOT move anything that is not listed. after editing, silently re-check each item against its stated position and fix again if it is off.`
+    : "";
   return `task: this image = a RE-DRAWN Korean exam question that is ALMOST correct. EDIT it — do NOT redraw it. apply ONLY the changes below and keep EVERYTHING else exactly as it is: every other character, number, choice, table, figure, position, size, spacing, the layout, the page size and the white background. do not re-typeset, do not "improve" or tidy anything, do not touch text that is not mentioned.
 changes to make:
 """
 ${changes.trim()}
 """
-rules: fix only the named places; when an item is ambiguous change the smallest possible area; circled markers (㉠ ① ⓐ) not listed stay exactly as they are (a thin circle with the inner glyph centered); handwriting that is mentioned must be erased completely (restore the printed content under it, or clean white paper); output = the same image with only those fixes.`;
+rules: fix only the named places; when an item is ambiguous change the smallest possible area; circled markers (㉠ ① ⓐ) not listed stay exactly as they are (a thin circle with the inner glyph centered); handwriting that is mentioned must be erased completely (restore the printed content under it, or clean white paper); output = the same image with only those fixes.${force}`;
 }
 
 function withInstruction(prompt: string, instruction?: string): string {
@@ -788,6 +791,8 @@ export async function generateFigureImage(
   skipCircled?: boolean,
   /** 있으면 다시 그리지 않고 **이 내용만 고치는** 편집 프롬프트를 쓴다(`patchPrompt`). */
   patchNote?: string,
+  /** 수정 지시를 **강하게** 전달한다(sol 이 위치까지 재서 못박은 지시일 때). */
+  patchStrong = false,
 ): Promise<FigureImageResult | null> {
   const apiKey = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -829,7 +834,7 @@ export async function generateFigureImage(
     form.append(
       "prompt",
       patchNote !== undefined
-        ? patchPrompt(patchNote)
+        ? patchPrompt(patchNote, patchStrong)
         : withInstruction(
         mode === "problem"
           ? withReference(

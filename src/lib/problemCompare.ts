@@ -214,11 +214,12 @@ ${userText.trim() || "(nothing written — use the findings below)"}
 """
 ${findings ? `earlier automatic findings (image 2 vs image 1):\n${findings}\n` : ""}
 you translate this into PRECISE edit instructions for an image-editing model that cannot understand vague location words ("here", "a bit to the right", "near B") and only sees image 2.
-for EACH fix:
-- find the thing in BOTH images.
+do a DETAILED COMPARISON first, then write the edits as STRONG imperative commands (MOVE / ERASE / REPLACE … "exactly", "do not") — the image-editing model ignores soft wording, so be forceful and numeric. for EACH fix:
+- find the thing in BOTH images, and also check every neighbouring point / label / element the fix could plausibly involve (the person often names only one of several that are off).
 - POINTS / DOTS / MARKERS on maps, graphs, figures: give its position in image 1 (the target) and in image 2 (the current) relative to printed landmarks (a coastline bend, an island, a river or border, a printed grid / latitude–longitude line, an axis, a labelled neighbour, nearby printed text) AND as % of the figure box (x from the left edge, y from the top edge). then say exactly how to move it: direction + distance in % of the figure width/height + the landmark it must end up on or beside ("move point B about 6% of the figure width to the left so it sits exactly on the crossing of the 37°N line and the coast").
 - TEXT: quote the exact current text and the exact target text (from image 1), and where it sits.
 - HANDWRITING: say which marks to erase and where; what printed content is under them (or "clean white paper").
+- give a checkable success condition ("B must end within ~2% of x=56%, y=41%, on the 37°N line").
 - say what must NOT change around it.
 if the request is ambiguous or contradicts image 1, pick the reading that makes image 2 match image 1 and say so in "understood". if it asks for something that is not visible / not possible, say so instead of inventing.
 write "understood" in Korean (1–2 short sentences: what you understood, so the person can check). write edits in English or Korean, whichever is clearer, but keep quotes exact.

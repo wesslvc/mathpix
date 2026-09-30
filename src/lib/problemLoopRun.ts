@@ -100,6 +100,8 @@ export type ProblemLoopState = {
   patch?: {
     instruction: string;
     includeDiffs: boolean;
+    /** 사용자가 골랐다 — sol 이 위치까지 자세히 비교해 그림 모델에 **강하게** 지시하고, 고친 뒤 다시 검수한다. 안 골랐으면 글 그대로. */
+    useSol?: boolean;
     /** sol 이 사용자 요청을 구체적인 편집 지시로 풀어 쓴 것(`patch-plan` 단계가 채운다). 못 풀었으면 없다. */
     plan?: string;
     /** 사용자에게 보여 줄 "이렇게 이해했어요". */
@@ -393,7 +395,7 @@ async function runPatchPlan(
     state: {
       ...state,
       solKrw: (state.solKrw ?? 0) + ask.krw,
-      patch: { instruction: user, includeDiffs: state.patch?.includeDiffs ?? false, plan, understood },
+      patch: { instruction: user, includeDiffs: state.patch?.includeDiffs ?? false, useSol: true, plan, understood },
     },
     note,
   };
@@ -432,6 +434,7 @@ async function runPatch(
     deadlineMs: ctx.deadlineMs,
     tag: `${ctx.tag} 수정`,
     patchNote: changes,
+    patchStrong: !!state.patch?.plan,
   });
   if (!out.ok) return { kind: "fail", error: out.error, cleanup: [] };
 
@@ -458,7 +461,8 @@ async function runPatch(
   // 같은 시간 안에서 sol 이 원본과 다시 견줘 남은 차이를 새로 찾는다(실패해도 고친 그림은 그대로 둔다).
   let diffs: TextDiff[] | null = null;
   let solKrw = 0;
-  const original = await loadAsDataUrl(admin, job.input_path);
+  // sol 을 고른 경우에만 다시 검수한다(안 골랐으면 sol 을 안 부른다).
+  const original = state.patch?.useSol ? await loadAsDataUrl(admin, job.input_path) : null;
   if (original) {
     const ask = await askSol(VERIFY_PROMPT, [original, out.dataUrl], ctx, "검수");
     solKrw = ask.krw;
@@ -489,7 +493,7 @@ async function runPatch(
     patch: undefined,
     instruction: history.length ? accumulatedCorrection(history) : state.instruction,
   };
-  const summary = diffs === null ? "검수는 못 했어요" : diffs.length === 0 ? "글자·도형 차이 없음" : `남은 차이 ${diffs.length}곳`;
+  const summary = !state.patch?.useSol ? "sol 검수 없이 저장" : diffs === null ? "검수는 못 했어요" : diffs.length === 0 ? "글자·도형 차이 없음" : `남은 차이 ${diffs.length}곳`;
   const understood = state.patch?.understood;
   return {
     kind: "done",

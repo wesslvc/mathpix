@@ -263,7 +263,7 @@ export async function POST(req: NextRequest) {
  *  - `releaseApply` : 반영에 실패해 찜을 푼다.
  */
 export async function PATCH(req: NextRequest) {
-  let body: { id?: string; action?: string; problemId?: string; instruction?: string; includeDiffs?: boolean };
+  let body: { id?: string; action?: string; problemId?: string; instruction?: string; includeDiffs?: boolean; useSol?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -387,6 +387,7 @@ export async function PATCH(req: NextRequest) {
   if (body.action === "patch") {
     const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 1000) : "";
     const includeDiffs = body.includeDiffs !== false;
+    const useSol = body.useSol !== false;
     if (!instruction && !includeDiffs) {
       return NextResponse.json({ error: "고칠 내용을 적거나 남은 차이를 함께 고치도록 골라주세요." }, { status: 400 });
     }
@@ -424,9 +425,10 @@ export async function PATCH(req: NextRequest) {
       .from("figure_jobs")
       .update({
         status: "pending",
-        stage: "patch-plan",
-        state: { ...(row.state as ProblemLoopState), patchPhase: true, patch: { instruction, includeDiffs } },
-        note: "sol 이 요청을 해석하는 중",
+        // sol 을 고르면 해석 걸음부터, 아니면 곧바로 그린다.
+        stage: useSol ? "patch-plan" : "patch",
+        state: { ...(row.state as ProblemLoopState), patchPhase: true, patch: { instruction, includeDiffs, useSol } },
+        note: useSol ? "sol 이 원본과 비교해 요청을 해석하는 중" : "적어 주신 곳을 수정하는 중",
         error: null,
         started_at: null,
         finished_at: null,

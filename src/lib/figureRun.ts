@@ -59,6 +59,8 @@ export type RunInput = {
   skipCircled?: boolean;
   /** 다시 그리지 않고 이 내용만 고친다(입력이 이미 다시 그려진 그림일 때). */
   patchNote?: string;
+  /** 수정 지시를 강하게 전달한다(`patchPrompt` 의 strong). */
+  patchStrong?: boolean;
 };
 
 export type RunOutcome =
@@ -105,6 +107,7 @@ export async function runFigureGeneration(input: RunInput): Promise<RunOutcome> 
               input.outputSize,
               input.skipCircled,
               input.patchNote,
+              input.patchStrong,
             );
             break;
           } catch (err) {

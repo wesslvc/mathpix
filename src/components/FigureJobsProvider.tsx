@@ -196,7 +196,7 @@ type Ctx = {
   /** max 확인 대기 중인 문제들에 **남은 차이**(확인 창에 보여 준다). 키는 로컬 작업 id. */
   loadOfferDiffs: () => Promise<Record<string, OfferDiffs>>;
   /** 다시 그리지 않고 저장된 그림에서 적은 곳만 고친다. 실패하면 이유를 돌려준다. */
-  confirmPatch: (id: string, instruction: string, includeDiffs: boolean) => Promise<string | null>;
+  confirmPatch: (id: string, instruction: string, includeDiffs: boolean, useSol: boolean) => Promise<string | null>;
   /** max 를 확인받고 돌린다. 실패하면 이유를 돌려준다(토큰 부족 등). */
   confirmMax: (id: string) => Promise<string | null>;
   /** max 는 안 돌리고 지금 그림으로 둔다. */
@@ -894,14 +894,14 @@ export default function FigureJobsProvider({
   );
 
   const confirmPatch = useCallback(
-    async (id: string, instruction: string, includeDiffs: boolean): Promise<string | null> => {
+    async (id: string, instruction: string, includeDiffs: boolean, useSol: boolean): Promise<string | null> => {
       const serverId = jobsRef.current.find((j) => j.id === id)?.serverId;
       if (!serverId) return "서버 작업을 찾지 못했어요.";
       try {
         const res = await fetch("/api/figure-jobs", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: serverId, action: "patch", instruction, includeDiffs }),
+          body: JSON.stringify({ id: serverId, action: "patch", instruction, includeDiffs, useSol }),
         });
         const json = await jsonOf<{ job?: ServerJob; error?: string }>(res);
         if (!res.ok || !json.job) return json.error ?? "수정을 시작하지 못했어요.";

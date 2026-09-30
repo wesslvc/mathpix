@@ -20,7 +20,7 @@ function statusText(j: FigureJob, top: string): string {
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계로 돈다(`gen:N` / `verify:N`).
   if (j.mode === "problem" && j.stage) {
     if (j.stage === "patch-plan") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}sol 이 수정 요청을 해석하는 중`;
-    if (j.stage === "patch") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}수정하고 sol 이 다시 검수하는 중`;
+    if (j.stage === "patch") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}수정하는 중`;
     const gen = /^gen:(\d+)$/.exec(j.stage);
     const ver = /^verify:(\d+)$/.exec(j.stage);
     const q = ["low", "medium", top];
@@ -126,6 +126,8 @@ export default function FigureJobsPanel() {
   const [choice, setChoice] = useState<"patch" | "redraw">("patch");
   const [patchText, setPatchText] = useState("");
   const [patchDiffs, setPatchDiffs] = useState(true);
+  // sol 이 지점 위치 등을 원본과 자세히 비교해 그림 모델에 강하게 지시할지(사용자가 고른다).
+  const [patchSol, setPatchSol] = useState(true);
 
   if (jobs.length === 0) return null;
 
@@ -141,6 +143,7 @@ export default function FigureJobsPanel() {
     setPicked(new Set(list.map((j) => j.id)));
     setPatchText("");
     setPatchDiffs(true);
+    setPatchSol(true);
     setConfirming(list);
     setDetails(await loadOfferDiffs());
   }
@@ -162,7 +165,7 @@ export default function FigureJobsPanel() {
   async function runPatch(j: FigureJob) {
     setMaxBusy(true);
     setMaxError(null);
-    const err = await confirmPatch(j.id, patchText, patchDiffs);
+    const err = await confirmPatch(j.id, patchText, patchDiffs, patchSol);
     setMaxBusy(false);
     if (err) setMaxError(err);
     else setConfirming(null);
@@ -546,7 +549,7 @@ export default function FigureJobsPanel() {
                 {choice === "patch" && (
                   <div className="mt-2">
                     <p className="mb-1 text-[11px] text-slate-500">
-                      지금 저장된 그림을 <b>다시 그리지 않고</b> 적은 곳만 고쳐요. <b>sol 이 원본과 지금 그림을 보고 요청을 위치·좌표까지 풀어 써서</b> 그림 모델에 전달하고, 고친 뒤 다시 검수해요. 마음에 안 들면 또 수정할 수 있어요.
+                      지금 저장된 그림을 <b>다시 그리지 않고</b> 적은 곳만 고쳐요. 마음에 안 들면 또 수정할 수 있어요.
                     </p>
                     <textarea
                       value={patchText}
@@ -555,6 +558,18 @@ export default function FigureJobsPanel() {
                       placeholder="고칠 곳을 편하게 적어 주세요. 예) 3번 선지의 ㉡ 을 ㉢ 으로 · B 점이 원본보다 왼쪽이야 · 지도 A 옆 손글씨 지우기 (위치는 sol 이 원본과 비교해 정확히 잡아요)"
                       className="w-full resize-none rounded border border-slate-300 px-2 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:border-amber-500 focus:outline-none"
                     />
+                    <label className="mt-1 flex items-start gap-1.5 rounded border border-amber-200 bg-amber-50/60 px-1.5 py-1 text-[11px] text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={patchSol}
+                        onChange={(e) => setPatchSol(e.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <b>sol 이 자세히 비교해서 강하게 지시하기</b> — 점 위치 같은 것을 원본과 견줘 기준물·좌표(%)까지 재고, 그림 모델에
+                        &quot;정확히 여기로&quot; 하고 못박아요. 고친 뒤 다시 검수도 해요. (추천 · 1~2분 더 · 위치가 자꾸 안 맞을 때)
+                      </span>
+                    </label>
                     <label className="mt-1 flex items-start gap-1.5 text-[11px] text-slate-600">
                       <input
                         type="checkbox"
