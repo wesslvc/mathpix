@@ -10,6 +10,8 @@
 //
 // 이 파일에는 네트워크 호출도 환경변수도 없다(화면과 서버가 같이 쓴다).
 
+import { circledCharsIn, circledPairs } from "./circledChars";
+
 /** 원본과 다시 만든 것 사이의 글자 차이 하나. */
 export type TextDiff = {
   /** 원본(사진 1)에 인쇄된 글자. */
@@ -36,8 +38,15 @@ find every place where the PRINTED TEXT of image 2 differs from image 1:
 - math: wrong symbols, exponents, subscripts, fractions (numerator/denominator), inequality direction, variables
 - circled markers (㉠㉡ ①② ⓐⓑ ㉮㉯) and choice numbers — a wrong or swapped marker IS a difference
 - negations and key words (옳은 ↔ 옳지 않은, 않는, 아닌, 최대/최소 ...) — highest priority
+- circled markers — see the block below, highest priority too
 - lines/sentences/choices that are missing or duplicated
 - text inside tables and figure labels (axis labels, numbers on graphs, legend) also counts
+
+circled markers (㉠㉡㉢ / ㉮㉯㉰ / ①②③ / ⓐⓑⓒ) — YOU are the only one checking these. the drawing model was NOT told how to draw them, so expect mistakes:
+- first list every circled marker in image 1 in reading order (stem, boxes, <보기>, tables, choices) by its INNER glyph: ㉠㉡㉢㉣㉤㉥㉦㉧㉨㉩㉪㉫㉬㉭=ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ; ㉮㉯㉰㉱㉲=가나다라마; ①..⑳=1..20; ⓐⓑⓒⓓⓔ=a b c d e. read each circle separately, zoomed in. never infer one from its neighbours (a question may use only ㉡ and ㉣, or repeat ㉠ four times)
+- list image 2 the same way and compare position by position
+- report a difference when the inner glyph differs, the family changes (㉠→① / ㉠→㉮), a marker is missing / extra / renumbered, a circle is drawn as a square / parenthesis / bare character, or the same marker looks different in different places
+- in "recreated" write the inner glyph you actually see, e.g. "㉡ (inner ㄴ)"
 
 do NOT report: font, size, spacing, line breaks, alignment, box/table border style, drawing style of figures, handwriting, image quality, the same math written in different but equivalent notation.
 be precise — quote the exact characters. if you are not sure a difference exists, do not report it.
@@ -75,8 +84,14 @@ export function correctionInstruction(diffs: TextDiff[]): string {
     const got = d.recreated ? `"${d.recreated}"` : "(빠짐)";
     return `${i + 1}. ${d.where ? `[${d.where}] ` : ""}원본 "${d.original}" 인데 지난번에 ${got} 로 그렸다.`;
   });
+  // 그림 모델은 원문자 그리는 법을 프롬프트로 못 받는다(원문자는 sol 이 지킨다). 그래서 틀린 원문자가
+  // 있으면 **여기서** 안쪽 글자를 짚어 준다 — 동그라미 안에 무엇인지가 핵심이다.
+  const circled = circledCharsIn(diffs.map((d) => d.original).join(" "));
+  const circledLine = circled.length
+    ? `\n원문자는 글자 하나로 외워 그리지 말고 얇은 원을 긋고 그 안 가운데에 글자를 넣어 그린다: ${circledPairs(circled)}. 같은 표지는 어디서나 똑같이, 계열(㉠→①)을 넘나들지 말 것.`
+    : "";
   return `지난번 결과에서 아래 글자가 원본 사진과 달랐다. 이번에는 사진과 똑같이 그려라(나머지도 그대로 베낀다):
-${lines.join("\n")}`;
+${lines.join("\n")}${circledLine}`;
 }
 
 function parseJsonObject(text: string): unknown {

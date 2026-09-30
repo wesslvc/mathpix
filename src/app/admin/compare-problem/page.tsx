@@ -14,12 +14,18 @@ import { cn } from "@/lib/utils";
  * 2026-09-30 사용자 지시 — "sol 이 읽고 sunburst 알아서 그리고 대조하고 다른 거 그리고
  * 이런 식으로. 대조(비교표)는 필요 없어, 이것만 놔두고 퀄리티랑 추론강도 조정만 가능하게".
  *
- * 흐름: sunburst 가 문제를 통째로 그린다 → sol 이 원본과 대조해 글자가 다른 곳을 찾는다 →
- * 있으면 그 목록을 지시로 붙여 sunburst 가 **다시** 그린다 → 또 대조 … 차이가 없어지거나
- * `MAX_DRAWS` 번 그릴 때까지. 마지막에 **남은 차이가 가장 적은 그림**(같으면 나중 것)을 남긴다.
+ * 흐름: sunburst 가 **가장 낮은 quality 로** 문제를 통째로 그린다 → sol 이 원본과 대조해 글자가
+ * 다른 곳을 찾는다 → 있으면 그 목록을 지시로 붙여 **quality 를 한 단계 올려** 다시 그린다 →
+ * 또 대조 … 차이가 없어지거나 끝 quality 까지 그릴 때까지(사용자 — "low 로 시작해서 퀄리티를
+ * 하나씩 올리게끔"). 마지막에 **남은 차이가 가장 적은 그림**(같으면 더 싼 앞의 것)을 남긴다.
  *
- * 조절하는 것은 둘뿐이다: sunburst 의 `quality`, sol 의 추론 강도. sol 모델(`gpt-6.1-sol`)과
- * 출력 크기(운영과 같은 비율 맞춤)는 고정이다.
+ * **원문자(㉠ ① ⓐ)는 sol 이 지킨다**(사용자 — "원문자 주의를 선버스트에게 보내던 걸 sol 에게").
+ * 이 화면의 sunburst 프롬프트에서는 원문자 지시(`CIRCLED_CHARS`)를 뺀다(`skipCircled`) — 운영
+ * 프롬프트는 그대로다. 대신 sol 대조가 원문자를 안쪽 글자로 하나씩 세어 견주고, 틀린 원문자가
+ * 있으면 다시 그릴 때 지시에 안쪽 글자 표가 붙는다(`correctionInstruction`).
+ *
+ * 조절하는 것: 시작·끝 quality, sol 의 추론 강도. sol 모델(`gpt-6.1-sol`)과 출력 크기(운영과 같은
+ * 비율 맞춤)는 고정이다.
  *
  * 시간은 화면에서 잰 벽시계 시간(네트워크 포함), 원가는 공표 단가로 계산한 값이다.
  * 토큰은 차감하지 않는다. (운영·① 단독·③ 조판과 견주던 예전 비교 화면은 git 이력에 있다.)
@@ -27,13 +33,11 @@ import { cn } from "@/lib/utils";
 
 const SOL_MODEL = "gpt-6.1-sol";
 const EFFORTS = ["low", "medium", "high"];
-/** sunburst 출력 품질(사용자가 확인해 준 값들). */
-const QUALITIES = ["high", "xhigh", "max", "medium", "low", "auto"];
 /**
- * 그리기 횟수 상한(첫 그리기 포함). 한 번 그릴 때마다 원가가 붙으므로 끝없이 돌리지 않는다.
- * 차이가 0곳이면 그 전에 멈춘다.
+ * sunburst 출력 품질 사다리(사용자가 확인해 준 값들, 낮은 것부터). 한 번 그릴 때마다 한 칸
+ * 올린다. `auto` 는 높낮이를 알 수 없어 뺐다. 차이가 0곳이면 끝까지 안 가고 멈춘다.
  */
-const MAX_DRAWS = 3;
+const LADDER = ["low", "medium", "high", "xhigh", "max"];
 
 type Step = {
   label: string;
@@ -43,7 +47,7 @@ type Step = {
   note?: string;
 };
 
-type Round = { img: string; diffs?: TextDiff[] };
+type Round = { img: string; quality: string; diffs?: TextDiff[] };
 
 type Result = {
   rounds: Round[];
@@ -115,7 +119,8 @@ export default function CompareProblemPage() {
   const [name, setName] = useState("");
   const [prepared, setPrepared] = useState<string | null>(null);
   const [effort, setEffort] = useState("medium");
-  const [quality, setQuality] = useState(QUALITIES[0]);
+  const [startQ, setStartQ] = useState("low");
+  const [endQ, setEndQ] = useState("max");
   const [steps, setSteps] = useState<Step[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [result, setResult] = useState<Result | null>(null);
@@ -171,29 +176,36 @@ export default function CompareProblemPage() {
     }
 
     const original = prepared;
+    // 시작 quality 부터 끝 quality 까지. 끝이 시작보다 낮으면 시작 하나만 그린다.
+    const from = LADDER.indexOf(startQ);
+    const ladder = LADDER.slice(from, Math.max(from, LADDER.indexOf(endQ)) + 1);
     const done: Round[] = [];
     const t0 = performance.now();
     try {
       const size = await imageSizeOf(original);
       let instruction: string | undefined;
 
-      for (let n = 1; n <= MAX_DRAWS; n++) {
+      for (let i = 0; i < ladder.length; i++) {
+        const n = i + 1;
+        const q = ladder[i];
         const img = await step(
-          n === 1 ? `그리기 1 (sunburst · quality=${quality})` : `그리기 ${n} (틀린 곳을 지시로 붙여)`,
+          n === 1 ? `그리기 1 (sunburst · quality=${q})` : `그리기 ${n} (quality=${q} · 틀린 곳을 지시로 붙여)`,
           async () => {
             const out = await postJson<GenResponse>({
               task: "generate",
               image: original,
               mode: "problem",
               instruction,
-              quality,
+              quality: q,
+              // 원문자는 sol 이 지킨다 — 이 화면의 sunburst 프롬프트에서는 원문자 지시를 뺀다.
+              skipCircled: true,
               width: size?.width,
               height: size?.height,
             });
             return { value: out.image, krw: out.usage?.estKrw ?? null };
           },
         );
-        const round: Round = { img };
+        const round: Round = { img, quality: q };
         done.push(round);
         setRounds([...done]);
 
@@ -220,10 +232,10 @@ export default function CompareProblemPage() {
       setBusy(false);
     }
 
-    // 끝까지 대조가 된 그림 중 차이가 가장 적은 것(같으면 나중 것).
+    // 끝까지 대조가 된 그림 중 차이가 가장 적은 것. 같으면 앞의 것(quality 가 낮아 더 싸다).
     let best = -1;
     done.forEach((r, i) => {
-      if (r.diffs && (best === -1 || r.diffs.length <= done[best].diffs!.length)) best = i;
+      if (r.diffs && (best === -1 || r.diffs.length < done[best].diffs!.length)) best = i;
     });
     if (best !== -1) {
       const r: Result = {
@@ -232,7 +244,7 @@ export default function CompareProblemPage() {
         ms: performance.now() - t0,
         krw: local.reduce((a, s) => a + (s.krw ?? 0), 0),
         unknownCost: local.some((s) => s.state === "done" && s.krw == null),
-        quality,
+        quality: ladder.join(" → "),
         effort,
       };
       setResult(r);
@@ -245,9 +257,10 @@ export default function CompareProblemPage() {
       <div>
         <h1 className="text-xl font-bold text-slate-900">sol 이 읽고 sunburst 가 고쳐 그리기</h1>
         <p className="mt-1 text-sm text-slate-600">
-          sunburst 가 문제를 그리면 sol 이 원본과 대조해 글자가 다른 곳을 찾고, 있으면 그 목록을 붙여 다시
-          그립니다. 차이가 없어지거나 {MAX_DRAWS}번 그릴 때까지 되풀이하고, 남은 차이가 가장 적은 그림을
-          남깁니다. 토큰은 차감하지 않습니다(무제한 계정 전용).
+          sunburst 가 낮은 quality 로 그리면 sol 이 원본과 대조해 글자가 다른 곳을 찾고, 있으면 그 목록을
+          붙여 quality 를 한 단계 올려 다시 그립니다. 차이가 없어지거나 끝 quality 까지 그리면 멈추고, 남은
+          차이가 가장 적은 그림을 남깁니다. 원문자(㉠ ① ⓐ)는 sunburst 에게 따로 알려 주지 않고 sol 이 대조로
+          지킵니다. 토큰은 차감하지 않습니다(무제한 계정 전용).
         </p>
       </div>
 
@@ -258,9 +271,17 @@ export default function CompareProblemPage() {
         </label>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
           <label className="flex items-center gap-1.5">
-            sunburst quality
-            <select value={quality} onChange={(e) => setQuality(e.target.value)} className="rounded border px-2 py-1 font-mono text-xs">
-              {QUALITIES.map((m) => (
+            시작 quality
+            <select value={startQ} onChange={(e) => setStartQ(e.target.value)} className="rounded border px-2 py-1 font-mono text-xs">
+              {LADDER.map((m) => (
+                <option key={m}>{m}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5">
+            끝 quality
+            <select value={endQ} onChange={(e) => setEndQ(e.target.value)} className="rounded border px-2 py-1 font-mono text-xs">
+              {LADDER.map((m) => (
                 <option key={m}>{m}</option>
               ))}
             </select>
@@ -274,6 +295,9 @@ export default function CompareProblemPage() {
             </select>
           </label>
         </div>
+        <p className="text-xs text-slate-500">
+          그리는 차례: {LADDER.slice(LADDER.indexOf(startQ), Math.max(LADDER.indexOf(startQ), LADDER.indexOf(endQ)) + 1).join(" → ")}
+        </p>
         <div>
           <Button variant="primary" disabled={!prepared || busy} onClick={run}>
             {busy ? "돌리는 중…" : "돌리기"}
@@ -298,7 +322,7 @@ export default function CompareProblemPage() {
       {result && (
         <section className={cn(cardClass, "flex flex-wrap items-baseline gap-x-6 gap-y-1 p-4 text-sm")}>
           <span className="font-semibold text-ink">
-            최종: 그리기 {result.pick + 1} · 남은 글자 차이{" "}
+            최종: 그리기 {result.pick + 1}(quality={result.rounds[result.pick].quality}) · 남은 글자 차이{" "}
             <span className={result.rounds[result.pick].diffs!.length ? "text-red-700" : "text-emerald-700"}>
               {result.rounds[result.pick].diffs!.length}곳
             </span>
@@ -313,7 +337,7 @@ export default function CompareProblemPage() {
       {rounds.map((r, i) => (
         <section key={i} className={cn(cardClass, "flex flex-col gap-2 p-4")}>
           <p className="text-xs font-medium text-slate-600">
-            그리기 {i + 1}
+            그리기 {i + 1} · quality={r.quality}
             {result && result.pick === i ? " · 최종" : ""}
           </p>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -329,7 +353,7 @@ export default function CompareProblemPage() {
             <thead>
               <tr className="text-left text-xs text-slate-500">
                 <th className="py-1">문제</th>
-                <th>quality · 강도</th>
+                <th>quality 차례 · sol 강도</th>
                 <th>그림 수</th>
                 <th>시간</th>
                 <th>원가</th>

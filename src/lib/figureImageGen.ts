@@ -705,6 +705,11 @@ don't print LaTeX literally -> render as mathematics (e.g. \\frac{1}{2} as fract
  *
  * 비어 있으면 프롬프트를 **한 글자도 건드리지 않는다**.
  */
+/** 프롬프트에서 원문자 블록만 뺀다(앞뒤 빈 줄까지 한 덩어리로). */
+function stripCircled(prompt: string): string {
+  return prompt.replace(`${CIRCLED_CHARS}\n\n`, "");
+}
+
 function withInstruction(prompt: string, instruction?: string): string {
   const text = instruction?.trim();
   if (!text) return prompt;
@@ -762,6 +767,11 @@ export async function generateFigureImage(
    * (`pickOutputSize`). 운영은 안 넘긴다 — 비교 화면 전용.
    */
   outputSize?: string,
+  /**
+   * 원문자(㉠ ① ⓐ) 지시(`CIRCLED_CHARS`)를 프롬프트에서 뺀다. **운영은 안 넘긴다** — 운영에서는
+   * 이 지시가 원문자를 지키는 유일한 장치다. 비교 화면이 "원문자는 sol 이 지킨다"를 시험할 때만 쓴다.
+   */
+  skipCircled?: boolean,
 ): Promise<FigureImageResult | null> {
   const apiKey = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -804,8 +814,14 @@ export async function generateFigureImage(
       "prompt",
       withInstruction(
         mode === "problem"
-          ? withReference(WHOLE_PROBLEM_PROMPT, reference ?? "", korean)
-          : PROMPT,
+          ? withReference(
+              skipCircled ? stripCircled(WHOLE_PROBLEM_PROMPT) : WHOLE_PROBLEM_PROMPT,
+              reference ?? "",
+              korean,
+            )
+          : skipCircled
+            ? stripCircled(PROMPT)
+            : PROMPT,
         instruction,
       ),
     );

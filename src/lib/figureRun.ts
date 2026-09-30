@@ -55,6 +55,8 @@ export type RunInput = {
   quality?: string;
   /** 출력 캔버스 크기(예 `2048x2048`). 운영은 안 넘긴다 — 비교 화면 전용. */
   outputSize?: string;
+  /** 원문자 지시를 프롬프트에서 뺀다. 운영은 안 넘긴다 — 비교 화면 전용. */
+  skipCircled?: boolean;
 };
 
 export type RunOutcome =
@@ -92,6 +94,7 @@ export async function runFigureGeneration(input: RunInput): Promise<RunOutcome> 
           input.byokApiKey,
           input.quality,
           input.outputSize,
+          input.skipCircled,
         );
         if (!result) {
           return {

@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
       typeof body.outputSize === "string" && /^\d{3,4}x\d{3,4}$/.test(body.outputSize)
         ? body.outputSize
         : undefined;
+    const skipCircled = body.skipCircled === true;
     const t0 = Date.now();
     const out = await runFigureGeneration({
       image: body.image,
@@ -65,11 +66,12 @@ export async function POST(req: NextRequest) {
       tag: "compare-problem",
       quality,
       outputSize,
+      skipCircled,
     });
     const ms = Date.now() - t0;
     if (!out.ok) return NextResponse.json({ error: out.error, ms }, { status: out.status });
     console.info(
-      `[compare-problem] generate mode=${mode} quality=${quality ?? "-"} size=${outputSize ?? "auto"} ms=${ms} krw=${out.usage?.estKrw ?? "?"}`,
+      `[compare-problem] generate mode=${mode} quality=${quality ?? "-"} size=${outputSize ?? "auto"} skipCircled=${skipCircled} ms=${ms} krw=${out.usage?.estKrw ?? "?"}`,
     );
     return NextResponse.json({
       image: out.dataUrl,
