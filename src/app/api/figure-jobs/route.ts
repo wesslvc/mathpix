@@ -7,6 +7,7 @@ import { JOB_COLUMNS, kickWorker, type FigureJobRow } from "@/lib/figureJobsServ
 import { passageDepositFrom, passageInputPaths, type PassagePayload } from "@/lib/passageRun";
 import {
   PROBLEM_LADDER,
+  TOP_QUALITY,
   problemLoopPaths,
   problemLoopStarted,
   type ProblemLoopState,
@@ -54,7 +55,7 @@ export async function GET() {
     .order("created_at", { ascending: true })
     .limit(100);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS });
+  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS, topQuality: TOP_QUALITY });
 }
 
 export async function POST(req: NextRequest) {
@@ -292,7 +293,7 @@ export async function PATCH(req: NextRequest) {
       .maybeSingle();
     if (!row) return NextResponse.json({ error: "작업을 찾지 못했어요." }, { status: 404 });
     if (row.status !== "done" || row.stage !== "max-offer" || !row.state) {
-      return NextResponse.json({ error: "max 로 고쳐 그릴 수 있는 작업이 아니에요." }, { status: 409 });
+      return NextResponse.json({ error: `${TOP_QUALITY} 로 고쳐 그릴 수 있는 작업이 아니에요.` }, { status: 409 });
     }
     const billing = await getBillingContext(supabase, user.id);
     if (billing.byok && !billing.byokApiKey) {
@@ -311,7 +312,7 @@ export async function PATCH(req: NextRequest) {
           {
             error: error
               ? error.message
-              : `토큰이 부족해요. max 로 고쳐 그리려면 ${MAX_REDRAW_TOKENS}토큰이 필요합니다.`,
+              : `토큰이 부족해요. ${TOP_QUALITY} 로 고쳐 그리려면 ${MAX_REDRAW_TOKENS}토큰이 필요합니다.`,
           },
           { status: error ? 500 : 402 },
         );
@@ -323,7 +324,7 @@ export async function PATCH(req: NextRequest) {
         status: "pending",
         stage: `gen:${PROBLEM_LADDER.length - 1}`,
         state: { ...(row.state as ProblemLoopState), maxPhase: true },
-        note: "max 로 고쳐 그리는 중",
+        note: `${TOP_QUALITY} 로 고쳐 그리는 중`,
         error: null,
         started_at: null,
         finished_at: null,
@@ -363,7 +364,7 @@ export async function PATCH(req: NextRequest) {
     if (!row) return NextResponse.json({ error: "닫을 작업이 없어요." }, { status: 409 });
     const { data: closed } = await admin
       .from("figure_jobs")
-      .update({ stage: "done", state: null, note: "max 없이 지금 그림으로 두었어요" })
+      .update({ stage: "done", state: null, note: "더 고쳐 그리지 않고 지금 그림으로 두었어요" })
       .eq("id", body.id)
       .eq("user_id", user.id)
       .eq("status", "done")

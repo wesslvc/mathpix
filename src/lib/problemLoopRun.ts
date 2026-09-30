@@ -9,7 +9,7 @@
 //   verify:1 …
 //   (medium 검수에서도 차이가 남으면 여기서 **멈춘다** — 가장 나은 그림을 먼저 저장하고 작업을
 //    `max-offer` 로 남긴다. max 는 사용자가 패널에서 확인하면 200토큰을 걷고 이어서 돈다.)
-//   gen:2    max 로 마지막으로 그린다(확인 뒤에만) → verify:2 → 끝
+//   gen:2    맨 위 quality(기본 high, `TOP_QUALITY`)로 마지막으로 그린다(확인 뒤에만) → verify:2 → 끝
 //
 // 끝나면 **남은 차이가 가장 적은 그림**을 저장한다(같으면 앞의 것 — quality 가 낮아 더 싸다).
 //
@@ -38,8 +38,18 @@ import { accumulatedCorrection, parseVerify, VERIFY_PROMPT, type RoundDiffs, typ
 import { gradingEstKrw } from "./tokens";
 import { logAiCost } from "./costLog";
 
-/** 그리는 차례(고정). 앞에서 차이가 없어지면 거기서 멈춘다. */
-export const PROBLEM_LADDER = ["low", "medium", "max"] as const;
+/**
+ * 맨 위 단계(사용자 확인 뒤에만 돈다)의 quality. **기본은 high 다** — max 는 문제 한 장에 그림 출력이
+ * 7,000토큰 남짓(운영 로그 2026-09-30: 318원)이라 low(29원)·medium(41원)의 8~11배였다(사용자 —
+ * "max 의 비용이 너무 과도해"). 되돌리려면 재배포 없이 `PROBLEM_MAX_QUALITY=max`.
+ */
+export const TOP_QUALITY = (() => {
+  const v = (process.env.PROBLEM_MAX_QUALITY ?? "high").trim().toLowerCase();
+  return ["medium", "high", "xhigh", "max"].includes(v) ? v : "high";
+})();
+
+/** 그리는 차례(고정 앞 둘 + 확인 뒤 맨 위). 앞에서 차이가 없어지면 거기서 멈춘다. */
+export const PROBLEM_LADDER = ["low", "medium", TOP_QUALITY] as const;
 
 /** sol 검수의 추론 강도. 재배포 없이 `OPENAI_VERIFY_EFFORT` 로 바꾼다(`default` 면 안 보낸다). */
 const VERIFY_EFFORT = (() => {
@@ -430,7 +440,7 @@ async function runVerify(
     if (saved.kind === "done") {
       return {
         ...saved,
-        note: `${saved.note} · max 로 고쳐 그리려면 확인이 필요해요`,
+        note: `${saved.note} · ${TOP_QUALITY} 로 고쳐 그리려면 확인이 필요해요`,
         cleanup: [],
         offer: withHistory,
       };

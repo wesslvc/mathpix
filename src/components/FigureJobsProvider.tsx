@@ -177,7 +177,8 @@ type Ctx = {
   krwRate: number | null;
   /** 물린 토큰 합계. 금액이 안 오는 일반 사용자는 이걸 본다. */
   spentTokens: number;
-  /** max 로 고쳐 그리기 확인 1건에 걷는 토큰(서버가 알려 준다). */
+  /** 맨 위 단계(확인 뒤에만 돈다)의 quality 이름과 그 확인 1건에 걷는 토큰(서버가 알려 준다). */
+  topQuality: string;
   maxTokens: number;
   /** max 를 확인받고 돌린다. 실패하면 이유를 돌려준다(토큰 부족 등). */
   confirmMax: (id: string) => Promise<string | null>;
@@ -285,6 +286,7 @@ export default function FigureJobsProvider({
   const signedOutRef = useRef(false);
   const [tick, setTick] = useState(0);
   const [maxTokens, setMaxTokens] = useState(200);
+  const [topQuality, setTopQuality] = useState("high");
 
   const putSnapshot = useCallback(
     (problemKey: string, snapshot: ProblemSnapshot) => {
@@ -489,7 +491,8 @@ export default function FigureJobsProvider({
         return;
       }
       if (!res.ok) return;
-      const body = await jsonOf<{ jobs?: ServerJob[]; maxRedrawTokens?: number }>(res);
+      const body = await jsonOf<{ jobs?: ServerJob[]; maxRedrawTokens?: number; topQuality?: string }>(res);
+      if (typeof body.topQuality === "string") setTopQuality(body.topQuality);
       rows = body.jobs ?? [];
       if (typeof body.maxRedrawTokens === "number") setMaxTokens(body.maxRedrawTokens);
     } catch {
@@ -853,7 +856,7 @@ export default function FigureJobsProvider({
       } catch {
         return;
       }
-      patchJob(id, { stage: undefined, note: "max 없이 지금 그림으로 두었어요" });
+      patchJob(id, { stage: undefined, note: "더 고쳐 그리지 않고 지금 그림으로 두었어요" });
     },
     [patchJob],
   );
@@ -937,6 +940,7 @@ export default function FigureJobsProvider({
         spentKrw,
         krwRate,
         spentTokens,
+        topQuality,
         maxTokens,
         confirmMax,
         skipMax,

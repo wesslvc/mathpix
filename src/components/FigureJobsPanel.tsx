@@ -14,14 +14,14 @@ const STATUS_TEXT = {
  * 지문 작업은 그림을 그리는 게 아니라 **글자로 옮긴다**(사용자 — "지문은 글을
  * 옮겨적는중이라고"). 서버가 알려 주는 단계로 지금 무엇을 하는지 적는다.
  */
-function statusText(j: FigureJob): string {
+function statusText(j: FigureJob, top: string): string {
   if (j.status === "done" && j.stage === "max-offer") return "완료 · 글자·도형 차이가 남았어요";
   if (j.status !== "running" && j.status !== "pending") return STATUS_TEXT[j.status];
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계로 돈다(`gen:N` / `verify:N`).
   if (j.mode === "problem" && j.stage) {
     const gen = /^gen:(\d+)$/.exec(j.stage);
     const ver = /^verify:(\d+)$/.exec(j.stage);
-    const q = ["low", "medium", "max"];
+    const q = ["low", "medium", top];
     if (gen) {
       const n = Number(gen[1]);
       return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}${n === 0 ? "" : "고쳐 "}그리는 중 (${q[Math.min(n, 2)]})`;
@@ -93,6 +93,7 @@ export default function FigureJobsPanel() {
     spentTokens,
     retry,
     dismiss,
+    topQuality,
     maxTokens,
     confirmMax,
     skipMax,
@@ -154,7 +155,7 @@ export default function FigureJobsPanel() {
         {idle && offers.length > 0 && (
           <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-900">
             <p>
-              <b>글자·도형 차이가 남은 문제 {offers.length}개</b>가 있어요. 지금 저장된 그림은 그대로 두고, max 로 한 번 더
+              <b>글자·도형 차이가 남은 문제 {offers.length}개</b>가 있어요. 지금 저장된 그림은 그대로 두고, {topQuality} 로 한 번 더
               고쳐 그려 볼까요? 문제당 <b>{maxTokens}토큰</b>
               {offers.length > 1 && <> (합계 {(offers.length * maxTokens).toLocaleString()}토큰)</>}이고, 그리기에 실패하면
               돌려드려요.
@@ -167,7 +168,7 @@ export default function FigureJobsPanel() {
                 onClick={() => void runMax(offers)}
                 className="rounded bg-amber-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-amber-700 disabled:opacity-50"
               >
-                {maxBusy ? "처리 중…" : "모두 max 로 고쳐 그리기"}
+                {maxBusy ? "처리 중…" : `모두 ${topQuality} 로 고쳐 그리기`}
               </button>
               <button
                 type="button"
@@ -200,7 +201,7 @@ export default function FigureJobsPanel() {
               : failed > 0
                 ? `${failed}개 실패`
                 : offers.length > 0
-                  ? `AI 작업 완료 · max 확인 대기 ${offers.length}개`
+                  ? `AI 작업 완료 · ${topQuality} 확인 대기 ${offers.length}개`
                   : "AI 작업 완료"}
           </span>
           {/* 실제로 나간 유료 호출 수. 문제 수보다 많아지면(재시도가 쌓이면)
@@ -247,7 +248,7 @@ export default function FigureJobsPanel() {
                           : "text-slate-500"
                     } ${j.status === "running" ? "animate-soft-pulse" : ""}`}
                   >
-                    {statusText(j)}
+                    {statusText(j, topQuality)}
                     {(j.status === "running" || j.status === "pending") && (
                       <span className="text-slate-400"> · 예상 {formatWait(remainingSeconds(j))}</span>
                     )}
@@ -286,7 +287,7 @@ export default function FigureJobsPanel() {
                       onClick={() => void runMax([j])}
                       className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 hover:bg-amber-100 disabled:opacity-50"
                     >
-                      max {maxTokens}
+                      {topQuality} {maxTokens}
                     </button>
                   )}
                   {j.status === "error" && (
