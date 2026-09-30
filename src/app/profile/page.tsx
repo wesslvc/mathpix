@@ -14,6 +14,7 @@ import GradingPrefsForm, { type GradingPrefsValue } from "@/components/GradingPr
 import CropShapeSetting from "@/components/CropShapeSetting";
 import ManualScoreForm from "@/components/ManualScoreForm";
 import LinkedAccounts from "@/components/LinkedAccounts";
+import AiCostPanel from "@/components/AiCostPanel";
 import { buttonVariants } from "@/components/ui/button";
 import { cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -104,6 +105,9 @@ export default async function ProfilePage() {
         checkoutReady={isCheckoutReady()}
         byokCheckoutReady={isByokCheckoutReady()}
  />
+
+      {/* 무제한 계정에게만 — 서버(/api/admin/ai-cost)도 같은 조건으로 막는다. */}
+      {access.unlimited && <AiCostPanel />}
 
       <LinkedAccounts initialIdentities={user.identities ?? []} />
 

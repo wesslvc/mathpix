@@ -10,6 +10,8 @@ import {
 } from "@/lib/figureRun";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { logAiCost } from "@/lib/costLog";
 
 export const runtime = "nodejs";
 /**
@@ -99,6 +101,7 @@ export async function POST(req: NextRequest) {
   let byok = false;
   let byokApiKey: string | null = null;
   let byokModel: string | null = null;
+  let userId: string | null = null;
   if (supabase) {
     const {
       data: { user },
@@ -109,6 +112,7 @@ export async function POST(req: NextRequest) {
         { status: 401 },
       );
     }
+    userId = user.id;
     const billingCtx = await getBillingContext(supabase, user.id);
     unlimited = billingCtx.unlimited;
     byok = billingCtx.byok;
@@ -224,6 +228,17 @@ export async function POST(req: NextRequest) {
       (await persistWholeProblem(supabase, problemId, figureId, outcome.dataUrl)) !== null;
   }
   const chargedTokens = await settle(outcome.usage?.estKrw);
+  // 원가 장부(작업을 치워도 남는다). 서비스 키가 없으면 조용히 건너뛴다.
+  if (outcome.usage && userId && !byok && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    await logAiCost(createAdminClient(), {
+      userId,
+      jobId: crypto.randomUUID(),
+      kind: mode === "problem" ? "problem" : "figure",
+      what: "그림(직접 호출)",
+      krw: outcome.usage.estKrw,
+      usd: outcome.usage.estUsd,
+    });
+  }
 
   return NextResponse.json({
     image: outcome.dataUrl,

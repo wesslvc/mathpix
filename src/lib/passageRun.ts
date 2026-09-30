@@ -18,6 +18,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cardUrl } from "./cardUrl";
+import { logAiCost } from "./costLog";
 import { loadAsDataUrl, removeStored, runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
 import { GradeError, readKoreanMarks, readKoreanRichText } from "./gradeExam";
 import { describeMarks, emptyMarkStats, readRichBlocks, type RichBlock } from "./kice/richText";
@@ -180,7 +181,16 @@ export async function runPassageStage(
       const image = await loadAsDataUrl(admin, job.input_path);
       const small = await loadAll(admin, payload.figuresSmall);
       if (!image || !small) return { kind: "fail", error: "올려 둔 지문 사진을 찾지 못했어요. 다시 넣어주세요." };
-      const { blocks: raw, model } = await readKoreanRichText(image, deadline.signal, ctx.byokApiKey, small);
+      const { blocks: raw, model, usage: readUsage } = await readKoreanRichText(
+        image,
+        deadline.signal,
+        ctx.byokApiKey,
+        small,
+      );
+      const readKrw = readUsage ? gradingEstKrw(readUsage, model) : undefined;
+      if (readKrw && !ctx.byokApiKey) {
+        await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "passage", what: "지문 읽기", krw: readKrw });
+      }
       const stats = emptyMarkStats();
       const blocks = readRichBlocks(raw, 0, stats);
       if (blocks.length === 0) return { kind: "fail", error: "지문에서 문단을 하나도 읽지 못했어요." };
@@ -230,6 +240,9 @@ export async function runPassageStage(
               ctx.byokApiKey,
             );
             const est = usage ? gradingEstKrw(usage, model) : undefined;
+            if (est && !ctx.byokApiKey) {
+              await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "passage", what: "서식 검수", krw: est });
+            }
             charge = Math.min(PASSAGE_MARKS_DEPOSIT, gradingTokenCharge(est));
             next.review = review;
             next.notes!.marks = describeMarksReview(
@@ -276,6 +289,16 @@ export async function runPassageStage(
             })
           : null;
         if (outcome?.ok) {
+          if (outcome.usage && !ctx.byokApiKey) {
+            await logAiCost(admin, {
+              userId: job.user_id,
+              jobId: job.id,
+              kind: "passage",
+              what: "지문 그림",
+              krw: outcome.usage.estKrw,
+              usd: outcome.usage.estUsd,
+            });
+          }
           const saved = await keepFigure(admin, job.user_id, outcome.dataUrl);
           if (saved) {
             // 우선 붙여 둔 원본 사본은 이제 아무도 안 가리킨다.

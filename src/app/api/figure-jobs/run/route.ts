@@ -12,6 +12,7 @@ import {
   storeBytes,
   visibleUsage,
 } from "@/lib/figureRun";
+import { logAiCost } from "@/lib/costLog";
 import { kickWorker, workerToken } from "@/lib/figureJobsServer";
 import { callOpenAIVision } from "@/lib/detectProblems";
 import { pollKoreanTextBackground, startKoreanTextBackground } from "@/lib/gradeExam";
@@ -297,6 +298,16 @@ async function runJob(admin: Admin, job: ClaimedJob) {
   if (!outcome.ok) {
     await fail(admin, job, outcome.error);
     return;
+  }
+  if (outcome.usage && !billing.byok) {
+    await logAiCost(admin, {
+      userId: job.user_id,
+      jobId: job.id,
+      kind: job.mode === "problem" ? "problem" : "figure",
+      what: job.mode === "problem" ? "그림" : "그림 하나",
+      krw: outcome.usage.estKrw,
+      usd: outcome.usage.estUsd,
+    });
   }
   await finishJob(admin, job, {
     dataUrl: outcome.dataUrl,

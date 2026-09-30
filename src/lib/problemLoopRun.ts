@@ -34,6 +34,7 @@ import {
 } from "./gradeExam";
 import { correctionInstruction, parseVerify, VERIFY_PROMPT, type TextDiff } from "./problemCompare";
 import { gradingEstKrw } from "./tokens";
+import { logAiCost } from "./costLog";
 
 /** 그리는 차례(고정). 앞에서 차이가 없어지면 거기서 멈춘다. */
 export const PROBLEM_LADDER = ["low", "medium", "max"] as const;
@@ -278,6 +279,18 @@ async function runGen(
     return finalize(admin, state, bestRound(state.rounds), ctx, `${quality} 다시 그리기 실패`);
   }
 
+  // 원가 장부(작업을 치워도 남는다). BYOK 는 본인 키라 우리 원가가 아니다.
+  if (out.usage && !ctx.byokApiKey) {
+    await logAiCost(admin, {
+      userId: job.user_id,
+      jobId: job.id,
+      kind: "problem",
+      what: `그림 ${quality}`,
+      krw: out.usage.estKrw,
+      usd: out.usage.estUsd,
+    });
+  }
+
   const parts = splitDataUrl(out.dataUrl);
   const path = parts ? `${job.user_id}/_jobs/${job.id}-r${i}.${parts.ext}` : "";
   const stored = parts ? await storeBytes(admin, path, parts.bytes, parts.mime) : false;
@@ -362,6 +375,15 @@ async function runVerify(
     if (respId) await deleteVisionResponse(respId, ctx.byokApiKey, fail !== "");
   }
 
+  if (solKrw > 0 && !ctx.byokApiKey) {
+    await logAiCost(admin, {
+      userId: job.user_id,
+      jobId: job.id,
+      kind: "problem",
+      what: "sol 검수",
+      krw: solKrw,
+    });
+  }
   const withCost: ProblemLoopState = { ...state, solKrw: (state.solKrw ?? 0) + solKrw };
   if (!diffs) {
     console.warn(`[${ctx.tag}] 검수 실패, 검수 없이 저장: ${fail.slice(0, 200)}`);
