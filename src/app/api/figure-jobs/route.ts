@@ -5,6 +5,7 @@ import { FIGURE_TOKEN_DEPOSIT } from "@/lib/tokens";
 import { removeStored, splitDataUrl, storeBytes } from "@/lib/figureRun";
 import { JOB_COLUMNS, kickWorker, type FigureJobRow } from "@/lib/figureJobsServer";
 import { passageDepositFrom, passageInputPaths, type PassagePayload } from "@/lib/passageRun";
+import { problemLoopPaths, problemLoopStarted } from "@/lib/problemLoopRun";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -368,17 +369,20 @@ export async function DELETE(req: NextRequest) {
     .eq("id", id)
     .eq("user_id", user.id)
     .eq("status", "pending")
-    .select("input_path, payload, charged, charged_tokens")
+    .select("input_path, payload, charged, charged_tokens, state")
     .maybeSingle();
   if (removed) {
-    if (removed.charged && removed.charged_tokens > 0) {
+    // 그리기가 이미 시작된 작업(단계 사이에 줄에 서 있는 것)은 **돈이 나간 뒤**라 돌려주지 않는다 —
+    // 치우기만 해도 전액이 돌아오면 그려 놓고 취소하는 길이 열린다.
+    const spent = problemLoopStarted(removed.state);
+    if (removed.charged && removed.charged_tokens > 0 && !spent) {
       await admin.rpc("refund_recognition_credit_for", {
         p_user_id: user.id,
         p_amount: removed.charged_tokens,
       });
     }
-    await removeStored(admin, passageInputPaths(removed));
-    return NextResponse.json({ ok: true, refunded: removed.charged });
+    await removeStored(admin, [...passageInputPaths(removed), ...problemLoopPaths(removed.state)]);
+    return NextResponse.json({ ok: true, refunded: removed.charged && !spent });
   }
 
   const { data: running } = await admin
@@ -397,10 +401,12 @@ export async function DELETE(req: NextRequest) {
     .eq("id", id)
     .eq("user_id", user.id)
     .in("status", ["done", "error"])
-    .select("status, input_path, payload")
+    .select("status, input_path, payload, state")
     .maybeSingle();
-  // 실패한 작업은 다시 시도하려고 입력을 남겨 뒀다 — 치웠으니 지운다.
-  if (finished?.status === "error") await removeStored(admin, passageInputPaths(finished));
+  // 실패한 작업은 다시 시도하려고 입력을 남겨 뒀다 — 치웠으니 지운다(중간 그림도).
+  if (finished?.status === "error") {
+    await removeStored(admin, [...passageInputPaths(finished), ...problemLoopPaths(finished.state)]);
+  }
   return NextResponse.json({ ok: true });
 }
 

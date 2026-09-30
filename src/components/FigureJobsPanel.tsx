@@ -53,6 +53,8 @@ export default function FigureJobsPanel() {
   const {
     jobs,
     activeCount,
+    submitting,
+    serverActive,
     calls,
     spentUsd,
     spentKrw,
@@ -70,6 +72,18 @@ export default function FigureJobsPanel() {
   return (
     <div className="fixed bottom-4 right-4 z-40 w-[min(20rem,calc(100vw-2rem))]">
       <div className="animate-fade-in overflow-hidden rounded-xl border border-slate-300 bg-white shadow-lg">
+        {/* 나가도 되는지 안 되는지를 늘 보이게 한다. 서버에 넣는 몇 초 동안만 나가면 안 된다 —
+            그 뒤로는 서버가 그리므로 창을 닫아도 · 오프라인이어도 계속된다. */}
+        {submitting > 0 ? (
+          <p className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-800">
+            ⚠ 서버로 보내는 중이에요 ({submitting}개). 다 보낼 때까지 이 창을 닫거나 나가지 마세요.
+          </p>
+        ) : serverActive ? (
+          <p className="border-b border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-snug text-emerald-800">
+            ✓ 서버로 다 보냈어요. 이제 서버에서 그리니까 창을 닫거나 오프라인이어도 계속돼요. 나중에 다시 들어오면
+            결과가 저장돼 있어요.
+          </p>
+        ) : null}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}

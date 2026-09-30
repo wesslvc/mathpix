@@ -731,14 +731,18 @@ export default function BatchSplitPanel({
           {usedModel} 로 {pieces.length}개를 잡았습니다
         </p>
       )}
-      {(bg.pending > 0 || bg.done > 0) && (
+      {bg.pending > 0 && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          ⚠ 저장 중이에요 ({bg.pending}개 남음). 끝날 때까지 이 창을 닫거나 나가지 마세요. 저장이 끝나면 AI 그리기는
+          서버가 이어서 하니 그때부터는 나가도 돼요.
+        </p>
+      )}
+      {bg.done > 0 && (
         <p className="text-sm text-emerald-700">
-          {bg.pending > 0 && `뒤에서 저장 중 ${bg.pending}개 · `}
           {bg.done}개 저장 완료
-          {bg.done > 0 &&
-            (bg.numbered === bg.done
-              ? " · 번호 전부 인식"
-              : ` · 번호 ${bg.numbered}개 인식(나머지는 “수정”에서 직접)`)}
+          {bg.numbered === bg.done
+            ? " · 번호 전부 인식"
+            : ` · 번호 ${bg.numbered}개 인식(나머지는 “수정”에서 직접)`}
           {bg.answered > 0 && ` · 정답 ${bg.answered}개 붙임`}
         </p>
       )}

@@ -855,6 +855,11 @@ function QuickList({ items, onClear }: { items: QuickItem[]; onClear: () => void
           </button>
         )}
       </div>
+      {items.some((q) => q.status === "saving") && (
+        <p className="text-xs text-amber-700">
+          ⚠ 저장 중이에요. 끝날 때까지 이 창을 닫거나 나가지 마세요. AI 그리기는 저장이 끝난 뒤 서버가 이어서 해요.
+        </p>
+      )}
       <ul className="flex gap-2 overflow-x-auto pb-1">
         {items.map((q) => (
           <li key={q.key} className="flex w-44 shrink-0 items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-1.5">

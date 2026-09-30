@@ -23,6 +23,7 @@ import {
 } from "@/lib/passageRun";
 import {
   problemLoopEnabled,
+  problemLoopPaths,
   runProblemStage,
   type ProblemLoopState,
 } from "@/lib/problemLoopRun";
@@ -515,19 +516,20 @@ async function sweepOldInputs(admin: Admin) {
   const before = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
   const { data } = await admin
     .from("figure_jobs")
-    .select("id, input_path, payload")
+    .select("id, input_path, payload, state")
     .eq("status", "error")
     .lt("finished_at", before)
     .limit(20);
   if (!data || data.length === 0) return;
   await removeStored(
     admin,
-    data.flatMap((r) =>
-      passageInputPaths({
+    data.flatMap((r) => [
+      ...passageInputPaths({
         input_path: r.input_path as string,
         payload: (r.payload ?? null) as PassagePayload | null,
       }),
-    ),
+      ...problemLoopPaths(r.state),
+    ]),
   );
   await admin
     .from("figure_jobs")

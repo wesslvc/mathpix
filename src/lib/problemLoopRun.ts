@@ -127,6 +127,23 @@ function pathsOf(state: ProblemLoopState | null | undefined): string[] {
   return (state?.rounds ?? []).map((r) => r.path);
 }
 
+/**
+ * 이 작업이 남긴 **중간 그림** 경로들. 작업이 도중에 사라질 때(사용자가 치웠거나, 멈춘 작업 정리가
+ * 오류로 돌렸거나) 부르는 쪽이 지운다 — 안 지우면 아무도 안 가리키는 파일이 쌓인다.
+ */
+export function problemLoopPaths(state: unknown): string[] {
+  const rounds = (state as { rounds?: unknown } | null)?.rounds;
+  if (!Array.isArray(rounds)) return [];
+  return rounds
+    .map((r) => (r as { path?: unknown } | null)?.path)
+    .filter((p): p is string => typeof p === "string" && p.length > 0);
+}
+
+/** 이미 그림을 그려(=돈이 나가) 본 작업인가. */
+export function problemLoopStarted(state: unknown): boolean {
+  return problemLoopPaths(state).length > 0;
+}
+
 /** 남은 차이가 가장 적은 라운드(같으면 앞). 검수 못 한 라운드는 뒤로 미룬다. */
 function bestRound(rounds: Round[]): number {
   let best = -1;

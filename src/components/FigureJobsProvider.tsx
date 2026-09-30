@@ -158,6 +158,10 @@ type Ctx = {
   jobs: FigureJob[];
   /** 진행 중이거나 대기 중인 작업 수. */
   activeCount: number;
+  /** 아직 **서버에 못 넣은** 작업 수(그림을 줄여 올리는 몇 초). 이때 나가면 그 작업은 사라진다. */
+  submitting: number;
+  /** 서버에서 도는(또는 차례를 기다리는) 작업이 있는가. 이건 창을 닫아도 계속된다. */
+  serverActive: boolean;
   /** 실제로 나간 **유료** 생성 호출 수. 캐시에 걸린 것은 세지 않는다. */
   calls: number;
   /** 유료 호출의 **추정** 비용 합계(달러). 무제한·BYOK 계정에만 온다. */
@@ -868,6 +872,8 @@ export default function FigureJobsProvider({
       value={{
         jobs,
         activeCount,
+        submitting,
+        serverActive,
         calls,
         spentUsd,
         spentKrw,
