@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { cropImageToDataUrl, fileToDataUrl, isHeicFile, openPageSource, type PageSource } from "@/lib/cropImage";
+import { NO_CROP_LIMIT, cropImageToDataUrl, fileToDataUrl, isHeicFile, openPageSource, type PageSource } from "@/lib/cropImage";
 import { cropRegionToDataUrl, isRealPolygon, type Region } from "@/lib/polygon";
 import { useCropShape } from "@/lib/cropShape";
 import BoxEditor, { type EditBox } from "./BoxEditor";
@@ -9,8 +9,6 @@ import CropShapeToggle from "./CropShapeToggle";
 import {
   DETECT_INPUT_DIM,
   MAX_UPLOAD_CHARS,
-  PROBLEM_INPUT_DIM,
-  PROBLEM_MAX_HEIGHT,
   stitchVertically,
 } from "@/lib/figureImage";
 import type { StoredBoxRange } from "@/lib/storedFigures";
@@ -182,10 +180,7 @@ export default function BatchSplitPanel({
    */
   function cutBox(img: HTMLImageElement | ImageBitmap, b: Region, pad: number): string {
     // 다각형이면 바깥을 흰색으로 지우고 자른다(`polygon.ts`).
-    return cropRegionToDataUrl(img, b, pad, {
-      maxWidth: PROBLEM_INPUT_DIM,
-      maxHeight: PROBLEM_MAX_HEIGHT,
-    });
+    return cropRegionToDataUrl(img, b, pad, NO_CROP_LIMIT);
   }
 
   /**

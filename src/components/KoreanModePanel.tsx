@@ -1,12 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage, openPageSource, type PageSource } from "@/lib/cropImage";
+import { NO_CROP_LIMIT, cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage, openPageSource, type PageSource } from "@/lib/cropImage";
 import {
   DETECT_INPUT_DIM,
   MAX_UPLOAD_CHARS,
-  PROBLEM_INPUT_DIM,
-  PROBLEM_MAX_HEIGHT,
+  prepareProblemForModel,
   rasterToSvg,
   stitchVertically,
 } from "@/lib/figureImage";
@@ -204,10 +203,7 @@ export default function KoreanModePanel({
 
   function cutBox(img: HTMLImageElement | ImageBitmap, b: Region, pad: number): string {
     // 손으로 그린 다각형이면 바깥을 흰색으로 지우고 자른다(`polygon.ts`).
-    return cropRegionToDataUrl(img, b, pad, {
-      maxWidth: PROBLEM_INPUT_DIM,
-      maxHeight: PROBLEM_MAX_HEIGHT,
-    });
+    return cropRegionToDataUrl(img, b, pad, NO_CROP_LIMIT);
   }
 
   /**
@@ -483,7 +479,7 @@ export default function KoreanModePanel({
       const res = await fetch("/api/korean-title", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await enhanceContrast(passageCrop) }),
+        body: JSON.stringify({ image: await prepareProblemForModel(passageCrop) }),
       });
       const json = (await res.json()) as { title?: string; kind?: string; error?: string };
       if (!res.ok || !json.title) throw new Error(json.error ?? "제목을 짓지 못했습니다.");

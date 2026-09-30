@@ -4,6 +4,13 @@ const MAX_DIMENSION = 1600;
 const JPEG_QUALITY = 0.9;
 
 /**
+ * 지면에서 문제를 자를 때 쓰는 "줄이지 않는다" 한도. 원본 픽셀 그대로 자른다
+ * (`Math.min(1, …)` 라 키우지도 않는다). 모델에 보낼 때는 각자 보내기 직전에 따로
+ * 줄이므로(`prepareProblemForModel`) 여기서 미리 깎을 이유가 없다.
+ */
+export const NO_CROP_LIMIT = { maxWidth: Infinity, maxHeight: Infinity };
+
+/**
  * 원본 이미지에서 주어진 영역(원본 픽셀 좌표 기준)을 잘라 data URL로 반환한다.
  * 실제 카메라 사진은 무압축 PNG로 인코딩하면 문자열이 수십 MB까지 커져
  * 일부 모바일 브라우저(특히 Safari)에서 요청 자체가 실패하는 경우가 있어,

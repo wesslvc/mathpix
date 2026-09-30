@@ -1,11 +1,10 @@
 import { createClient } from "@/lib/supabase/client";
-import { rasterToSvg } from "@/lib/figureImage";
+import { prepareProblemForModel, rasterToSvg } from "@/lib/figureImage";
 import { renderCardOffscreen } from "@/lib/renderCardOffscreen";
 import { toStoredFigures, type StoredBoxRange } from "@/lib/storedFigures";
 import type { CardFigure } from "@/lib/cardHtml";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
-import { enhanceContrast } from "@/lib/autoContrast";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import type { AnswerByNumber, AnswerEntry } from "@/lib/answerMap";
 
@@ -55,8 +54,9 @@ export async function readNumberWithMathpix(crop: string): Promise<number | null
     const res = await fetch("/api/mathpix", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // 인식에 보낼 때만 대비를 올린다(화면에 남는 원본은 그대로 둔다).
-      body: JSON.stringify({ image: await enhanceContrast(crop) }),
+      // 보낼 때만 대비를 올리고 폭 1536 아래로 줄인다(요청 본문 4.5MB 한도 — 지면 조각은
+      // 이제 원본 크기 그대로라 크다). 화면에 남는 원본은 그대로 둔다.
+      body: JSON.stringify({ image: await prepareProblemForModel(crop) }),
     });
     if (!res.ok) return null;
     const json = (await res.json()) as { text?: string; latex?: string };
