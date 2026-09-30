@@ -2850,37 +2850,36 @@ latest 로 바꿔 봐 ... flash 써 보고 안 되면 테라로 넘어가게")
 - **실제 Gemini API 로 성공한 응답은 아직 못 봤다** — 로그에 남은 것은 503뿐이다.
   자리가 나면 그때 품질과 값을 견줘 볼 것.
 
-#### 문제 글자 정확도 비교 화면 (`/admin/compare-problem`, 2026-09-30)
+#### sol 이 읽고 sunburst 가 고쳐 그리기 (`/admin/compare-problem`, 2026-09-30)
 
 사용자 — "이미지 생성 방식이라 텍스트 정확도가 많이 떨어진다, sol 6.1 로 개선하는 방안" →
-"② ③ 을 테스트해서 대조 가능한 창을 만들고 비용·시간을 재 보자" → "선버스트 강도만 바꾼
-단독도 넣어서 비교" → **"3번은 폐기하고 sunburst 추론강도를 1번과 2번 다르게 만들 수 있게"**.
-문제 사진 한 장을 세 줄로 견준다. 무제한 계정 전용이고 토큰을 안 뗀다(`requireFontAdmin`).
+운영·① 단독·② 검수·③ 조판을 견주는 비교 화면을 만들었다가 → **"sol 이 읽고 sunburst 알아서
+그리고 대조하고 다른 거 그리고 이런 식으로, 대조(비교표)는 필요 없어, 이것만 놔두고 퀄리티랑
+추론강도 조정만 가능하게"**. 그래서 지금은 **한 가지 흐름만** 남았다. 무제한 계정 전용이고
+토큰을 안 뗀다(`requireFontAdmin`).
 
-- **지금 운영**: sunburst 가 문제를 통째로 한 번(`quality` 안 보냄 — 모델 기본값).
-- **① sunburst 단독**: 같은 한 번 그리기에 **①만의** `quality`·출력 크기를 보낸다.
-- **② 검수 후 다시 그리기**: **②만의** `quality`·출력 크기로 그리고, sol 이 원본과 대조
-  (`VERIFY_PROMPT`)해 다른 곳이 있으면 그 목록을 지시로 붙여(`correctionInstruction` →
-  `withInstruction`) 같은 값으로 한 번 더 그린 뒤 다시 대조해 차이가 적은 쪽을 남긴다.
-  **운영 결과를 재사용하지 않는다** — ① 과 ② 의 값이 다를 수 있어 ② 는 자기 값으로 처음부터
-  그린다(그래서 전부 돌리면 그리기가 운영 1 + ① 1 + ② 1~2 = 3~4번 나간다).
-- **① 과 ② 의 quality·크기는 서로 독립이다**(`GenPicker` 둘). 받는 값은 사용자가 확인해 줬다 —
-  low·medium·high·**xhigh·max**·auto, 크기는 운영과 같은 비율 맞춤 / `2048x2048`(확인된 값만
-  넣었다). 이미지 모델의 "강도"는 이 `quality` 다(따로 추론 강도 파라미터는 확인한 적이 없어
-  지어내지 않았다). `generateFigureImage`·`runFigureGeneration` 에 `quality`·`outputSize` 인자가
-  있지만 **운영 호출부는 안 넘긴다**(위 "quality 는 보내지 않는다"). 모델이 quality 를 콕 집어
-  거부하면 조합 캐스케이드를 돌지 않고 그 오류를 그대로 알린다(몰래 빼고 다시 보내면 무엇을
-  쟀는지 알 수 없다).
-- **③ "sol 이 옮겨 적고 우리가 조판" 은 폐기했다**(사용자 지시). `TRANSCRIBE_PROMPT`·
-  `parseTranscription`·`splitFigureMarkers`·`transcribe` 작업·조판 코드를 걷어냈다 — git 이력에
-  있다(`9850a04` 부근).
-- **남은 글자 차이는 세 줄 다 같은 sol 대조로 센다** — 잣대가 같아야 견줄 수 있다. 운영·①의
-  대조는 **측정용**이라 그 방식의 비용·시간에 안 넣는다(② 는 대조가 방식의 일부다). 글자만
-  본다 — 글꼴·줄바꿈·배치·손글씨는 차이로 안 친다.
-- 시간은 화면에서 잰 벽시계 시간, 원가는 공표 단가(그림 `FigureUsage.estKrw`, sol
-  `gradingEstKrw`; `gpt-6.1-sol` 은 6 과 같은 $2/$10). sol 호출은 Responses 백그라운드로 걸고
-  화면이 묻는다(300초 한도). 세션 기록 표에 문제마다 쌓이고(①·② 는 그때 쓴 quality·크기가
-  `[ ]` 로 붙는다) 평균이 나온다(새로고침하면 사라진다).
+- **흐름**: sunburst 가 문제를 통째로 그린다 → sol(`gpt-6.1-sol`)이 원본과 대조(`VERIFY_PROMPT`)해
+  글자가 다른 곳을 찾는다 → 있으면 그 목록을 지시로 붙여(`correctionInstruction` →
+  `withInstruction`) sunburst 가 **다시** 그린다 → 또 대조 … 차이가 0곳이 되거나 `MAX_DRAWS`(3)번
+  그릴 때까지. 마지막에 **남은 차이가 가장 적은 그림**(같으면 나중 것)을 최종으로 남긴다.
+  다시 그릴 때도 입력은 늘 **원본**이다(고친 그림을 다시 넣지 않는다).
+- **조절하는 것은 둘뿐**: sunburst `quality`(high · xhigh · max · medium · low · auto — 사용자가
+  확인해 준 값) · sol 추론 강도(low · medium · high). sol 모델과 출력 크기(운영과 같은 비율 맞춤)는
+  고정이다. 이미지 모델의 "강도"는 `quality` 다(따로 추론 강도 파라미터는 확인한 적이 없어
+  지어내지 않았다). sol 에 `xhigh`·`max` 가 되는지는 확인 못 해 뺐다 — 필요하면 일꾼 라우트
+  `probe: "vision"` + `effort` 로 허용 값을 먼저 볼 것.
+- **원가가 붙는 만큼 상한을 뒀다**: 그리기 1번이 대략 100원대(quality 를 올리면 더)이고 대조도
+  돈이 든다. 최악이면 그리기 3 + 대조 3 이다. 화면이 단계마다 시간·원가를 보여 주고 마지막에
+  합계를 낸다(세션 기록 표에 쌓인다, 새로고침하면 사라진다).
+- `generateFigureImage`·`runFigureGeneration` 에 `quality`·`outputSize` 인자가 있지만 **운영
+  호출부는 안 넘긴다**(위 "quality 는 보내지 않는다"). 모델이 quality 를 콕 집어 거부하면 조합
+  캐스케이드를 돌지 않고 그 오류를 그대로 알린다(몰래 빼고 다시 보내면 무엇을 쟀는지 모른다).
+  `outputSize` 는 서버가 받지만 화면은 안 쓴다.
+- **폐기한 것들(git 이력 `9850a04`~`793e146`)**: ③ "sol 이 본문을 글자·LaTeX 로 옮기고 우리가
+  조판"(`TRANSCRIBE_PROMPT`·`parseTranscription`·조판 코드), 운영 vs ① vs ② 나란히 견주는 표,
+  ①·② 가 각자 quality·크기를 고르던 화면.
+- 원가는 공표 단가(그림 `FigureUsage.estKrw`, sol `gradingEstKrw`; `gpt-6.1-sol` 은 6 과 같은
+  $2/$10). sol 호출은 Responses 백그라운드로 걸고 화면이 묻는다(300초 한도).
 - 코드: `src/lib/problemCompare.ts`(대조 프롬프트·해석, 순수) · `/api/admin/compare-problem` ·
   `src/app/admin/compare-problem/page.tsx`.
 - **실제 문제로 돌려 본 결과는 아직 없다** — 로그인이 필요해 사용자 계정으로 잰다.
