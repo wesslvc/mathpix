@@ -38,12 +38,15 @@ import type { BoxOverride } from "@/lib/renderMathText";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { passageStrips } from "@/lib/passageMarks";
 import { figuresForReader, type PassageFigureInput } from "@/lib/passageFigures";
+import { AI_TASK_EVENT } from "@/lib/aiTask";
 
 /**
  * 작업 종류. "figure"/"problem" 은 그림을 다시 그리고, "passage" 는 국어 지문을
  * 글자로 옮긴다(서버 일꾼이 sol 읽기 → 서식 검수 → 지문 안 그림을 단계마다 한다).
+ * "task" 는 짧은 AI 작업(글자 인식·채점·영역 찾기·sol 대화 …, `aiTask.ts`) — 화면이 넣고 결과를 받아 가며,
+ * 여기서는 대기열에 보여 주기만 한다(`stage` 가 일의 종류다).
  */
-export type JobMode = FigureMode | "passage";
+export type JobMode = FigureMode | "passage" | "task";
 
 export type FigureJob = {
   id: string;
@@ -589,6 +592,7 @@ export default function FigureJobsProvider({
     // 알아야 결과를 그 행에 바로 저장한다).
     for (const j of jobsRef.current) {
       if (!j.serverId || j.serverProblemId || toldProblemRef.current.has(j.serverId)) continue;
+      if (j.mode === "task") continue;
       if (j.status === "error") continue;
       const pid = snapshotsRef.current.get(j.problemKey)?.problemId;
       if (!pid) continue;
@@ -977,11 +981,18 @@ export default function FigureJobsProvider({
       signedOutRef.current = false;
       void sync();
     };
+    // 짧은 AI 작업(`runAiTask`)을 넣거나 끝냈다 — 곧바로 서버 목록을 다시 봐 패널에 띄운다.
+    const onTask = () => {
+      signedOutRef.current = false;
+      void sync().then(() => setTick((n) => n + 1));
+    };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
+    window.addEventListener(AI_TASK_EVENT, onTask);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
+      window.removeEventListener(AI_TASK_EVENT, onTask);
     };
   }, [sync]);
 
@@ -1020,7 +1031,8 @@ export default function FigureJobsProvider({
 
   // 합계는 목록에서 센다 — 새로고침 뒤 되살린 작업도 함께 셈된다.
   const paid = jobs.filter((j) => j.serverId && j.status === "done");
-  const calls = paid.length;
+  // "생성 N회" 는 그림 생성만 센다 — 글자 인식·채점 같은 짧은 작업은 토큰 합계에만 들어간다.
+  const calls = paid.filter((j) => j.mode !== "task").length;
   const spentTokens = paid.reduce((s, j) => s + (j.chargedTokens ?? 0), 0);
   const spentUsd = paid.reduce((s, j) => s + (j.costUsd ?? 0), 0);
   const spentKrw = paid.reduce((s, j) => s + (j.costKrw ?? 0), 0);

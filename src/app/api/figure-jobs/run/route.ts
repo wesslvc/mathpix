@@ -39,6 +39,8 @@ import {
   type ProblemLoopState,
 } from "@/lib/problemLoopRun";
 import type { FigureUsage } from "@/lib/figureImageGen";
+import { TASKS, TASK_KINDS, type TaskKind } from "@/lib/aiTasks";
+import { gradingTokenCharge } from "@/lib/tokens";
 
 /** 확인용 64×64 PNG(청크 CRC 까지 검사한 것 — `/api/figure/models` 와 같은 파일). */
 const PROBE_PNG =
@@ -60,7 +62,7 @@ type ClaimedJob = {
   user_id: string;
   figure_id: string;
   problem_id: string | null;
-  mode: "figure" | "problem" | "passage";
+  mode: "figure" | "problem" | "passage" | "task";
   korean: boolean;
   instruction: string | null;
   input_path: string;
@@ -313,6 +315,7 @@ async function fail(admin: Admin, job: ClaimedJob, message: string) {
 }
 
 async function runJob(admin: Admin, job: ClaimedJob) {
+  if (job.mode === "task") return runTaskJob(admin, job);
   if (job.mode === "passage") return runPassageJob(admin, job);
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계별로 돈다.
   // **수정 모드의 다시 그리기는 우리 프로세스(그리기 → sol 검수 → 고쳐 그리기)를 타지 않는다**(사용자 —
@@ -506,7 +509,13 @@ async function runProblemLoopJob(admin: Admin, job: ClaimedJob) {
   }
   const out = await runProblemStage(
     admin,
-    { ...job, edit: job.payload?.sol === true, state: (job.state ?? null) as ProblemLoopState | null },
+    {
+      ...job,
+      // task 는 여기 안 온다(runJob 이 먼저 가른다) — 타입만 좁힌다.
+      mode: job.mode === "task" ? "figure" : job.mode,
+      edit: job.payload?.sol === true,
+      state: (job.state ?? null) as ProblemLoopState | null,
+    },
     {
       byokApiKey: billing.byokApiKey ?? undefined,
       modelIds: pickModelIds(billing.byok, billing.byokModel),
@@ -680,4 +689,122 @@ async function sweepOldInputs(admin: Admin) {
       "id",
       data.map((r) => r.id as string),
     );
+}
+
+/** 짧은 AI 작업 하나에 쓸 시간(함수 한도 300초 안에서 앞뒤 기록할 몫을 남긴다). */
+const TASK_MS = 270_000;
+
+/**
+ * **짧은 AI 작업**(mode "task", `aiTasks.ts`)을 돌린다 — 글자 인식·영역 찾기·제목·채점·답지·지문 다시 인식·
+ * sol 조판·sol 대화. 결과는 `state.result` 에 두고 화면이 받아 간다(`GET /api/figure-jobs?task=`).
+ * 끝나면 넣을 때 건 보증금을 쓴 만큼으로 맞춘다. 실패하면 전부 돌려준다. 입력 그림은 어느 쪽이든 지운다 —
+ * 결과를 기다리던 화면이 이미 실패를 받았으므로 다시 시도할 일이 없다.
+ */
+async function runTaskJob(admin: Admin, job: ClaimedJob) {
+  const payload = (job.payload ?? null) as { task?: unknown; paths?: unknown; params?: unknown } | null;
+  const kind = TASK_KINDS.includes(payload?.task as TaskKind) ? (payload?.task as TaskKind) : null;
+  const paths = Array.isArray(payload?.paths) ? (payload.paths as unknown[]).filter((p): p is string => typeof p === "string") : [];
+  const params =
+    payload?.params && typeof payload.params === "object" ? (payload.params as Record<string, unknown>) : {};
+  const cleanup = () => removeStored(admin, paths);
+  if (!kind) {
+    await fail(admin, job, "알 수 없는 작업이에요.");
+    await cleanup();
+    return;
+  }
+  const def = TASKS[kind];
+  const tag = `figure-jobs/run ${job.id.slice(0, 8)} ${kind}`;
+  const images = await Promise.all(paths.map((p) => loadAsDataUrl(admin, p)));
+  if (images.some((x) => !x)) {
+    await fail(admin, job, "올려 둔 그림을 찾지 못했어요. 다시 해주세요.");
+    await cleanup();
+    return;
+  }
+  const billing = await getBillingContext(admin, job.user_id);
+  if (def.needsOpenAI && billing.byok && !billing.byokApiKey) {
+    await fail(admin, job, "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.");
+    await cleanup();
+    return;
+  }
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TASK_MS);
+  let out: Awaited<ReturnType<typeof def.run>>;
+  try {
+    out = await def.run({
+      admin,
+      userId: job.user_id,
+      jobId: job.id,
+      images: images as string[],
+      params,
+      unlimited: billing.unlimited,
+      byok: billing.byok,
+      byokApiKey: billing.byokApiKey ?? undefined,
+      signal: ctrl.signal,
+      deadlineMs: TASK_MS - 10_000,
+      tag,
+    });
+  } catch (err) {
+    out = { ok: false, error: err instanceof Error ? err.message : "알 수 없는 오류" };
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!out.ok && ctrl.signal.aborted) {
+    out = { ...out, error: "제때 끝나지 않았어요. 토큰은 돌려드렸어요. 다시 해주세요." };
+  }
+
+  // 정산 — `charged_tokens` 는 넣을 때 건 보증금이다.
+  const deposit = job.charged ? job.charged_tokens : 0;
+  const spentKrw = out.estKrw;
+  const chargeAnyway = !out.ok && typeof spentKrw === "number" && spentKrw > 0;
+  if (!out.ok && !chargeAnyway) {
+    await fail(admin, job, out.error);
+    await cleanup();
+    return;
+  }
+  let want = deposit;
+  if (job.charged && !def.flat && typeof spentKrw === "number") want = gradingTokenCharge(spentKrw);
+  const now = new Date().toISOString();
+  const { data: saved } = await admin
+    .from("figure_jobs")
+    .update(
+      out.ok
+        ? {
+            status: "done",
+            state: { result: out.result },
+            note: out.note ?? null,
+            model: out.model ?? null,
+            charged_tokens: job.charged ? want : 0,
+            applied_at: now,
+            result_path: null,
+            finished_at: now,
+          }
+        : {
+            status: "error",
+            error: out.error.slice(0, 1000),
+            charged_tokens: job.charged ? want : 0,
+            finished_at: now,
+          },
+    )
+    .eq("id", job.id)
+    .eq("status", "running")
+    .select("id")
+    .maybeSingle();
+  await cleanup();
+  if (!saved) {
+    // 멈춘 작업 정리가 먼저 오류로 돌려놓고 보증금을 돌려줬다 — 정산을 건너뛴다.
+    console.warn(`[${tag}] 이미 정리된 작업이라 기록을 건너뜀`);
+    return;
+  }
+  if (!job.charged) return;
+  if (want < deposit) {
+    await admin.rpc("refund_recognition_credit_for", { p_user_id: job.user_id, p_amount: deposit - want });
+  } else if (want > deposit) {
+    const { data: ok } = await admin.rpc("consume_recognition_credit_for", {
+      p_user_id: job.user_id,
+      p_amount: want - deposit,
+    });
+    // 못 받아도 결과는 준다 — 이미 만든 것을 버릴 이유가 없다(예전 라우트들의 정산과 같은 판단).
+    if (ok === null) console.warn(`[${tag}] 잔액 부족으로 ${want - deposit}토큰을 못 받았습니다.`);
+  }
 }

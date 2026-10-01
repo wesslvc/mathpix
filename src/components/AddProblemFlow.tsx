@@ -47,6 +47,7 @@ import { putBlob, removeBlobs } from "@/lib/blobClient";
 import { persistFigureBlobs } from "@/lib/figureBlob";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
+import { runAiTask } from "@/lib/aiTask";
 import type { AnswerByNumber } from "@/lib/answerMap";
 import {
   clearQueue,
@@ -387,16 +388,14 @@ export default function AddProblemFlow({
     setStage("loading");
     setError(null);
     try {
-      const res = await fetch("/api/mathpix", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // 인식에 보낼 때만 대비를 올린다. 화면에 남는 원본은 그대로 둔다
-        // (도형을 오려낼 때 원래 픽셀이 필요하다).
-        body: JSON.stringify({ image: await enhanceContrast(croppedDataUrl) }),
+      // **서버 대기열에서 읽는다**(`runAiTask` — 진행이 대기열 패널에 뜬다).
+      // 인식에 보낼 때만 대비를 올린다. 화면에 남는 원본은 그대로 둔다
+      // (도형을 오려낼 때 원래 픽셀이 필요하다).
+      const { result } = await runAiTask<RecognizeResponse>("ocr", {
+        label: "글자로 인식",
+        images: [await enhanceContrast(croppedDataUrl)],
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "인식에 실패했습니다.");
-      setResult(json as RecognizeResponse);
+      setResult(result);
       setRecognizedSourceImage(croppedDataUrl);
       // 결과 화면이 곧 저장한다 — 이 사진은 다 쓴 것이다.
       markActiveUsed();

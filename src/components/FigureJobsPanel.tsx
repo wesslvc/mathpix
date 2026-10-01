@@ -15,9 +15,40 @@ const STATUS_TEXT = {
  * 지문 작업은 그림을 그리는 게 아니라 **글자로 옮긴다**(사용자 — "지문은 글을
  * 옮겨적는중이라고"). 서버가 알려 주는 단계로 지금 무엇을 하는지 적는다.
  */
+/**
+ * 짧은 AI 작업(mode "task")이 지금 하는 일. `stage` 가 일의 종류다(`aiTasks.ts`).
+ * 사용자가 무엇을 기다리는지 알 수 있게 **어느 모델이 무엇을 하는지** 적는다.
+ */
+const TASK_RUNNING: Record<string, string> = {
+  ocr: "Mathpix 가 글자를 읽는 중",
+  detect: "luna 가 문제·지문 자리를 찾는 중",
+  title: "luna 가 지문 제목을 짓는 중",
+  grade: "luna 가 채점하는 중",
+  answerKey: "luna 가 답지를 읽는 중",
+  passageRead: "sol 이 지문을 글자로 옮기는 중",
+  passageMarks: "sol 이 서식(원문자·밑줄·네모·굵게)을 검수하는 중",
+  typeset: "sol 이 문제를 글자로 옮겨 적는 중",
+  chat: "sol 이 답하는 중",
+};
+/** 짧은 작업의 남은 시간 어림(초). */
+const TASK_SECONDS: Record<string, number> = {
+  ocr: 8,
+  detect: 60,
+  title: 15,
+  grade: 40,
+  answerKey: 30,
+  passageRead: 150,
+  passageMarks: 90,
+  typeset: 90,
+  chat: 30,
+};
+
 function statusText(j: FigureJob, top: string): string {
   if (j.status === "done" && j.stage === "max-offer") return "완료 · 글자·도형 차이가 남았어요";
   if (j.status !== "running" && j.status !== "pending") return STATUS_TEXT[j.status];
+  if (j.mode === "task") {
+    return j.status === "pending" ? "차례 기다리는 중" : (TASK_RUNNING[j.stage ?? ""] ?? "AI 가 처리하는 중");
+  }
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계로 돈다(`gen:N` / `verify:N`).
   if (j.mode !== "passage" && j.stage) {
     if (j.stage === "patch-plan") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}sol 이 수정 요청을 해석하는 중`;
@@ -54,6 +85,7 @@ function statusText(j: FigureJob, top: string): string {
  */
 function remainingSeconds(j: FigureJob): number {
   if (j.status !== "running" && j.status !== "pending") return 0;
+  if (j.mode === "task") return TASK_SECONDS[j.stage ?? ""] ?? 30;
   if (j.mode === "problem" || (j.mode !== "passage" && j.stage)) {
     // 전 단계 기대값: 그리기 low + 검수, 30% 는 medium 으로 한 번 더. max 는 사용자 확인 뒤에만 돈다.
     const stage = j.stage ?? "gen:0";
@@ -179,6 +211,7 @@ export default function FigureJobsPanel() {
   }
 
   const failed = jobs.filter((j) => j.status === "error").length;
+  const activeJobs = jobs.filter((j) => j.status === "pending" || j.status === "running");
   // 줄 전체가 끝나기까지 어림(일반 계정은 한 번에 하나씩, 무제한 계정은 여러 개가 동시에).
   // 무제한 계정은 여러 개를 동시에 돌리므로 그만큼 나눈다(가장 긴 한 개보다 짧아질 수는 없다).
   const remaining = jobs.map(remainingSeconds).filter((n) => n > 0);
@@ -196,9 +229,15 @@ export default function FigureJobsPanel() {
           <p className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-800">
             ⚠ 서버로 보내는 중이에요 ({submitting}개). 다 보낼 때까지 이 창을 닫거나 나가지 마세요.
           </p>
+        ) : serverActive && activeJobs.every((j) => j.mode === "task") ? (
+          // 짧은 작업(글자 인식·채점·대화 …)은 결과를 **이 화면이** 받아 간다 — 창을 닫으면 서버는 끝까지 돌아도
+          // 결과를 받을 곳이 없다. 그림 작업과 달리 "닫아도 된다"고 하면 안 된다.
+          <p className="border-b border-sky-200 bg-sky-50 px-3 py-2 text-[11px] leading-snug text-sky-800">
+            서버에서 AI 가 처리하는 중이에요. 결과는 이 화면으로 돌아와요 — 끝날 때까지 이 화면을 열어 두세요.
+          </p>
         ) : serverActive ? (
           <p className="border-b border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-snug text-emerald-800">
-            ✓ 서버로 다 보냈어요. 이제 서버에서 그리니까 창을 닫거나 오프라인이어도 계속돼요.
+            ✓ 서버로 다 보냈어요. 이제 서버에서 처리하니까 창을 닫거나 오프라인이어도 계속돼요.
             {activeCount > 0 && (
               <>
                 {" "}
@@ -348,7 +387,8 @@ export default function FigureJobsPanel() {
                       {topQuality} {maxTokens}
                     </button>
                   )}
-                  {j.status === "error" && (
+                  {/* 짧은 작업은 결과를 기다리던 화면이 이미 실패를 받았다 — 그 화면에서 다시 한다. */}
+                  {j.status === "error" && j.mode !== "task" && (
                     <button
                       type="button"
                       onClick={() => retry(j.id)}

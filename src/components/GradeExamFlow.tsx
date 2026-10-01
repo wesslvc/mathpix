@@ -1,5 +1,6 @@
 "use client";
 
+import { runAiTask } from "@/lib/aiTask";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -266,27 +267,24 @@ export default function GradeExamFlow() {
       }
 
       setBusyMessage("채점하는 중... (최대 1~2분)");
-      const res = await fetch("/api/grade-exam", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // **서버 대기열에서 채점한다**(`runAiTask` — 대기열 패널에 뜬다).
+      const { result: graded, chargedTokens } = await runAiTask<{
+        slots?: GradeSlot[];
+        usage?: { estKrw?: number; estUsd?: number };
+      }>("grade", {
+        label: "자동채점",
+        images: [omr, ...keys.map((k) => k.image)],
+        params: {
           subject,
-          omr,
-          keys,
+          keys: keys.map((k) => ({ slot: k.slot, label: k.label })),
           method: formalExam ? "handwritten" : "omr",
           // 정답표에 미적분/기하/확률과 통계(또는 언어와 매체/화법과 작문)
           // 답이 나란히 적혀 있을 때 어느 것을 봐야 하는지 서버에 알려준다
           // — 안 보내면 모델이 아무 칸이나 골라 채점한다(사용자 신고).
           electiveLabel: electiveLabelFor(undefined),
-        }),
+        },
       });
-      const json: {
-        slots?: GradeSlot[];
-        chargedTokens?: number | null;
-        usage?: { estKrw?: number; estUsd?: number };
-        error?: string;
-      } = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "채점에 실패했습니다.");
+      const json = { ...graded, chargedTokens };
 
       const gotSlots = json.slots ?? [];
       setSlots(

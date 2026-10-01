@@ -14,7 +14,7 @@ export type FigureJobRow = {
   problem_key: string;
   problem_id: string | null;
   label: string;
-  mode: "figure" | "problem" | "passage";
+  mode: "figure" | "problem" | "passage" | "task";
   korean: boolean;
   instruction: string | null;
   status: "pending" | "running" | "done" | "error";

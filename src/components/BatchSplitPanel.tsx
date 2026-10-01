@@ -16,6 +16,7 @@ import type { DetectedProblem } from "@/lib/detectProblems";
 import { mergeChosen, type ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
+import { runAiTask } from "@/lib/aiTask";
 import type { AnswerByNumber } from "@/lib/answerMap";
 import { useFigureJobs } from "./FigureJobsProvider";
 import { Button } from "@/components/ui/button";
@@ -355,14 +356,12 @@ export default function BatchSplitPanel({
       let found: DetectedProblem[];
       setBusy("문제 영역을 찾는 중...");
       try {
-        const res = await fetch("/api/detect-problems", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: await detectImage(source) }),
+        // **서버 대기열에서 찾는다**(`runAiTask` — 대기열 패널에 뜬다).
+        const { result: json } = await runAiTask<{ problems?: DetectedProblem[]; model?: string }>("detect", {
+          label: "지면에서 문제 자리 찾기",
+          images: [await detectImage(source)],
+          params: { mode: "pages" },
         });
-        const json: { problems?: DetectedProblem[]; model?: string; error?: string } =
-          await res.json();
-        if (!res.ok) throw new Error(json.error ?? "문제 영역 인식에 실패했습니다.");
         found = json.problems ?? [];
         setUsedModel(json.model ?? null);
       } catch (err) {

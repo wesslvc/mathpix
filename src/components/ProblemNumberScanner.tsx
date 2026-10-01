@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { parseProblemNumber } from "@/lib/problemNumber";
+import { AiTaskError, runAiTask } from "@/lib/aiTask";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -90,19 +91,22 @@ export default function ProblemNumberScanner({
         setBusy(`번호를 읽는 중... (${i + 1}/${needScan.length})`);
         try {
           const dataUrl = await urlToDataUrl(t.imageUrl);
-          const res = await fetch("/api/mathpix", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: await enhanceContrast(dataUrl) }),
-          });
-          const json = (await res.json()) as { text?: string; latex?: string; error?: string };
-          // 토큰 부족 같은 것은 그 자리에서 멈춘다 — 남은 것을 계속 부르면
-          // 실패만 쌓이고 시간이 오래 걸린다.
-          if (res.status === 402 || res.status === 401) {
-            throw new Error(json.error ?? "토큰이 부족합니다.");
+          // **서버 대기열에서 읽는다**(`runAiTask` — 대기열 패널에 뜬다).
+          let read = "";
+          try {
+            const { result } = await runAiTask<{ text?: string; latex?: string }>("ocr", {
+              label: `번호 읽기 ${i + 1}/${needScan.length}`,
+              images: [await enhanceContrast(dataUrl)],
+            });
+            read = result?.text || result?.latex || "";
+          } catch (err) {
+            // 토큰 부족 같은 것은 그 자리에서 멈춘다 — 남은 것을 계속 부르면
+            // 실패만 쌓이고 시간이 오래 걸린다.
+            if (err instanceof AiTaskError && (err.status === 402 || err.status === 401)) {
+              throw new Error(err.message);
+            }
           }
-          const read = json.text || json.latex || "";
-          const n = res.ok ? parseProblemNumber(read) : null;
+          const n = parseProblemNumber(read);
           if (n != null) updates.push({ id: t.id, number: n });
           else {
             failed += 1;

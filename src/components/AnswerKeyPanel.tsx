@@ -1,5 +1,6 @@
 "use client";
 
+import { runAiTask } from "@/lib/aiTask";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -89,18 +90,12 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
     try {
       const budget = gradingImageBudget(pics.length);
       const images = await Promise.all(pics.map((p) => prepareGradingImage(p, budget)));
-      const res = await fetch("/api/answer-key", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ images }),
-      });
-      const json: {
+      // **서버 대기열에서 읽는다**(`runAiTask` — 대기열 패널에 뜬다).
+      const { result: read, chargedTokens } = await runAiTask<{
         items?: AnswerKeyItem[];
-        chargedTokens?: number | null;
         usage?: { estKrw?: number };
-        error?: string;
-      } = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "답지 인식에 실패했습니다.");
+      }>("answerKey", { label: "답지 읽기", images });
+      const json = { ...read, chargedTokens };
       setItems(json.items ?? []);
       if (typeof json.chargedTokens === "number") {
         setNote(

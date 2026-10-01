@@ -1,4 +1,5 @@
 import { loadImage } from "./cropImage";
+import { AiTaskError, runAiTask } from "./aiTask";
 import { ensureDataUrl } from "./figureImage";
 import {
   applyMarksReview,
@@ -116,21 +117,19 @@ export async function reviewPassageMarks(crop: string, blocks: RichBlock[]): Pro
   let lastError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch("/api/korean-text", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: "marks", image: strips.overview, strips: strips.strips, paragraphs }),
-      });
-      const json = (await res.json().catch(() => ({}))) as {
+      // **서버 대기열에서 검수한다**(`runAiTask` — 대기열 패널에 뜬다).
+      const { result, chargedTokens } = await runAiTask<{
         review?: MarksReviewPara[];
-        error?: string;
-        chargedTokens?: number | null;
         usage?: { estKrw?: number };
         model?: string;
-      };
-      if (!res.ok || !Array.isArray(json.review)) {
-        lastError = json.error ?? `HTTP ${res.status}`;
-        if (res.status === 400 || res.status === 401 || res.status === 402) break;
+      }>("passageMarks", {
+        label: "지문 서식 검수",
+        images: [strips.overview, ...strips.strips],
+        params: { paragraphs },
+      });
+      const json = { ...result, chargedTokens };
+      if (!Array.isArray(json.review)) {
+        lastError = "검수 결과가 비어 있어요";
         continue;
       }
       const applied = applyMarksReview(blocks, json.review);
@@ -145,6 +144,8 @@ export async function reviewPassageMarks(crop: string, blocks: RichBlock[]): Pro
       };
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
+      // 400·401·402(토큰 부족)는 다시 해도 같다 — 바로 멈춘다.
+      if (err instanceof AiTaskError && err.status && [400, 401, 402].includes(err.status)) break;
     }
   }
   return {

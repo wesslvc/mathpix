@@ -58,6 +58,7 @@ import { useFigureJobs } from "./FigureJobsProvider";
 import { ensureDataUrl, prepareFigureForModel, prepareProblemForModel, rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
 import { SolChat } from "@/components/SolChat";
 import { splitFigureMarkers, type TranscribedFigure } from "@/lib/problemCompare";
+import { runAiTask } from "@/lib/aiTask";
 import { buildAnchors } from "@/lib/cardHtml";
 import { cropImageToDataUrl, loadImage } from "@/lib/cropImage";
 import { keepOrigin } from "@/lib/figureOrigin";
@@ -473,23 +474,17 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     setPassageStatus({ state: "running" });
     const figures = existingPassageFigures(editKoreanBlocks ?? editing?.korean?.blocks);
     try {
-      const res = await fetch("/api/korean-text", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: await enhanceContrast(crop),
-          figures: await figuresForReader(figures),
-        }),
-      });
-      const json = (await res.json()) as {
+      // **서버 대기열에서 읽는다**(`runAiTask` — 대기열 패널에 뜬다). 결과는 이 창에만 담기고 저장을 눌러야 반영된다.
+      const { result: read0, chargedTokens: readTokens } = await runAiTask<{
         blocks?: unknown;
-        error?: string;
-        chargedTokens?: number;
         usage?: { estKrw?: number };
         /** 실제로 답한 모델. 화면에 그대로 보여 준다. */
         model?: string;
-      };
-      if (!res.ok) throw new Error(json.error ?? "지문을 글자로 옮기지 못했습니다.");
+      }>("passageRead", {
+        label: "지문 다시 인식",
+        images: [await enhanceContrast(crop), ...(await figuresForReader(figures))],
+      });
+      const json = { ...read0, chargedTokens: readTokens ?? undefined };
       // KoreanModePanel 과 같은 규칙 — 두 경로가 달라지면 안 된다.
       const stats = emptyMarkStats();
       const read = readRichBlocks(json.blocks, 0, stats);
@@ -548,19 +543,17 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     setEditError(null);
     try {
       const source = await ensureDataUrl(src);
-      const res = await fetch("/api/sol-typeset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await prepareProblemForModel(await enhanceContrast(source)) }),
-      });
-      const json = (await res.json().catch(() => ({}))) as {
+      // **서버 대기열에서 옮겨 적는다**(`runAiTask` — 대기열 패널에 뜬다).
+      const { result: typed, chargedTokens: typedTokens } = await runAiTask<{
         text?: string;
         figures?: TranscribedFigure[];
-        error?: string;
-        chargedTokens?: number;
         estKrw?: number;
-      };
-      if (!res.ok || typeof json.text !== "string") throw new Error(json.error ?? "sol 이 옮겨 적지 못했어요.");
+      }>("typeset", {
+        label: "sol 인식 후 조판",
+        images: [await prepareProblemForModel(await enhanceContrast(source))],
+      });
+      const json = { ...typed, chargedTokens: typedTokens ?? undefined };
+      if (typeof json.text !== "string") throw new Error("sol 이 옮겨 적지 못했어요.");
 
       if (run !== typesetRunRef.current) return; // 그사이 창을 닫았거나 다른 문제를 열었다 — 엉뚱한 문제에 붙이지 않는다.
       const { text, markers } = splitFigureMarkers(json.text);

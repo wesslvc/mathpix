@@ -1,5 +1,6 @@
 "use client";
 
+import { runAiTask } from "@/lib/aiTask";
 import { useEffect, useRef, useState } from "react";
 
 export type SolChatPlan = { text: string; understood: string; count: number };
@@ -60,25 +61,21 @@ export function SolChat({
         if (!imagesRef.current && getImages) imagesRef.current = await getImages();
         images = imagesRef.current ?? undefined;
       }
-      const res = await fetch("/api/sol-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal, jobId, images, messages: next }),
-      });
-      const raw = await res.text();
-      let json: {
-        reply?: string;
-        plan?: SolChatPlan | null;
-        chargedTokens?: number | null;
-        error?: string;
-      } = {};
+      // **서버 대기열에서 답한다**(`runAiTask` — 대기열 패널에 "sol 이 답하는 중"으로 뜬다).
+      let json: { reply?: string; plan?: SolChatPlan | null; chargedTokens?: number | null };
       try {
-        json = JSON.parse(raw);
-      } catch {
-        // 본문이 JSON 이 아니다(게이트웨이 오류 등).
+        const { result, chargedTokens } = await runAiTask<{ reply?: string; plan?: SolChatPlan | null }>("chat", {
+          label: "sol 수정 대화",
+          images: jobId ? [] : images,
+          params: { goal, jobId, messages: next },
+        });
+        json = { ...result, chargedTokens };
+      } catch (err) {
+        json = {};
+        setError(err instanceof Error ? err.message : "sol 이 답하지 못했어요.");
       }
-      if (!res.ok || !json.reply) {
-        setError(json.error ?? `sol 이 답하지 못했어요 (HTTP ${res.status}).`);
+      if (!json.reply) {
+        setError((e) => e ?? "sol 이 답하지 못했어요.");
         // 보낸 말은 입력칸으로 돌려놓는다 — 다시 보낼 수 있게.
         setMsgs(msgs);
         setText(t);

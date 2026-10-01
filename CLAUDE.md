@@ -3241,7 +3241,7 @@ max 에 넘긴다.
 사용자 — "수정창에서만 sol인식후 조판기능도 추가해". 통째로 그린 문제(그림 한 장 = 문제)는 이미지 생성이라 글자가 틀려도 고칠
 길이 없다. 수정 창의 그 그림 줄에 **"sol 인식 후 조판"** 버튼이 생겼다(`isWholeProblemFigure` 일 때만 — 수정 창에만 있다).
 
-- **sol 이 글자로 옮겨 적는다**(`/api/sol-typeset`, `TYPESET_PROMPT`·`parseTranscription` — `problemCompare.ts`). 출력 꼴은 이 앱이
+- **sol 이 글자로 옮겨 적는다**(서버 대기열 task `typeset` — 처음엔 `/api/sol-typeset` 라우트였다, 아래 "모든 AI 작업은 서버 대기열에서" 참고; `TYPESET_PROMPT`·`parseTranscription` — `problemCompare.ts`). 출력 꼴은 이 앱이
   이미 그리는 Mathpix mmd 와 같다: `$…$`/`$$…$$`, 빈 줄로 문단, `> ` 조건 박스, `(가)(나)`, `<보기>` + ㄱ. ㄴ. ㄷ., 마크다운 표,
   선지 한 줄. **밑줄은 `$\underline{\text{…}}$`**(우리 렌더러는 `<u>`·`**` 를 글자 그대로 찍는다 — 렌더해 보고 정했다), 굵게는
   그냥 글자로(조판기에 굵게가 없다). 손글씨는 무시. 모델·강도는 지문 인식과 같은 `OPENAI_TEXT_MODEL`·`OPENAI_TEXT_EFFORT`
@@ -3261,6 +3261,50 @@ max 에 넘긴다.
 - 검증: 옮겨 적기 예시로 `parseTranscription`·`splitFigureMarkers`·자리 계산을 돌려 봤다 — 문단 사이 그림은 그 문단 앞(자리 1), 문장 끝에 붙어
   온 표시는 떼어져 선지 앞(자리 7)에, 망가진 box 는 버림, `\underline{\text{…}}` 가 KaTeX 로 그려지고 `[[FIG` 글자가 남지 않는다.
   `tsc`·`build`. **실제 계정으로 sol 이 얼마나 정확히 옮기는지·그림 자리를 맞게 짚는지는 아직 못 봤다**(로그인 필요).
+
+#### 모든 AI 작업은 서버 대기열에서 — 짧은 작업(task) (2026-10-01)
+
+사용자 — "모든 ai작업은 서버에서 돌리고 사용자한테 대기열에 들어가서 진행중인걸 볼수있게할것". 그림 다시 그리기·지문 인식만
+`figure_jobs` 를 탔고 나머지는 화면이 라우트를 직접 부르고 기다렸다. 이제 그것들도 **`mode = 'task'` 작업**으로 같은 표에
+들어가고 같은 일꾼이 처리하며, 같은 대기열 패널(`FigureJobsPanel`)에 "Mathpix 가 글자를 읽는 중 / luna 가 채점하는 중 /
+sol 이 답하는 중" 처럼 뜬다.
+
+| task | 하던 라우트(지웠다) | 부르는 곳 | 과금 |
+|---|---|---|---|
+| `ocr` | `/api/mathpix` | 글자로 인식(`AddProblemFlow`) · 번호 읽기(`quickProblem`) · 전체 번호 인식 | 고정 1(mock·무제한·BYOK 0) |
+| `detect` | `/api/detect-problems` | 지면 통째로 · 국어 지문/문제 자리 | 무제한 전용, 0 |
+| `title` | `/api/korean-title` | 국어 제목 짓기 | 고정 1 |
+| `grade` | `/api/grade-exam` | 자동채점 | 고정 `GRADING_TOKEN_DEPOSIT` |
+| `answerKey` | `/api/answer-key` | 답지 읽기 | 고정 |
+| `passageRead` · `passageMarks` | `/api/korean-text` | 수정 창의 지문 "다시 인식하기"·서식 검수 | 고정 100 · 실사용(보증금 30) |
+| `typeset` | `/api/sol-typeset` | 수정 창 "sol 인식 후 조판" | 실사용(보증금 30) |
+| `chat` | `/api/sol-chat` | sol 수정 대화 한 마디 | 실사용(보증금 20) |
+
+- **서버**: `src/lib/aiTasks.ts` 의 `TASKS` 가 일마다 보증금·그림 수·`run` 을 든다(옛 라우트의 알맹이를 그대로 옮겼다).
+  넣기는 `POST /api/figure-jobs`(`mode:"task"`, `task`, `paths`, `params`) — 보증금을 거기서 걸고(세션 차감) 그림 경로가 자기
+  `_jobs/` 아래인지 본다. 일꾼의 `runTaskJob` 이 돌리고 결과를 **`state.result`** 에 둔 뒤, 쓴 만큼으로 정산한다(남으면
+  `refund_recognition_credit_for`, 모자라면 새 서비스용 `consume_recognition_credit_for`). 실패하면 전액 환불. 입력 그림은
+  성공·실패 모두 지운다. 결과는 `GET /api/figure-jobs?task=<id>` 로 받는다(목록에는 안 내려보낸다 — 크다).
+- **화면**: `src/lib/aiTask.ts` 의 `runAiTask(kind, {label, images, params})` 하나 — 그림을 `<uid>/_jobs/t-<id>-<n>` 에 올리고
+  (4.5MB 본문 한도를 피한다) 넣고, 1~2초마다 물어 결과를 돌려준다. 넣고 끝날 때 `ai-task:changed` 를 쏴서 Provider 가 곧바로
+  목록을 다시 본다(패널에 바로 뜬다). 토큰 부족 같은 넣기 실패는 `AiTaskError.status`(402 등)로 온다.
+- **줄은 따로다**(마이그레이션 `0034`, 적용됨): task 는 그림 작업의 동시 상한(일반 1·무제한 10·전체 12)에 안 세고, **사람당
+  4개·전체 30개**까지 따로 돌며 **먼저 집는다** — 화면이 기다리는 짧은 일이 1분짜리 그림 뒤에 서면 안 된다. 운영 DB 에서
+  트랜잭션 안에 넣어 집어 봤다: 일반 계정에 task 6·그림 2 → `tt1..tt4`, `tf1`, 그다음 없음.
+- **`claim_figure_job` 은 서명을 안 바꿨다**(인자 셋 그대로, task 상한은 함수 안 상수). 바꾸려면 옛 것을 DROP 해야 하는데
+  **Supabase MCP 가 DROP 을 확인 대기로 붙잡아** `apply_migration`·`execute_sql` 이 60초에 끊기고 되돌려졌다(두 번). DROP 이 든
+  SQL 은 MCP 로 돌리지 말 것 — `create or replace` 로 몸통만 갈거나 사용자에게 대시보드에서 돌려 달라고 할 것.
+- 목록(`GET /api/figure-jobs`)은 **끝난 지 10분 넘은 task 를 빼고**, 최근 것부터 100개를 받아 차례만 되돌린다(예전에는 오래된
+  것부터 100개라 줄이 길면 새 작업이 빠질 수 있었다). 패널은 task 를 "생성 N회"에 안 세고 토큰 합계에만 넣는다, task 는 "다시"
+  버튼이 없다(결과를 기다리던 화면이 이미 실패를 받았다), task 만 도는 동안 띠는 "결과는 이 화면으로 돌아와요 — 열어 두세요"다
+  (그림 작업과 달리 창을 닫으면 결과를 받을 곳이 없다).
+- 곁들여 고친 것: `passageInputPaths` 가 지문이 아닌 payload(`{auto}`·`{sol}`)를 받으면 `is not iterable` 로 터졌다(대기 중인
+  문제 다시 그리기를 지울 때) — 모양을 보고 고른다. 쓰는 곳이 없어진 `gradingBilling.ts` 는 지웠다.
+- **안 옮긴 것**: 관리자 비교 화면(`/admin/compare-*`)은 제 백그라운드 라우트를 그대로 쓴다(개발용 도구). `/api/figure` 는 그
+  화면의 그림 다시 그리기가 써서 남겼다 — 사용자 흐름에서는 이제 아무도 안 부른다.
+- 검증: `tsc`·`build`; `TASKS` 의 `run` 을 가로챈 fetch 로 돌려 봤다(ocr mock · title · typeset(백그라운드 시작→물음→삭제) ·
+  chat · 빈 대화 거절); PostgREST 가 새 `or` 필터를 받는 것(200); claim 순서(위). **실제 계정으로 화면에서 눌러 패널에 뜨고
+  결과가 돌아오는 것은 배포 뒤에 봐야 한다**(로그인 필요).
 
 #### AI 원가 장부 — 작업을 지워도 누적 비용은 남는다 (2026-09-30)
 

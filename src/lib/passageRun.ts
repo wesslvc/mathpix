@@ -91,9 +91,14 @@ type Ctx = {
 
 /** 입력 경로들(끝나면 지운다). */
 export function passageInputPaths(job: { input_path: string; payload: PassagePayload | null }): string[] {
-  const p = job.payload;
-  if (!p) return [job.input_path];
-  return [job.input_path, p.overview, ...p.strips, ...p.figuresSmall, ...p.figures.map((f) => f.path)];
+  // payload 는 작업마다 모양이 다르다 — 짧은 AI 작업(task)은 `{ paths }`, 문제 다시 그리기는 `{ auto }`·`{ sol }`
+  // 이라 지문 칸이 없다(그대로 펼치면 "is not iterable" 로 터진다).
+  const p = job.payload as (PassagePayload & { paths?: unknown }) | null;
+  const own = [job.input_path].filter(Boolean);
+  if (!p) return own;
+  if (Array.isArray(p.paths)) return [...own, ...p.paths.filter((x): x is string => typeof x === "string")];
+  if (typeof p.overview !== "string" || !Array.isArray(p.strips)) return own;
+  return [...own, p.overview, ...p.strips, ...(p.figuresSmall ?? []), ...(p.figures ?? []).map((f) => f.path)];
 }
 
 /** 지금 상태로 조판할 블록(그림을 제자리에 붙이고 서식 검수를 입힌다). */

@@ -7,6 +7,7 @@ import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
 import type { DiagramLayout } from "@/lib/diagramLayout";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import type { AnswerByNumber, AnswerEntry } from "@/lib/answerMap";
+import { runAiTask } from "@/lib/aiTask";
 
 /**
  * **그림 한 장이 곧 문제**인 것(통째로 다시 그리기 · 원본 그대로 넣기)을 화면
@@ -47,20 +48,18 @@ export async function wholeProblemCard(
 
 /**
  * 크롭 한 장을 Mathpix 에 보내 **문제 번호만** 얻는다. 본문은 쓰지 않는다(위 참고).
+ * **서버 대기열에서** 돈다(`runAiTask("ocr")` — 진행이 대기열 패널에 뜬다).
  * **실패해도 던지지 않는다.** 번호가 없을 뿐 저장은 되어야 한다.
  */
-export async function readNumberWithMathpix(crop: string): Promise<number | null> {
+export async function readNumberWithMathpix(crop: string, label = "문제 번호 읽기"): Promise<number | null> {
   try {
-    const res = await fetch("/api/mathpix", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // 보낼 때만 대비를 올리고 폭 1536 아래로 줄인다(요청 본문 4.5MB 한도 — 지면 조각은
-      // 이제 원본 크기 그대로라 크다). 화면에 남는 원본은 그대로 둔다.
-      body: JSON.stringify({ image: await prepareProblemForModel(crop) }),
+    // 보낼 때만 대비를 올리고 폭 1536 아래로 줄인다(지면 조각은 원본 크기 그대로라 크다).
+    // 화면에 남는 원본은 그대로 둔다.
+    const { result } = await runAiTask<{ text?: string; latex?: string }>("ocr", {
+      label,
+      images: [await prepareProblemForModel(crop)],
     });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { text?: string; latex?: string };
-    return parseProblemNumber(json.text || json.latex || "");
+    return parseProblemNumber(result?.text || result?.latex || "");
   } catch {
     return null;
   }

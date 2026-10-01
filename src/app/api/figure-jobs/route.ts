@@ -15,6 +15,7 @@ import {
   type ProblemLoopState,
 } from "@/lib/problemLoopRun";
 import { cardUrl } from "@/lib/cardUrl";
+import { MAX_TASK_PARAMS_CHARS, TASKS, TASK_KINDS, type TaskKind } from "@/lib/aiTasks";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -48,6 +49,28 @@ export async function GET(req: NextRequest) {
   if (!supabase || !user) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
+  // **짧은 AI 작업의 결과**(mode "task"). 화면이 넣은 뒤 끝날 때까지 이걸로 묻는다. 결과는 state 에 있다
+  // (목록에는 안 내려보내는 칸이다 — 크다). 읽기는 RLS(본인 것만)로 충분하다.
+  const taskId = req.nextUrl.searchParams.get("task");
+  if (taskId) {
+    const { data, error } = await supabase
+      .from("figure_jobs")
+      .select("id, status, error, note, state, charged, charged_tokens, model")
+      .eq("id", taskId)
+      .eq("mode", "task")
+      .maybeSingle();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data) return NextResponse.json({ error: "작업을 찾지 못했어요." }, { status: 404 });
+    const st = (data.state ?? null) as { result?: unknown } | null;
+    return NextResponse.json({
+      status: data.status,
+      error: data.error,
+      note: data.note,
+      model: data.model,
+      chargedTokens: data.status === "done" && data.charged ? data.charged_tokens : null,
+      result: data.status === "done" ? (st?.result ?? null) : null,
+    });
+  }
   if (req.nextUrl.searchParams.get("offers") === "1") {
     // "이게 다릅니다, 진행하시겠어요?" 창에 보여 줄 것. state 는 화면에 안 내려보내는 칸이라
     // 서비스 키로 읽되 **본인 것만** 걸러 준다.
@@ -77,16 +100,21 @@ export async function GET(req: NextRequest) {
   // 이 계정이 동시에 돌릴 수 있는 작업 수(화면의 예상 시간 계산용).
   const concurrency = (await getBillingContext(supabase, user.id)).unlimited ? UNLIMITED_CONCURRENCY : 1;
   const since = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
+  // 짧은 AI 작업(task)은 끝난 지 10분이 지나면 목록에 안 띄운다 — 번호 읽기·대화 한 마디가 수십 개씩 쌓여
+  // 그림 작업을 밀어낸다. 그래서 **최근 것부터** 100개를 받아 차례만 되돌린다(예전에는 오래된 것부터 100개라
+  // 줄이 길면 새 작업이 빠졌다).
+  const taskSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   // 읽기는 RLS(본인 것만)로 충분하다.
   const { data, error } = await supabase
     .from("figure_jobs")
     .select(JOB_COLUMNS)
     .eq("dismissed", false)
     .gte("created_at", since)
-    .order("created_at", { ascending: true })
+    .or(`mode.neq.task,status.in.(pending,running),finished_at.gt."${taskSince}"`)
+    .order("created_at", { ascending: false })
     .limit(100);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ jobs: data ?? [], maxRedrawTokens: MAX_REDRAW_TOKENS, patchTokens: PATCH_REDRAW_TOKENS, topQuality: TOP_QUALITY, concurrency });
+  return NextResponse.json({ jobs: (data ?? []).reverse(), maxRedrawTokens: MAX_REDRAW_TOKENS, patchTokens: PATCH_REDRAW_TOKENS, topQuality: TOP_QUALITY, concurrency });
 }
 
 export async function POST(req: NextRequest) {
@@ -103,6 +131,10 @@ export async function POST(req: NextRequest) {
     height?: number;
     inputPath?: unknown;
     payload?: unknown;
+    /** mode "task": 어떤 일인가 · 미리 올려 둔 그림 경로들 · 일마다 다른 값. */
+    task?: unknown;
+    paths?: unknown;
+    params?: unknown;
     /** 수정 모드 다시 그리기 — 우리 프로세스(검수 반복) 없이 quality=auto 로 한 번만. */
     auto?: boolean;
     /** 수정 창에서 그림 하나를 다시 그릴 때 sol 검수 흐름을 고른다. */
@@ -119,6 +151,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
   }
   if (body.mode === "passage") return enqueuePassage(req, body, supabase, user.id);
+  if (body.mode === "task") return enqueueTask(req, body, supabase, user.id);
 
   const figureId = typeof body.figureId === "string" ? body.figureId.slice(0, 100) : "";
   const image = typeof body.image === "string" ? body.image : "";
@@ -502,6 +535,10 @@ export async function PATCH(req: NextRequest) {
     if (row.status !== "error") {
       return NextResponse.json({ error: "실패한 작업만 다시 돌릴 수 있어요." }, { status: 409 });
     }
+    // 짧은 AI 작업은 결과를 기다리던 화면이 이미 실패를 받았다 — 다시 돌려도 받아 갈 곳이 없다.
+    if (row.mode === "task") {
+      return NextResponse.json({ error: "이 작업은 처음 했던 화면에서 다시 해주세요." }, { status: 409 });
+    }
     const billing = await getBillingContext(supabase, user.id);
     // 지문 작업은 **실패한 단계부터** 잇는다 — 그 뒤 단계 몫만 다시 건다.
     const deposit =
@@ -771,6 +808,111 @@ async function enqueuePassage(
           error: error
             ? error.message
             : `토큰이 부족해요. 지문 인식에는 최소 ${deposit}토큰이 필요합니다(남는 몫은 돌려드려요).`,
+        },
+        { status: error ? 500 : 402 },
+      );
+    }
+    const charged = await admin
+      .from("figure_jobs")
+      .update({ charged: true, charged_tokens: deposit })
+      .eq("id", jobId)
+      .select(JOB_COLUMNS)
+      .single<FigureJobRow>();
+    if (charged.data) job = charged.data;
+  }
+
+  await kickWorker(admin, redirectBase(req), userId);
+  return NextResponse.json({ job });
+}
+
+/**
+ * **짧은 AI 작업**(mode "task", `aiTasks.ts`)을 줄에 세운다. 그림은 브라우저가 미리 `<uid>/_jobs/` 에 올려 두고
+ * 경로만 보낸다(4.5MB 한도). 보증금은 지금 건다 — 잔액 부족을 바로 알릴 수 있고, 일꾼은 세션 없이 돈다.
+ */
+async function enqueueTask(
+  req: NextRequest,
+  body: { figureId?: string; label?: string; task?: unknown; paths?: unknown; params?: unknown },
+  supabase: NonNullable<Awaited<ReturnType<typeof sessionUser>>["supabase"]>,
+  userId: string,
+) {
+  const kind = TASK_KINDS.includes(body.task as TaskKind) ? (body.task as TaskKind) : null;
+  const figureId = typeof body.figureId === "string" ? body.figureId.slice(0, 100) : "";
+  if (!kind || !figureId) return NextResponse.json({ error: "작업 종류를 알 수 없어요." }, { status: 400 });
+  const def = TASKS[kind];
+  const rawPaths = Array.isArray(body.paths) ? body.paths : [];
+  if (!rawPaths.every((p) => ownJobPath(p, userId))) {
+    return NextResponse.json({ error: "그림 경로가 올바르지 않아요." }, { status: 400 });
+  }
+  const paths = rawPaths as string[];
+  if (paths.length < def.images.min || paths.length > def.images.max) {
+    return NextResponse.json({ error: `그림 수가 맞지 않아요(${def.name}).` }, { status: 400 });
+  }
+  const params =
+    body.params && typeof body.params === "object" && !Array.isArray(body.params)
+      ? (body.params as Record<string, unknown>)
+      : {};
+  if (JSON.stringify(params).length > MAX_TASK_PARAMS_CHARS) {
+    return NextResponse.json({ error: "보낸 내용이 너무 길어요." }, { status: 413 });
+  }
+
+  const admin = createAdminClient();
+  const cleanup = () => removeStored(admin, paths);
+  const billing = await getBillingContext(supabase, userId);
+  if (def.unlimitedOnly && !billing.unlimited) {
+    await cleanup();
+    return NextResponse.json({ error: "이 기능은 무제한 계정에서만 쓸 수 있습니다." }, { status: 403 });
+  }
+  if (def.needsOpenAI) {
+    if (billing.byok && !billing.byokApiKey) {
+      await cleanup();
+      return NextResponse.json(
+        { error: "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요." },
+        { status: 402 },
+      );
+    }
+    if (!billing.byok && !process.env.OPENAI_API_KEY) {
+      await cleanup();
+      return NextResponse.json({ error: `OPENAI_API_KEY 가 설정되지 않아 ${def.name}을(를) 쓸 수 없습니다.` }, { status: 500 });
+    }
+  }
+
+  const jobId = crypto.randomUUID();
+  const inserted = await admin
+    .from("figure_jobs")
+    .insert({
+      id: jobId,
+      user_id: userId,
+      figure_id: figureId,
+      problem_key: "",
+      label: typeof body.label === "string" ? body.label.slice(0, 100) : def.name,
+      mode: "task",
+      // 패널이 "무엇을 하는 중"을 적는 데 쓴다(일의 종류).
+      stage: kind,
+      input_path: paths[0] ?? "",
+      payload: { task: kind, paths, params },
+    })
+    .select(JOB_COLUMNS)
+    .single<FigureJobRow>();
+  if (inserted.error || !inserted.data) {
+    await cleanup();
+    return NextResponse.json(
+      { error: inserted.error?.message ?? "작업을 넣지 못했어요." },
+      { status: inserted.error?.code === "23505" ? 409 : 500 },
+    );
+  }
+
+  let job = inserted.data;
+  const deposit = def.deposit(params);
+  if (deposit > 0 && !billing.unlimited && !billing.byok) {
+    const { data, error } = await supabase.rpc("consume_recognition_credit", { p_amount: deposit });
+    if (error || data === null) {
+      await admin.from("figure_jobs").delete().eq("id", jobId);
+      await cleanup();
+      return NextResponse.json(
+        {
+          error: error
+            ? error.message
+            : `토큰이 부족해요. ${def.name}에는 ${def.flat ? "" : "최대 "}${deposit}토큰이 필요합니다${def.flat ? "" : "(끝나면 쓴 만큼만 받아요)"}.`,
         },
         { status: error ? 500 : 402 },
       );

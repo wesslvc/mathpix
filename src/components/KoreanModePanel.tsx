@@ -1,5 +1,6 @@
 "use client";
 
+import { runAiTask } from "@/lib/aiTask";
 import { useRef, useState } from "react";
 import { NO_CROP_LIMIT, cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage, openPageSource, type PageSource } from "@/lib/cropImage";
 import {
@@ -254,21 +255,18 @@ export default function KoreanModePanel({
         const passagesHere = (passageBoxes[page.id] ?? [])
           .filter((b) => b.group === PASSAGE_GROUP)
           .map(({ x, y, w, h }) => ({ x, y, w, h }));
-        const res = await fetch("/api/detect-problems", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            image: await detectImage(source),
-            mode: kind === "passage" ? "korean-passage" : "korean-question",
-            ...(kind === "question" ? { passages: passagesHere } : {}),
-          }),
-        });
-        const json = (await res.json()) as {
+        // **서버 대기열에서 찾는다**(`runAiTask` — 대기열 패널에 뜬다).
+        const { result: json } = await runAiTask<{
           regions?: DetectedKoreanRegion[];
           figures?: ProblemBox[];
-          error?: string;
-        };
-        if (!res.ok) throw new Error(json.error ?? "자리 인식에 실패했습니다.");
+        }>("detect", {
+          label: kind === "passage" ? "지문 자리 찾기" : "문제 자리 찾기",
+          images: [await detectImage(source)],
+          params: {
+            mode: kind === "passage" ? "korean-passage" : "korean-question",
+            ...(kind === "question" ? { passages: passagesHere } : {}),
+          },
+        });
         detectedRef.current[page.id] = {
           ...cached,
           ...(kind === "passage"
@@ -476,13 +474,11 @@ export default function KoreanModePanel({
     setTitling(true);
     setTitleNote("제목을 짓는 중...");
     try {
-      const res = await fetch("/api/korean-title", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: await prepareProblemForModel(passageCrop) }),
+      const { result: json } = await runAiTask<{ title?: string; kind?: string }>("title", {
+        label: "지문 제목 짓기",
+        images: [await prepareProblemForModel(passageCrop)],
       });
-      const json = (await res.json()) as { title?: string; kind?: string; error?: string };
-      if (!res.ok || !json.title) throw new Error(json.error ?? "제목을 짓지 못했습니다.");
+      if (!json?.title) throw new Error("제목을 짓지 못했습니다.");
       setTitle(json.title);
       setTitleNote(`${json.kind ?? ""} 지문으로 보고 지었어요. 고쳐도 됩니다.`);
     } catch (err) {
