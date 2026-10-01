@@ -57,6 +57,9 @@ const DiagramCropModal = dynamic(() => import("./DiagramCropModal"), { ssr: fals
 import { useFigureJobs } from "./FigureJobsProvider";
 import { ensureDataUrl, prepareFigureForModel, prepareProblemForModel, rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
 import { SolChat } from "@/components/SolChat";
+import { splitFigureMarkers, type TranscribedFigure } from "@/lib/problemCompare";
+import { buildAnchors } from "@/lib/cardHtml";
+import { cropImageToDataUrl, loadImage } from "@/lib/cropImage";
 import { keepOrigin } from "@/lib/figureOrigin";
 import { thumbPathFor } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
@@ -276,6 +279,21 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   const [passageBusy, setPassageBusy] = useState(false);
   /** 지문 재인식 진행 상황(Mathpix → terra). 안 돌고 있으면 null. */
   const [passageStatus, setPassageStatus] = useState<PassageStatus | null>(null);
+  /**
+   * "sol 이 옮겨 적고 우리가 조판" 진행 상황. 끝나면 본문·그림이 바뀌지만 **저장을 눌러야** 반영된다.
+   * `undo` 는 조판 전 상태(본문·박스·그림) — 결과가 마음에 안 들면 공짜로 되돌린다.
+   */
+  const [typeset, setTypeset] = useState<{
+    busy: boolean;
+    note?: string;
+    undo?: { text: string; box: BoxOverride | undefined; figures: StoredFigure[] };
+  } | null>(null);
+  // 조판 요청이 끝났을 때 아직 **같은 수정 창**인지 가린다(창을 닫거나 다른 문제를 열면 늘어난다).
+  const typesetRunRef = useRef(0);
+  useEffect(() => {
+    typesetRunRef.current++;
+    setTypeset(null);
+  }, [editing]);
   const previewRef = useRef<HTMLDivElement>(null);
   /**
    * 오려내기 창을 무엇 때문에 열었는가.
@@ -300,7 +318,10 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
    * 본문 글자가 없는 문제인가("통째로 AI로 다시 그리기"로 만든 것).
    * 그림 한 장이 곧 문제라, 본문 수정·조건 박스는 다룰 대상이 없다.
    */
-  const isImageOnly = (editing?.text ?? "").trim() === "";
+  // 조판(`typesetWithSol`)으로 본문이 생기면 더는 이미지뿐인 문제가 아니다 — 본문 편집·박스가 돌아온다.
+  // 저장된 본문만 보면 안 된다(조판 결과가 화면에 안 나온다). 반대로 지금 본문만 보면, 글자가 있는 문제에서 본문을
+  // 다 지우는 순간 편집기가 사라진다 — 그래서 둘 다 비었을 때만이다.
+  const isImageOnly = (editing?.text ?? "").trim() === "" && editText.trim() === "";
   /**
    * 국어 지문인가. 지문도 본문 글자가 없어 `isImageOnly` 지만, "AI로 통째로
    * 다시 그리기"로 만든 이미지 문제와는 완전히 다른 물건이다 — 그림이
@@ -509,6 +530,102 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     } finally {
       setPassageBusy(false);
     }
+  }
+
+  /**
+   * **sol 이 문제 한 장을 글자로 옮겨 적고, 우리가 조판한다**(수정 창 전용, `/api/sol-typeset`).
+   *
+   * 이미지 생성은 글자를 틀리고 틀린 글자를 고칠 길이 없다. 옮겨 적은 글은 우리 인식 경로(`renderMathText` · KaTeX ·
+   * 나눔명조)가 그대로 그리므로 **틀린 글자는 본문 편집에서 고칠 수 있다.** 글자로 못 옮기는 그림(그래프·도형·지도)은
+   * sol 이 짚은 자리를 원본에서 오려 그 문단 사이에 붙인다 — 붙은 그림은 여느 그림처럼 다시 오려내거나 AI 로 다시 그릴 수 있다.
+   *
+   * 읽는 재료는 **AI 이전 원본**(`origin`)이 있으면 그것이다 — 원본이 진실이고, AI 그림은 이미 글자가 틀렸을 수 있다.
+   */
+  async function typesetWithSol(src: string) {
+    const undo = { text: editText, box: editBox, figures: editFigures };
+    const run = typesetRunRef.current;
+    setTypeset({ busy: true, note: "sol 이 문제를 글자로 옮겨 적는 중… (1분 안팎)" });
+    setEditError(null);
+    try {
+      const source = await ensureDataUrl(src);
+      const res = await fetch("/api/sol-typeset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: await prepareProblemForModel(await enhanceContrast(source)) }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        text?: string;
+        figures?: TranscribedFigure[];
+        error?: string;
+        chargedTokens?: number;
+        estKrw?: number;
+      };
+      if (!res.ok || typeof json.text !== "string") throw new Error(json.error ?? "sol 이 옮겨 적지 못했어요.");
+
+      if (run !== typesetRunRef.current) return; // 그사이 창을 닫았거나 다른 문제를 열었다 — 엉뚱한 문제에 붙이지 않는다.
+      const { text, markers } = splitFigureMarkers(json.text);
+      // 그림 자리 = 그 그림 앞까지의 본문이 끝나는 자리(카드의 자리 목록 번호). 앞에 본문이 없으면 맨 위.
+      const posOf = new Map(
+        markers.map((m) => [
+          m.id,
+          m.before.trim() ? buildAnchors(renderMathTextWithInfo(m.before).blocks).length - 1 : 0,
+        ]),
+      );
+      const figs = json.figures ?? [];
+      const nextFigures: StoredFigure[] = [];
+      if (figs.length) {
+        const img = await loadImage(source);
+        const W = img.naturalWidth;
+        const H = img.naturalHeight;
+        for (const f of figs) {
+          // 모델이 경계를 빠듯하게 잡는 일이 흔해 사방 1% 여유를 준다(그림 가장자리 눈금·글자가 잘리지 않게).
+          const x0 = Math.max(0, f.x - 0.01);
+          const y0 = Math.max(0, f.y - 0.01);
+          const x1 = Math.min(1, f.x + f.w + 0.01);
+          const y1 = Math.min(1, f.y + f.h + 0.01);
+          const crop = cropImageToDataUrl(img, { x: x0 * W, y: y0 * H, width: (x1 - x0) * W, height: (y1 - y0) * H });
+          nextFigures.push({
+            id: crypto.randomUUID(),
+            markup: await rasterToSvg(crop),
+            layout: DEFAULT_DIAGRAM_LAYOUT,
+            // 본문에 자리 표시가 없는 그림은 맨 아래 — 미리보기에서 끌어 옮기면 된다.
+            position: posOf.get(f.id) ?? BOTTOM,
+            kind: "figure",
+            row: false,
+          });
+        }
+      }
+      if (run !== typesetRunRef.current) return;
+      setEditText(text);
+      // 박스 범위는 옛 본문의 줄 번호라 새 본문에는 맞지 않는다 — 자동 감지로 돌린다.
+      setEditBox(undefined);
+      setEditFigures(nextFigures);
+      const cost =
+        typeof json.estKrw === "number"
+          ? ` · 약 ${json.estKrw}원`
+          : typeof json.chargedTokens === "number"
+            ? ` · ${json.chargedTokens}토큰`
+            : "";
+      setTypeset({
+        busy: false,
+        undo,
+        note: `조판했어요 — 글 ${text.length}자 · 그림 ${nextFigures.length}개${cost}. 틀린 글자는 본문에서 고치고, 저장을 눌러야 반영돼요.`,
+      });
+    } catch (err) {
+      if (run !== typesetRunRef.current) return;
+      const message = err instanceof Error ? err.message : "sol 이 옮겨 적지 못했어요.";
+      setTypeset(null);
+      setEditError(message);
+    }
+  }
+
+  /** 조판 전으로 되돌린다(돈이 안 든다 — 화면 상태만 되돌린다). */
+  function undoTypeset() {
+    if (!typeset?.undo) return;
+    setEditText(typeset.undo.text);
+    setEditBox(typeset.undo.box);
+    setEditFigures(typeset.undo.figures);
+    setTypeset(null);
   }
 
   /**
@@ -1098,6 +1215,14 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                 ) : (
                   <TextEditTabs value={editText} onChange={setEditText} />
                 )}
+                {typeset && !typeset.busy && typeset.undo && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                    <span className="min-w-[12rem] flex-1">{typeset.note}</span>
+                    <Button type="button" variant="outline" size="xs" onClick={undoTypeset}>
+                      조판 전으로 되돌리기
+                    </Button>
+                  </div>
+                )}
 
                 <div className="flex flex-col gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
                   <div className="flex items-center gap-2">
@@ -1328,6 +1453,17 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                             >
                               {busy ? "다시 그리는 중..." : "AI로 다시 그리기"}
                             </Button>
+                            {isWholeProblemFigure(f.id) && (
+                              // 그림 대신 **글자로** 다시 만든다 — sol 이 옮겨 적고 우리 조판기가 그린다(수정 창에만 있다).
+                              <Button
+                                type="button"
+                                onClick={() => void typesetWithSol(f.origin ?? raster)}
+                                disabled={busy || typeset?.busy === true}
+                                variant="outline" size="xs"
+                              >
+                                {typeset?.busy ? "sol 이 옮겨 적는 중..." : "sol 인식 후 조판"}
+                              </Button>
+                            )}
                             {f.origin && (
                               <Button
                                 type="button"
@@ -1420,6 +1556,11 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                             {job?.status === "error" && (
                               <span className="text-[11px] text-red-600">
                                 {job.error}
+                              </span>
+                            )}
+                            {typeset?.busy && isWholeProblemFigure(f.id) && (
+                              <span className="w-full text-[11px] text-slate-500">
+                                {typeset.note} 글자로 옮긴 뒤 그래프·도형은 원본에서 오려 제자리에 붙여요.
                               </span>
                             )}
                             {/* 무엇이 잘못됐는지는 사용자가 보고 있다. 그대로

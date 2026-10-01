@@ -637,6 +637,8 @@ export async function askSol(
   opts?: {
     /** 추론 강도를 아예 보내지 않는다(수정 대화 — 사용자 지시). 기본은 검수 강도. */
     noEffort?: boolean;
+    /** 검수 강도 대신 쓸 추론 강도(수정 창의 조판용 옮겨 적기는 지문 인식과 같은 강도). */
+    effort?: string;
     /** 프롬프트 캐시 키(같은 일끼리 같은 값 — `postResponses` 주석). */
     cacheKey?: string;
     /** 사진들 뒤에 붙일 글(매번 바뀌는 부분 — 앞쪽이 캐시에 맞게). */
@@ -653,7 +655,7 @@ export async function askSol(
     let id = "";
     for (let attempt = 0; ; attempt++) {
       try {
-        id = await startVisionBackground(prompt, images, OPENAI_TEXT_MODEL, opts?.noEffort ? undefined : VERIFY_EFFORT, ctx.byokApiKey, {
+        id = await startVisionBackground(prompt, images, OPENAI_TEXT_MODEL, opts?.noEffort ? undefined : (opts?.effort ?? VERIFY_EFFORT), ctx.byokApiKey, {
           cacheKey: opts?.cacheKey,
           tail: opts?.tail,
         });

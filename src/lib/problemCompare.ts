@@ -327,3 +327,94 @@ function parseJsonObject(text: string): unknown {
     return JSON.parse(text.slice(a, b + 1));
   }
 }
+
+// ── sol 이 읽고 우리가 조판하기 (수정 창 전용) ─────────────────────────────
+
+/** 옮겨 적기에서 글자로 못 옮긴 그림 하나(사진 대비 비율 0~1). */
+export type TranscribedFigure = { id: string; x: number; y: number; w: number; h: number };
+export type Transcription = { text: string; figures: TranscribedFigure[] };
+
+/**
+ * **sol 이 문제 한 장을 글자로 옮겨 적는다** — 그 글을 우리 인식 경로(`renderMathText` · 카드 조립)가 그대로 조판한다.
+ * 출력 꼴은 이 앱의 인식 경로가 이미 그리는 Mathpix mmd 에 맞춘다: `$…$`/`$$…$$` 수식, 빈 줄로 문단, `> ` 로 조건 박스,
+ * `(가)`/`(나)` 표지, `<보기>` 머리글과 ㄱ. ㄴ. ㄷ. 항목, 마크다운 표.
+ *
+ * 그림은 글자로 못 옮기는 것(그래프·도형·지도·사진·도식)만이다. 글자만 든 표는 표로 옮긴다 — 그림으로 넘기면 표 안 글자가
+ * 원본 사진 조각으로 남아 조판한 글과 서체가 갈린다. 예전 비교 화면의 ③(9850a04)을 수정 창으로 옮겨 온 것이다.
+ */
+export const TYPESET_PROMPT = `task: transcribe ONE Korean exam question from the photo so it can be re-typeset by our renderer. text accuracy is the whole point — every printed character exactly as printed. never paraphrase, never fix the question, never solve it.
+
+ignore handwriting (student's pencil/pen marks, circles, check marks, scribbles, written answers, margin calculations). keep only what is PRINTED. printed underlines / bold that belong to the question are kept (see below).
+
+output format for "text" (markdown-like, rendered by our typesetter):
+- question number at the start as printed, e.g. "17. " .
+- paragraphs separated by one blank line. do not add line breaks inside a sentence.
+- ALL math in LaTeX: inline $...$, display $$...$$ on its own line. expressions inside sentences (e.g. $f(x)$, $x=3$, $\\frac{1}{2}$, $\\overline{AB}$) go in $...$. plain Korean counting like "3개" may stay plain.
+- a condition box printed with a border: each line of the box prefixed with "> ". (가)/(나)/(다) conditions keep their markers "(가)", "(나)".
+- <보기> box: a line "<보기>" then one item per line: "ㄱ. ...", "ㄴ. ...", "ㄷ. ...". use the compatibility jamo ㄱ ㄴ ㄷ (U+3131…), not conjoining jamo.
+- a table made only of text/numbers: markdown table ("| a | b |" rows, second row "| --- | --- |"). keep every cell, keep empty cells empty.
+- choices: each line as printed, e.g. "① 1  ② 2  ③ 3  ④ 4  ⑤ 5" on one line if printed on one line; math choices as "① $\\frac{1}{2}$".
+- circled markers (㉠㉡㉢ ①② ⓐⓑ ㉮㉯) as those exact unicode characters. read the character INSIDE each circle carefully; never guess from neighbours and never switch families (㉠ is not ①).
+- printed underline (the question often points at it, e.g. "밑줄 친 ㉠"): $\\underline{\\text{밑줄 친 말}}$ for Korean words, \\underline{...} inside math. keep the circled marker OUTSIDE the underline unless it is printed under the line. printed bold: write the words plainly (our typesetter has no bold); never use <u>, ** or HTML tags.
+- a fraction whose numerator/denominator are Korean words: $\\frac{\\text{분자}}{\\text{분모}}$ — keep it stacked, never flatten it into one line.
+
+figures: anything that cannot be written as text or a simple table — graph, geometric figure, diagram, map, photo, chart, apparatus, a table containing pictures. for each figure:
+- put a line "[[FIG fN]]" (N = 1,2,…) as its own paragraph where it sits in the reading order.
+- give its box in "figures" with box_2d [ymin, xmin, ymax, xmax] normalised 0-1000 to THIS image, tight around the figure including its own labels/caption but NOT the surrounding sentences.
+- do NOT also transcribe the text drawn inside the figure (axis labels, numbers on the graph, map names) — it stays in the picture.
+
+return JSON only:
+{"text":"...","figures":[{"id":"f1","box_2d":[ymin,xmin,ymax,xmax]}]}`;
+
+/** 옮겨 적기 결과를 읽는다. 모양이 이상한 그림은 버린다(그 자리 표시는 조판할 때 빠진다). */
+export function parseTranscription(text: string): Transcription {
+  const obj = parseJsonObject(text) as { text?: unknown; figures?: unknown };
+  const body = typeof obj?.text === "string" ? obj.text : "";
+  if (!body.trim()) throw new Error("옮겨 적은 글이 비어 있습니다.");
+  const figures: TranscribedFigure[] = [];
+  const seen = new Set<string>();
+  if (Array.isArray(obj.figures)) {
+    for (const f of obj.figures.slice(0, 12)) {
+      if (!f || typeof f !== "object") continue;
+      const r = f as { id?: unknown; box_2d?: unknown };
+      const id = typeof r.id === "string" && /^f\d{1,2}$/.test(r.id) ? r.id : null;
+      const b = Array.isArray(r.box_2d) ? r.box_2d.map(Number) : null;
+      if (!id || seen.has(id) || !b || b.length !== 4 || b.some((n) => !Number.isFinite(n))) continue;
+      const [y0, x0, y1, x1] = b.map((n) => Math.min(1000, Math.max(0, n)) / 1000);
+      if (x1 - x0 < 0.01 || y1 - y0 < 0.01) continue;
+      seen.add(id);
+      figures.push({ id, x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+    }
+  }
+  return { text: body.replace(/\r\n/g, "\n").trim().slice(0, 20000), figures };
+}
+
+/** 본문에서 그림 자리 표시 줄. */
+export const FIG_MARKER = /^\s*\[\[FIG (f\d{1,2})\]\]\s*$/;
+
+/**
+ * 본문을 그림 자리 표시 기준으로 나눈다. `before` 는 그 그림 앞까지의 본문(자리 계산용), `text` 는 표시를 뺀 본문 전체다.
+ * 본문에 표시가 없는 그림은 부르는 쪽이 맨 아래에 붙인다.
+ */
+export function splitFigureMarkers(text: string): {
+  text: string;
+  markers: { id: string; before: string }[];
+} {
+  // 표시가 문단 한가운데·문장 속에 끼어 와도 제 문단으로 떼어 낸다 — 안 그러면 "[[FIG f1]]" 글자가 그대로 인쇄된다.
+  const paras = text
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]*\[\[FIG (f\d{1,2})\]\][ \t]*/g, "\n\n[[FIG $1]]\n\n")
+    .split(/\n\s*\n/)
+    .filter((p) => p.trim());
+  const kept: string[] = [];
+  const markers: { id: string; before: string }[] = [];
+  for (const p of paras) {
+    const m = p.match(FIG_MARKER);
+    if (m) {
+      markers.push({ id: m[1], before: kept.join("\n\n") });
+      continue;
+    }
+    kept.push(p);
+  }
+  return { text: kept.join("\n\n"), markers };
+}
