@@ -258,18 +258,24 @@ export type ChatTurn = { role: "user" | "assistant"; text: string };
  *  - `patch`  : 사진 2 를 **그 자리에서 고친다**(수정 사항 = 사진 2 에 가할 편집).
  *  - `redraw` : 사진 1 에서 **처음부터 다시 그린다**(사진 2 는 지난 시도 — 수정 사항 = 이번에 틀리지 말아야 할 곳).
  */
-export function solChatPrompt(goal: "patch" | "redraw", turns: ChatTurn[], findings: string): string {
+/**
+ * 수정 대화 프롬프트. **바뀌지 않는 지시문(`head`)을 사진 앞에, 대화 내용(`tail`)을 사진 뒤에** 둔다 — 프롬프트
+ * 캐시는 앞에서부터 같은 부분까지만 맞으므로, 대화가 사진 앞에 있으면 마디마다 거기서 끊긴다. 이렇게 두면
+ * 두 번째 마디부터는 지시문 + 사진 두 장이 캐시에 맞는다.
+ */
+export function solChatPrompt(
+  goal: "patch" | "redraw",
+  turns: ChatTurn[],
+  findings: string,
+): { head: string; tail: string } {
   const what =
     goal === "patch"
       ? "image 2 will be EDITED IN PLACE by an image-editing model, so every plan item is an edit to image 2."
       : "image 2 is only the previous attempt; the next drawing is made from image 1 again, so every plan item is something the NEXT drawing must get right (based on what went wrong in image 2)."
   ;
   const talk = turns.map((t) => `${t.role === "user" ? "PERSON" : "YOU"}: ${t.text.trim().slice(0, 1500)}`).join("\n");
-  return `task: you are chatting (in Korean) with a person who is fixing a re-drawn Korean exam question. image 1 = ORIGINAL photo (the truth). image 2 = the CURRENT re-drawn version. ${what}
-${findings ? `automatic findings from an earlier comparison (may help, may be incomplete):\n${findings}\n` : ""}
-conversation so far:
-${talk}
-
+  const head = `task: you are chatting (in Korean) with a person who is fixing a re-drawn Korean exam question. image 1 = ORIGINAL photo (the truth). image 2 = the CURRENT re-drawn version. ${what}
+${findings ? `automatic findings from an earlier comparison (may help, may be incomplete):\n${findings}\n` : ""}the conversation so far comes AFTER the two images.
 reply to the LAST person message like a careful assistant:
 - LOOK at both images. say what you actually see that is different around what they mean ("점 B 는 원본에서 해안선 꺾이는 곳 위인데 지금 그림은 약 6% 오른쪽에 있어요"). be concrete: printed landmarks + % of the figure box.
 - if the location / target is ambiguous, or you cannot see it, ASK one short question instead of guessing. never invent what is not in the images.
@@ -278,6 +284,11 @@ reply to the LAST person message like a careful assistant:
 also, every turn, output the CURRENT AGREED PLAN as "plan" — everything agreed so far in this conversation (not only the last message), as PRECISE, FORCEFUL instructions an image model can follow (MOVE/ERASE/REPLACE … exactly, with numeric % positions and a landmark; quote exact text). "understood" = 1–2 Korean sentences summarising the plan. if nothing concrete is agreed yet (you are asking a question), set "plan" to null.
 return JSON only:
 {"reply":"한국어 답변","plan":null or {"understood":"...","edits":[{"where":"short location","current":"what image 2 has now (with position)","target":"what it must be (with position, from image 1)","how":"the concrete edit"}],"keep":"what to leave untouched"}}`;
+  const tail = `conversation so far:
+${talk}
+
+reply to the LAST person message (JSON only, as described above).`;
+  return { head, tail };
 }
 
 /** 대화 답을 읽는다. `plan` 이 이상하면 없는 것으로 친다(답변 글은 살린다). */

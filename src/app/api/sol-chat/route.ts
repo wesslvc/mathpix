@@ -4,7 +4,7 @@ import { startGradingBilling } from "@/lib/gradingBilling";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import { logAiCost } from "@/lib/costLog";
+import { logAiCost, solTokens } from "@/lib/costLog";
 import { askSol, loadPatchImages } from "@/lib/problemLoopRun";
 import { parseSolChat, planToChanges, solChatPrompt, type ChatTurn } from "@/lib/problemCompare";
 
@@ -105,15 +105,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `토큰이 부족해요. 대화 한 마디에 최대 ${TURN_DEPOSIT}토큰이 필요합니다(끝나면 쓴 만큼만 받아요).` }, { status: 402 });
   }
 
+  const prompt = solChatPrompt(goal, turns, findings);
   const ask = await askSol(
-    solChatPrompt(goal, turns, findings),
+    prompt.head,
     images,
     { byokApiKey: billingCtx.byokApiKey ?? undefined, modelIds: [], deadlineMs: 100_000, tag: "sol-chat" },
     "대화",
-    { noEffort: true },
+    // 대화 내용은 사진 뒤에 — 지시문 + 사진 두 장이 마디마다 캐시에 맞는다.
+    { noEffort: true, cacheKey: "reprint-sol-chat", tail: prompt.tail },
   );
   if (ask.krw > 0 && !billingCtx.byok) {
-    await logAiCost(admin, { userId: user.id, jobId, kind: "problem", what: "sol 수정 대화", krw: ask.krw });
+    await logAiCost(admin, { userId: user.id, jobId, kind: "problem", what: "sol 수정 대화", krw: ask.krw, tokens: solTokens(ask.usage) });
   }
   if (ask.text === null) {
     await billing.refund();

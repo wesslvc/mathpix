@@ -18,7 +18,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cardUrl } from "./cardUrl";
-import { logAiCost } from "./costLog";
+import { imageTokens, logAiCost, solTokens } from "./costLog";
 import { loadAsDataUrl, removeStored, runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
 import { GradeError, readKoreanMarks, readKoreanRichText } from "./gradeExam";
 import { describeMarks, emptyMarkStats, readRichBlocks, type RichBlock } from "./kice/richText";
@@ -189,7 +189,7 @@ export async function runPassageStage(
       );
       const readKrw = readUsage ? gradingEstKrw(readUsage, model) : undefined;
       if (readKrw && !ctx.byokApiKey) {
-        await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "passage", what: "지문 읽기", krw: readKrw });
+        await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "passage", what: "지문 읽기", krw: readKrw, tokens: solTokens(readUsage) });
       }
       const stats = emptyMarkStats();
       const blocks = readRichBlocks(raw, 0, stats);
@@ -241,7 +241,7 @@ export async function runPassageStage(
             );
             const est = usage ? gradingEstKrw(usage, model) : undefined;
             if (est && !ctx.byokApiKey) {
-              await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "passage", what: "서식 검수", krw: est });
+              await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "passage", what: "서식 검수", krw: est, tokens: solTokens(usage) });
             }
             charge = Math.min(PASSAGE_MARKS_DEPOSIT, gradingTokenCharge(est));
             next.review = review;
@@ -297,6 +297,7 @@ export async function runPassageStage(
               what: "지문 그림",
               krw: outcome.usage.estKrw,
               usd: outcome.usage.estUsd,
+              tokens: imageTokens(outcome.usage),
             });
           }
           const saved = await keepFigure(admin, job.user_id, outcome.dataUrl);

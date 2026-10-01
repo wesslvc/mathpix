@@ -16,6 +16,8 @@ export async function logAiCost(
     krw: number;
     usd?: number;
     krwRate?: number;
+    /** 토큰 수(입력 전체 · 그중 캐시에서 읽은 것 · 출력). 캐시 적중률을 재려고 남긴다(0033). */
+    tokens?: { input: number; cached: number; output: number };
   },
 ): Promise<void> {
   if (!(row.krw > 0)) return;
@@ -28,9 +30,26 @@ export async function logAiCost(
       what: row.what,
       est_krw: row.krw,
       est_usd: usd,
+      ...(row.tokens
+        ? { in_tokens: row.tokens.input, cached_tokens: row.tokens.cached, out_tokens: row.tokens.output }
+        : {}),
     });
     if (error) console.warn("[costLog] 장부 기록 실패:", error.message);
   } catch (err) {
     console.warn("[costLog] 장부 기록 실패:", err instanceof Error ? err.message : err);
   }
+}
+
+/** sol(Responses) usage → 장부 토큰. */
+export function solTokens(
+  u: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | undefined,
+): { input: number; cached: number; output: number } | undefined {
+  return u ? { input: u.inputTokens, cached: u.cachedInputTokens ?? 0, output: u.outputTokens } : undefined;
+}
+
+/** 그림 생성 usage → 장부 토큰. */
+export function imageTokens(
+  u: { inputText: number; inputImage: number; output: number; cached: number } | undefined,
+): { input: number; cached: number; output: number } | undefined {
+  return u ? { input: u.inputText + u.inputImage, cached: u.cached, output: u.output } : undefined;
 }

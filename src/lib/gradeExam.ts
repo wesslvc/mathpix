@@ -155,6 +155,78 @@ const OPENAI_MODELS = "https://api.openai.com/v1/models";
 const OPENAI_RESPONSES = "https://api.openai.com/v1/responses";
 const OPENAI_CHAT = "https://api.openai.com/v1/chat/completions";
 
+/**
+ * **프롬프트 캐시를 노린다** (Responses API).
+ *
+ * OpenAI 는 요청의 **앞부분(1024토큰 이상)이 같으면** 그 부분을 캐시에서 읽고 입력 단가를 깎아 준다 — 따로
+ * 켤 것은 없지만, 기본 캐시는 몇 분이면 사라지고 같은 앞부분이라도 다른 서버로 가면 못 맞힌다. 우리는 하루
+ * 수십 번 부르는 정도라 그대로 두면 거의 매번 빗나간다. 그래서 두 가지를 붙인다:
+ * - `prompt_cache_key` — 같은 일(검수·대화·지문 읽기 …)을 같은 서버로 보내 앞부분을 맞히게 한다.
+ * - `prompt_cache_retention: "24h"` — 캐시를 하루 들고 있게 한다(`OPENAI_PROMPT_CACHE_RETENTION`,
+ *   `off` 면 안 보낸다).
+ * **결과는 하나도 안 바뀐다** — 같은 입력을 보내고 값만 덜 낸다.
+ *
+ * 두 값을 이 계정의 모든 모델이 받는지는 확인하지 못했다. 모델이 콕 집어 거부하면(400 에 `prompt_cache`)
+ * 한 단계씩 빼고 다시 보내고(보존 기간 → 키), 그 모델은 이 인스턴스가 사는 동안 기억해 다시 안 보낸다 —
+ * 캐시 때문에 호출이 죽으면 안 된다.
+ */
+const CACHE_RETENTION = (() => {
+  const v = process.env.OPENAI_PROMPT_CACHE_RETENTION?.trim();
+  return v === "off" || v === "in_memory" ? null : v || "24h";
+})();
+/** 2 = 키 + 보존 기간, 1 = 키만, 0 = 안 보냄. */
+const cacheLevelByModel = new Map<string, 0 | 1 | 2>();
+
+function cacheFields(level: 0 | 1 | 2, cacheKey: string | undefined): Record<string, string> {
+  if (level === 0) return {};
+  return {
+    ...(cacheKey ? { prompt_cache_key: cacheKey } : {}),
+    ...(level === 2 && CACHE_RETENTION ? { prompt_cache_retention: CACHE_RETENTION } : {}),
+  };
+}
+
+/** Responses API 에 보낸다 — 캐시 필드를 붙이고, 그 필드를 거부하면 빼고 다시 보낸다. */
+async function postResponses(
+  key: string,
+  payload: Record<string, unknown> & { model: string },
+  cacheKey: string | undefined,
+  signal?: AbortSignal,
+): Promise<{ res: Response; body: string; cacheLevel: 0 | 1 | 2 }> {
+  let level: 0 | 1 | 2 = cacheLevelByModel.get(payload.model) ?? (CACHE_RETENTION ? 2 : 1);
+  for (;;) {
+    const res = await fetch(OPENAI_RESPONSES, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      signal,
+      body: JSON.stringify({ ...payload, ...cacheFields(level, cacheKey) }),
+    });
+    const body = await res.text();
+    if (res.status === 400 && level > 0 && /prompt_cache/i.test(body)) {
+      const next: 0 | 1 = level === 2 && /retention/i.test(body) ? 1 : 0;
+      console.warn(`[vision] ${payload.model} 가 캐시 필드를 거부 → ${next === 1 ? "보존 기간 빼고" : "캐시 필드 없이"} 다시: ${body.slice(0, 160)}`);
+      cacheLevelByModel.set(payload.model, next);
+      level = next;
+      continue;
+    }
+    if (res.ok) cacheLevelByModel.set(payload.model, level);
+    return { res, body, cacheLevel: level };
+  }
+}
+
+/** 이 인스턴스가 이 모델에 캐시 필드를 어디까지 붙이는지(확인용 프로브). */
+export function promptCacheLevel(model: string): 0 | 1 | 2 | null {
+  return cacheLevelByModel.get(model) ?? null;
+}
+
+/** 일 이름 → 캐시 키(ASCII). 같은 일끼리 앞부분(지시문)이 같다. */
+const CACHE_KEY_BY_WHAT: Record<string, string> = {
+  채점: "reprint-grade",
+  "제목 짓기": "reprint-title",
+  "답지 인식": "reprint-answer-key",
+  "지문 인식": "reprint-korean-text",
+  "서식 검수": "reprint-marks",
+};
+
 /** 404 가 났을 때, 이 계정이 실제로 가진 이름들을 붙여 준다(목록 조회는 무료). */
 async function explain404(key: string, model: string): Promise<string> {
   try {
@@ -252,11 +324,9 @@ async function callVision(
   const model = modelName ?? OPENAI_DETECT_MODEL;
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
 
-  let res = await fetch(OPENAI_RESPONSES, {
-    method: "POST",
-    headers,
-    signal,
-    body: JSON.stringify({
+  const first = await postResponses(
+    key,
+    {
       model,
       input: [
         {
@@ -273,9 +343,12 @@ async function callVision(
       ],
       text: { format: { type: "json_object" } },
       ...(effort ? { reasoning: { effort } } : {}),
-    }),
-  });
-  let body = await res.text();
+    },
+    CACHE_KEY_BY_WHAT[what] ?? "reprint-vision",
+    signal,
+  );
+  let res = first.res;
+  let body = first.body;
   let viaResponses = true;
 
   // 추론 강도를 정해 부른 것이면 Chat 으로 내려가지 않는다 — 그쪽은 그 값을
@@ -879,13 +952,21 @@ export async function startVisionBackground(
   effort?: string,
   /** BYOK 계정의 키. 있으면 서버 키를 **아예 쓰지 않는다**. */
   apiKeyOverride?: string,
+  opts?: {
+    /** 캐시 키(같은 일끼리 같은 값). 없으면 `reprint-vision`. */
+    cacheKey?: string;
+    /**
+     * 사진들 **뒤에** 붙일 글. 매번 바뀌는 글(대화 내용)을 여기 두면 앞쪽(지시문 + 사진)이 캐시에 맞는다 —
+     * 바뀌는 글이 사진 앞에 있으면 거기서부터 캐시가 끊긴다.
+     */
+    tail?: string;
+  },
 ): Promise<string> {
   const key = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!key) throw new GradeError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
-  const res = await fetch(OPENAI_RESPONSES, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
+  const { res, body } = await postResponses(
+    key,
+    {
       model,
       background: true,
       // 백그라운드 결과는 저장돼 있어야 나중에 꺼낼 수 있다.
@@ -900,14 +981,15 @@ export async function startVisionBackground(
               image_url: url,
               detail: "high",
             })),
+            ...(opts?.tail ? [{ type: "input_text", text: opts.tail }] : []),
           ],
         },
       ],
       text: { format: { type: "json_object" } },
       ...(effort ? { reasoning: { effort } } : {}),
-    }),
-  });
-  const body = await res.text();
+    },
+    opts?.cacheKey ?? "reprint-vision",
+  );
   if (!res.ok) {
     throw new GradeError(
       `지문 인식을 시작하지 못했습니다 (${model}, HTTP ${res.status}). ${body.slice(0, 300)}`,

@@ -34,6 +34,7 @@ import {
   deleteVisionResponse,
   pollVisionBackground,
   startVisionBackground,
+  type GradeUsage,
 } from "./gradeExam";
 import {
   accumulatedCorrection,
@@ -47,7 +48,7 @@ import {
   type TextDiff,
 } from "./problemCompare";
 import { gradingEstKrw } from "./tokens";
-import { logAiCost } from "./costLog";
+import { imageTokens, logAiCost, solTokens } from "./costLog";
 
 /**
  * 맨 위 단계(사용자 확인 뒤에만 돈다)의 quality. **기본은 high 다** — max 는 문제 한 장에 그림 출력이
@@ -401,9 +402,11 @@ async function runPatchPlan(
   const { user, findings } = patchRequestText(state);
   if (!user && !findings) return { kind: "fail", error: "고칠 내용이 없어요.", cleanup: [] };
 
-  const ask = await askSol(patchPlanPrompt(user, findings), [original, current], ctx, "수정 해석");
+  const ask = await askSol(patchPlanPrompt(user, findings), [original, current], ctx, "수정 해석", {
+    cacheKey: "reprint-patch-plan",
+  });
   if (ask.krw > 0 && !ctx.byokApiKey) {
-    await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: job.mode === "figure" ? "figure" : "problem", what: "sol 수정 해석", krw: ask.krw });
+    await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: job.mode === "figure" ? "figure" : "problem", what: "sol 수정 해석", krw: ask.krw, tokens: solTokens(ask.usage) });
   }
   let plan: string | undefined;
   let understood: string | undefined;
@@ -477,6 +480,7 @@ async function runPatch(
       what: "그림 수정(quality 미지정)",
       krw: out.usage.estKrw,
       usd: out.usage.estUsd,
+      tokens: imageTokens(out.usage),
     });
   }
   const usage = addUsage(state.usage, out.usage);
@@ -495,7 +499,7 @@ async function runPatch(
   // sol 을 고른 경우에만 다시 검수한다(안 골랐으면 sol 을 안 부른다).
   const original = state.patch?.useSol ? await loadAsDataUrl(admin, job.input_path) : null;
   if (original) {
-    const ask = await askSol(VERIFY_PROMPT, [original, out.dataUrl], ctx, "검수");
+    const ask = await askSol(VERIFY_PROMPT, [original, out.dataUrl], ctx, "검수", { cacheKey: VERIFY_CACHE_KEY });
     solKrw = ask.krw;
     if (ask.text !== null) {
       try {
@@ -505,7 +509,7 @@ async function runPatch(
       }
     }
     if (solKrw > 0 && !ctx.byokApiKey) {
-      await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: job.mode === "figure" ? "figure" : "problem", what: "sol 검수", krw: solKrw });
+      await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: job.mode === "figure" ? "figure" : "problem", what: "sol 검수", krw: solKrw, tokens: solTokens(ask.usage) });
     }
   }
 
@@ -582,6 +586,7 @@ async function runGen(
       what: `그림 ${quality}`,
       krw: out.usage.estKrw,
       usd: out.usage.estUsd,
+      tokens: imageTokens(out.usage),
     });
   }
 
@@ -614,6 +619,12 @@ async function runGen(
 }
 
 /**
+ * 검수 호출의 프롬프트 캐시 키. 검수는 매번 **같은 지시문(VERIFY_PROMPT, 2천 토큰쯤) + 원본 사진**으로 시작해서
+ * 앞부분이 캐시에 맞는다 — 지시문은 모든 검수가, 원본 사진은 같은 문제의 다음 라운드가 같이 쓴다.
+ */
+const VERIFY_CACHE_KEY = "reprint-verify";
+
+/**
  * sol(`OPENAI_TEXT_MODEL`)에게 사진들과 프롬프트를 보내 글을 받는다 — 백그라운드로 걸고 묻는다(강도를 올리면 오래
  * 걸린다). 분당 한도(429)는 6·12초 뒤 두 번까지 다시 걸고, **응답은 받자마자(실패·시간 초과면 취소 뒤) 지운다.**
  * BYOK 계정은 본인 키로만 부른다. 실패는 던지지 않고 `fail` 로 돌려준다(부르는 쪽이 정한다).
@@ -623,19 +634,29 @@ export async function askSol(
   images: string[],
   ctx: Ctx,
   label: string,
-  /** 추론 강도를 아예 보내지 않는다(수정 대화 — 사용자 지시). 기본은 검수 강도. */
-  opts?: { noEffort?: boolean },
-): Promise<{ text: string | null; krw: number; fail: string }> {
+  opts?: {
+    /** 추론 강도를 아예 보내지 않는다(수정 대화 — 사용자 지시). 기본은 검수 강도. */
+    noEffort?: boolean;
+    /** 프롬프트 캐시 키(같은 일끼리 같은 값 — `postResponses` 주석). */
+    cacheKey?: string;
+    /** 사진들 뒤에 붙일 글(매번 바뀌는 부분 — 앞쪽이 캐시에 맞게). */
+    tail?: string;
+  },
+): Promise<{ text: string | null; krw: number; fail: string; usage?: GradeUsage }> {
   const t0 = Date.now();
   let text: string | null = null;
   let krw = 0;
   let fail = "";
+  let usage: GradeUsage | undefined;
   let respId: string | null = null;
   try {
     let id = "";
     for (let attempt = 0; ; attempt++) {
       try {
-        id = await startVisionBackground(prompt, images, OPENAI_TEXT_MODEL, opts?.noEffort ? undefined : VERIFY_EFFORT, ctx.byokApiKey);
+        id = await startVisionBackground(prompt, images, OPENAI_TEXT_MODEL, opts?.noEffort ? undefined : VERIFY_EFFORT, ctx.byokApiKey, {
+          cacheKey: opts?.cacheKey,
+          tail: opts?.tail,
+        });
         break;
       } catch (err) {
         const limited = err instanceof GradeError && err.status === 429 && !/quota|billing|balance/i.test(err.message);
@@ -657,9 +678,10 @@ export async function askSol(
         break;
       }
       if (poll.usage) {
+        usage = poll.usage;
         krw = gradingEstKrw(poll.usage, poll.model) ?? 0;
         console.info(
-          `[${ctx.tag}] sol ${label} usage model=${poll.model} in=${poll.usage.inputTokens} out=${poll.usage.outputTokens} est=${krw.toFixed(1)}원`,
+          `[${ctx.tag}] sol ${label} usage model=${poll.model} in=${poll.usage.inputTokens} cached=${poll.usage.cachedInputTokens ?? 0} out=${poll.usage.outputTokens} est=${krw.toFixed(1)}원`,
         );
       }
       text = poll.text;
@@ -670,7 +692,7 @@ export async function askSol(
   } finally {
     if (respId) await deleteVisionResponse(respId, ctx.byokApiKey, fail !== "");
   }
-  return { text, krw, fail };
+  return { text, krw, fail, usage };
 }
 
 async function runVerify(
@@ -691,7 +713,7 @@ async function runVerify(
   if (!original || !candidate) return finalize(admin, state, i, ctx, "검수 재료를 못 읽음");
 
   // sol 은 백그라운드로 걸고 묻는다(강도를 올리면 오래 걸린다). 시간이 다 되면 검수를 포기한다.
-  const ask = await askSol(VERIFY_PROMPT, [original, candidate], ctx, "검수");
+  const ask = await askSol(VERIFY_PROMPT, [original, candidate], ctx, "검수", { cacheKey: VERIFY_CACHE_KEY });
   let diffs: TextDiff[] | null = null;
   let fail = ask.fail;
   const solKrw = ask.krw;
@@ -710,6 +732,7 @@ async function runVerify(
       kind: job.mode === "figure" ? "figure" : "problem",
       what: "sol 검수",
       krw: solKrw,
+      tokens: solTokens(ask.usage),
     });
   }
   const withCost: ProblemLoopState = { ...state, solKrw: (state.solKrw ?? 0) + solKrw };

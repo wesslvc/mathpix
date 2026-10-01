@@ -15,7 +15,16 @@ import {
 import { logAiCost } from "@/lib/costLog";
 import { GLOBAL_CONCURRENCY, UNLIMITED_CONCURRENCY, kickWorker, workerToken } from "@/lib/figureJobsServer";
 import { callOpenAIVision } from "@/lib/detectProblems";
-import { pollKoreanTextBackground, startKoreanTextBackground } from "@/lib/gradeExam";
+import {
+  OPENAI_TEXT_MODEL,
+  deleteVisionResponse,
+  pollKoreanTextBackground,
+  pollVisionBackground,
+  promptCacheLevel,
+  startKoreanTextBackground,
+  startVisionBackground,
+} from "@/lib/gradeExam";
+import { VERIFY_PROMPT } from "@/lib/problemCompare";
 import {
   passageInputPaths,
   runPassageStage,
@@ -148,6 +157,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "id 가 필요합니다." }, { status: 400 });
     }
     return NextResponse.json(await pollKoreanTextBackground(probeId));
+  }
+  // **프롬프트 캐시 확인용.** 검수와 같은 앞부분(VERIFY_PROMPT + 사진)으로 sol 을 두 번 연달아 불러
+  // 두 번째가 캐시에서 몇 토큰을 읽었는지(`cached`)와, 모델이 캐시 필드를 받았는지(`level`: 2 = 키+보존 기간,
+  // 1 = 키만, 0 = 거부)를 돌려준다. 강도는 low 라 몇 원이다.
+  if (probe === "cache") {
+    const model = /^gpt-[\w.-]+$/.test(probeModel) ? probeModel : OPENAI_TEXT_MODEL;
+    const img = `data:image/png;base64,${PROBE_PNG}`;
+    const runs: unknown[] = [];
+    for (let n = 0; n < 2; n++) {
+      const t0 = Date.now();
+      let id = "";
+      try {
+        id = await startVisionBackground(VERIFY_PROMPT, [img, img], model, "low", undefined, {
+          cacheKey: "reprint-verify",
+        });
+        for (;;) {
+          if (Date.now() - t0 > 120_000) {
+            runs.push({ error: "timeout" });
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 3000));
+          const poll = await pollVisionBackground(id);
+          if (poll.status === "running") continue;
+          runs.push(poll.status === "done" ? { ms: Date.now() - t0, usage: poll.usage } : { error: poll.message });
+          break;
+        }
+      } catch (err) {
+        runs.push({ error: err instanceof Error ? err.message.slice(0, 400) : String(err) });
+      } finally {
+        if (id) await deleteVisionResponse(id);
+      }
+    }
+    return NextResponse.json({ model, level: promptCacheLevel(model), runs });
   }
   // Gemini 쪽 이름 확인용. 이 키로 부를 수 있는 모델 이름과 지원하는 호출
   // 방식만 준다(ListModels 는 무료). 키는 내보내지 않는다.
