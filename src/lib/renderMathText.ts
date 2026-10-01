@@ -146,7 +146,11 @@ const CHOSEONG_JAMO = "ᄀᄁᄂᄃᄄᄅᄆᄇᄈᄉᄊᄋᄌᄍᄎᄏᄐᄑᄒ
 const COMPAT_JAMO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
 
 export function normalizeJamo(input: string): string {
-  return input.replace(/[ᄀ-ᄒ]/g, (ch) => {
+  // **옛한글 음절의 첫소리는 건드리지 않는다**(2026-10-01, 사용자 신고 — 중세 국어 'ᄃᆞᆰ' 이 'ㄷ · ㄹㄱ' 으로 깨졌다).
+  // 중세 국어 문제의 ᄃᆞᆰ · ᄆᆞᆯ 같은 음절은 조합용 자모를 **이어 써서**(초성 U+1100~ + 중성 U+1160~ + 종성 U+11A8~)
+  // 한 글자로 조립된다. 초성만 호환용으로 바꾸면 조립이 풀린다. 홀로 선 초성(보기 표지 "ᄀ.")만 바꾼다 —
+  // 바로 뒤에 중성이 오면 음절의 일부다.
+  return input.replace(/[ᄀ-ᄒ](?![\u1160-\u11A7\uD7B0-\uD7C6])/g, (ch) => {
     const i = CHOSEONG_JAMO.indexOf(ch);
     return i === -1 ? ch : COMPAT_JAMO[i];
   });
@@ -591,9 +595,26 @@ function mergeChoiceLines(lines: string[]): string[] {
 function renderLineContent(line: string, mathBlocks: string[]): string {
   const restored = restoreDisplayMath(line, mathBlocks);
   if (isBareMathBlock(restored)) {
-    return renderMath(restored.trim(), true);
+    return wrapOldHangul(renderMath(restored.trim(), true));
   }
-  return renderInline(restored);
+  return wrapOldHangul(renderInline(restored));
+}
+
+/**
+ * **옛한글(중세 국어) 글자를 조립할 수 있는 글꼴로 감싼다.**
+ *
+ * 나눔명조에는 옛한글 자모 조립(OpenType ljmo·vjmo·tjmo)이 없어서 'ᄃᆞᆰ' 같은 음절이 빈칸이나 낱자로
+ * 흩어져 그려진다. Noto Serif KR 에서 옛한글 자모만 떼어 낸 글꼴(`/fonts/old-hangul-serif.woff2`, 300KB,
+ * OFL)을 그 글자들에만 쓴다(`.mmd-oldhangul`, globals.css). **span 으로 감싸는 이유**: 카드 캡처
+ * (html-to-image)는 카드 안에서 실제로 쓰인 글꼴만 PNG 에 심는다 — 전역 글꼴 목록에 넣으면 옛한글이 없는
+ * 카드까지 매번 300KB 를 싣는다. 태그 안(속성)은 건드리지 않고 글자 부분만 감싼다.
+ */
+const OLD_HANGUL_RUN = /(<[^>]*>)|([\u1100-\u11FF\uA960-\uA97F\uD7B0-\uD7FF\u302E\u302F]+)/g;
+export function wrapOldHangul(html: string): string {
+  if (!/[\u1100-\u11FF\uA960-\uA97F\uD7B0-\uD7FF]/.test(html)) return html;
+  return html.replace(OLD_HANGUL_RUN, (m, tag: string | undefined, run: string | undefined) =>
+    tag ? tag : `<span class="mmd-oldhangul">${run}</span>`,
+  );
 }
 
 /**

@@ -389,6 +389,19 @@ body {
   font-family: KaTeX_Main, "Nanum Myeongjo", serif;
 }
 
+/* 옛한글(중세 국어 — ᄃᆞᆰ · ᄆᆞᆯ · 아래아). 나눔명조에는 옛한글 자모를 한 글자로 조립하는 기능이 없어
+   빈칸·낱자로 흩어진다. Noto Serif KR(OFL)에서 옛한글 자모 구간만 떼어 낸 글꼴을 그 글자들에만 쓴다 —
+   renderMathText 의 wrapOldHangul 이 감싼다. unicode-range 를 걸어 두어 다른 글자는 나눔명조 그대로다. */
+@font-face {
+  font-family: "Old Hangul Serif";
+  src: url("/fonts/old-hangul-serif.woff2") format("woff2");
+  font-display: block;
+  unicode-range: U+1100-11FF, U+A960-A97F, U+D7B0-D7FF, U+302E-302F;
+}
+.mmd-oldhangul {
+  font-family: "Old Hangul Serif", "Nanum Myeongjo", serif;
+}
+
 /* 문제 카드에 끼워 넣는 도형·자료. 본문 문단 사이에 놓으려고 본문 HTML
    문자열에 함께 이어붙이기 때문에, Tailwind 유틸리티 대신 실제 클래스가
    필요하다(문자열에는 클래스명만 적을 수 있다). */
