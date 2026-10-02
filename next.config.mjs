@@ -4,20 +4,20 @@
  */
 /**
  * 바닥글 버전 = 빌드한 순간부터 2027학년도 수능 시작(2026-11-19 08:40 KST)까지 남은 일·시·분·초.
- * 배포마다 저절로 바뀐다. 수능이 지난 뒤에 빌드하면 D+ 로 지난 시간을 적는다.
+ * 배포마다 저절로 바뀐다. 수능이 지난 뒤에 빌드하면 V+ 로 지난 시간을 적는다.
  */
 function buildVersion() {
   if (process.env.APP_VERSION) return process.env.APP_VERSION;
   const exam = Date.UTC(2026, 10, 18, 23, 40, 0); // 2026-11-19 08:40 KST
   let diff = Math.floor((exam - Date.now()) / 1000);
-  const sign = diff >= 0 ? "D-" : "D+";
+  const sign = diff >= 0 ? "V-" : "V+";
   diff = Math.abs(diff);
   const d = Math.floor(diff / 86400);
   const h = Math.floor((diff % 86400) / 3600);
   const m = Math.floor((diff % 3600) / 60);
   const sec = diff % 60;
   const p = (n) => String(n).padStart(2, "0");
-  return `ver.${sign}${d}.${p(h)}:${p(m)}:${p(sec)}`;
+  return `${sign}${d}-${p(h)}:${p(m)}:${p(sec)}`;
 }
 
 /** @type {import('next').NextConfig} */
