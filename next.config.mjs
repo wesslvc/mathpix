@@ -2,11 +2,22 @@
  * 바닥글 NEPICA 옆에 찍는 버전(`ver.261002.2053`). **빌드할 때(=배포할 때마다) 한국 시간으로 저절로 매긴다** —
  * 손으로 올리면 반드시 잊는다. `APP_VERSION` 환경변수를 주면 그 값을 그대로 쓴다.
  */
+/**
+ * 바닥글 버전 = 빌드한 순간부터 2027학년도 수능 시작(2026-11-19 08:40 KST)까지 남은 일·시·분·초.
+ * 배포마다 저절로 바뀐다. 수능이 지난 뒤에 빌드하면 D+ 로 지난 시간을 적는다.
+ */
 function buildVersion() {
   if (process.env.APP_VERSION) return process.env.APP_VERSION;
-  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  const exam = Date.UTC(2026, 10, 18, 23, 40, 0); // 2026-11-19 08:40 KST
+  let diff = Math.floor((exam - Date.now()) / 1000);
+  const sign = diff >= 0 ? "D-" : "D+";
+  diff = Math.abs(diff);
+  const d = Math.floor(diff / 86400);
+  const h = Math.floor((diff % 86400) / 3600);
+  const m = Math.floor((diff % 3600) / 60);
+  const sec = diff % 60;
   const p = (n) => String(n).padStart(2, "0");
-  return `ver.${p(kst.getUTCFullYear() % 100)}${p(kst.getUTCMonth() + 1)}${p(kst.getUTCDate())}.${p(kst.getUTCHours())}${p(kst.getUTCMinutes())}`;
+  return `ver.${sign}${d}.${p(h)}:${p(m)}:${p(sec)}`;
 }
 
 /** @type {import('next').NextConfig} */
