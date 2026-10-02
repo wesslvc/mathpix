@@ -1,4 +1,5 @@
 import type { RichBlock, RichRun } from "./richText";
+import { textClusters } from "./oldHangul";
 
 /**
  * **조판기** — 지문 글자를 단에 흘려 넣는다.
@@ -113,7 +114,8 @@ function breakRuns(
       buf = "";
     };
 
-    const chars = [...run.t];
+    // 옛한글 음절(조합용 자모 여럿)은 한 덩어리로 — 음절 한가운데서 줄을 자르면 조립이 풀린다.
+    const chars = textClusters(run.t);
     for (let i = 0; i < chars.length; i++) {
       const ch = chars[i];
       // **줄바꿈은 그 자리에서 줄을 끊는다.** 시가(詩歌)는 한 문단 안에 행이

@@ -27,6 +27,7 @@ import {
 import fontkit from "@pdf-lib/fontkit";
 import type { Frame, FrameBox, FrameItem, FrameSet } from "./frames";
 import { framePassage, type RichBlock } from "./richText";
+import { hasOldHangul, oldHangulRuns } from "./oldHangul";
 import { planKoreanPages, type KoreanPage, type KoreanPassage, type KoreanSetIn } from "./koreanLayout";
 import {
   DEFAULT_FLOW_STYLE,
@@ -559,6 +560,11 @@ export type KiceSpec = {
    */
   koreanSets?: { sets: KoreanSetIn[]; loose: number[] };
   /**
+   * **옛한글 글꼴**(조합용 자모를 조립할 줄 아는 것, `public/fonts/old-hangul-serif.woff2`).
+   * 지문에 옛한글이 있을 때만 쓴다. 안 넘기면 브라우저에서 그 주소로 받아 온다.
+   */
+  oldHangulFont?: Uint8Array;
+  /**
    * 마지막에 붙일 **정답표**. 비어 있으면 붙이지 않는다.
    *
    * 실제 문제지에는 없는 쪽이지만, 이건 문제지가 아니라 **오답프린트**다 —
@@ -830,8 +836,14 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   // 글자 지문을 재고 그리는 글꼴·폭. **재는 쪽과 그리는 쪽이 같은 것을 써야
   // 한다** — 어긋나면 "한 단에 들어간다"고 판단한 지문이 넘쳐 잘린다.
   const body = await fontForText(BODY_FONT, "");
-  const measure = (t: string, size: number, bold: boolean) =>
-    body.font.widthOfTextAtSize(t, size) * (bold ? 1.02 : 1);
+  const oldHangul = await loadOldHangul(spec);
+  const measure = (t: string, size: number, bold: boolean) => {
+    let w = 0;
+    for (const run of oldHangul ? oldHangulRuns(t) : [{ t, old: false }]) {
+      w += run.old ? oldHangul!.width(run.t, size) : body.font.widthOfTextAtSize(run.t, size);
+    }
+    return w * (bold ? 1.02 : 1);
+  };
   const columnsOf = (pageNo: number, which: number[]): FlowColumn[] => {
     const b = frameBounds(frameFor(spec.frames, pageNo));
     return which.map((i) => ({
@@ -954,7 +966,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       );
       const passageFigures = await loadPassageFigures(pdf, textPassage.blocks, spec.onWarn);
       for (const r of flowed.results) {
-        await drawFlow(page, r.items, fontForText, flip, passageFigures);
+        await drawFlow(page, r.items, fontForText, flip, passageFigures, oldHangul);
       }
       if (flowed.rest.length > 0 && spec.onWarn) {
         spec.onWarn("지문이 한 쪽에 다 들어가지 않아 뒷부분이 잘렸습니다.");
@@ -1023,6 +1035,7 @@ async function drawFlow(
   fontForText: (name: string, text: string) => Promise<{ font: PDFFont; text: string }>,
   flip: (y: number) => number,
   figures: Map<string, PDFImage>,
+  oldHangul: OldHangulFont | null = null,
 ) {
   for (const it of items) {
     if (it.kind === "boxEdge") {
@@ -1052,27 +1065,43 @@ async function drawFlow(
       continue;
     }
     for (const piece of it.pieces) {
-      const picked = await fontForText(BODY_FONT, piece.t);
-      if (!picked.text.trim()) continue;
       const x = it.x + piece.dx;
       // 글자 줄은 칸 위에서 크기만큼 내려온 자리다.
       const baseline = flip(it.y + it.size);
-      page.drawText(picked.text, {
-        x,
-        y: baseline,
-        size: it.size,
-        font: picked.font,
-        color: rgb(0, 0, 0),
-      });
-      if (piece.b) {
-        // 굵게 흉내 — 아주 조금 어긋나게 한 번 더.
-        page.drawText(picked.text, {
-          x: x + it.size * 0.035,
-          y: baseline,
-          size: it.size,
-          font: picked.font,
-          color: rgb(0, 0, 0),
-        });
+      // 옛한글 구간은 따로 조립해 선으로 그린다(`drawOldHangul`). 나머지는 예전 그대로.
+      const runs = oldHangul ? oldHangulRuns(piece.t) : [{ t: piece.t, old: false }];
+      let rx = x;
+      for (const run of runs) {
+        if (run.old) {
+          const w = oldHangul!.width(run.t, it.size);
+          oldHangul!.draw(page, run.t, rx, baseline, it.size);
+          // 굵게 흉내 — 아주 조금 어긋나게 한 번 더.
+          if (piece.b) oldHangul!.draw(page, run.t, rx + it.size * 0.035, baseline, it.size);
+          rx += w * (piece.b ? 1.02 : 1);
+          continue;
+        }
+        const picked = await fontForText(BODY_FONT, run.t);
+        const w = picked.font.widthOfTextAtSize(run.t, it.size);
+        if (picked.text.trim()) {
+          page.drawText(picked.text, {
+            x: rx,
+            y: baseline,
+            size: it.size,
+            font: picked.font,
+            color: rgb(0, 0, 0),
+          });
+          if (piece.b) {
+            // 굵게 흉내 — 아주 조금 어긋나게 한 번 더.
+            page.drawText(picked.text, {
+              x: rx + it.size * 0.035,
+              y: baseline,
+              size: it.size,
+              font: picked.font,
+              color: rgb(0, 0, 0),
+            });
+          }
+        }
+        rx += w * (piece.b ? 1.02 : 1);
       }
       if (piece.u) {
         page.drawLine({
@@ -1104,6 +1133,84 @@ async function drawFlow(
       }
     }
   }
+}
+
+/**
+ * **옛한글을 조립해 선으로 그린다.**
+ *
+ * pdf-lib 은 글자 모양 조립(shaping)을 안 해서 `ᄃᆞᆰ`(자모 셋)이 한 글자로 모이지 않는다. fontkit 은
+ * 한글 조립(ljmo·vjmo·tjmo)을 할 줄 알아서 `layout()` 이 조립된 글리프와 자리를 준다 — 그 윤곽을
+ * `drawSvgPath` 로 그린다. 글꼴을 PDF 에 심지 않으므로 그 글자는 복사·검색이 안 되지만 모양은 정확하다.
+ * 지문에 옛한글이 있을 때만 글꼴을 받는다(300KB).
+ */
+type OldHangulFont = {
+  width: (text: string, size: number) => number;
+  draw: (page: PDFPage, text: string, x: number, baseline: number, size: number) => void;
+};
+
+/** 지문(글자 조판)에 옛한글이 있는지 — 있을 때만 글꼴을 받는다. */
+function specHasOldHangul(spec: KiceSpec): boolean {
+  const blocks: unknown[] = [];
+  for (const p of spec.koreanPlan?.pages ?? []) if (p.kind === "passageText" || p.kind === "spread") blocks.push(p);
+  for (const s of spec.koreanSets?.sets ?? []) blocks.push(s.passage);
+  return blocks.length > 0 && hasOldHangul(JSON.stringify(blocks));
+}
+
+async function loadOldHangul(spec: KiceSpec): Promise<OldHangulFont | null> {
+  if (!specHasOldHangul(spec)) return null;
+  let bytes = spec.oldHangulFont;
+  if (!bytes && typeof window !== "undefined") {
+    try {
+      const res = await fetch("/fonts/old-hangul-serif.woff2");
+      if (res.ok) bytes = new Uint8Array(await res.arrayBuffer());
+    } catch {
+      // 못 받으면 예전처럼 본문 글꼴로 그린다(자모가 흩어지거나 빠진다) — 경고는 fontForText 가 낸다.
+    }
+  }
+  if (!bytes) {
+    spec.onWarn?.("옛한글 글꼴을 받지 못해 중세 국어 글자가 흩어져 찍힐 수 있어요.");
+    return null;
+  }
+  // `@pdf-lib/fontkit` 의 타입에는 `layout`·`path` 가 빠져 있어 필요한 만큼만 적는다.
+  type Glyph = { advanceWidth: number; path: { scale: (x: number, y: number) => { toSVG: () => string } } };
+  type Layout = { glyphs: Glyph[]; positions: { xAdvance: number; xOffset: number; yOffset: number }[] };
+  const font = (fontkit as unknown as { create: (b: Uint8Array) => unknown }).create(bytes) as {
+    unitsPerEm: number;
+    layout: (text: string) => Layout;
+  };
+  const cache = new Map<string, Layout>();
+  const layout = (t: string) => {
+    let l = cache.get(t);
+    if (!l) {
+      l = font.layout(t);
+      cache.set(t, l);
+    }
+    return l;
+  };
+  return {
+    width: (text, size) =>
+      (layout(text).positions.reduce((a, p) => a + p.xAdvance, 0) * size) / font.unitsPerEm,
+    draw: (page, text, x, baseline, size) => {
+      const k = size / font.unitsPerEm;
+      const l = layout(text);
+      let pen = 0;
+      l.glyphs.forEach((g, i) => {
+        const pos = l.positions[i];
+        // 글꼴 윤곽은 위가 +y 다. drawSvgPath 는 SVG 처럼 아래가 +y 로 읽으므로 뒤집어 넘긴다.
+        const svg = g.path.scale(1, -1).toSVG();
+        if (svg) {
+          page.drawSvgPath(svg, {
+            x: x + (pen + pos.xOffset) * k,
+            y: baseline + pos.yOffset * k,
+            scale: k,
+            color: rgb(0, 0, 0),
+            borderWidth: 0,
+          });
+        }
+        pen += pos.xAdvance;
+      });
+    },
+  };
 }
 
 /**

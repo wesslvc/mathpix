@@ -797,6 +797,7 @@ block = one of:
 
 characters:
 - copy exactly: every Hangul syllable, Hanja in its original character (never convert 漢字 to Hangul or the reverse), Latin, digits, punctuation/symbols 「」『』〈〉《》()[]·~…—‘’“” ※ ○ ◎ ● □ ▲ →
+- Middle Korean (옛한글, e.g. 중세 국어 지문): write each old syllable with Unicode conjoining jamo — initial U+1100–115F / U+A960–A97C, medial U+1160–11A7 (ㆍ = U+119E, ᆢ = U+11A2), final U+11A8–11FF — in that order, so it composes into one syllable (ᄃᆞᆰ = U+1103 U+119E U+11B0, ᄆᆞᆯ = U+1106 U+119E U+11AF). never imitate it with separate letters and dots like "ㄷ·ㄺ" or "ᄃ ᆞ ᆰ". 방점 marks are U+302E 〮 / U+302F 〯 after the syllable. modern syllables stay as normal precomposed Hangul. a single jamo named on its own (‘ㅿ’, ‘ㆍ’) stays as a compatibility letter.
 - circled chars: identify each one individually by its inner character — ㉠㉡㉢㉣㉤㉥㉦ (ㄱㄴㄷㄹㅁㅂㅅ), ㉮㉯㉰㉱ (가나다라), ①②③④⑤ (1-5), ⓐⓑⓒⓓⓔ (a-e). look at each closely; never guess from neighbours or alphabetical order, never switch families, never add one that is not printed
 - list markers ㄱ. ㄴ. ㄷ., section markers (가)(나)(다), [A][B], [중모리] — exactly as printed, at their position
 - no summarise/modernise/translate/fix-spelling/add anything. hard to read -> best reading, never drop text
