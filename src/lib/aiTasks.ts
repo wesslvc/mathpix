@@ -24,6 +24,8 @@ import {
   readKoreanMarks,
   readKoreanRichText,
   readKoreanTitle,
+  type AnswerKeyItem,
+  type GradeKeySource,
   type GradingMethod,
   type Subject,
 } from "./gradeExam";
@@ -116,6 +118,23 @@ type TaskDef = {
 };
 
 const str = (v: unknown, max = 4000) => (typeof v === "string" ? v.slice(0, max) : "");
+
+/** 불러온 정답표(데이터)의 모양을 확인한다. 쓸 것이 하나도 없으면 null(= 사진 정답표로 본다). */
+function readKeyItems(v: unknown): AnswerKeyItem[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: AnswerKeyItem[] = [];
+  const seen = new Set<number>();
+  for (const raw of v.slice(0, 200)) {
+    const o = raw as Record<string, unknown>;
+    const no = Math.floor(Number(o?.no));
+    const answer = typeof o?.answer === "string" ? o.answer.trim().slice(0, 60) : "";
+    if (!Number.isFinite(no) || no < 1 || no > 999 || !answer || seen.has(no)) continue;
+    seen.add(no);
+    const points = Number(o?.points);
+    out.push({ no, answer, ...(Number.isFinite(points) && points > 0 && points <= 100 ? { points } : {}) });
+  }
+  return out.length ? out : null;
+}
 
 /** 화면이 보낸 지문 자리(0~1). 모양이 이상한 것은 버린다. */
 function readBoxes(raw: unknown): ProblemBox[] {
@@ -220,7 +239,8 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     deposit: () => GRADING_TOKEN_DEPOSIT,
     flat: true,
     needsOpenAI: true,
-    images: { min: 2, max: 3 },
+    // 정답표를 전부 저장된 것에서 불러오면 OMR 한 장만 온다.
+    images: { min: 1, max: 3 },
     name: "자동채점",
     async run(ctx) {
       const p = ctx.params;
@@ -228,12 +248,28 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         p.subject === "math" || p.subject === "elective" || p.subject === "english" ? p.subject : "korean";
       const method: GradingMethod = p.method === "handwritten" ? "handwritten" : "omr";
       const electiveLabel = str(p.electiveLabel, 100).trim() || undefined;
-      const keys = (Array.isArray(p.keys) ? p.keys : []) as { slot?: number; label?: string }[];
-      const keyCount = ctx.images.length - 1;
-      const valid = subject === "elective" ? keyCount === 1 || keyCount === 2 : keyCount === 1;
+      const keys = (Array.isArray(p.keys) ? p.keys : []) as { slot?: number; label?: string; items?: unknown }[];
+      // 정답표마다 사진인지, 불러온 정답표(데이터)인지. 데이터는 모양을 다시 확인한다(사람이 보낸 값이다).
+      const sources: GradeKeySource[] = keys.map((k) => {
+        const items = readKeyItems(k?.items);
+        return items ? { kind: "data", items } : { kind: "image" };
+      });
+      const keyCount = keys.length || ctx.images.length - 1;
+      const imageKeys = keys.length ? sources.filter((k) => k.kind === "image").length : keyCount;
+      const valid =
+        (subject === "elective" ? keyCount === 1 || keyCount === 2 : keyCount === 1) &&
+        ctx.images.length === 1 + imageKeys;
       if (!valid) return { ok: false, error: "정답표 사진 수가 맞지 않아요." };
       try {
-        const result = await gradeWithVision(subject, ctx.images, method, ctx.signal, electiveLabel, ctx.byokApiKey);
+        const result = await gradeWithVision(
+          subject,
+          ctx.images,
+          method,
+          ctx.signal,
+          electiveLabel,
+          ctx.byokApiKey,
+          keys.length ? sources : undefined,
+        );
         const estKrw = result.usage ? gradingEstKrw(result.usage, result.model) : undefined;
         // 슬롯에 사용자가 적어 준 과목명(elective_label)을 그대로 이어 붙인다.
         const slots = result.slots.map((s) => {

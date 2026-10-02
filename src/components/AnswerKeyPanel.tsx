@@ -9,6 +9,8 @@ import { prepareGradingImage, gradingImageBudget, type PickedImage } from "@/lib
 import type { AnswerKeyItem } from "@/lib/gradeExam";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import SavedKeyPicker from "./SavedKeyPicker";
+import type { SavedKeySource } from "@/lib/savedAnswerKeys";
 
 /** 이 실모에 저장된 문제 — 번호로 답지와 이어 붙인다. */
 export type AnswerKeyTarget = { id: string; number: number | null };
@@ -44,6 +46,10 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [applied, setApplied] = useState(0);
+  /** "다른 실모에서 불러오기"로 들어왔으면 고르는 칸을 처음부터 펼친다. */
+  const [importFirst, setImportFirst] = useState(false);
+  /** 불러온 정답표(사진으로 읽은 게 아니면). 검토 화면에 어디서 왔는지 적는다. */
+  const [importedFrom, setImportedFrom] = useState<SavedKeySource | null>(null);
 
   /** 번호 → 문제 id. 번호가 없는 문제는 붙일 방법이 없어 뺀다. */
   const byNumber = useMemo(() => {
@@ -113,6 +119,15 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
     }
   }
 
+  /** 저장된 정답표를 불러온다 — 사진을 읽지 않으므로 토큰이 안 든다. 검토는 똑같이 거친다. */
+  function importKey(src: SavedKeySource) {
+    setError(null);
+    setNote(null);
+    setImportedFrom(src);
+    setItems(src.items.map((it) => ({ ...it })));
+    setStep("review");
+  }
+
   function update(i: number, patch: Partial<AnswerKeyItem>) {
     setItems((prev) => {
       const next = [...prev];
@@ -170,17 +185,31 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
     setError(null);
     setNote(null);
     setApplied(0);
+    setImportFirst(false);
+    setImportedFrom(null);
   }
 
   if (step === "idle") {
     return (
-      <button
-        type="button"
-        onClick={() => setStep("picking")}
-        className="self-start text-sm text-blue-600 underline underline-offset-2 hover:text-blue-800"
-      >
-        + 답지 사진으로 정답 한 번에 넣기
-      </button>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        <button
+          type="button"
+          onClick={() => setStep("picking")}
+          className="text-sm text-blue-600 underline underline-offset-2 hover:text-blue-800"
+        >
+          + 답지 사진으로 정답 한 번에 넣기
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setImportFirst(true);
+            setStep("picking");
+          }}
+          className="text-sm text-blue-600 underline underline-offset-2 hover:text-blue-800"
+        >
+          + 다른 실모·답지에서 정답표 불러오기
+        </button>
+      </div>
     );
   }
 
@@ -208,13 +237,24 @@ export default function AnswerKeyPanel({ categoryId, categoryName, problems }: P
           {pics.length > 0 && (
             <p className="text-xs text-slate-400">{pics.map((p) => p.name).join(", ")}</p>
           )}
+          <SavedKeyPicker
+            label="또는 다른 실모·답지·채점 기록에서 정답표 불러오기 (토큰 안 듦)"
+            excludeCategoryId={categoryId}
+            defaultOpen={importFirst}
+            onPick={importKey}
+          />
         </>
       )}
 
       {step === "review" && (
         <>
+          {importedFrom && (
+            <p className="text-xs text-emerald-700">
+              불러온 정답표 · <span className="font-medium">{importedFrom.title}</span> ({importedFrom.detail})
+            </p>
+          )}
           <p className="text-xs text-slate-500">
-            읽은 결과를 확인하고 틀린 곳은 고친 뒤 저장하세요. 이 실모에 번호가
+            {importedFrom ? "불러온 정답을" : "읽은 결과를"} 확인하고 틀린 곳은 고친 뒤 저장하세요. 이 실모에 번호가
             같은 문제가 있는 것만 붙습니다 —{" "}
             <span className="font-medium text-slate-700">
               {items.length}개 중 {matched.length}개 연결됨

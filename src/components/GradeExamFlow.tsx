@@ -21,6 +21,8 @@ import {
   SUBJECT_LABEL,
 } from "@/lib/examSubjects";
 import LinkCategoryPicker from "./LinkCategoryPicker";
+import SavedKeyPicker from "./SavedKeyPicker";
+import type { SavedKeySource } from "@/lib/savedAnswerKeys";
 import CommentBox from "./CommentBox";
 import ExamNameEditor from "./ExamNameEditor";
 import ExamDateEditor from "./ExamDateEditor";
@@ -134,6 +136,11 @@ export default function GradeExamFlow() {
   const [key1Label, setKey1Label] = useState("");
   const [key2File, setKey2File] = useState<PickedImage | null>(null);
   const [key2Label, setKey2Label] = useState("");
+  // 사진 대신 **저장된 정답표**(다른 실모의 정답·읽어 둔 답지·채점 기록)를 불러와 쓸 수도 있다.
+  // 사진과 둘 중 하나만 — 하나를 고르면 다른 하나는 비운다(KeyField).
+  const [keyLoaded, setKeyLoaded] = useState<SavedKeySource | null>(null);
+  const [key1Loaded, setKey1Loaded] = useState<SavedKeySource | null>(null);
+  const [key2Loaded, setKey2Loaded] = useState<SavedKeySource | null>(null);
 
   const [busyMessage, setBusyMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -191,9 +198,9 @@ export default function GradeExamFlow() {
     electivePicked &&
     (subject === "elective"
       ? tamguSingle
-        ? Boolean(omrFile && key1File)
-        : Boolean(omrFile && key1File && key2File)
-      : Boolean(omrFile && keyFile));
+        ? Boolean(omrFile && (key1File || key1Loaded))
+        : Boolean(omrFile && (key1File || key1Loaded) && (key2File || key2Loaded))
+      : Boolean(omrFile && (keyFile || keyLoaded)));
 
   function reset() {
     setStep("setup");
@@ -210,6 +217,9 @@ export default function GradeExamFlow() {
     setKey1Label("");
     setKey2File(null);
     setKey2Label("");
+    setKeyLoaded(null);
+    setKey1Loaded(null);
+    setKey2Loaded(null);
     setSlots([]);
     setError(null);
     setTokenNote(null);
@@ -246,24 +256,30 @@ export default function GradeExamFlow() {
       // HEIC 걸러내기와 파일 읽기는 **사진을 고를 때** 이미 끝났다(FileField).
       // 여기 남아 있던 검사는 그때로 옮겼다 — 실패를 그 자리에서 알려주는
       // 편이 낫고, 여기서는 이미 읽어 둔 바이트만 쓰므로 다시 읽을 일이 없다.
-      const imageCount = subject === "elective" ? (tamguSingle ? 2 : 3) : 2;
+      // 정답표마다 사진이거나 불러온 정답표(데이터)다. 불러온 것은 사진을 안 보낸다.
+      type KeyPick = { slot?: 1 | 2; label?: string; file: PickedImage | null; loaded: SavedKeySource | null };
+      const picks: KeyPick[] =
+        subject === "elective"
+          ? tamguSingle
+            ? // 한 과목만 채점할 때는 "1선택"이라는 구분 자체가 없다 — slot을
+              // 아예 안 매겨서 저장 때도 elective_slot이 null로 남게 한다.
+              [{ label: key1Label || undefined, file: key1File, loaded: key1Loaded }]
+            : [
+                { slot: 1, label: key1Label || undefined, file: key1File, loaded: key1Loaded },
+                { slot: 2, label: key2Label || undefined, file: key2File, loaded: key2Loaded },
+              ]
+          : [{ file: keyFile, loaded: keyLoaded }];
+      const imageCount = 1 + picks.filter((k) => !k.loaded).length;
       const budget = gradingImageBudget(imageCount);
 
       const omr = await prepareGradingImage(omrFile as PickedImage, budget);
-      const keys: { slot?: 1 | 2; label?: string; image: string }[] = [];
-      if (subject === "elective") {
-        keys.push({
-          // 한 과목만 채점할 때는 "1선택"이라는 구분 자체가 없다 — slot을
-          // 아예 안 매겨서 저장 때도 elective_slot이 null로 남게 한다.
-          slot: tamguSingle ? undefined : 1,
-          label: key1Label || undefined,
-          image: await prepareGradingImage(key1File as PickedImage, budget),
-        });
-        if (!tamguSingle) {
-          keys.push({ slot: 2, label: key2Label || undefined, image: await prepareGradingImage(key2File as PickedImage, budget) });
-        }
-      } else {
-        keys.push({ image: await prepareGradingImage(keyFile as PickedImage, budget) });
+      const keys: { slot?: 1 | 2; label?: string; image?: string; items?: SavedKeySource["items"] }[] = [];
+      for (const k of picks) {
+        keys.push(
+          k.loaded
+            ? { slot: k.slot, label: k.label, items: k.loaded.items }
+            : { slot: k.slot, label: k.label, image: await prepareGradingImage(k.file as PickedImage, budget) },
+        );
       }
 
       setBusyMessage("채점하는 중... (최대 1~2분)");
@@ -273,10 +289,10 @@ export default function GradeExamFlow() {
         usage?: { estKrw?: number; estUsd?: number };
       }>("grade", {
         label: "자동채점",
-        images: [omr, ...keys.map((k) => k.image)],
+        images: [omr, ...keys.flatMap((k) => (k.image ? [k.image] : []))],
         params: {
           subject,
-          keys: keys.map((k) => ({ slot: k.slot, label: k.label })),
+          keys: keys.map((k) => ({ slot: k.slot, label: k.label, ...(k.items ? { items: k.items } : {}) })),
           method: formalExam ? "handwritten" : "omr",
           // 정답표에 미적분/기하/확률과 통계(또는 언어와 매체/화법과 작문)
           // 답이 나란히 적혀 있을 때 어느 것을 봐야 하는지 서버에 알려준다
@@ -652,7 +668,7 @@ export default function GradeExamFlow() {
                   {key1Label}
                   {examName1 && ` · ${examName1}`}
                 </p>
-                <FileField label="정답표" file={key1File} onChange={setKey1File} />
+                <KeyField label="정답표" file={key1File} onFile={setKey1File} loaded={key1Loaded} onLoaded={setKey1Loaded} />
               </div>
             ) : (
               <>
@@ -661,19 +677,19 @@ export default function GradeExamFlow() {
                     1선택 · {key1Label}
                     {examName1 && ` · ${examName1}`}
                   </p>
-                  <FileField label="1선택 정답표" file={key1File} onChange={setKey1File} />
+                  <KeyField label="1선택 정답표" file={key1File} onFile={setKey1File} loaded={key1Loaded} onLoaded={setKey1Loaded} />
                 </div>
                 <div className="rounded-lg border border-slate-200 p-3">
                   <p className="mb-2 text-sm font-medium text-slate-700">
                     2선택 · {key2Label}
                     {examName2 && ` · ${examName2}`}
                   </p>
-                  <FileField label="2선택 정답표" file={key2File} onChange={setKey2File} />
+                  <KeyField label="2선택 정답표" file={key2File} onFile={setKey2File} loaded={key2Loaded} onLoaded={setKey2Loaded} />
                 </div>
               </>
             )
           ) : (
-            <FileField label="정답표" file={keyFile} onChange={setKeyFile} />
+            <KeyField label="정답표" file={keyFile} onFile={setKeyFile} loaded={keyLoaded} onLoaded={setKeyLoaded} />
           )}
 
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -1057,6 +1073,57 @@ export function ElectiveSelect({
         ))}
       </optgroup>
     </NativeSelect>
+  );
+}
+
+/**
+ * 정답표 한 칸 — **사진을 올리거나, 저장된 정답표를 불러온다**(둘 중 하나). 불러오면 정답표 사진을 안 보내고
+ * 그 표로 채점한다(모델은 OMR 에서 학생 답만 읽고, 정답·배점은 불러온 표가 이긴다 — `applyDataKeys`).
+ */
+function KeyField({
+  label,
+  file,
+  onFile,
+  loaded,
+  onLoaded,
+}: {
+  label: string;
+  file: PickedImage | null;
+  onFile: (f: PickedImage | null) => void;
+  loaded: SavedKeySource | null;
+  onLoaded: (s: SavedKeySource | null) => void;
+}) {
+  if (loaded) {
+    return (
+      <div className="flex flex-col gap-1 text-sm text-slate-700">
+        {label}
+        <div className="flex items-start justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+          <span className="min-w-0 text-xs text-emerald-800">
+            불러온 정답표 · <span className="font-medium">{loaded.title}</span>
+            <span className="block text-emerald-700/80">{loaded.detail}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => onLoaded(null)}
+            className="shrink-0 text-xs text-slate-500 underline underline-offset-2 hover:text-slate-700"
+          >
+            사진으로 바꾸기
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      <FileField label={label} file={file} onChange={onFile} />
+      <SavedKeyPicker
+        label="또는 저장된 정답표 불러오기"
+        onPick={(src) => {
+          onFile(null);
+          onLoaded(src);
+        }}
+      />
+    </div>
   );
 }
 

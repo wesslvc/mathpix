@@ -42,11 +42,30 @@ export class GradeError extends Error {
  *  적어 둔 가채점표로 채점해야 한다. */
 export type GradingMethod = "omr" | "handwritten";
 
+/**
+ * 채점에 쓸 정답표 하나 — **사진**이거나, 이미 저장해 둔 **정답표 데이터**(답지·채점 기록·실모 문제의
+ * 정답에서 불러온 것, `savedAnswerKeys.ts`). 2026-10-02, 사용자 — "이미 생성된 파일의 정답표를 불러와서
+ * 채점하게". 데이터면 정답표 사진을 안 보내고 그 표를 프롬프트에 실으며, 모델이 뭐라고 하든
+ * **정답·배점은 데이터가 이긴다**(`applyDataKeys`) — 모델은 학생 답만 읽는다.
+ */
+export type GradeKeySource = { kind: "image" } | { kind: "data"; items: AnswerKeyItem[] };
+
+/** 정답표 데이터를 프롬프트에 싣는 꼴. 배점이 없으면 키를 빼서 "배점 없음"이 그대로 전해진다. */
+function keyDataJson(items: AnswerKeyItem[]): string {
+  return JSON.stringify(
+    [...items]
+      .sort((a, b) => a.no - b.no)
+      .map((it) => (it.points != null ? { no: it.no, answer: it.answer, points: it.points } : { no: it.no, answer: it.answer })),
+  );
+}
+
 function subjectPrompt(
   subject: Subject,
   keyCount: number,
   method: GradingMethod,
   electiveLabel?: string,
+  /** 정답표마다 사진인지 데이터인지. 없거나 전부 사진이면 예전 프롬프트 그대로다. */
+  keys?: GradeKeySource[],
 ): string {
   // 공통 지시는 짧게 유지한다 — 매 채점 호출마다 입력 토큰으로 나가므로,
   // 특정 과목에만 해당하는 설명(예: 수학의 격자형 표기)은 여기 넣지 않고
@@ -74,6 +93,12 @@ item = {"no": item number (int), "studentAnswer": what student marked (string; n
   // 연습(자체 제작 워크시트 등)도 있다 — 그때는 정답표 사진이 1장뿐이고
   // OMR에 구역을 나눌 것도 없다. keyCount로 갈라서, 1장이면 국어·수학과
   // 같은 "사진 두 장, slot 없음" 구조를 그대로 쓴다(아래로 흘러간다).
+  // **저장해 둔 정답표(데이터)가 하나라도 있으면** 따로 짠다. 전부 사진이면 아래 예전 프롬프트를 글자 하나
+  // 안 바꾸고 쓴다(되던 채점이 흔들리지 않게).
+  if (keys?.some((k) => k.kind === "data")) {
+    return dataKeyPrompt(subject, keys, sheetLabel, common, method, electiveLabel);
+  }
+
   if (subject === "elective" && keyCount === 2) {
     return `task: grade Korean HS 탐구영역 (elective science/social-studies) exam. 3 images:
 1) ${sheetLabel} holds BOTH first-choice+second-choice subjects (usually 20 items each, split into 2 zones top/bottom or left/right)
@@ -132,6 +157,101 @@ ${mathNote}${electiveNote}
 read items in number order, answer JSON only:
 {"slots":[{"items":[...]}]}
 ${common}`;
+}
+
+/**
+ * 정답표 중 하나 이상이 **데이터**일 때의 채점 프롬프트. 사진 정답표는 OMR 다음 차례로 번호를 매기고,
+ * 데이터 정답표는 글로 싣는다. 모델이 할 일은 학생 답을 읽는 것뿐이다 — 정답·배점은 `applyDataKeys` 가
+ * 데이터로 덮어쓴다.
+ */
+function dataKeyPrompt(
+  subject: Subject,
+  keys: GradeKeySource[],
+  sheetLabel: string,
+  common: string,
+  method: GradingMethod,
+  electiveLabel?: string,
+): string {
+  let img = 1;
+  const where = keys.map((k, i) =>
+    k.kind === "image" ? `image ${++img}` : `DATA ${String.fromCharCode(65 + i)} below`,
+  );
+  const imageCount = img;
+  const data = keys
+    .map((k, i) =>
+      k.kind === "data" ? `DATA ${String.fromCharCode(65 + i)}: ${keyDataJson(k.items)}` : "",
+    )
+    .filter(Boolean)
+    .join("\n");
+  const dataRule = `answer key given as DATA (authoritative, not in any image): item list = exactly the DATA's items; copy "answer" into "correctAnswer" and "points" as given (no points in DATA -> omit "points"); read ONLY studentAnswer from image 1.
+${data}`;
+  // 사진 정답표가 하나라도 있으면 선택과목 안내가 여전히 필요하다(데이터 쪽은 이미 그 과목 것이다).
+  const electiveNote =
+    (subject === "math" || subject === "korean") && electiveLabel && keys.some((k) => k.kind === "image")
+      ? `\nstudent's elective subject is "${electiveLabel}". if an answer-key image lists separate answers per elective, use ONLY the "${electiveLabel}" answer.\n`
+      : "";
+  const mathNote =
+    subject === "math" && method === "omr"
+      ? `
+standard 수능/mock-exam layout: items 1-15,23-28 = multiple choice (①-⑤; in a grid follow the item number's COLUMN downward). items 16-22,29-30 = short answer, 3-row digit grid (hundreds/tens/units by row label, unmarked place = 0, unmarked only if all 3 rows empty).
+`
+      : "";
+
+  if (subject === "elective" && keys.length === 2) {
+    return `task: grade Korean HS 탐구영역 (elective science/social-studies) exam. ${imageCount} image(s):
+1) ${sheetLabel} holds BOTH first-choice+second-choice subjects (usually 20 items each, split into 2 zones top/bottom or left/right)
+first-choice answer key: ${where[0]}
+second-choice answer key: ${where[1]}
+
+read the 2 zones of image 1 separately, answer JSON only:
+{"slots":[{"slot":1,"items":[...]},{"slot":2,"items":[...]}]}
+${common}
+- slot 1 item count = first-choice key's count; slot 2 item count = second-choice key's count
+${dataRule}`;
+  }
+
+  const intro =
+    subject === "elective"
+      ? "task: grade Korean HS 탐구영역 exam."
+      : "task: grade Korean HS exam (school test, mock exam, 수능).";
+  return `${intro}
+${imageCount} image(s):
+1) ${sheetLabel}
+answer key: ${where[0]}
+${mathNote}${electiveNote}
+read items in number order, answer JSON only:
+{"slots":[{"items":[...]}]}
+${common}
+${dataRule}`;
+}
+
+/**
+ * 데이터 정답표 자리의 슬롯을 **데이터로 다시 짠다** — 문항 목록·정답·배점은 데이터 그대로, 학생 답만
+ * 모델이 읽은 것에서 번호로 찾아 온다(못 찾으면 null — 검토 화면에서 고친다). 사진 정답표 자리는 그대로.
+ */
+export function applyDataKeys(slots: GradeSlot[], keys: GradeKeySource[] | undefined): GradeSlot[] {
+  if (!keys?.some((k) => k.kind === "data")) return slots;
+  const two = keys.length === 2;
+  const out: GradeSlot[] = [];
+  keys.forEach((k, i) => {
+    const slotNo = two ? ((i + 1) as 1 | 2) : undefined;
+    const got = two ? (slots.find((s) => s.slot === slotNo) ?? slots[i]) : slots[0];
+    if (k.kind !== "data") {
+      if (got) out.push(slotNo ? { ...got, slot: slotNo } : got);
+      return;
+    }
+    const byNo = new Map((got?.items ?? []).map((it) => [it.no, it]));
+    const items: GradedItem[] = [...k.items]
+      .sort((a, b) => a.no - b.no)
+      .map((it) => ({
+        no: it.no,
+        studentAnswer: byNo.get(it.no)?.studentAnswer ?? null,
+        correctAnswer: it.answer,
+        ...(it.points != null ? { points: it.points } : {}),
+      }));
+    out.push({ ...(slotNo ? { slot: slotNo } : {}), items });
+  });
+  return out;
 }
 
 /** 응답에서 글자만 긁어모은다(Responses API 는 여러 조각으로 나눠 준다). */
@@ -454,10 +574,12 @@ export async function gradeWithVision(
   electiveLabel?: string,
   /** BYOK 사용자의 본인 OpenAI 키. 없으면 공유 키를 쓴다. */
   apiKeyOverride?: string,
+  /** 정답표마다 사진인지 저장된 데이터인지. 없으면 images[1..] 가 전부 정답표 사진이다. */
+  keys?: GradeKeySource[],
 ): Promise<{ slots: GradeSlot[]; usage?: GradeUsage; model: string }> {
   // images[0]은 OMR(또는 가채점표), 나머지가 정답표다 — 탐구가 정답표
   // 1장(한 과목만)인지 2장(1선택+2선택)인지로 프롬프트가 갈린다.
-  const prompt = subjectPrompt(subject, images.length - 1, method, electiveLabel);
+  const prompt = subjectPrompt(subject, keys?.length ?? images.length - 1, method, electiveLabel, keys);
   const { text, usage, model } = await callVision(
     prompt,
     images,
@@ -467,7 +589,7 @@ export async function gradeWithVision(
     apiKeyOverride,
     OPENAI_GRADE_EFFORT,
   );
-  return { slots: parseSlots(text), usage, model };
+  return { slots: applyDataKeys(parseSlots(text), keys), usage, model };
 }
 
 /**
