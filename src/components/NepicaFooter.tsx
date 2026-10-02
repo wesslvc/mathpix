@@ -11,10 +11,10 @@
  * 로그인 두 곳에만 있었다).
  */
 export default function NepicaFooter() {
-  // 배포할 때마다 바뀌는 버전(빌드 시각, 한국 시간 — next.config.mjs 의 buildVersion).
+  // 배포할 때마다 바뀌는 버전(수능까지 남은 시간 — next.config.mjs 의 buildVersion). NEPICA 바로 밑에 작게.
   const version = process.env.NEXT_PUBLIC_APP_VERSION;
   return (
-    <footer className="flex items-center justify-center gap-2 px-4 pb-8 pt-10">
+    <footer className="flex flex-col items-center gap-1 px-4 pb-8 pt-10">
       <a
         href="https://nepica.vercel.app"
         target="_blank"
