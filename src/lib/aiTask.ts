@@ -63,6 +63,11 @@ export async function runAiTask<T>(
     /** 모델에 보낼 그림(데이터 URL 이나 `/api/card/…` 주소). 부르는 쪽이 미리 줄여 둔다. */
     images?: string[];
     params?: Record<string, unknown>;
+    /**
+     * 서버 줄에 들어간 순간 그 작업 id 를 알려 준다. 결과를 기다리던 화면이 닫혀도 나중에
+     * `waitAiTask(id)` 로 받아 갈 수 있게 부르는 쪽이 적어 둔다(수정 창의 sol 조판).
+     */
+    onQueued?: (taskId: string) => void;
   },
 ): Promise<AiTaskResult<T>> {
   const supabase = createClient();
@@ -107,14 +112,24 @@ export async function runAiTask<T>(
     throw err instanceof AiTaskError ? err : new AiTaskError(err instanceof Error ? err.message : String(err));
   }
   announce();
+  opts.onQueued?.(serverId);
+  return waitAiTask<T>(serverId);
+}
 
+/**
+ * 이미 서버 줄에 넣은 짧은 작업이 끝나기를 기다려 결과를 받는다. 끝난 작업이면 곧바로 돌려준다
+ * (결과는 그 행의 `state.result` 에 남아 있다). 행이 지워졌으면 404 로 알린다.
+ */
+export async function waitAiTask<T>(serverId: string): Promise<AiTaskResult<T>> {
   const started = Date.now();
+  let first = true;
   let misses = 0;
   try {
     for (;;) {
       const elapsed = Date.now() - started;
       if (elapsed > GIVE_UP_MS) throw new AiTaskError("서버 작업이 너무 오래 걸려요. 잠시 뒤 다시 해주세요.");
-      await sleep(elapsed < 20_000 ? 1000 : 2000);
+      if (!first) await sleep(elapsed < 20_000 ? 1000 : 2000);
+      first = false;
       let body: {
         status?: string;
         error?: string | null;
@@ -126,6 +141,7 @@ export async function runAiTask<T>(
       try {
         const res = await fetch(`/api/figure-jobs?task=${encodeURIComponent(serverId)}`, { cache: "no-store" });
         if (res.status === 401) throw new AiTaskError("로그인이 풀렸어요. 다시 로그인해주세요.", 401);
+        if (res.status === 404) throw new AiTaskError("작업을 찾지 못했어요(지워졌을 수 있어요).", 404);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         body = await res.json();
         misses = 0;
