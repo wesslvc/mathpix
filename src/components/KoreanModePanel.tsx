@@ -1,6 +1,7 @@
 "use client";
 
 import { runAiTask } from "@/lib/aiTask";
+import { inkMapFromImage, snapBoxes } from "@/lib/snapBoxes";
 import { useRef, useState } from "react";
 import { NO_CROP_LIMIT, cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage, openPageSource, type PageSource } from "@/lib/cropImage";
 import {
@@ -137,6 +138,8 @@ export default function KoreanModePanel({
   const [picked, setPicked] = useState<Set<string>>(new Set());
   /** 자동으로 찾은 결과(쪽마다). 지문·문제를 따로 부르고 각자 한 번만 부른다. */
   const detectedRef = useRef<Record<string, Detected>>({});
+  /** 이번 자동 찾기에서 테두리를 글자에 맞춰 다듬은 네모 수(`snapBoxes.ts`). */
+  const snappedRef = useRef(0);
   /** 지문 단계에서 새로 그리는 네모가 지문인가 그림인가. */
   const [drawKind, setDrawKind] = useState<"passage" | "figure">("passage");
   /** 자동으로 찾은 자리를 사람이 안 건드렸으면 여유(PAD)를 준다. */
@@ -238,6 +241,7 @@ export default function KoreanModePanel({
       const col = (r: { box: ProblemBox }) => (r.box.x + r.box.w / 2 < 0.5 ? 0 : 1);
       return col(a) - col(b) || a.box.y - b.box.y;
     };
+    snappedRef.current = 0;
     for (const page of pages) {
       const cached = detectedRef.current[page.id];
       if (kind === "passage" ? cached?.passages : cached?.questions) continue;
@@ -267,11 +271,20 @@ export default function KoreanModePanel({
             ...(kind === "question" ? { passages: passagesHere } : {}),
           },
         });
+        // **테두리는 사진이 정한다**(`snapBoxes.ts`, 지면 통째로 넣기와 같다). 문제는 지문 자리를 넘지 않게 한다.
+        // 지문 안 그림은 다듬지 않는다 — 그림 바로 옆 지문 줄을 같은 덩어리로 품을 수 있고, 어차피 다시 그린다.
+        let regions = json.regions ?? [];
+        const map = regions.length ? inkMapFromImage(source.img, source.width, source.height) : null;
+        if (map) {
+          const res = snapBoxes(map, regions.map((r) => r.box), kind === "question" ? passagesHere : []);
+          snappedRef.current += res.changed;
+          regions = regions.map((r, i) => ({ ...r, box: res.boxes[i] }));
+        }
         detectedRef.current[page.id] = {
           ...cached,
           ...(kind === "passage"
-            ? { passages: json.regions ?? [], figures: json.figures ?? [] }
-            : { questions: json.regions ?? [] }),
+            ? { passages: regions, figures: json.figures ?? [] }
+            : { questions: regions }),
         };
       } catch (err) {
         setError(err instanceof Error ? err.message : "자리 인식에 실패했습니다.");
@@ -324,12 +337,16 @@ export default function KoreanModePanel({
       );
       return;
     }
+    const snapNote = snappedRef.current > 0 ? `테두리 ${snappedRef.current}곳을 글자에 맞춰 다듬었어요.` : "";
     if (kind === "passage") {
       setPassageBoxes(next);
-      if (figureCount > 0) {
-        setNote(`지문 안에서 그림 ${figureCount}개를 찾았어요(주황 네모). 넣을 때 AI 로 다시 그려 붙입니다.`);
-      }
-    } else setQuestionBoxes(next);
+      const figNote =
+        figureCount > 0 ? `지문 안에서 그림 ${figureCount}개를 찾았어요(주황 네모). 넣을 때 AI 로 다시 그려 붙입니다.` : "";
+      if (figNote || snapNote) setNote([figNote, snapNote].filter(Boolean).join(" "));
+    } else {
+      setQuestionBoxes(next);
+      if (snapNote) setNote(snapNote);
+    }
   }
 
   /** 문제 단계의 묶음들을 **그린 차례**로 늘어놓는다. */

@@ -17,6 +17,7 @@ import { mergeChosen, type ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
 import { runAiTask } from "@/lib/aiTask";
+import { inkMapFromImage, snapBoxes } from "@/lib/snapBoxes";
 import type { AnswerByNumber } from "@/lib/answerMap";
 import { useFigureJobs } from "./FigureJobsProvider";
 import { Button } from "@/components/ui/button";
@@ -135,6 +136,8 @@ export default function BatchSplitPanel({
   const [error, setError] = useState<string | null>(null);
   /** 어떤 모델이 영역을 잡았는지. 모델을 바꿔 가며 견줄 때 필요하다. */
   const [usedModel, setUsedModel] = useState<string | null>(null);
+  /** 테두리를 사진의 글자에 맞춰 다듬은 네모 수(`snapBoxes.ts`). */
+  const [snapped, setSnapped] = useState(0);
   const { enqueue } = useFigureJobs();
   /** 지금 자르는 재료의 크기와, 원본을 못 열어 축소본으로 내려갔는지. */
   const [sourceInfo, setSourceInfo] = useState<{ w: number; h: number; degraded: boolean } | null>(null);
@@ -373,6 +376,18 @@ export default function BatchSplitPanel({
         setPieces([]);
         return;
       }
+
+      // **테두리는 사진이 정한다**(`snapBoxes.ts`) — 모델은 어느 문제가 어디쯤인지는 잘 알지만 테두리가 1~2%
+      // 어긋난다(지면을 줄여 본다). 변마다 가까운 흰 띠에 붙여 잘린 줄·남는 여백을 없앤다. 못 하면 그대로 간다.
+      const map = inkMapFromImage(source.img, source.width, source.height);
+      let snappedCount = 0;
+      if (map) {
+        const res = snapBoxes(map, found.flatMap((p) => p.boxes));
+        snappedCount = res.changed;
+        let k = 0;
+        found = found.map((p) => ({ ...p, boxes: p.boxes.map(() => res.boxes[k++]) }));
+      }
+      setSnapped(snappedCount);
 
       setBusy(`영역 ${found.length}개를 자르는 중...`);
       try {
@@ -728,6 +743,7 @@ export default function BatchSplitPanel({
       {!busy && usedModel && pieces.length > 0 && (
         <p className="text-[11px] text-slate-400">
           {usedModel} 로 {pieces.length}개를 잡았습니다
+          {snapped > 0 && ` · 테두리 ${snapped}곳을 글자에 맞춰 다듬었어요`}
         </p>
       )}
       {bg.pending > 0 && (
