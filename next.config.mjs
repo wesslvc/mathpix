@@ -1,6 +1,18 @@
+/**
+ * 바닥글 NEPICA 옆에 찍는 버전(`ver.261002.2053`). **빌드할 때(=배포할 때마다) 한국 시간으로 저절로 매긴다** —
+ * 손으로 올리면 반드시 잊는다. `APP_VERSION` 환경변수를 주면 그 값을 그대로 쓴다.
+ */
+function buildVersion() {
+  if (process.env.APP_VERSION) return process.env.APP_VERSION;
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `ver.${p(kst.getUTCFullYear() % 100)}${p(kst.getUTCMonth() + 1)}${p(kst.getUTCDate())}.${p(kst.getUTCHours())}${p(kst.getUTCMinutes())}`;
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  env: { NEXT_PUBLIC_APP_VERSION: buildVersion() },
   experimental: {
     /**
      * **뒤로 갈 때마다 다시 불러오던 것을 멈춘다.**

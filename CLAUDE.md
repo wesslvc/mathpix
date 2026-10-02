@@ -5017,6 +5017,12 @@ ReprintOCR=종이, 브랜드 자체=아무것도 안 뭄).
 높이를 잡으므로(`flex min-h-screen flex-col`) 그대로 두면 바닥글이 한 화면
 아래로 밀린다. 가운데 정렬 빈 화면만 `min-h-[60vh]` 로 남겼다.
 
+#### 바닥글 버전 표기 (2026-10-02)
+
+사용자 — "nepica 옆에 업데이트할 때마다 작게 버전을 적어 줘 ver.261002.2053". `NepicaFooter` 가 NEPICA 옆에 작게
+`ver.YYMMDD.HHMM` 을 찍는다. **값은 빌드할 때(=배포마다) 한국 시간으로 저절로 매긴다**(`next.config.mjs` 의 `buildVersion` →
+`NEXT_PUBLIC_APP_VERSION`) — 손으로 올리면 잊는다. `APP_VERSION` 환경변수를 주면 그 값을 쓴다.
+
 #### 인쇄되는 면이 가장 위험한 자리다 — 확인하고 넘어갔다
 
 문제 카드는 PNG 로 캡처돼 그대로 인쇄된다. 팔레트를 갈아 끼우면 종이가
