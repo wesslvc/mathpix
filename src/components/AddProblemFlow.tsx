@@ -44,6 +44,7 @@ import type { StoredBoxRange } from "@/lib/storedFigures";
 import type { TokenStatus } from "@/app/api/tokens/route";
 import { thumbPathFor } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
+import { figuresOfBox, figuresReference } from "@/lib/figureRefs";
 import { persistFigureBlobs } from "@/lib/figureBlob";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
@@ -558,7 +559,8 @@ export default function AddProblemFlow({
       // 갈아 끼운 **뒤에** 지운다 — 먼저 지웠다가 갱신이 실패하면 행이 없는
       // 파일을 가리켜 목록에 깨진 그림이 뜬다. 실패해도 저장은 성공이다
       // (고아 하나가 남을 뿐이고, 여기서 막으면 저장이 안 된 것처럼 보인다).
-      if (oldPath && oldPath !== path) {
+      // 그림이 옛 카드 파일을 가리키면 남긴다(통째로 그린 그림은 마크업이 곧 카드다 — `figureRefs.ts`).
+      if (oldPath && oldPath !== path && !figuresReference(oldPath, figuresOfBox(persistedBoxRange))) {
         await removeBlobs([oldPath, thumbPathFor(oldPath)]);
       }
       router.refresh();

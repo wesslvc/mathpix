@@ -775,7 +775,8 @@ async function runTaskJob(admin: Admin, job: ClaimedJob) {
             note: out.note ?? null,
             model: out.model ?? null,
             charged_tokens: job.charged ? want : 0,
-            applied_at: now,
+            // 문제가 걸린 sol 조판은 브라우저가 그 문제에 저장한 뒤에 찍는다(`typesetApply.ts`, claimApply).
+            applied_at: kind === "typeset" && job.problem_id ? null : now,
             result_path: null,
             finished_at: now,
           }

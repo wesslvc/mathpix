@@ -103,6 +103,7 @@ export async function GET(req: NextRequest) {
   // 짧은 AI 작업(task)은 끝난 지 10분이 지나면 목록에 안 띄운다 — 번호 읽기·대화 한 마디가 수십 개씩 쌓여
   // 그림 작업을 밀어낸다. 그래서 **최근 것부터** 100개를 받아 차례만 되돌린다(예전에는 오래된 것부터 100개라
   // 줄이 길면 새 작업이 빠졌다).
+  // 다만 **문제에 아직 저장 안 된 sol 조판**(done · applied_at 없음)은 남긴다 — 앱을 다시 열면 그때 저장한다.
   const taskSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   // 읽기는 RLS(본인 것만)로 충분하다.
   const { data, error } = await supabase
@@ -110,7 +111,7 @@ export async function GET(req: NextRequest) {
     .select(JOB_COLUMNS)
     .eq("dismissed", false)
     .gte("created_at", since)
-    .or(`mode.neq.task,status.in.(pending,running),finished_at.gt."${taskSince}"`)
+    .or(`mode.neq.task,status.in.(pending,running),finished_at.gt."${taskSince}",and(status.eq.done,applied_at.is.null)`)
     .order("created_at", { ascending: false })
     .limit(100);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -855,6 +856,11 @@ async function enqueueTask(
     return NextResponse.json({ error: "보낸 내용이 너무 길어요." }, { status: 413 });
   }
 
+  const problemIdParam =
+    kind === "typeset" && typeof params.problemId === "string" && /^[0-9a-f-]{36}$/i.test(params.problemId)
+      ? params.problemId
+      : null;
+
   const admin = createAdminClient();
   const cleanup = () => removeStored(admin, paths);
   const billing = await getBillingContext(supabase, userId);
@@ -890,6 +896,9 @@ async function enqueueTask(
       stage: kind,
       input_path: paths[0] ?? "",
       payload: { task: kind, paths, params },
+      // sol 조판은 **끝나면 그 문제에 저장된다**(`typesetApply.ts`) — 어느 문제인지 적어 둔다. 남의 문제 id 를
+      // 적어도 저장은 사용자 세션(RLS)으로 하므로 거기서 막힌다.
+      problem_id: problemIdParam,
     })
     .select(JOB_COLUMNS)
     .single<FigureJobRow>();

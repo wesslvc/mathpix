@@ -5,6 +5,7 @@
 // 고르고 · 시간이 다 되면 먼저 끊고 · 결과를 문제 행에 저장하는 규칙이 두 벌이
 // 되면 반드시 한쪽만 고쳐진다(이 저장소가 여러 번 데인 자리다).
 
+import { figuresOfBox, figuresReference } from "./figureRefs";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   FigureImageError,
@@ -344,10 +345,13 @@ export async function persistWholeProblem(
     }
     // 예전 원본과 그 미리보기를 지운다(미리보기는 서버가 못 만든다 — 낡은
     // 미리보기를 남겨 두면 지금 그림과 다른 그림이 목록에 뜬다).
-    await removeStored(supabase, [
-      String(row.image_path),
-      thumbPathFor(String(row.image_path)),
-    ]);
+    // 다만 그림이 그 파일을 가리키면 남긴다(`figureRefs.ts`).
+    if (!figuresReference(String(row.image_path), figuresOfBox(box, nextFigures))) {
+      await removeStored(supabase, [
+        String(row.image_path),
+        thumbPathFor(String(row.image_path)),
+      ]);
+    }
     return newPath;
   } catch (err) {
     console.error("[figureRun] 결과 저장 실패:", err);

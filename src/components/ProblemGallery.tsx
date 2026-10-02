@@ -57,10 +57,13 @@ const DiagramCropModal = dynamic(() => import("./DiagramCropModal"), { ssr: fals
 import { useFigureJobs } from "./FigureJobsProvider";
 import { ensureDataUrl, prepareFigureForModel, prepareProblemForModel, rasterFromSvg, rasterToSvg } from "@/lib/figureImage";
 import { SolChat } from "@/components/SolChat";
-import { splitFigureMarkers, type TranscribedFigure } from "@/lib/problemCompare";
-import { runAiTask, waitAiTask } from "@/lib/aiTask";
-import { buildAnchors } from "@/lib/cardHtml";
-import { cropImageToDataUrl, loadImage } from "@/lib/cropImage";
+import { runAiTask } from "@/lib/aiTask";
+import { figuresReference } from "@/lib/figureRefs";
+import {
+  TYPESET_APPLIED_EVENT,
+  type PreTypeset,
+  type TypesetAppliedDetail,
+} from "@/lib/typesetApply";
 import { keepOrigin } from "@/lib/figureOrigin";
 import { thumbPathFor } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
@@ -115,43 +118,14 @@ function siblingPath(imagePath: string): string {
   return `${dir}/${crypto.randomUUID()}.png`;
 }
 
-/** sol 조판이 돌려주는 것(`aiTasks.ts` 의 typeset). */
-type TypesetResult = { text?: string; figures?: TranscribedFigure[]; estKrw?: number };
-
-/**
- * **맡겨 둔 sol 조판을 문제별로 기억한다**(기기마다 localStorage). 결과는 서버 줄(`figure_jobs.state.result`)에
- * 남으므로 작업 id 만 적어 두면 된다 — 끝나기 전에 수정 창을 닫거나 화면을 떠나도, 그 문제를 다시 열면 받아 붙인다.
- * 예전에는 창을 닫는 순간 결과를 버려서 "AI 작업은 끝났는데 조판본이 안 붙는" 일이 났다.
- */
-const TYPESET_PENDING_KEY = "reprint.typesetPending";
-const TYPESET_PENDING_MS = 2 * 24 * 60 * 60 * 1000; // 이틀 — 서버도 대략 그만큼 들고 있다.
-type TypesetPending = Record<string, { taskId: string; at: number }>;
-function readTypesetPending(): TypesetPending {
-  try {
-    const raw = JSON.parse(localStorage.getItem(TYPESET_PENDING_KEY) ?? "{}") as TypesetPending;
-    const now = Date.now();
-    return Object.fromEntries(
-      Object.entries(raw).filter(
-        ([, v]) => v && typeof v.taskId === "string" && typeof v.at === "number" && now - v.at < TYPESET_PENDING_MS,
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-function writeTypesetPending(map: TypesetPending) {
-  try {
-    localStorage.setItem(TYPESET_PENDING_KEY, JSON.stringify(map));
-  } catch {
-    // 저장소를 못 쓰면 예전처럼 창이 열려 있을 때만 붙는다.
-  }
-}
-function rememberTypeset(problemId: string, taskId: string) {
-  writeTypesetPending({ ...readTypesetPending(), [problemId]: { taskId, at: Date.now() } });
-}
-function forgetTypeset(problemId: string) {
-  const { [problemId]: _drop, ...rest } = readTypesetPending();
-  writeTypesetPending(rest);
+/** 저장된 box_range 에서 조판 전 상태를 읽는다(`typesetApply.ts` 가 남긴다). 모양이 이상하면 없는 것으로 본다. */
+function readPreTypeset(box: unknown): PreTypeset | null {
+  if (!box || typeof box !== "object") return null;
+  const v = (box as { preTypeset?: unknown }).preTypeset;
+  if (!v || typeof v !== "object") return null;
+  const o = v as { text?: unknown; figures?: unknown };
+  if (typeof o.text !== "string" || !Array.isArray(o.figures)) return null;
+  return { text: o.text, figures: o.figures };
 }
 
 type Props = {
@@ -323,17 +297,48 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
    * "sol 이 옮겨 적고 우리가 조판" 진행 상황. 끝나면 본문·그림이 바뀌지만 **저장을 눌러야** 반영된다.
    * `undo` 는 조판 전 상태(본문·박스·그림) — 결과가 마음에 안 들면 공짜로 되돌린다.
    */
-  const [typeset, setTypeset] = useState<{
-    busy: boolean;
-    note?: string;
-    undo?: { text: string; box: BoxOverride | undefined; figures: StoredFigure[] };
-  } | null>(null);
+  const [typeset, setTypeset] = useState<{ busy: boolean; note?: string } | null>(null);
+  /**
+   * 조판 전 상태(`box_range.preTypeset`). sol 조판은 끝나면 **저절로 문제에 저장되므로**(`typesetApply.ts`)
+   * 되돌리기도 저장본에 남긴 이 값으로 한다. `dropPreTypeset` 이 켜지면 되돌린 것 — 저장을 눌러야 반영된다.
+   */
+  const [preTypeset, setPreTypeset] = useState<PreTypeset | null>(null);
+  const [dropPreTypeset, setDropPreTypeset] = useState(false);
+  /** 되돌리기를 취소할 때 다시 얹을 조판본(되돌리기 직전 화면 상태). */
+  const typesetSnapRef = useRef<{ text: string; box: BoxOverride | undefined; figures: StoredFigure[] } | null>(null);
   // 조판 요청이 끝났을 때 아직 **같은 수정 창**인지 가린다(창을 닫거나 다른 문제를 열면 늘어난다).
+  // `editing` 객체가 아니라 id 를 본다 — 조판 저장 뒤 image_path 만 갈아 끼울 때 진행 표시가 지워지면 안 된다.
   const typesetRunRef = useRef(0);
+  const editingId = editing?.id;
   useEffect(() => {
     typesetRunRef.current++;
     setTypeset(null);
-  }, [editing]);
+  }, [editingId]);
+  const editingRef = useRef<GalleryProblem | null>(null);
+  editingRef.current = editing;
+  /**
+   * 조판본이 저장됐다는 알림(`FigureJobsProvider`). 목록 그림을 새로 받고, 그 문제의 수정 창이 열려 있으면 다시 읽는다.
+   * 핸들러는 매 렌더 갈아 끼우고 등록은 한 번만 한다(최신 상태를 보게).
+   */
+  const onTypesetAppliedRef = useRef<(d: TypesetAppliedDetail) => void>(() => {});
+  onTypesetAppliedRef.current = (d) => {
+    router.refresh();
+    if (editingRef.current?.id !== d.problemId) return;
+    if (d.ok) {
+      void reloadAfterTypeset(d.problemId);
+    } else {
+      setTypeset(null);
+      setEditError(d.error ?? "조판본을 저장하지 못했어요.");
+    }
+  };
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<TypesetAppliedDetail>).detail;
+      if (d?.problemId) onTypesetAppliedRef.current(d);
+    };
+    window.addEventListener(TYPESET_APPLIED_EVENT, on);
+    return () => window.removeEventListener(TYPESET_APPLIED_EVENT, on);
+  }, []);
   const previewRef = useRef<HTMLDivElement>(null);
   /**
    * 오려내기 창을 무엇 때문에 열었는가.
@@ -567,143 +572,91 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   }
 
   /**
-   * **sol 이 문제 한 장을 글자로 옮겨 적고, 우리가 조판한다**(수정 창 전용, `/api/sol-typeset`).
+   * **sol 이 문제 한 장을 글자로 옮겨 적고, 우리가 조판한다**(수정 창 전용, 서버 대기열 task `typeset`).
    *
    * 이미지 생성은 글자를 틀리고 틀린 글자를 고칠 길이 없다. 옮겨 적은 글은 우리 인식 경로(`renderMathText` · KaTeX ·
    * 나눔명조)가 그대로 그리므로 **틀린 글자는 본문 편집에서 고칠 수 있다.** 글자로 못 옮기는 그림(그래프·도형·지도)은
    * sol 이 짚은 자리를 원본에서 오려 그 문단 사이에 붙인다 — 붙은 그림은 여느 그림처럼 다시 오려내거나 AI 로 다시 그릴 수 있다.
    *
    * 읽는 재료는 **AI 이전 원본**(`origin`)이 있으면 그것이다 — 원본이 진실이고, AI 그림은 이미 글자가 틀렸을 수 있다.
+   *
+   * **끝나면 저절로 문제에 저장된다**(AI 통째로 그리기처럼, 2026-10-02). 작업에 문제 id 를 달아 넣으면
+   * `FigureJobsProvider` 가 결과를 받아 본문·그림·카드를 저장하고(`typesetApply.ts`) 알려 온다 — 이 창은 그때 다시 읽는다.
+   * 창을 닫아도, 다른 화면으로 가도 된다.
    */
   async function typesetWithSol(src: string) {
     if (!editing) return;
-    const problemId = editing.id;
-    const undo = { text: editText, box: editBox, figures: editFigures };
     const run = typesetRunRef.current;
     setTypeset({
       busy: true,
-      note: "sol 이 문제를 글자로 옮겨 적는 중… (1분 안팎) 창을 닫아도 돼요 — 이 문제를 다시 열면 붙어요.",
+      note: "sol 이 문제를 글자로 옮겨 적는 중… (1분 안팎) 창을 닫아도 돼요 — 끝나면 저절로 문제에 저장돼요.",
     });
     setEditError(null);
     try {
       const source = await ensureDataUrl(src);
-      // **서버 대기열에서 옮겨 적는다**(`runAiTask` — 대기열 패널에 뜬다). 줄에 들어간 순간 작업 id 를 이 문제에
-      // 적어 둔다 — 끝나기 전에 창을 닫거나 화면을 떠나도 다시 열면 받아 붙인다(`resumeTypeset`).
-      const done = await runAiTask<TypesetResult>("typeset", {
+      await runAiTask("typeset", {
         label: `sol 인식 후 조판${editing.number != null ? ` (${editing.number}번)` : ""}`,
         images: [await prepareProblemForModel(await enhanceContrast(source))],
-        onQueued: (taskId) => rememberTypeset(problemId, taskId),
+        params: { problemId: editing.id },
       });
-      // 그사이 창을 닫았거나 다른 문제를 열었다 — 여기서 붙이지 않는다(적어 둔 id 로 다시 열 때 붙는다).
       if (run !== typesetRunRef.current) return;
-      await applyTypeset(done.result, done.chargedTokens, source, undo, run);
-      forgetTypeset(problemId);
+      // 저장은 FigureJobsProvider 가 한다 — 끝나면 TYPESET_APPLIED_EVENT 가 온다.
+      setTypeset({ busy: true, note: "다 읽었어요 — 조판해서 문제에 저장하는 중…" });
     } catch (err) {
       if (run !== typesetRunRef.current) return;
-      forgetTypeset(problemId);
       const message = err instanceof Error ? err.message : "sol 이 옮겨 적지 못했어요.";
       setTypeset(null);
       setEditError(message);
     }
   }
 
-  /**
-   * **창을 닫은 사이 끝난(또는 아직 도는) sol 조판을 받아 붙인다.** 수정 창을 열고 그림을 불러온 뒤 부른다.
-   * 읽는 재료는 처음과 같은 것 — 문제 통째로 그림의 AI 이전 원본(없으면 지금 그림)이다(그림 자리를 거기서 오려 낸다).
-   */
-  async function resumeTypeset(problemId: string, taskId: string, figures: StoredFigure[], text: string) {
-    const run = typesetRunRef.current;
-    const drawings = figures.filter((f) => f.kind !== "table");
-    const whole = text.trim() === "" && drawings.length === 1 ? drawings[0] : null;
-    const src =
-      (whole?.origin ? rasterFromSvg(whole.origin) : null) ?? (whole?.markup ? rasterFromSvg(whole.markup) : null);
-    if (!src) {
-      // 그사이 저장해 본문이 생겼거나 그림이 바뀌었다 — 붙일 자리가 없다.
-      forgetTypeset(problemId);
-      return;
-    }
-    const undo = { text, box: undefined as BoxOverride | undefined, figures };
-    setTypeset({ busy: true, note: "앞서 맡긴 sol 조판 결과를 받아 붙이는 중…" });
-    try {
-      const done = await waitAiTask<TypesetResult>(taskId);
-      if (run !== typesetRunRef.current) return;
-      const source = await ensureDataUrl(src);
-      await applyTypeset(done.result, done.chargedTokens, source, undo, run);
-      forgetTypeset(problemId);
-    } catch (err) {
-      if (run !== typesetRunRef.current) return;
-      forgetTypeset(problemId);
-      setTypeset(null);
-      setEditError(err instanceof Error ? err.message : "sol 조판 결과를 받지 못했어요.");
-    }
-  }
-
-  /** 옮겨 적은 글을 본문으로, 짚은 그림 자리를 원본에서 오려 붙인다(화면에만 — 저장을 눌러야 반영). */
-  async function applyTypeset(
-    typed: TypesetResult,
-    chargedTokens: number | null,
-    source: string,
-    undo: { text: string; box: BoxOverride | undefined; figures: StoredFigure[] },
-    run: number,
-  ) {
-    const json = { ...typed, chargedTokens: chargedTokens ?? undefined };
-    if (typeof json.text !== "string") throw new Error("sol 이 옮겨 적지 못했어요.");
-    const { text, markers } = splitFigureMarkers(json.text);
-    // 그림 자리 = 그 그림 앞까지의 본문이 끝나는 자리(카드의 자리 목록 번호). 앞에 본문이 없으면 맨 위.
-    const posOf = new Map(
-      markers.map((m) => [
-        m.id,
-        m.before.trim() ? buildAnchors(renderMathTextWithInfo(m.before).blocks).length - 1 : 0,
-      ]),
+  /** 조판본이 저장됐다 — 이 창의 본문·그림·기준 이미지를 저장본으로 다시 맞춘다. */
+  async function reloadAfterTypeset(problemId: string) {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("problems")
+      .select("image_path, text_content, box_range")
+      .eq("id", problemId)
+      .maybeSingle();
+    if (!data || editingRef.current?.id !== problemId) return;
+    const text = String(data.text_content ?? "");
+    const figures = readStoredFigures(data.box_range);
+    // 기준 이미지를 바꿔 둬야 다음 저장이 **지금** 카드를 지운다(옛 경로를 지우면 새 카드가 고아로 남는다).
+    setEditing((cur) =>
+      cur && cur.id === problemId ? { ...cur, imagePath: String(data.image_path), text } : cur,
     );
-    const figs = json.figures ?? [];
-    const nextFigures: StoredFigure[] = [];
-    if (figs.length) {
-      const img = await loadImage(source);
-      const W = img.naturalWidth;
-      const H = img.naturalHeight;
-      for (const f of figs) {
-        // 모델이 경계를 빠듯하게 잡는 일이 흔해 사방 1% 여유를 준다(그림 가장자리 눈금·글자가 잘리지 않게).
-        const x0 = Math.max(0, f.x - 0.01);
-        const y0 = Math.max(0, f.y - 0.01);
-        const x1 = Math.min(1, f.x + f.w + 0.01);
-        const y1 = Math.min(1, f.y + f.h + 0.01);
-        const crop = cropImageToDataUrl(img, { x: x0 * W, y: y0 * H, width: (x1 - x0) * W, height: (y1 - y0) * H });
-        nextFigures.push({
-          id: crypto.randomUUID(),
-          markup: await rasterToSvg(crop),
-          layout: DEFAULT_DIAGRAM_LAYOUT,
-          // 본문에 자리 표시가 없는 그림은 맨 아래 — 미리보기에서 끌어 옮기면 된다.
-          position: posOf.get(f.id) ?? BOTTOM,
-          kind: "figure",
-          row: false,
-        });
-      }
-    }
-    if (run !== typesetRunRef.current) return;
     setEditText(text);
-    // 박스 범위는 옛 본문의 줄 번호라 새 본문에는 맞지 않는다 — 자동 감지로 돌린다.
     setEditBox(undefined);
-    setEditFigures(nextFigures);
-    const cost =
-      typeof json.estKrw === "number"
-        ? ` · 약 ${json.estKrw}원`
-        : typeof json.chargedTokens === "number"
-          ? ` · ${json.chargedTokens}토큰`
-          : "";
+    setEditFigures(figures);
+    setPreTypeset(readPreTypeset(data.box_range));
+    setDropPreTypeset(false);
+    typesetSnapRef.current = null;
     setTypeset({
       busy: false,
-      undo,
-      note: `조판했어요 — 글 ${text.length}자 · 그림 ${nextFigures.length}개${cost}. 틀린 글자는 본문에서 고치고, 저장을 눌러야 반영돼요.`,
+      note: `조판해서 저장했어요 — 글 ${text.length}자 · 그림 ${figures.filter((f) => f.kind !== "table").length}개. 틀린 글자는 본문에서 고치고 저장하세요.`,
     });
   }
 
-  /** 조판 전으로 되돌린다(돈이 안 든다 — 화면 상태만 되돌린다). */
+  /** 조판 전으로 되돌린다(돈이 안 든다). 저장을 눌러야 반영된다 — 이 창의 다른 수정과 같은 규칙. */
   function undoTypeset() {
-    if (!typeset?.undo) return;
-    setEditText(typeset.undo.text);
-    setEditBox(typeset.undo.box);
-    setEditFigures(typeset.undo.figures);
+    if (!preTypeset) return;
+    typesetSnapRef.current = { text: editText, box: editBox, figures: editFigures };
+    setEditText(preTypeset.text);
+    setEditBox(undefined);
+    setEditFigures(readStoredFigures({ figures: preTypeset.figures }));
+    setDropPreTypeset(true);
+    setTypeset({ busy: false, note: "조판 전으로 되돌렸어요 — 저장을 눌러야 반영돼요." });
+  }
+
+  /** 되돌리기를 무른다(아직 저장 전일 때). */
+  function redoTypeset() {
+    const snap = typesetSnapRef.current;
+    if (!snap) return;
+    setEditText(snap.text);
+    setEditBox(snap.box);
+    setEditFigures(snap.figures);
+    setDropPreTypeset(false);
+    typesetSnapRef.current = null;
     setTypeset(null);
   }
 
@@ -854,14 +807,17 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     setEditPoints(problem.points == null ? "" : String(problem.points));
     setEditError(null);
     setEditFigures([]);
+    setPreTypeset(null);
+    setDropPreTypeset(false);
+    typesetSnapRef.current = null;
     setMaybeLostFigures(false);
     setEditKoreanBlocks(undefined);
     setPassageStatus(null);
-    void loadFigures(problem.id, problem.text);
+    void loadFigures(problem.id);
   }
 
   /** 이 문제에 저장된 그림을 가져온다(목록 조회에서는 일부러 뺐다). */
-  async function loadFigures(problemId: string, problemText: string) {
+  async function loadFigures(problemId: string) {
     setFiguresLoading(true);
     try {
       const supabase = createClient();
@@ -870,11 +826,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         .select("box_range")
         .eq("id", problemId)
         .maybeSingle();
-      const stored = readStoredFigures(data?.box_range);
-      setEditFigures(stored);
-      // 창을 닫은 사이 끝난 sol 조판이 있으면 받아 붙인다.
-      const pending = readTypesetPending()[problemId];
-      if (pending) void resumeTypeset(problemId, pending.taskId, stored, problemText);
+      setEditFigures(readStoredFigures(data?.box_range));
+      setPreTypeset(readPreTypeset(data?.box_range));
       // figures 키 자체가 없으면 그림을 저장하기 전에 만들어진 문제다.
       const hasKey =
         data?.box_range &&
@@ -926,6 +879,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         if (read) koreanBlocks = read;
       }
 
+      const keptPreTypeset = dropPreTypeset ? null : preTypeset;
       const { error: dbErr } = await supabase
         .from("problems")
         .update({
@@ -956,6 +910,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                   ...(koreanBlocks ? { blocks: koreanBlocks } : {}),
                 }
               : undefined,
+            // sol 조판 전 상태도 같은 이유로 옮겨 담는다(되돌리기에 쓴다). 되돌려 저장하면 뗀다.
+            preTypeset: keptPreTypeset ?? undefined,
           },
         })
         .eq("id", editing.id);
@@ -967,7 +923,11 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
 
       // 예전 이미지는 정리(실패해도 치명적이지 않으므로 무시). 미리보기도 같이
       // 지운다 — 안 지우면 아무도 안 보는 파일이 저장 용량만 차지한다.
-      await removeBlobs([editing.imagePath, thumbPathFor(editing.imagePath)]);
+      // **다만 그림이 그 파일을 가리키면 남긴다.** 통째로 다시 그린 문제는 그림의 마크업이 곧 카드 파일이다
+      // (`persistWholeProblem`) — 지우면 다음에 열 때 그 그림이 빈다(실제로 그런 행이 있었다).
+      if (!figuresReference(editing.imagePath, [...figures, ...(keptPreTypeset?.figures ?? [])])) {
+        await removeBlobs([editing.imagePath, thumbPathFor(editing.imagePath)]);
+      }
 
       setEditing(null);
       router.refresh();
@@ -1297,12 +1257,20 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                 ) : (
                   <TextEditTabs value={editText} onChange={setEditText} />
                 )}
-                {typeset && !typeset.busy && typeset.undo && (
+                {!typeset?.busy && (preTypeset || typesetSnapRef.current) && (
                   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                    <span className="min-w-[12rem] flex-1">{typeset.note}</span>
-                    <Button type="button" variant="outline" size="xs" onClick={undoTypeset}>
-                      조판 전으로 되돌리기
-                    </Button>
+                    <span className="min-w-[12rem] flex-1">
+                      {typeset?.note ?? "sol 이 옮겨 적어 조판한 문제예요. 틀린 글자는 본문에서 고칠 수 있어요."}
+                    </span>
+                    {dropPreTypeset ? (
+                      <Button type="button" variant="outline" size="xs" onClick={redoTypeset}>
+                        되돌리기 취소
+                      </Button>
+                    ) : (
+                      <Button type="button" variant="outline" size="xs" onClick={undoTypeset}>
+                        조판 전으로 되돌리기
+                      </Button>
+                    )}
                   </div>
                 )}
 

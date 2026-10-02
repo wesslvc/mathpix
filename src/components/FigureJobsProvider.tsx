@@ -39,6 +39,13 @@ import { enhanceContrast } from "@/lib/autoContrast";
 import { passageStrips } from "@/lib/passageMarks";
 import { figuresForReader, type PassageFigureInput } from "@/lib/passageFigures";
 import { AI_TASK_EVENT } from "@/lib/aiTask";
+import { figuresOfBox, figuresReference } from "@/lib/figureRefs";
+import {
+  TYPESET_APPLIED_EVENT,
+  persistTypeset,
+  type TypesetAppliedDetail,
+  type TypesetResult,
+} from "@/lib/typesetApply";
 
 /**
  * 작업 종류. "figure"/"problem" 은 그림을 다시 그리고, "passage" 는 국어 지문을
@@ -445,7 +452,11 @@ export default function FigureJobsProvider({
         await removeBlobs([newPath, thumbPathFor(newPath)]);
         throw dbErr;
       }
-      await removeBlobs([String(row.image_path), thumbPathFor(String(row.image_path))]);
+      // 그림이 옛 카드 파일을 가리키면 남긴다(통째로 그린 그림은 마크업이 곧 카드다 — `figureRefs.ts`).
+      const keptFigures = existingFigures.some((f) => f.id === job.id) ? nextFigures : existingFigures;
+      if (!figuresReference(String(row.image_path), figuresOfBox(box, keptFigures))) {
+        await removeBlobs([String(row.image_path), thumbPathFor(String(row.image_path))]);
+      }
 
       // 다음 갱신 때도 최신 마크업을 쓰도록 스냅샷을 갱신해 둔다.
       if (snap?.problemId === problemId) {
@@ -511,6 +522,64 @@ export default function FigureJobsProvider({
       }
     },
     [applyToProblem, patchJob],
+  );
+
+  /**
+   * **끝난 sol 조판을 그 문제에 저장한다**(`typesetApply.ts`). 서버는 결과만 들고 있고(카드 PNG 는 브라우저가
+   * 그려야 한다) 여기서 본문·그림·카드를 한 번에 갈아 끼운다. 기기 둘이 열려 있어도 한쪽만 하도록 먼저 찜한다.
+   * 다 되면 알린다 — 열려 있는 수정 창·목록이 다시 읽는다.
+   */
+  const handleTypeset = useCallback(
+    async (job: Internal) => {
+      const serverId = job.serverId;
+      const problemId = job.serverProblemId;
+      if (!serverId || !problemId || handlingRef.current.has(serverId)) return;
+      handlingRef.current.add(serverId);
+      const announce = (detail: TypesetAppliedDetail) =>
+        window.dispatchEvent(new CustomEvent<TypesetAppliedDetail>(TYPESET_APPLIED_EVENT, { detail }));
+      try {
+        const claim = await fetch("/api/figure-jobs", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: serverId, action: "claimApply" }),
+        });
+        const claimed = await jsonOf<{ claimed?: boolean }>(claim);
+        if (!claimed.claimed) return;
+        patchJob(job.id, { appliedAt: new Date().toISOString() });
+        try {
+          const res = await fetch(`/api/figure-jobs?task=${encodeURIComponent(serverId)}`, { cache: "no-store" });
+          const body = await jsonOf<{ result?: TypesetResult | null; error?: string }>(res);
+          if (!res.ok || !body.result) throw new Error(body.error ?? "조판 결과를 받지 못했어요.");
+          const outcome = await persistTypeset(problemId, body.result);
+          if (outcome === "stale") {
+            patchJob(job.id, { note: "그사이 문제가 바뀌어 조판본을 붙이지 않았어요" });
+            announce({ problemId, ok: false, error: "그사이 본문이나 그림이 바뀌어 조판본을 붙이지 않았어요." });
+          } else {
+            patchJob(job.id, { note: "조판해서 문제에 저장했어요" });
+            announce({ problemId, ok: true });
+          }
+        } catch (err) {
+          console.error("[figureJobs] 조판 저장 실패:", err);
+          // 찜을 풀어 둔다 — 다음에 앱을 열면 다시 해 본다(이 화면에서는 되풀이하지 않는다).
+          await fetch("/api/figure-jobs", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: serverId, action: "releaseApply" }),
+          }).catch(() => {});
+          patchJob(job.id, { appliedAt: null, gaveUp: true });
+          announce({
+            problemId,
+            ok: false,
+            error: `조판본을 저장하지 못했어요 — ${err instanceof Error ? err.message : "알 수 없는 오류"}. 앱을 다시 열면 다시 해 봐요.`,
+          });
+        }
+      } catch (err) {
+        console.error("[figureJobs] 조판 찜 실패:", err);
+      } finally {
+        handlingRef.current.delete(serverId);
+      }
+    },
+    [patchJob],
   );
 
   /** 서버 목록을 받아 로컬과 맞춘다. */
@@ -607,8 +676,18 @@ export default function FigureJobsProvider({
     // 끝난 것들의 결과를 받아 온다.
     for (const j of jobsRef.current) {
       if (needsResult(j)) void handleDone(j);
+      if (
+        j.mode === "task" &&
+        j.stage === "typeset" &&
+        j.status === "done" &&
+        j.serverProblemId &&
+        !j.appliedAt &&
+        !j.gaveUp
+      ) {
+        void handleTypeset(j);
+      }
     }
-  }, [fromServer, handleDone, setJobs]);
+  }, [fromServer, handleDone, handleTypeset, setJobs]);
 
   /**
    * **지문 작업을 넣는다.** 브라우저만 할 수 있는 것(대비 올리기·확대 띠 자르기·
