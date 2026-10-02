@@ -1,4 +1,4 @@
-import { collectTables, type CardFigure } from "./cardHtml";
+import { collectTables, type CardFigure, type FigureOverlay } from "./cardHtml";
 import type { KoreanMeta } from "./koreanSet";
 import {
   DEFAULT_DIAGRAM_LAYOUT,
@@ -49,7 +49,17 @@ export type StoredFigure = {
   origin?: string;
   /** 원본을 담아 둔 때(ISO). 오래된 원본은 밤마다 지운다 — `figureOrigin.ts` 참고. */
   originAt?: string;
+  /** 다른 그림 위에 덧붙였다(`CardFigure.overlay`). */
+  overlay?: FigureOverlay;
 };
+
+function readOverlay(v: unknown): FigureOverlay | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  if (typeof o.on !== "string") return undefined;
+  if (![o.x, o.y, o.w].every((n) => typeof n === "number" && Number.isFinite(n))) return undefined;
+  return { on: o.on, x: o.x as number, y: o.y as number, w: o.w as number };
+}
 
 /** 카드에 붙은 것들을 저장할 형태로. 표에서는 마크업을 뗀다. */
 export function toStoredFigures(figures: CardFigure[]): StoredFigure[] {
@@ -64,6 +74,7 @@ export function toStoredFigures(figures: CardFigure[]): StoredFigure[] {
     ...(f.kind !== "table" && f.origin
       ? { origin: f.origin, ...(f.originAt ? { originAt: f.originAt } : {}) }
       : {}),
+    ...(f.kind !== "table" && f.overlay ? { overlay: f.overlay } : {}),
   }));
 }
 
@@ -118,6 +129,7 @@ export function readStoredFigures(boxRange: unknown): StoredFigure[] {
       // 원본도 카드에 그대로 붙을 수 있는 값이라 마크업과 같은 검사를 거친다.
       origin: isFigureMarkup(f.origin) ? (f.origin as string) : undefined,
       originAt: typeof f.originAt === "string" ? f.originAt : undefined,
+      overlay: kind === "table" ? undefined : readOverlay(f.overlay),
     });
   }
   return out;
@@ -160,6 +172,7 @@ export function restoreCardFigures(
       ai: s.ai === true,
       origin: s.origin,
       originAt: s.originAt,
+      overlay: s.overlay,
     }));
 
   return [...tables, ...figures];

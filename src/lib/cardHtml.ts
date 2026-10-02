@@ -46,7 +46,21 @@ export type CardFigure = {
    * (나란히 세울 상대가 없으므로 평소처럼 한 줄을 차지한다).
    */
   row?: boolean;
+  /**
+   * **다른 그림 위에 덧붙인다**(2026-10-02, 사용자 — "이미지를 추가해서 위에 덧붙일 수 있게").
+   * 있으면 이 그림은 자리(`position`)를 쓰지 않고 `on` 그림의 상자 안에 떠 있는다. 값은 전부 그 그림 상자 대비 %다
+   * (`x`·`y` 왼쪽 위 모서리, `w` 폭 — 높이는 그림 비율대로). `on` 그림이 없거나 그 그림도 덧붙인 것이면 평소처럼
+   * 자리에 놓는다(그림을 잃지 않게).
+   */
+  overlay?: FigureOverlay;
 };
+
+export type FigureOverlay = { on: string; x: number; y: number; w: number };
+
+/** 덧붙인 그림의 기본 자리 — 받침 그림의 오른쪽 위, 폭 30%. */
+export function defaultOverlay(on: string): FigureOverlay {
+  return { on, x: 65, y: 5, w: 30 };
+}
 
 /**
  * 그림·표를 놓을 수 있는 자리들. 위에서부터 순서대로다.
@@ -99,13 +113,46 @@ export function collectTables(
   return out;
 }
 
-function itemHtml(f: CardFigure, inRow: boolean): string {
+function overlayHtml(f: CardFigure): string {
+  const o = f.overlay!;
+  // 자리는 width/left/top 으로만 잡는다(transform 은 캡처에서 어긋날 수 있다 — diagramStyle 주석).
+  return `<div class="problem-figure problem-figure--overlay" data-fig-id="${f.id}" style="position:absolute;left:${o.x}%;top:${o.y}%;width:${o.w}%;margin:0">${f.markup}</div>`;
+}
+
+function itemHtml(f: CardFigure, inRow: boolean, overlays: CardFigure[] = []): string {
   const cls =
     f.kind === "table" ? "problem-figure problem-figure--table" : "problem-figure";
+  // 덧붙인 그림이 있으면 받침 그림이 기준 상자가 된다.
+  const rel = overlays.length ? ";position:relative" : "";
   return `<div class="${cls}" data-fig-id="${f.id}" style="${diagramStyleCss(
     f.layout,
     inRow,
-  )}">${f.markup}</div>`;
+  )}${rel}">${f.markup}${overlays.map(overlayHtml).join("")}</div>`;
+}
+
+const hasMarkup = (f: CardFigure) => typeof f.markup === "string" && f.markup.length > 0;
+
+/**
+ * 덧붙인 그림과 그 받침을 가른다. 받침이 없거나(지워졌다) 받침도 덧붙인 것이면 덧붙임을 풀어 평소처럼 놓는다 —
+ * 그림이 사라지는 것보다 낫다.
+ */
+export function splitOverlays(figures: CardFigure[]): {
+  placed: CardFigure[];
+  overlaysOf: Map<string, CardFigure[]>;
+} {
+  const hosts = new Set(figures.filter((f) => !f.overlay && hasMarkup(f)).map((f) => f.id));
+  const overlaysOf = new Map<string, CardFigure[]>();
+  const placed: CardFigure[] = [];
+  for (const f of figures) {
+    if (f.overlay && f.overlay.on !== f.id && hosts.has(f.overlay.on) && hasMarkup(f)) {
+      const list = overlaysOf.get(f.overlay.on) ?? [];
+      list.push(f);
+      overlaysOf.set(f.overlay.on, list);
+    } else {
+      placed.push(f.overlay ? { ...f, overlay: undefined } : f);
+    }
+  }
+  return { placed, overlaysOf };
 }
 
 /**
@@ -122,13 +169,11 @@ export function buildCardHtml(
 ): string {
   const anchorCount = buildAnchors(blocks).length;
   const clamp = (p: number) => Math.min(Math.max(p, 0), anchorCount - 1);
+  const { placed, overlaysOf } = splitOverlays(figures);
 
   const atSlot = (slot: number) => {
-    const here = figures.filter(
-      (f) =>
-        typeof f.markup === "string" &&
-        f.markup.length > 0 &&
-        clamp(f.position) === slot,
+    const here = placed.filter(
+      (f) => hasMarkup(f) && clamp(f.position) === slot,
     );
     if (here.length === 0) return "";
     // 나란히 놓기는 상대가 있어야 뜻이 있다. 혼자면 평소대로 한 줄을 쓴다.
@@ -143,7 +188,7 @@ export function buildCardHtml(
           )
           .map((x) => x.f)
       : here;
-    const html = ordered.map((f) => itemHtml(f, inRow)).join("");
+    const html = ordered.map((f) => itemHtml(f, inRow, overlaysOf.get(f.id))).join("");
     return inRow
       ? `<div class="problem-figure-row" style="${rowStyleCss(
           ordered.map((f) => f.layout),

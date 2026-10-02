@@ -420,6 +420,23 @@ body {
   cursor: grabbing;
 }
 
+/* "그림 크기·위치 조절"을 안 켰을 때(DraggableCard). 그림이 손가락을 받지 않아
+   휴대폰에서 카드를 스크롤하려다 그림을 끌어 버리는 일이 없다. */
+.figures-locked .problem-figure {
+  touch-action: auto;
+  cursor: default;
+}
+
+.figures-locked .problem-figure:active {
+  cursor: default;
+}
+
+/* 다른 그림 위에 덧붙인 그림. 자리는 style 의 left/top/width(%)가 정한다. */
+.problem-figure--overlay {
+  max-width: none;
+  z-index: 1;
+}
+
 .problem-figure > svg,
 .problem-figure > img {
   display: block;

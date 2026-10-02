@@ -41,6 +41,10 @@ type Props = {
   onRowChange?: (next: boolean) => void;
   /** 같은 자리에 놓인 다른 것의 개수. 0이면 나란히 세울 상대가 없다. */
   rowMates?: number;
+  /** 다른 그림 위에 덧붙인 그림이면 그 받침 이름("그림 1"). 자리·여백·나란히는 받침을 따른다. */
+  overlayOn?: string;
+  /** 덧붙임을 풀어 따로 놓는다. */
+  onDetach?: () => void;
 };
 
 function Slider({
@@ -96,9 +100,12 @@ export default function DiagramAdjuster({
   row = false,
   onRowChange,
   rowMates = 0,
+  overlayOn,
+  onDetach,
 }: Props) {
   // 위치 조절은 놓을 자리가 둘 이상일 때만 의미가 있다.
   const canMove =
+    !overlayOn &&
     position !== undefined &&
     slotLabels !== undefined &&
     onPositionChange !== undefined &&
@@ -168,7 +175,17 @@ export default function DiagramAdjuster({
       {/* 같은 자리에 놓인 것끼리 가로로 나란히. 표 옆에 지도·그래프를 세우는
           경우가 흔해서 필요하다. 상대가 없으면 켜도 달라지지 않으므로 그
           사실을 그대로 알려준다. */}
-      {onRowChange && (
+      {overlayOn && (
+        <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+          <span className="min-w-0 flex-1">{overlayOn} 위에 덧붙였어요.</span>
+          {onDetach && (
+            <Button type="button" onClick={onDetach} variant="outline" className="px-1.5 py-0.5 text-[10px]">
+              떼어 따로 놓기
+            </Button>
+          )}
+        </div>
+      )}
+      {onRowChange && !overlayOn && (
         <label className="flex items-start gap-1.5 text-[11px] text-slate-500">
           <input
             type="checkbox"
@@ -187,26 +204,13 @@ export default function DiagramAdjuster({
           </span>
         </label>
       )}
-      <Slider
-        label="크기"
-        value={layout.scale}
-        min={15}
-        max={100}
-        suffix="%"
-        onChange={(scale) => onChange({ ...layout, scale })}
-      />
-      <Slider
-        // 나란히 놓였을 때는 좌우로 밀 자리가 없다. 대신 이 값이 가로 순서를
-        // 정한다 — 미리보기에서 옆으로 끌면 이 값이 바뀌어 자리가 바뀐다.
-        label={rowActive ? "가로 순서" : "좌우"}
-        value={layout.offsetX}
-        min={-300}
-        max={300}
-        step={4}
-        suffix={rowActive ? "" : "px"}
-        onChange={(offsetX) => onChange({ ...layout, offsetX })}
-      />
-      <Slider
+      {/* 크기와 좌우 자리는 슬라이더가 아니라 미리보기에서 손잡이로 조절한다(사용자 — "크기조절을 사진 자를 때처럼").
+          미리보기 위 "그림 크기·위치 조절"을 누르고 그림을 고르면 네 귀퉁이에 손잡이가 생긴다. */}
+      {!overlayOn && <p className="text-[10px] text-slate-400">
+        크기 {Math.round(layout.scale)}%
+        {rowActive ? " · 나란히 놓임(옆으로 끌면 순서가 바뀌어요)" : ""} — 미리보기의 “그림 크기·위치 조절”로 바꿔요.
+      </p>}
+      {!overlayOn && <Slider
         label="위 여백"
         value={layout.offsetY}
         min={0}
@@ -214,7 +218,7 @@ export default function DiagramAdjuster({
         step={4}
         suffix="px"
         onChange={(offsetY) => onChange({ ...layout, offsetY })}
-      />
+      />}
     </div>
   );
 }

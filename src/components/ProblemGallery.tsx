@@ -68,6 +68,7 @@ import { keepOrigin } from "@/lib/figureOrigin";
 import { thumbPathFor } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
 import { persistFigureBlobs } from "@/lib/figureBlob";
+import { defaultOverlay } from "@/lib/cardHtml";
 import {
   ANSWER_TYPE_LABEL,
   formatAnswer,
@@ -348,6 +349,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   const [cropTarget, setCropTarget] = useState<
     { mode: "add" } | { mode: "recrop"; id: string; src: string } | null
   >(null);
+  /** 방금 오려낸 새 그림 — 어떻게 붙일지 고르는 중이다(`placeNewFigure`). */
+  const [pendingAdd, setPendingAdd] = useState<{ markup: string; target: string } | null>(null);
 
   // AI 그림 작업은 화면 바깥(FigureJobsProvider)에서 돈다 — 인식 화면과 같은
   // 큐를 쓴다. 수정 창을 닫아도 작업은 계속 돌고, 끝나면 저장본이 갱신된다.
@@ -685,20 +688,42 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     if (target?.mode === "recrop") {
       // 다시 오려낸 것은 **원본 픽셀**이므로 AI 표시를 떼어 다시 그릴 수 있게 한다.
       updateFigure(target.id, { markup, ai: false });
+    } else if (cardFigures.some((f) => !f.overlay)) {
+      // 붙일 그림이 이미 있으면 **어떻게 붙일지** 먼저 묻는다(따로 · 나란히 · 위에 덧붙이기).
+      const first = cardFigures.find((f) => !f.overlay && f.kind !== "table") ?? cardFigures.find((f) => !f.overlay);
+      setPendingAdd({ markup, target: first?.id ?? "" });
     } else {
-      setEditFigures((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          markup,
-          layout: DEFAULT_DIAGRAM_LAYOUT,
-          position: BOTTOM,
-          kind: "figure",
-          row: false,
-        },
-      ]);
+      placeNewFigure(markup, "below", "");
     }
     setCropTarget(null);
+  }
+
+  /**
+   * 새로 오려낸 그림을 붙인다(2026-10-02, 사용자 — "이미지를 추가해서 위에 덧붙일 수 있게, 나란히 + 덧붙이기").
+   *   below  : 맨 아래에 따로
+   *   row    : 고른 그림·표와 같은 자리에 가로로 나란히(둘 다 나란히를 켠다)
+   *   overlay: 고른 그림 위에 떠 있게(오른쪽 위, 폭 30% — 미리보기의 손잡이로 옮기고 키운다)
+   */
+  function placeNewFigure(markup: string, how: "below" | "row" | "overlay", targetId: string) {
+    const target = cardFigures.find((f) => f.id === targetId && !f.overlay);
+    const id = crypto.randomUUID();
+    const base: StoredFigure = {
+      id,
+      markup,
+      layout: DEFAULT_DIAGRAM_LAYOUT,
+      position: BOTTOM,
+      kind: "figure",
+      row: false,
+    };
+    if (how === "row" && target) {
+      updateFigure(target.id, { row: true });
+      setEditFigures((prev) => [...prev, { ...base, layout: { ...DEFAULT_DIAGRAM_LAYOUT, scale: 40, offsetX: 1 }, position: target.position, row: true }]);
+    } else if (how === "overlay" && target) {
+      setEditFigures((prev) => [...prev, { ...base, position: target.position, overlay: defaultOverlay(target.id) }]);
+    } else {
+      setEditFigures((prev) => [...prev, base]);
+    }
+    setPendingAdd(null);
   }
 
   // 뒤에서 돌던 AI 작업이 끝나면 그 자리를 완성된 그림으로 갈아끼운다.
@@ -742,9 +767,19 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   ]);
 
   /** 같은 자리에 놓인 다른 것의 개수("나란히 놓기"가 뜻이 있는지). */
+  /** 조절 목록에 쓰는 이름("그림 2" · "표 1"). */
+  function figureName(id: string): string {
+    const f = cardFigures.find((x) => x.id === id);
+    if (!f) return "그림";
+    return f.kind === "table"
+      ? `표 ${cardFigures.filter((x) => x.kind === "table").indexOf(f) + 1}`
+      : `그림 ${cardFigures.filter((x) => x.kind !== "table").indexOf(f) + 1}`;
+  }
+
   function slotMateCount(id: string): number {
     const here = cardFigures.find((f) => f.id === id)?.position;
-    return cardFigures.filter((f) => f.id !== id && f.position === here).length;
+    // 덧붙인 그림은 자리를 쓰지 않으므로(받침 위에 떠 있다) 나란히 세울 상대가 아니다.
+    return cardFigures.filter((f) => f.id !== id && !f.overlay && f.position === here).length;
   }
 
   /**
@@ -1395,6 +1430,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                     onPositionChange={(id, position) =>
                       updateFigure(id, { position })
                     }
+                    onOverlayChange={(id, overlay) => updateFigure(id, { overlay })}
                   />
                 </div>
 
@@ -1415,6 +1451,54 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                       그림 추가
                     </Button>
                   </div>
+                  {pendingAdd && (
+                    <div className="flex flex-col gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-2 text-[11px] text-slate-700">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={rasterFromSvg(pendingAdd.markup) ?? undefined}
+                          alt="새 그림"
+                          className="h-12 w-auto max-w-[6rem] rounded border border-slate-200 bg-white object-contain"
+                        />
+                        <span className="min-w-0 flex-1 font-medium">새 그림을 어떻게 붙일까요?</span>
+                      </div>
+                      {cardFigures.filter((f) => !f.overlay).length > 1 && (
+                        <label className="flex items-center gap-1.5">
+                          <span className="shrink-0 text-slate-500">기준</span>
+                          <select
+                            value={pendingAdd.target}
+                            onChange={(e) => setPendingAdd({ ...pendingAdd, target: e.target.value })}
+                            className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-1.5 py-0.5"
+                          >
+                            {cardFigures
+                              .filter((f) => !f.overlay)
+                              .map((f) => (
+                                <option key={f.id} value={f.id}>
+                                  {figureName(f.id)}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                      )}
+                      <div className="flex flex-wrap gap-1.5">
+                        <Button type="button" size="xs" variant="dark" onClick={() => placeNewFigure(pendingAdd.markup, "overlay", pendingAdd.target)}>
+                          위에 덧붙이기
+                        </Button>
+                        <Button type="button" size="xs" variant="outline" onClick={() => placeNewFigure(pendingAdd.markup, "row", pendingAdd.target)}>
+                          옆에 나란히
+                        </Button>
+                        <Button type="button" size="xs" variant="outline" onClick={() => placeNewFigure(pendingAdd.markup, "below", "")}>
+                          맨 아래에 따로
+                        </Button>
+                        <Button type="button" size="xs" variant="ghost" onClick={() => setPendingAdd(null)}>
+                          취소
+                        </Button>
+                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        붙인 뒤 미리보기 위 “그림 크기·위치 조절”을 누르면 끌어 옮기고 모서리로 크기를 바꿀 수 있어요.
+                      </p>
+                    </div>
+                  )}
                   {cardFigures.map((f) => {
                     const job = jobs.find((j) => j.id === f.id);
                     const busy =
@@ -1424,10 +1508,22 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                     return (
                       <div key={f.id} className="flex flex-col gap-1">
                         <DiagramAdjuster
-                          label={
-                            f.kind === "table"
-                              ? `표 ${cardFigures.filter((x) => x.kind === "table").indexOf(f) + 1}`
-                              : `그림 ${cardFigures.filter((x) => x.kind !== "table").indexOf(f) + 1}`
+                          label={figureName(f.id)}
+                          overlayOn={f.overlay ? figureName(f.overlay.on) : undefined}
+                          onDetach={
+                            f.overlay
+                              ? () =>
+                                  updateFigure(f.id, {
+                                    overlay: undefined,
+                                    position: cardFigures.find((x) => x.id === f.overlay?.on)?.position ?? f.position,
+                                  })
+                              : undefined
+                          }
+                          onRemove={
+                            // 문제 그 자체인 그림(하나뿐인 그림)은 지우면 빈 카드가 된다 — 더 붙인 것만 지운다.
+                            f.kind !== "table" && cardFigures.filter((x) => x.kind !== "table").length > 1
+                              ? () => setEditFigures((prev) => prev.filter((x) => x.id !== f.id))
+                              : undefined
                           }
                           layout={f.layout}
                           defaultLayout={
