@@ -32,7 +32,7 @@ import {
   type PassageState,
 } from "@/lib/passageRun";
 import {
-  PROBLEM_LADDER,
+  offerTarget,
   problemLoopEnabled,
   problemLoopPaths,
   runProblemStage,
@@ -474,7 +474,7 @@ async function revertMax(admin: Admin, job: ClaimedJob, why: string, tag: string
       status: "done",
       stage: "max-offer",
       state: state ? { ...state, maxPhase: false, patchPhase: false, patch: undefined } : null,
-      note: `${state?.patchPhase ? "수정" : `${PROBLEM_LADDER[PROBLEM_LADDER.length - 1]} 그리기`}에 실패했어요${refund > 0 ? ` — ${refund}토큰은 돌려드렸어요` : ""} · 다시 시도할 수 있어요 (${why.slice(0, 120)})`,
+      note: `${state?.patchPhase ? "수정" : `${offerTarget(state).quality} 그리기`}에 실패했어요${refund > 0 ? ` — ${refund}토큰은 돌려드렸어요` : ""} · 다시 시도할 수 있어요 (${why.slice(0, 120)})`,
       charged: false,
       charged_tokens: 0,
       finished_at: now,

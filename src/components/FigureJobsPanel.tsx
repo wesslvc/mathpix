@@ -209,6 +209,29 @@ export default function FigureJobsPanel() {
     for (const j of list) await skipMax(j.id);
     setMaxBusy(false);
   }
+  /**
+   * **패스** — 이 문제들은 더 고쳐 그리지 않고 지금 저장된 그림 그대로 쓴다(사용자 — "그냥 쓸 것도 일부만 선택해서
+   * 배제시킬 수 있게"). 확인 창에서 빼고, 남은 게 없으면 창을 닫는다.
+   */
+  async function passOffers(list: FigureJob[]) {
+    if (list.length === 0) return;
+    setMaxError(null);
+    await closeOffers(list);
+    const gone = new Set(list.map((j) => j.id));
+    setPicked((prev) => new Set([...prev].filter((id) => !gone.has(id))));
+    setConfirming((prev) => {
+      const rest = (prev ?? []).filter((j) => !gone.has(j.id));
+      return rest.length ? rest : null;
+    });
+  }
+  /** 확인하면 그릴 다음 단계와 걷을 토큰. 차이 목록을 아직 못 받았으면 맨 위 단계(유료)로 친다. */
+  function targetOf(j: FigureJob): { quality: string; tokens: number } {
+    const d = details?.[j.id];
+    return { quality: d?.target ?? topQuality, tokens: typeof d?.tokens === "number" ? d.tokens : maxTokens };
+  }
+  function tokenText(n: number): string {
+    return n > 0 ? `${n.toLocaleString()}토큰` : "추가 토큰 없음";
+  }
 
   const failed = jobs.filter((j) => j.status === "error").length;
   const activeJobs = jobs.filter((j) => j.status === "pending" || j.status === "running");
@@ -251,10 +274,8 @@ export default function FigureJobsPanel() {
         {idle && offers.length > 0 && (
           <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-900">
             <p>
-              <b>글자·도형 차이가 남은 문제 {offers.length}개</b>가 있어요. 지금 저장된 그림은 그대로 두고, {topQuality} 로 한 번 더
-              고쳐 그려 볼까요? 문제당 <b>{maxTokens}토큰</b>
-              {offers.length > 1 && <> (합계 {(offers.length * maxTokens).toLocaleString()}토큰)</>}이고, 그리기에 실패하면
-              돌려드려요.
+              <b>글자·도형 차이가 남은 문제 {offers.length}개</b>가 있어요. 가장 나은 그림은 이미 저장돼 있어요. 화질을 올려 한 번 더
+              고쳐 그리는 건 <b>확인한 것만</b> 돌아요 — 차이를 보고 문제마다 진행하거나 그대로 쓰기(패스)를 고르세요.
             </p>
             {maxError && <p className="mt-1 text-red-700">{maxError}</p>}
             <div className="mt-1.5 flex gap-1.5">
@@ -264,7 +285,7 @@ export default function FigureJobsPanel() {
                 onClick={() => void openConfirm(offers)}
                 className="rounded bg-amber-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-amber-700 disabled:opacity-50"
               >
-                {maxBusy ? "처리 중…" : `차이 확인하고 ${topQuality} 로 고쳐 그리기`}
+                {maxBusy ? "처리 중…" : "차이 보고 고르기"}
               </button>
               <button
                 type="button"
@@ -272,7 +293,7 @@ export default function FigureJobsPanel() {
                 onClick={() => void closeOffers(offers)}
                 className="rounded border border-amber-300 bg-white px-2 py-1 text-[11px] text-amber-800 hover:bg-amber-100 disabled:opacity-50"
               >
-                이대로 두기
+                모두 그대로 쓰기 (패스)
               </button>
             </div>
           </div>
@@ -297,7 +318,7 @@ export default function FigureJobsPanel() {
               : failed > 0
                 ? `${failed}개 실패`
                 : offers.length > 0
-                  ? `AI 작업 완료 · ${topQuality} 확인 대기 ${offers.length}개`
+                  ? `AI 작업 완료 · 확인 대기 ${offers.length}개`
                   : "AI 작업 완료"}
           </span>
           {/* 실제로 나간 유료 호출 수. 문제 수보다 많아지면(재시도가 쌓이면)
@@ -384,7 +405,18 @@ export default function FigureJobsPanel() {
                       onClick={() => void openConfirm([j])}
                       className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 hover:bg-amber-100 disabled:opacity-50"
                     >
-                      {topQuality} {maxTokens}
+                      확인
+                    </button>
+                  )}
+                  {j.status === "done" && j.stage === "max-offer" && (
+                    <button
+                      type="button"
+                      disabled={maxBusy}
+                      title="더 고쳐 그리지 않고 지금 그림 그대로 써요"
+                      onClick={() => void closeOffers([j])}
+                      className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      패스
                     </button>
                   )}
                   {/* 짧은 작업은 결과를 기다리던 화면이 이미 실패를 받았다 — 그 화면에서 다시 한다. */}
@@ -452,13 +484,13 @@ export default function FigureJobsPanel() {
           >
             <div className="border-b border-slate-200 px-4 py-3">
               <h3 className="text-sm font-semibold text-slate-900">
-                이게 다릅니다 — {confirming.length === 1 ? "어떻게 할까요?" : `${topQuality} 로 고쳐 그릴까요?`}
+                이게 다릅니다 — 어떻게 할까요?
               </h3>
               <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
                 지금 저장된 그림은 원본과 아래가 달라요.
                 {confirming.length === 1
-                  ? " 저장된 그림에서 일부만 고치거나, 더 높은 화질로 처음부터 다시 그릴 수 있어요."
-                  : ` ${topQuality} 로 한 번 더 그리면 이 부분을 고치도록 알려 주고, 더 나은 쪽을 저장해요.`}
+                  ? " 저장된 그림에서 일부만 고치거나, 화질을 올려 처음부터 다시 그리거나, 그대로 쓸(패스) 수 있어요."
+                  : " 고른 것은 화질을 올려 이 부분을 고치도록 다시 그리고(더 나은 쪽을 저장), 패스한 것은 지금 그림 그대로 써요."}
               </p>
             </div>
             <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
@@ -490,7 +522,23 @@ export default function FigureJobsPanel() {
                         <p className="min-w-0 flex-1 truncate text-xs font-medium text-slate-800">
                           {j.label}
                           {d && <span className="ml-1 font-normal text-slate-400">· 차이 {d.diffs.length}곳</span>}
+                          {d && (
+                            <span className="ml-1 font-normal text-amber-700">
+                              · 다음 {targetOf(j).quality} ({tokenText(targetOf(j).tokens)})
+                            </span>
+                          )}
                         </p>
+                        {confirming.length > 1 && (
+                          <button
+                            type="button"
+                            disabled={maxBusy}
+                            onClick={() => void passOffers([j])}
+                            title="더 고쳐 그리지 않고 지금 그림 그대로 써요"
+                            className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                          >
+                            패스
+                          </button>
+                        )}
                         {confirming.length > 1 && (
                           <button
                             type="button"
@@ -571,7 +619,7 @@ export default function FigureJobsPanel() {
                   {(
                     [
                       ["patch", "수정 (일부만)", `${patchTokens.toLocaleString()}토큰 · 화질 지정 없음`],
-                      ["redraw", `${topQuality} 로 다시 그리기`, `${maxTokens.toLocaleString()}토큰 · 처음부터`],
+                      ["redraw", `${targetOf(confirming[0]).quality} 로 다시 그리기`, `${tokenText(targetOf(confirming[0]).tokens)} · 처음부터`],
                     ] as const
                   ).map(([k, title, sub]) => (
                     <button
@@ -663,7 +711,7 @@ export default function FigureJobsPanel() {
                 >
                   전체 해제
                 </button>
-                <span className="text-slate-400">고른 것만 진행하고, 나머지는 확인 대기로 남아요.</span>
+                <span className="text-slate-400">고른 것을 진행하거나 패스해요. 안 고른 것은 확인 대기로 남아요.</span>
               </div>
             )}
             <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-4 py-3">
@@ -671,8 +719,8 @@ export default function FigureJobsPanel() {
                 {confirming.length === 1 && choice === "patch"
                   ? `${patchTokens.toLocaleString()}토큰${patchMode === "chat" ? " · 대화는 쓴 만큼 따로" : ""}`
                   : confirming.length > 1
-                    ? `${picked.size}개 선택 · ${maxTokens.toLocaleString()}토큰 × ${picked.size} = ${(maxTokens * picked.size).toLocaleString()}토큰`
-                    : `${maxTokens.toLocaleString()}토큰`}
+                    ? `${picked.size}개 선택 · 진행하면 ${tokenText(confirming.filter((j) => picked.has(j.id)).reduce((a, j) => a + targetOf(j).tokens, 0))}`
+                    : tokenText(targetOf(confirming[0]).tokens)}
               </span>
               <div className="flex gap-1.5">
                 <button
@@ -682,6 +730,17 @@ export default function FigureJobsPanel() {
                   className="rounded border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
                 >
                   취소
+                </button>
+                <button
+                  type="button"
+                  disabled={maxBusy || (confirming.length > 1 && picked.size === 0)}
+                  onClick={() =>
+                    void passOffers(confirming.length === 1 ? confirming : confirming.filter((j) => picked.has(j.id)))
+                  }
+                  title="더 고쳐 그리지 않고 지금 저장된 그림 그대로 써요"
+                  className="rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                >
+                  {confirming.length === 1 ? "패스 (그대로 쓰기)" : "선택한 것 패스"}
                 </button>
                 <button
                   type="button"
@@ -697,7 +756,7 @@ export default function FigureJobsPanel() {
                   }
                   className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
                 >
-                  {maxBusy ? "시작하는 중…" : "진행"}
+                  {maxBusy ? "처리 중…" : confirming.length > 1 ? "선택한 것 진행" : "진행"}
                 </button>
               </div>
             </div>

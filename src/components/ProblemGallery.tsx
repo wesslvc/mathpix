@@ -1535,8 +1535,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 <p className="font-medium">sol 을 쓸까요?</p>
                                 <p className="mt-0.5 leading-snug text-slate-500">
                                   <b>쓰면</b> 그린 뒤 sol 이 원본과 글자·도형(점 위치 포함)·손글씨를 대조해서 틀린 곳을 알려 주고, 차이가 있으면
-                                  다시 그려요(더 정확하지만 몇 분 걸려요). <b>안 쓰면</b> 한 번만 그리고 바로 끝나요(빠르지만 검수 없음).
-                                  {isWholeProblemFigure(f.id) ? "" : " (도형은 두 번까지 그려요)"}
+                                  화질을 올려 다시 그릴지 <b>AI 작업 패널에서 확인을 받아요</b>(확인 전에는 화질을 올리지 않아요). <b>안 쓰면</b> 한 번만 그리고 바로 끝나요(빠르지만 검수 없음).
                                 </p>
                                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                                   <Button

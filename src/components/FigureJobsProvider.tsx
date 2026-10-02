@@ -176,6 +176,9 @@ export type ProblemSnapshot = {
 /** 지금 저장된 그림에 남은 차이(글자·깨진 글자·도형·손글씨 잔재). */
 export type OfferDiffs = {
   quality: string | null;
+  /** 확인하면 그릴 다음 단계의 quality(medium·high …)와 그때 걷을 토큰(0 이면 보증금에 들어 있다). */
+  target?: string;
+  tokens?: number;
   /** 원본(넣을 때 올린 사진)과 지금 저장된 생성 그림의 주소 — 확인 창이 나란히 보여 준다. */
   originalUrl?: string;
   generatedUrl?: string | null;
@@ -943,6 +946,8 @@ export default function FigureJobsProvider({
         offers?: {
           id: string;
           quality: string | null;
+          target?: string;
+          tokens?: number;
           diffs: OfferDiffs["diffs"];
           originalUrl?: string;
           generatedUrl?: string | null;
@@ -953,6 +958,8 @@ export default function FigureJobsProvider({
         const local = jobsRef.current.find((j) => j.serverId === o.id);
         if (local) out[local.id] = {
           quality: o.quality,
+          target: o.target,
+          tokens: o.tokens,
           diffs: o.diffs,
           originalUrl: o.originalUrl,
           generatedUrl: o.generatedUrl,

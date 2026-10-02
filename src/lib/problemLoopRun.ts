@@ -5,11 +5,11 @@
 //
 //   gen:0    low 로 그린다
 //   verify:0 sol 이 원본과 대조한다(글자 · 깨진 글자 · 도형 · 남은 손글씨). 차이가 0곳이면 끝.
-//   gen:1    차이 목록을 지시로 붙여 medium 으로 다시 그린다(입력은 늘 **원본**)
-//   verify:1 …
-//   (medium 검수에서도 차이가 남으면 여기서 **멈춘다** — 가장 나은 그림을 먼저 저장하고 작업을
-//    `max-offer` 로 남긴다. max 는 사용자가 패널에서 확인하면 200토큰을 걷고 이어서 돈다.)
-//   gen:2    맨 위 quality(기본 high, `TOP_QUALITY`)로 마지막으로 그린다(확인 뒤에만) → verify:2 → 끝
+//   (차이가 남으면 여기서 **멈춘다** — 가장 나은 그림을 먼저 저장하고 작업을 `max-offer` 로 남긴다.
+//    **화질을 올리는 다시 그리기는 언제나 사용자 확인 뒤에만 돈다**(2026-10-02, 사용자 — "무조건
+//    이미지생성 모델 수준 높일 때는 승인받아"). 다음 단계는 `state.offerRound`/`offerQuality` 에 적는다.)
+//   gen:1    (확인 뒤) 차이 목록을 지시로 붙여 medium 으로 다시 그린다(입력은 늘 **원본**) → verify:1
+//   gen:2    (확인 뒤, 200토큰) 맨 위 quality(기본 high, `TOP_QUALITY`)로 그린다 → verify:2 → 끝
 //
 // 끝나면 **남은 차이가 가장 적은 그림**을 저장한다(같으면 앞의 것 — quality 가 낮아 더 싸다).
 //
@@ -65,7 +65,7 @@ export const PROBLEM_LADDER = ["low", "medium", TOP_QUALITY] as const;
 
 /**
  * 수정 창에서 "sol 쓰기"를 골라 다시 그릴 때의 사다리 — **low 없이 medium → high**(사용자 — "수정 프로세스 중에서는
- * med → high 로, low 부터 해서 올리지 말고"). 확인 대기(max-offer) 없이 high 까지 자동으로 간다(이미 사용자가 고른 길이다).
+ * med → high 로, low 부터 해서 올리지 말고"). high 로 올리는 것도 확인 뒤에만 돈다(토큰은 따로 안 걷는다).
  */
 export const EDIT_LADDER = ["medium", TOP_QUALITY] as const;
 
@@ -123,8 +123,16 @@ export type ProblemLoopState = {
    * 결과가 (차이가 더 많더라도) 사용자가 고른 그림이므로 이 값이 그 라운드를 가리킨다 — 다음 수정은 이 그림에서 이어 간다.
    */
   current?: number;
-  /** 사용자가 max 다시 그리기를 확인해 돌고 있다(`max-offer` 에서 넘어온 것). 실패하면 환불하고 offer 로 돌아간다. */
+  /** 사용자가 화질 올리기를 확인해 돌고 있다(`max-offer` 에서 넘어온 것). 실패하면 환불하고 offer 로 돌아간다. */
   maxPhase?: boolean;
+  /**
+   * 확인을 기다리는(또는 확인받아 도는) **다음 그리기 단계** — 사다리 번호와 그 quality. 확인 뒤 `gen:<offerRound>` 로 돈다.
+   * `offerPaid` 면 확인할 때 `MAX_REDRAW_TOKENS` 를 걷는다(새로 만들기의 맨 위 단계만 — 나머지 단계는 넣을 때 건 보증금에
+   * 들어 있다). 이 값이 없는 옛 작업은 새로 만들기의 맨 위 단계(유료)로 본다(`offerTarget`).
+   */
+  offerRound?: number;
+  offerQuality?: string;
+  offerPaid?: boolean;
   /** 라운드마다 검수가 찾은 차이 목록. 다음 그리기의 지시를 만드는 재료(그림은 폐기하고 실수만 넘긴다). */
   history?: RoundDiffs[];
   /** 지금까지 그림 호출의 사용량 합. */
@@ -308,8 +316,20 @@ async function finalize(
  */
 export function maxRoundDrawn(state: unknown): boolean {
   const rounds = (state as ProblemLoopState | null)?.rounds;
-  const r = Array.isArray(rounds) ? rounds[PROBLEM_LADDER.length - 1] : undefined;
+  const r = Array.isArray(rounds) ? rounds[offerTarget(state).round] : undefined;
   return !!r && !String(r.quality).startsWith("patch");
+}
+
+/**
+ * 확인 대기 중인 작업이 확인받으면 돌 **다음 단계**. `paid` 면 확인할 때 토큰을 걷는다.
+ * 이 기능 전에 멈춘 작업(값이 없다)은 새로 만들기의 맨 위 단계로 본다 — 그때는 그것만 확인을 받았다.
+ */
+export function offerTarget(state: unknown): { round: number; quality: string; paid: boolean } {
+  const st = state as ProblemLoopState | null;
+  if (st && typeof st.offerRound === "number" && typeof st.offerQuality === "string") {
+    return { round: st.offerRound, quality: st.offerQuality, paid: st.offerPaid === true };
+  }
+  return { round: PROBLEM_LADDER.length - 1, quality: TOP_QUALITY, paid: true };
 }
 
 /** 그림 사용량에 sol 검수 원가를 더해 화면에 보이는 합계로 만든다. */
@@ -747,42 +767,33 @@ async function runVerify(
   const checked: ProblemLoopState = { ...withCost, rounds };
   console.info(`[${ctx.tag}] 검수 ${round.quality} 차이 ${diffs.length}곳`);
 
-  // 차이가 없거나 마지막 라운드면 끝. 그림 하나(figure)는 low → medium 까지만 돌고 맨 위 단계·확인 대기는 없다.
+  // 차이가 없거나 마지막 라운드면 끝. 그림 하나(figure, 수정 창이 아닌 것)는 low → medium 까지만 돈다.
   const ladder = ladderOf(job);
-  const lastAuto = job.edit ? ladder.length - 1 : job.mode === "figure" ? ladder.length - 2 : ladder.length - 1;
-  if (diffs.length === 0 || i >= lastAuto) {
+  const lastIdx = job.mode === "figure" && !job.edit ? ladder.length - 2 : ladder.length - 1;
+  if (diffs.length === 0 || i >= lastIdx) {
     return finalize(admin, checked, bestRound(rounds), ctx, "");
   }
 
   // 다음 라운드는 **원본만 보고** 새로 그린다 — 앞 라운드 그림은 입력으로 안 넣는다(고친 그림을 또
-  // 베끼면 흐려진다). 대신 low·medium 이 틀린 곳을 전부 모아 주의사항으로 넘긴다.
+  // 베끼면 흐려진다). 대신 앞선 라운드가 틀린 곳을 전부 모아 주의사항으로 넘긴다.
   const history: RoundDiffs[] = [
     ...(state.history ?? []).filter((h) => h.quality !== round.quality),
     { quality: round.quality, diffs: diffs.slice(0, 20) },
   ];
   const withHistory: ProblemLoopState = { ...checked, history, instruction: accumulatedCorrection(history) };
 
-  // **max 는 바로 돌리지 않는다**(사용자 — "딴 거 먼저 한 다음에 마지막에 최종 컨펌받고 돌려").
-  // medium 까지 해도 차이가 남으면 지금까지 나온 것 중 가장 나은 그림을 **먼저 저장**하고, 입력·중간
-  // 그림·지시를 작업에 남겨 둔 채 멈춘다. 사용자가 패널에서 확인하면 그때 200토큰을 걷고 이어 돌린다.
-  if (!job.edit && i === ladder.length - 2 && !state.maxPhase) {
-    const saved = await finalize(admin, withHistory, bestRound(rounds), ctx, "");
-    if (saved.kind === "done") {
-      return {
-        ...saved,
-        note: `${saved.note} · ${TOP_QUALITY} 로 고쳐 그리려면 확인이 필요해요`,
-        cleanup: [],
-        offer: withHistory,
-      };
-    }
-    return saved;
-  }
-
+  // **화질을 올리는 다시 그리기는 바로 돌리지 않는다**(사용자 — "무조건 이미지생성 모델 수준 높일 때는 승인받아").
+  // 지금까지 나온 것 중 가장 나은 그림을 **먼저 저장**하고, 입력·중간 그림·지시를 작업에 남겨 둔 채 멈춘다.
+  // 사용자가 패널에서 확인하면 그때 다음 단계를 돈다(새로 만들기의 맨 위 단계만 토큰을 더 걷는다).
+  // `finalize` 는 지금 상태(확인받아 돈 단계 번호가 그대로인)로 불러야 "확인받은 그림이 나왔는가"를 바로 잰다.
+  const saved = await finalize(admin, withHistory, bestRound(rounds), ctx, "");
+  if (saved.kind !== "done") return saved;
   const nextQ = ladder[i + 1];
+  const paid = !job.edit && job.mode !== "figure" && i + 1 === PROBLEM_LADDER.length - 1;
   return {
-    kind: "next",
-    stage: `gen:${i + 1}`,
-    state: withHistory,
-    note: `${round.quality}: 차이 ${diffs.length}곳 → ${nextQ} 로 고쳐 그립니다`,
+    ...saved,
+    note: `${saved.note} · ${nextQ} 로 고쳐 그리려면 확인이 필요해요`,
+    cleanup: [],
+    offer: { ...withHistory, maxPhase: false, offerRound: i + 1, offerQuality: nextQ, offerPaid: paid },
   };
 }

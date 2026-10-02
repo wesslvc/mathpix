@@ -6,8 +6,8 @@ import { removeStored, splitDataUrl, storeBytes } from "@/lib/figureRun";
 import { JOB_COLUMNS, UNLIMITED_CONCURRENCY, kickWorker, type FigureJobRow } from "@/lib/figureJobsServer";
 import { passageDepositFrom, passageInputPaths, type PassagePayload } from "@/lib/passageRun";
 import {
-  PROBLEM_LADDER,
   TOP_QUALITY,
+  offerTarget,
   problemLoopPaths,
   problemLoopStarted,
   maxRoundDrawn,
@@ -82,12 +82,19 @@ export async function GET(req: NextRequest) {
       .eq("stage", "max-offer")
       .limit(100);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // 확인하면 걷을 토큰 — 새로 만들기의 맨 위 단계만 걷고, 무제한·BYOK 는 안 걷는다(PATCH max 와 같은 규칙).
+    const offerBilling = await getBillingContext(supabase, user.id);
+    const freeAccount = offerBilling.unlimited || offerBilling.byok;
     return NextResponse.json({
       offers: (data ?? []).map((r) => {
         const rem = remainingDiffs(r.state);
+        const target = offerTarget(r.state);
         return {
           id: r.id as string,
           label: r.label as string,
+          // 확인하면 그릴 다음 단계의 quality 와 걷을 토큰.
+          target: target.quality,
+          tokens: target.paid && !freeAccount ? MAX_REDRAW_TOKENS : 0,
           quality: rem ? qualityLabel(rem.quality) : null,
           diffs: (rem?.diffs ?? []).slice(0, 30),
           // 양쪽을 나란히 보여 주려고 — 원본(넣을 때 올린 입력)과 지금 저장된 생성 그림.
@@ -350,8 +357,9 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ job: data, claimed: claim ? !!data : undefined });
   }
 
-  // **max 로 고쳐 그리기 확인.** medium 까지 해도 차이가 남은 문제는 가장 나은 그림이 이미 저장돼 있고
-  // 작업이 `max-offer` 로 멈춰 있다. 여기서 확인하면 토큰을 걷고 max 라운드를 이어서 돌린다.
+  // **화질을 올려 고쳐 그리기 확인.** sol 검수에서 차이가 남은 문제는 가장 나은 그림이 이미 저장돼 있고 작업이
+  // `max-offer` 로 멈춰 있다(화질을 올리는 다시 그리기는 늘 확인 뒤에만 돈다). 여기서 확인하면 다음 단계를 이어서
+  // 돌린다 — 새로 만들기의 맨 위 단계면 토큰을 걷는다.
   if (body.action === "max") {
     const { data: row } = await admin
       .from("figure_jobs")
@@ -361,8 +369,10 @@ export async function PATCH(req: NextRequest) {
       .maybeSingle();
     if (!row) return NextResponse.json({ error: "작업을 찾지 못했어요." }, { status: 404 });
     if (row.status !== "done" || row.stage !== "max-offer" || !row.state) {
-      return NextResponse.json({ error: `${TOP_QUALITY} 로 고쳐 그릴 수 있는 작업이 아니에요.` }, { status: 409 });
+      return NextResponse.json({ error: "고쳐 그릴 수 있는 작업이 아니에요." }, { status: 409 });
     }
+    // 확인받아 돌릴 다음 단계. 새로 만들기의 맨 위 단계만 토큰을 걷는다(나머지는 넣을 때 건 보증금에 들어 있다).
+    const target = offerTarget(row.state);
     const billing = await getBillingContext(supabase, user.id);
     if (billing.byok && !billing.byokApiKey) {
       return NextResponse.json(
@@ -370,7 +380,7 @@ export async function PATCH(req: NextRequest) {
         { status: 402 },
       );
     }
-    const charge = !billing.unlimited && !billing.byok;
+    const charge = target.paid && !billing.unlimited && !billing.byok;
     if (charge) {
       const { data, error } = await supabase.rpc("consume_recognition_credit", {
         p_amount: MAX_REDRAW_TOKENS,
@@ -380,7 +390,7 @@ export async function PATCH(req: NextRequest) {
           {
             error: error
               ? error.message
-              : `토큰이 부족해요. ${TOP_QUALITY} 로 고쳐 그리려면 ${MAX_REDRAW_TOKENS}토큰이 필요합니다.`,
+              : `토큰이 부족해요. ${target.quality} 로 고쳐 그리려면 ${MAX_REDRAW_TOKENS}토큰이 필요합니다.`,
           },
           { status: error ? 500 : 402 },
         );
@@ -390,9 +400,9 @@ export async function PATCH(req: NextRequest) {
       .from("figure_jobs")
       .update({
         status: "pending",
-        stage: `gen:${PROBLEM_LADDER.length - 1}`,
+        stage: `gen:${target.round}`,
         state: { ...(row.state as ProblemLoopState), maxPhase: true },
-        note: `${TOP_QUALITY} 로 고쳐 그리는 중`,
+        note: `${target.quality} 로 고쳐 그리는 중`,
         error: null,
         started_at: null,
         finished_at: null,
