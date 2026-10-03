@@ -617,6 +617,17 @@ export function wrapOldHangul(html: string): string {
   );
 }
 
+/** 이보다 긴 보기(표지·수식 안쪽 빼고 글자 수)가 하나라도 있으면 보기를 한 줄에 하나씩 세운다. */
+const LONG_CHOICE_CHARS = 14;
+
+/** 보기 한 조각의 대략적인 글자 수 — 표지를 빼고 수식은 두 글자로 친다. */
+function choiceTextLength(part: string): number {
+  return part
+    .trim()
+    .replace(/^[\u2460-\u2473]\s*/, "")
+    .replace(/\$\$[\s\S]*?\$\$|\$[^$]*\$|\x00MATH\d+\x00/g, "xx").length;
+}
+
 /**
  * 보기 줄을 원숫자 표지마다 잘라 각각 렌더링하고, 사이에 빈 span을 끼워
  * 넣는다. 간격을 CSS(.mmd-choice-gap)가 정하므로 글자 크기를 바꿔도 비율이
@@ -626,6 +637,24 @@ export function wrapOldHangul(html: string): string {
 function renderChoiceLine(line: string, mathBlocks: string[]): string {
   const parts = line.split(CHOICE_SPLIT).filter((p) => p.trim() !== "");
   if (parts.length <= 1) return renderLineContent(line, mathBlocks);
+  // **긴 보기는 한 줄에 하나씩** 세운다(2026-10-03, 사용자 신고 — 중세 국어 문제의 글 보기가 들쭉날쭉
+  // 들여 쓰이고 한 줄은 카드 밖으로 삐져나갔다). 나란히 놓기는 "① 12" 같은 짧은 보기용이다 — 보기마다
+  // 줄바꿈을 막아(nowrap) 두므로, 긴 글 보기는 줄이 넘칠 때 간격 자리에서 끊기며 앞이 들쭉날쭉해지고
+  // 한 줄보다 긴 보기는 아예 잘린다. 세운 보기는 표지 뒤로 내어쓰기(줄이 넘어가도 글이 표지 뒤에 맞춰진다).
+  if (parts.some((p) => choiceTextLength(p) > LONG_CHOICE_CHARS)) {
+    return parts
+      .map((p) => {
+        const t = p.trim();
+        const mark = t.match(/^[\u2460-\u2473]/)?.[0];
+        const body = mark ? t.slice(mark.length).trim() : t;
+        return (
+          `<span class="mmd-choice mmd-choice--row">` +
+          (mark ? `<span class="mmd-choice-mark">${mark}</span>` : "") +
+          `<span class="mmd-choice-body">${renderLineContent(body, mathBlocks)}</span></span>`
+        );
+      })
+      .join("");
+  }
   // 각 보기를 통째로 묶어 표지(⑤)와 값(12)이 서로 다른 줄로 갈라지지 않게 한다.
   return parts
     .map(
@@ -686,6 +715,29 @@ function renderLineList(
     });
 }
 
+/**
+ * **수식으로 감쌌을 뿐 실은 글자인 것**을 본문 글자로 그린다(없으면 null — 그대로 KaTeX).
+ *
+ * sol 조판은 밑줄을 `$\underline{\text{부터}}$` 로 적는다(우리 렌더러가 `<u>`·`**` 를 글자 그대로 찍어서
+ * 그렇게 정했다). 그런데 KaTeX 로 그리면 그 낱말만 **KaTeX 글꼴로 1.21배 크게** 나와 앞뒤 글자와 크기·서체가
+ * 어긋났고(2026-10-03, 사용자 캡처 — "글씨크기도 안맞고 이상해"), 옛한글 자모는 KaTeX 안에서 조립되지도 않는다.
+ * 그래서 `\underline{\text{…}}` · `\underline{한글…}` 은 `<u>` 로, `\text{…}` 하나뿐인 것은 그냥 글자로 바꾼다.
+ * 글자만 든 경우에만 — 안에 다른 명령·첨자가 있으면 수식이라 손대지 않는다.
+ */
+function mathAsPlainText(latex: string): string | null {
+  const t = latex.trim();
+  const text = (s: string) => preserveSpaces(escapeHtml(s));
+  let m = t.match(/^\\underline\s*\{\s*\\text(?:rm|normal)?\s*\{([^{}\\]*)\}\s*\}$/);
+  if (m) return `<u class="mmd-u">${text(m[1])}</u>`;
+  m = t.match(/^\\underline\s*\{([^{}\\^_$]*)\}$/);
+  if (m && /[\u1100-\u11FF\u3131-\u318E\uAC00-\uD7A3\u4E00-\u9FFF]/.test(m[1])) {
+    return `<u class="mmd-u">${text(m[1])}</u>`;
+  }
+  m = t.match(/^\\text(?:rm|normal)?\s*\{([^{}\\]*)\}$/);
+  if (m) return text(m[1]);
+  return null;
+}
+
 /** 한 문단(블록) 안의 "$$...$$"/"$...$" 수식과 일반 텍스트를 인라인 HTML로 변환한다. */
 function renderInline(text: string): string {
   const pattern = /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
@@ -700,7 +752,7 @@ function renderInline(text: string): string {
     if (match[1] !== undefined) {
       html += renderMath(match[1].trim(), true);
     } else if (match[2] !== undefined) {
-      html += renderMath(match[2].trim(), false);
+      html += mathAsPlainText(match[2]) ?? renderMath(match[2].trim(), false);
     }
 
     lastIndex = pattern.lastIndex;

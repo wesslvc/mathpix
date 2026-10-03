@@ -496,6 +496,33 @@ body {
   white-space: nowrap;
 }
 
+/* 긴 보기는 한 줄에 하나씩, 표지 뒤로 내어쓴다(renderChoiceLine). 줄이 넘어가도 글이 표지 뒤에 맞춰진다. */
+.mmd-choice--row {
+  display: flex;
+  gap: 0.35em;
+  white-space: normal;
+}
+
+.mmd-choice--row + .mmd-choice--row {
+  margin-top: 0.35em;
+}
+
+.mmd-choice-mark {
+  flex: none;
+}
+
+.mmd-choice-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* `$\underline{\text{…}}$` 를 본문 글꼴로 그린 밑줄(mathAsPlainText). */
+.mmd-u {
+  text-decoration: underline;
+  text-decoration-thickness: 0.06em;
+  text-underline-offset: 0.18em;
+}
+
 .mmd-box {
   margin: 1.1em 0;
   padding: 1.1em 1.4em;
