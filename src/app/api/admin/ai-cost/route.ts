@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
   // 이 기간 합계를 종류(그림·sol 검수 …)별로도 쪼갠다.
   const byWhat = new Map<string, { krw: number; calls: number }>();
   for (const r of (kinds.data ?? []) as { kind: string; what: string; est_krw: number | string }[]) {
-    const key = `${r.kind} · ${r.what}`;
+    const key = `${KIND_LABEL[r.kind] ?? r.kind} · ${r.what}`;
     const cur = byWhat.get(key) ?? { krw: 0, calls: 0 };
     cur.krw += Number(r.est_krw);
     cur.calls += 1;
@@ -71,3 +71,11 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.krw - a.krw),
   });
 }
+
+/** 장부의 갈래 이름을 화면 글자로. */
+const KIND_LABEL: Record<string, string> = {
+  problem: "문제",
+  figure: "그림",
+  passage: "국어 지문",
+  grade: "채점",
+};

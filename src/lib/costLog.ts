@@ -11,7 +11,7 @@ export async function logAiCost(
   row: {
     userId: string;
     jobId: string | null;
-    kind: "problem" | "figure" | "passage";
+    kind: "problem" | "figure" | "passage" | "grade";
     what: string;
     krw: number;
     usd?: number;

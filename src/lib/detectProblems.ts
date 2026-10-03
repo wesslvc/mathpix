@@ -366,29 +366,33 @@ export type DetectedKoreanPassages = {
   figures: ProblemBox[];
 };
 
-async function callDetect(dataUrl: string, prompt: string) {
+/** 영역 찾기 한 번에 쓴 토큰(입력 전체 · 그중 캐시 · 출력). luna 갈래에서만 온다 — 원가 장부에 적는다. */
+export type DetectUsage = { input: number; cached: number; output: number };
+
+async function callDetect(dataUrl: string, prompt: string): Promise<{ text: string; model: string; usage?: DetectUsage }> {
   if (DETECT_PROVIDER === "gemini") {
     return { text: await callGemini(dataUrl, prompt), model: DETECT_MODEL };
   }
-  return {
-    text: await callOpenAIVision(dataUrl, prompt, OPENAI_DETECT_MODEL, OPENAI_DETECT_EFFORT),
-    model: DETECT_OPENAI_LABEL,
-  };
+  let usage: DetectUsage | undefined;
+  const text = await callOpenAIVision(dataUrl, prompt, OPENAI_DETECT_MODEL, OPENAI_DETECT_EFFORT, (u) => {
+    usage = u;
+  });
+  return { text, model: DETECT_OPENAI_LABEL, usage };
 }
 
 export async function detectKoreanPassages(
   dataUrl: string,
-): Promise<DetectedKoreanPassages & { model: string }> {
-  const { text, model } = await callDetect(dataUrl, KOREAN_PASSAGE_PROMPT);
-  return { ...parseKoreanPassages(text), model };
+): Promise<DetectedKoreanPassages & { model: string; usage?: DetectUsage }> {
+  const { text, model, usage } = await callDetect(dataUrl, KOREAN_PASSAGE_PROMPT);
+  return { ...parseKoreanPassages(text), model, usage };
 }
 
 export async function detectKoreanQuestions(
   dataUrl: string,
   passages: ProblemBox[] = [],
-): Promise<{ regions: DetectedKoreanRegion[]; model: string }> {
-  const { text, model } = await callDetect(dataUrl, koreanQuestionPrompt(passages));
-  return { regions: parseKoreanQuestions(text), model };
+): Promise<{ regions: DetectedKoreanRegion[]; model: string; usage?: DetectUsage }> {
+  const { text, model, usage } = await callDetect(dataUrl, koreanQuestionPrompt(passages));
+  return { regions: parseKoreanQuestions(text), model, usage };
 }
 
 function readJsonObject(text: string): Record<string, unknown> {
@@ -535,6 +539,8 @@ export async function callOpenAIVision(
   model: string = OPENAI_DETECT_MODEL,
   /** 추론 강도(`reasoning.effort`). 없으면 모델 기본값. 영역 찾기와 probe 가 넘긴다. */
   effort?: string,
+  /** 쓴 토큰을 알려 준다(원가 장부용). 응답에 usage 가 없으면 안 부른다. */
+  onUsage?: (u: DetectUsage) => void,
 ): Promise<string> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new DetectError("OPENAI_API_KEY가 설정되지 않았습니다.", 500);
@@ -602,20 +608,34 @@ export async function callOpenAIVision(
 
   try {
     const json = JSON.parse(body);
+    const u = json?.usage;
+    if (onUsage && u) {
+      onUsage({
+        input: u.input_tokens ?? u.prompt_tokens ?? 0,
+        output: u.output_tokens ?? u.completion_tokens ?? 0,
+        cached: u.input_tokens_details?.cached_tokens ?? u.prompt_tokens_details?.cached_tokens ?? 0,
+      });
+    }
     return viaResponses ? harvest(json) : (json?.choices?.[0]?.message?.content ?? "");
   } catch {
     throw new DetectError("모델이 정상적인 응답을 주지 않았습니다.", 502);
   }
 }
 
-async function withOpenAI(dataUrl: string): Promise<{ problems: DetectedProblem[]; model: string }> {
+async function withOpenAI(
+  dataUrl: string,
+): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
+  let usage: DetectUsage | undefined;
   const text = await callOpenAIVision(
     dataUrl,
     `${PROMPT}\n\nanswer as JSON object: {"problems": [...]}`,
     OPENAI_DETECT_MODEL,
     OPENAI_DETECT_EFFORT,
+    (u) => {
+      usage = u;
+    },
   );
-  return { problems: parse(text), model: DETECT_OPENAI_LABEL };
+  return { problems: parse(text), model: DETECT_OPENAI_LABEL, usage };
 }
 
 /**
@@ -629,6 +649,6 @@ export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "gemini" ? "gemin
 
 export async function detectProblems(
   dataUrl: string,
-): Promise<{ problems: DetectedProblem[]; model: string }> {
+): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
   return DETECT_PROVIDER === "openai" ? withOpenAI(dataUrl) : withGemini(dataUrl);
 }

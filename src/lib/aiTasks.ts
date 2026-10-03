@@ -15,6 +15,8 @@ import {
   detectKoreanPassages,
   detectKoreanQuestions,
   detectProblems,
+  OPENAI_DETECT_MODEL,
+  type DetectUsage,
 } from "./detectProblems";
 import {
   GradeError,
@@ -193,17 +195,30 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     name: "영역 찾기",
     async run(ctx) {
       const mode = str(ctx.params.mode, 40);
+      // 영역 찾기도 원가가 든다(luna, 추론 강도 high) — 무제한 계정의 원가 장부에 적는다. 토큰은 안 뗀다(deposit 0·flat).
+      const cost = async (usage: DetectUsage | undefined, what: string, kind: "passage" | "problem") => {
+        if (!usage) return undefined;
+        const krw = gradingEstKrw(
+          { inputTokens: usage.input, outputTokens: usage.output, ...(usage.cached ? { cachedInputTokens: usage.cached } : {}) },
+          OPENAI_DETECT_MODEL,
+        );
+        if (krw) await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind, what, krw, tokens: usage });
+        return krw;
+      };
       try {
         if (mode === "korean-passage") {
-          const { passages, figures, model } = await detectKoreanPassages(ctx.images[0]);
-          return { ok: true, result: { regions: passages, figures, model }, model };
+          const { passages, figures, model, usage } = await detectKoreanPassages(ctx.images[0]);
+          const estKrw = await cost(usage, "지문 자리 찾기", "passage");
+          return { ok: true, result: { regions: passages, figures, model }, model, estKrw };
         }
         if (mode === "korean-question") {
-          const { regions, model } = await detectKoreanQuestions(ctx.images[0], readBoxes(ctx.params.passages));
-          return { ok: true, result: { regions, model }, model };
+          const { regions, model, usage } = await detectKoreanQuestions(ctx.images[0], readBoxes(ctx.params.passages));
+          const estKrw = await cost(usage, "국어 문제 자리 찾기", "passage");
+          return { ok: true, result: { regions, model }, model, estKrw };
         }
-        const { problems, model } = await detectProblems(ctx.images[0]);
-        return { ok: true, result: { problems, model }, model };
+        const { problems, model, usage } = await detectProblems(ctx.images[0]);
+        const estKrw = await cost(usage, "지면 자리 찾기", "problem");
+        return { ok: true, result: { problems, model }, model, estKrw };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "문제 영역 인식에 실패했습니다.") };
       }
@@ -227,6 +242,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           ctx.byokApiKey,
         );
         const estKrw = usage ? gradingEstKrw(usage, model) : undefined;
+        if (estKrw && !ctx.byok) await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "passage", what: "지문 제목 짓기", krw: estKrw, tokens: solTokens(usage) });
         return { ok: true, result: { ...result, model, usage: money(ctx, usage, estKrw) }, estKrw, model };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "제목 짓기에 실패했습니다.") };
@@ -271,6 +287,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           keys.length ? sources : undefined,
         );
         const estKrw = result.usage ? gradingEstKrw(result.usage, result.model) : undefined;
+        if (estKrw && !ctx.byok) await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "grade", what: "자동채점", krw: estKrw, tokens: solTokens(result.usage) });
         // 슬롯에 사용자가 적어 준 과목명(elective_label)을 그대로 이어 붙인다.
         const slots = result.slots.map((s) => {
           const key = s.slot ? keys.find((k) => k?.slot === s.slot) : keys[0];
@@ -299,6 +316,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       try {
         const result = await readAnswerKeyWithVision(ctx.images, ctx.signal, ctx.byokApiKey);
         const estKrw = result.usage ? gradingEstKrw(result.usage, result.model) : undefined;
+        if (estKrw && !ctx.byok) await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "grade", what: "답지 읽기", krw: estKrw, tokens: solTokens(result.usage) });
         return {
           ok: true,
           result: { items: result.items, model: result.model, usage: money(ctx, result.usage, estKrw) },
