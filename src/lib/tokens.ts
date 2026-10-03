@@ -124,6 +124,9 @@ const USD_TO_KRW = (() => {
   return Number.isFinite(raw) && raw > 0 ? raw : 1400;
 })();
 
+/** 같은 환율을 밖에서 쓸 때(지문 작업의 원가를 달러로도 적을 때). */
+export const USD_KRW_RATE = USD_TO_KRW;
+
 /**
  * 입력 토큰 100만 개당 단가(달러). 아래 `GRADING_PRICES` 에 없는 모델에만
  * 쓰는 **폴백**이다 — 새 모델을 붙일 때 재배포 없이 값을 넣을 수 있게 둔다.

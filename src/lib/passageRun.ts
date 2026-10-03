@@ -60,6 +60,12 @@ export type PassageState = {
   notes?: { read?: string; readMarks?: string; marks?: string; figures?: string };
   /** 지금까지 **쓴** 토큰(보증금 중 돌려주지 않을 몫). */
   spent?: number;
+  /**
+   * 지금까지 든 **원가**(원, 공표 단가로 계산). 끝나면 작업 행의 `usage` 로 옮겨 대기열 패널의 "약 N원" 합계에
+   * 들어간다 — 예전에는 지문 작업만 원가가 안 적혀 그림 작업보다 훨씬 비싼데도 공짜처럼 보였다(2026-10-03, 사용자 —
+   * "지문생성도 돈드는걸로 취급해").
+   */
+  costKrw?: number;
 };
 
 export type PassageJob = {
@@ -221,6 +227,7 @@ export async function runPassageStage(
         figures,
         notes: { read: model, readMarks: describeMarks(stats) || undefined },
         spent: spent0 + PASSAGE_READ_TOKENS,
+        costKrw: (state.costKrw ?? 0) + (readKrw ?? 0),
       };
       next.notes!.figures = figureNote(figures, placePassageFigures(blocks, figures).missing) || undefined;
       await publish(admin, job, next);
@@ -249,6 +256,7 @@ export async function runPassageStage(
               await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "passage", what: "서식 검수", krw: est, tokens: solTokens(usage) });
             }
             charge = Math.min(PASSAGE_MARKS_DEPOSIT, gradingTokenCharge(est));
+            next.costKrw = (state.costKrw ?? 0) + (est ?? 0);
             next.review = review;
             next.notes!.marks = describeMarksReview(
               applyMarksReview(state.blocks ?? [], review).stats,
@@ -279,6 +287,7 @@ export async function runPassageStage(
       const slots = [...(state.figures ?? [])];
       const input = payload.figures[i];
       let kept = false;
+      let figureKrw = 0;
       if (slots[i] && input) {
         const image = await loadAsDataUrl(admin, input.path);
         const outcome = image
@@ -294,6 +303,7 @@ export async function runPassageStage(
             })
           : null;
         if (outcome?.ok) {
+          figureKrw = outcome.usage?.estKrw ?? 0;
           if (outcome.usage && !ctx.byokApiKey) {
             await logAiCost(admin, {
               userId: job.user_id,
@@ -321,6 +331,7 @@ export async function runPassageStage(
         ...state,
         figures: slots,
         spent: spent0 + charge,
+        costKrw: (state.costKrw ?? 0) + figureKrw,
         notes: {
           ...state.notes,
           figures: figureNote(slots, placePassageFigures(state.blocks ?? [], slots).missing),

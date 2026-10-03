@@ -216,6 +216,19 @@ function NumberInput({
   );
 }
 
+/** 읽어 둔 지문 글자(blocks)를 제목 짓기에 보낼 맨글로(상자 안까지, 그림은 뺀다). */
+function passagePlainText(blocks: RichBlock[]): string {
+  const out: string[] = [];
+  const walk = (list: RichBlock[]) => {
+    for (const b of list) {
+      if (b.kind === "para") out.push(b.runs.map((r) => r.t).join(""));
+      else if (b.kind === "box") walk(b.blocks);
+    }
+  };
+  walk(blocks);
+  return out.join("\n").slice(0, 12000);
+}
+
 export default function ProblemGallery({ problems, unlimited = false }: Props) {
   const router = useRouter();
   const [raw, setList] = useState<GalleryProblem[]>(problems);
@@ -828,6 +841,39 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     }
   }
 
+  /**
+   * **제목이 비어 있는 지문의 제목을 다시 짓는다**(2026-10-03, 사용자 — "제목이 인식 안 됐을 때 다시 인식시키는
+   * 버튼"). 국어 모드에서 저장하기 전에 제목 짓기가 실패하면(또는 제목이 오기 전에 저장하면) 목차에 그냥
+   * "지문"으로 찍히는데, 저장한 뒤에는 고칠 길이 없었다. 읽어 둔 지문 글자(blocks)가 있으면 글로, 없으면 저장된
+   * 카드 그림으로 짓는다(luna, 고정 1토큰 — 국어 모드의 제목 짓기와 같은 작업). 저장은 서버 함수가 그 키만 고친다.
+   */
+  async function retitle(problem: GalleryProblem) {
+    setBusyId(problem.id);
+    try {
+      const text = passagePlainText(problem.korean?.blocks ?? []);
+      const { result } = await runAiTask<{ title?: string }>("title", {
+        label: "지문 제목 다시 짓기",
+        ...(text.length >= 20 ? { params: { text } } : { images: [problem.imageUrl] }),
+      });
+      const title = result?.title?.trim();
+      if (!title) throw new Error("제목을 짓지 못했어요.");
+      const { data, error } = await createClient().rpc("set_passage_title", {
+        p_id: problem.id,
+        p_title: title,
+      });
+      if (error) throw error;
+      if (data === false) throw new Error("이 문제는 지문이 아니라 제목을 붙일 수 없어요.");
+      setList((cur) =>
+        cur.map((p) => (p.id === problem.id && p.korean ? { ...p, korean: { ...p.korean, title } } : p)),
+      );
+      router.refresh();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "제목을 짓지 못했어요.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   function openEdit(problem: GalleryProblem) {
     setEditing(problem);
     setEditText(problem.text);
@@ -1082,6 +1128,18 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
 
   const rowButtons = (problem: GalleryProblem, index: number) => (
     <>
+      {/* 제목이 비어 있는 지문 — 목차에 "지문"으로만 찍히므로 다시 지을 길을 둔다. */}
+      {problem.korean?.role === "passage" && !problem.korean.title && (
+        <Button
+          type="button"
+          onClick={() => void retitle(problem)}
+          disabled={busyId === problem.id}
+          variant="soft" size="sm"
+          title="지문 제목을 다시 지어요(1토큰)"
+        >
+          {busyId === problem.id ? "짓는 중…" : "제목 인식"}
+        </Button>
+      )}
       {/* **PDF로 안 묶고 그림 하나만** 받고 싶을 때. `/api/card`가 같은
           출처(same-origin)라 `download` 속성이 그대로 먹는다 — 새 탭으로
           열리지 않고 바로 저장된다. */}
@@ -1216,6 +1274,11 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                   problem.debt ? "blur-md" : ""
                 }`}
  />
+              {problem.korean?.role === "passage" && (
+                <span className="self-start rounded bg-emerald-100 px-1.5 text-xs font-medium text-emerald-700">
+                  지문 · {problem.korean.title || "제목 없음"}
+                </span>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-1 px-1 pb-1">
                 {!problem.debt && (
                   <NumberInput

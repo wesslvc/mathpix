@@ -40,7 +40,7 @@ import {
 } from "@/lib/problemLoopRun";
 import type { FigureUsage } from "@/lib/figureImageGen";
 import { TASKS, TASK_KINDS, type TaskKind } from "@/lib/aiTasks";
-import { gradingTokenCharge } from "@/lib/tokens";
+import { USD_KRW_RATE, gradingTokenCharge } from "@/lib/tokens";
 
 /** 확인용 64×64 PNG(청크 CRC 까지 검사한 것 — `/api/figure/models` 와 같은 파일). */
 const PROBE_PNG =
@@ -620,6 +620,9 @@ async function runPassageJob(admin: Admin, job: ClaimedJob) {
           state: null,
           note: out.note,
           charged_tokens: job.charged ? (out.state.spent ?? 0) : 0,
+          // 원가를 그림 작업과 같은 자리(usage)에 적는다 — 패널의 "약 N원" 합계에 들어간다. 금액은 무제한·BYOK
+          // 화면에만(그림 작업의 visibleUsage 와 같은 규칙).
+          usage: passageUsage(out.state.costKrw, billing.unlimited || billing.byok),
           applied_at: now,
           result_path: null,
           finished_at: now,
@@ -808,4 +811,14 @@ async function runTaskJob(admin: Admin, job: ClaimedJob) {
     // 못 받아도 결과는 준다 — 이미 만든 것을 버릴 이유가 없다(예전 라우트들의 정산과 같은 판단).
     if (ok === null) console.warn(`[${tag}] 잔액 부족으로 ${want - deposit}토큰을 못 받았습니다.`);
   }
+}
+
+/** 지문 작업의 원가를 작업 행 `usage` 꼴로. 금액을 못 보는 계정이거나 원가가 없으면 null. */
+function passageUsage(costKrw: number | undefined, showMoney: boolean) {
+  if (!showMoney || !costKrw || costKrw <= 0) return null;
+  return {
+    estKrw: Math.round(costKrw),
+    estUsd: Math.round((costKrw / USD_KRW_RATE) * 10000) / 10000,
+    krwRate: USD_KRW_RATE,
+  };
 }
