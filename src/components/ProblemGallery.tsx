@@ -18,6 +18,7 @@ import {
   type StoredFigure,
 } from "@/lib/storedFigures";
 import { DEFAULT_FONT_PT, ptToPx } from "@/lib/fontSize";
+import { SOL_TYPESET_TOKENS } from "@/lib/tokens";
 import { parseProblemNumber } from "@/lib/problemNumber";
 import { sortByProblemNumber } from "@/lib/problemOrder";
 import { readKoreanMeta, type KoreanMeta } from "@/lib/koreanSet";
@@ -1670,7 +1671,9 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                                 disabled={busy || typeset?.busy === true}
                                 variant="outline" size="xs"
                               >
-                                {typeset?.busy ? "sol 이 옮겨 적는 중..." : "sol 인식 후 조판"}
+                                {typeset?.busy
+                                  ? "sol 이 옮겨 적는 중..."
+                                  : `sol 인식 후 조판${unlimited ? "" : ` (${SOL_TYPESET_TOKENS}토큰)`}`}
                               </Button>
                             )}
                             {f.origin && (

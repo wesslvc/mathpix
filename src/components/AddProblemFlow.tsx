@@ -49,6 +49,7 @@ import { persistFigureBlobs } from "@/lib/figureBlob";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
 import { runAiTask } from "@/lib/aiTask";
+import { prepareProblemForModel } from "@/lib/figureImage";
 import type { AnswerByNumber } from "@/lib/answerMap";
 import {
   clearQueue,
@@ -381,8 +382,8 @@ export default function AddProblemFlow({
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  async function handleCropConfirm(croppedDataUrl: string, cropMode: "ocr" | "problem" | "asis") {
-    if (cropMode === "problem" || cropMode === "asis") {
+  async function handleCropConfirm(croppedDataUrl: string, cropMode: "ocr" | "problem" | "asis" | "sol") {
+    if (cropMode === "problem" || cropMode === "asis" || cropMode === "sol") {
       quickAdd(croppedDataUrl, cropMode);
       return;
     }
@@ -417,7 +418,7 @@ export default function AddProblemFlow({
    * 쓴다) → 원본 크롭에서 읽은 번호를 붙이고 그 번호의 정답도 붙인다.
    * 번호는 AI 결과를 기다리지 않는다 — 같은 번호이고 몇 초면 읽힌다.
    */
-  function quickAdd(crop: string, addMode: "problem" | "asis") {
+  function quickAdd(crop: string, addMode: "problem" | "asis" | "sol") {
     const key = crypto.randomUUID();
     const nth = ++quickCountRef.current;
     const patch = (next: Partial<QuickItem>) =>
@@ -446,6 +447,21 @@ export default function AddProblemFlow({
           mode: "problem",
           problemId,
         });
+      }
+      if (addMode === "sol") {
+        // **sol 인식 후 조판**(서버 대기열 task `typeset`). 우선 원본 그대로 저장해 두고(빈 자리가 아니다), sol 이 옮겨
+        // 적으면 FigureJobsProvider 가 그 문제를 글자 본문으로 바꿔 저장한다(`typesetApply.ts`) — 화면을 떠나도 된다.
+        void (async () => {
+          try {
+            await runAiTask("typeset", {
+              label: `${nth}번째 사진 · sol 인식`,
+              images: [await prepareProblemForModel(await enhanceContrast(crop))],
+              params: { problemId },
+            });
+          } catch (err) {
+            setError(`sol 인식에 실패했어요(원본 그대로 저장돼 있어요). ${err instanceof Error ? err.message : ""}`);
+          }
+        })();
       }
       patch({ status: "saved" });
       return problemId;

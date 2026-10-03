@@ -77,6 +77,13 @@ export function figureTokenCharge(_estKrw: number | undefined): number {
 /** 국어 지문 인식 1회의 **고정** 차감액(2026-09-17 사용자 결정 — 원가와 무관). */
 export const PASSAGE_READ_TOKENS = 100;
 
+/**
+ * **sol 인식 후 조판** 1회의 고정 차감액(2026-10-03, 사용자 — "sol 인식도 초기부터 버튼에 넣어, 50토큰 정도로").
+ * 자르기 화면의 "sol로 인식"과 수정 창의 "sol 인식 후 조판"이 같은 값을 쓴다(화면도 이 값을 읽는다).
+ * 원가는 한 번에 30~40원쯤(장부 `sol 조판 인식` 평균) — 무제한 계정 장부에는 원가가 그대로 쌓인다.
+ */
+export const SOL_TYPESET_TOKENS = 50;
+
 /** 지문 서식 검수(두 번째 호출)의 보증금. 실사용량으로 정산해 남으면 돌려준다. */
 export const PASSAGE_MARKS_DEPOSIT = 30;
 

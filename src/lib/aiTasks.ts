@@ -37,6 +37,7 @@ import {
   PASSAGE_MARKS_DEPOSIT,
   PASSAGE_READ_TOKENS,
   gradingEstKrw,
+  SOL_TYPESET_TOKENS,
 } from "./tokens";
 import { logAiCost, solTokens } from "./costLog";
 import {
@@ -383,8 +384,8 @@ export const TASKS: Record<TaskKind, TaskDef> = {
 
   // sol 이 문제를 글자로 옮겨 적는다(수정 창의 "sol 인식 후 조판"). 실사용량 정산.
   typeset: {
-    deposit: () => 30,
-    flat: false,
+    deposit: () => SOL_TYPESET_TOKENS,
+    flat: true,
     needsOpenAI: true,
     images: { min: 1, max: 1 },
     name: "sol 조판 인식",

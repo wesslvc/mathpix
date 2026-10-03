@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SOL_TYPESET_TOKENS } from "@/lib/tokens";
 import ReactCrop, { type Crop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import { detectContentRegion } from "@/lib/autoDetectRegion";
@@ -17,7 +18,7 @@ type Props = {
    * mode가 "problem"이면 인식(Mathpix) 대신 문제 전체를 이미지로 다시 그린다.
    * 탐구처럼 표·지도·그림이 뒤섞인 문제는 그 편이 원본에 가깝다.
    */
-  onConfirm: (croppedDataUrl: string, mode: "ocr" | "problem" | "asis") => void;
+  onConfirm: (croppedDataUrl: string, mode: "ocr" | "problem" | "asis" | "sol") => void;
   /** 문제 전체 다시 그리기에 드는 토큰. 못 불러왔으면 표시하지 않는다. */
   problemTokenCost?: number | null;
   /** 무제한 계정인가. 토큰 비용 표시를 감춘다. */
@@ -116,7 +117,7 @@ export default function CropStage({
 
   const ready = !!region && region.w > 0 && region.h > 0;
 
-  function handleConfirm(mode: "ocr" | "problem" | "asis") {
+  function handleConfirm(mode: "ocr" | "problem" | "asis" | "sol") {
     const img = imgRef.current;
     if (!img || !region || !ready) return;
     onConfirm(cropRegionToDataUrl(img, region), mode);
@@ -221,8 +222,8 @@ export default function CropStage({
             </Button>
           )}
         </div>
-        {/* 휴대폰에서는 세 칸으로 나란히 — 한 손으로 연달아 누르는 자리다. */}
-        <div className="grid grid-cols-3 gap-2 sm:flex">
+        {/* 휴대폰에서는 두 칸씩 두 줄 — 한 손으로 연달아 누르는 자리다. */}
+        <div className="grid grid-cols-2 gap-2 sm:flex">
           {/* 이미 깨끗한 인쇄물이면 다시 그릴 이유가 없다. 인식도 생성도 하지 않으므로
               여기서 드는 것은 번호를 읽는 비용뿐이다. */}
           <Button
@@ -244,6 +245,20 @@ export default function CropStage({
             AI로 다시 그리기
             {typeof problemTokenCost === "number" && !unlimited && !byok && (
               <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{problemTokenCost}토큰</span>
+            )}
+            {byok && <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">본인 키</span>}
+          </Button>
+          {/* sol 이 글자로 옮겨 적고 우리가 조판한다(수정 창의 "sol 인식 후 조판"과 같은 작업). 글자가 정확하고
+              본문을 고칠 수 있다 — 그래프·지도 같은 그림은 원본에서 오려 붙인다. 넣자마자 다음 사진으로 넘어간다. */}
+          <Button
+            type="button"
+            onClick={() => handleConfirm("sol")}
+            disabled={!ready}
+            variant="soft" className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
+          >
+            sol로 인식
+            {!unlimited && !byok && (
+              <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{SOL_TYPESET_TOKENS}토큰</span>
             )}
             {byok && <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">본인 키</span>}
           </Button>
