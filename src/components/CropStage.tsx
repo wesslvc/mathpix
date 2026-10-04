@@ -8,7 +8,7 @@ import { detectContentRegion } from "@/lib/autoDetectRegion";
 import { rotateImageDataUrl } from "@/lib/cropImage";
 import { cropRegionToDataUrl, rectPoly, type Region } from "@/lib/polygon";
 import { useCropShape } from "@/lib/cropShape";
-import { inkMapFromImage, snapBoxes } from "@/lib/snapBoxes";
+import { refineAiBox } from "@/lib/autoCrop";
 import BoxEditor, { type EditBox } from "./BoxEditor";
 import CropShapeToggle from "./CropShapeToggle";
 import { Button } from "@/components/ui/button";
@@ -38,10 +38,12 @@ type Props = {
    * 계산(`detectContentRegion`)을 그대로 둔다. 사용자가 손대기 전에 도착하면 그 자리로 바꾼다.
    */
   aiRegion?: Region | null;
+  /** 이 사진 뒤에 남은 사진 수. 있으면 "남은 사진도 같은 방식으로 한 번에" 고르기가 뜬다. */
+  restCount?: number;
+  /** 지금 사진과 남은 사진을 모두 같은 방식으로 넣는다(남은 것은 luna 가 자른 자리대로). */
+  onConfirmRest?: (croppedDataUrl: string, mode: "problem" | "asis" | "sol") => void;
 };
 
-/** luna 자리를 글자에 맞춰 다듬은 뒤 두르는 여유(사방). 딱 맞게 자르면 획 끝이 잘릴 수 있다. */
-const AI_PAD = 0.006;
 
 /** 한 문제 자르기에서 영역을 가리키는 id. 하나뿐이라 고정값이다. */
 const ONE = "crop";
@@ -56,6 +58,8 @@ export default function CropStage({
   unlimited = false,
   byok = false,
   aiRegion,
+  restCount = 0,
+  onConfirmRest,
 }: Props) {
   /** 자를 재료. 화면에 뜬 `<img>` 가 아니라 따로 연 것이라 모양을 바꿔도 그대로다. */
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -69,6 +73,8 @@ export default function CropStage({
   const touched = useRef(false);
   /** luna 자리를 이미 얹었다. */
   const [aiApplied, setAiApplied] = useState(false);
+  /** 남은 사진도 같은 방식으로 한 번에 넣는다. */
+  const [allRest, setAllRest] = useState(false);
   const aiRef = useRef(aiRegion);
   aiRef.current = aiRegion;
 
@@ -124,14 +130,7 @@ export default function CropStage({
   function applyAi(img: HTMLImageElement) {
     const box = aiRef.current;
     if (!box || touched.current || turns !== 0) return;
-    let b = { x: box.x, y: box.y, w: box.w, h: box.h };
-    const map = inkMapFromImage(img, img.naturalWidth, img.naturalHeight);
-    if (map) b = snapBoxes(map, [b]).boxes[0] ?? b;
-    const x0 = Math.max(0, b.x - AI_PAD);
-    const y0 = Math.max(0, b.y - AI_PAD);
-    const x1 = Math.min(1, b.x + b.w + AI_PAD);
-    const y1 = Math.min(1, b.y + b.h + AI_PAD);
-    setRegion({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+    setRegion(refineAiBox(img, box, img.naturalWidth, img.naturalHeight));
     setAiApplied(true);
   }
 
@@ -167,7 +166,9 @@ export default function CropStage({
   function handleConfirm(mode: "ocr" | "problem" | "asis" | "sol") {
     const img = imgRef.current;
     if (!img || !region || !ready) return;
-    onConfirm(cropRegionToDataUrl(img, region), mode);
+    const crop = cropRegionToDataUrl(img, region);
+    if (allRest && restCount > 0 && onConfirmRest && mode !== "ocr") onConfirmRest(crop, mode);
+    else onConfirm(crop, mode);
   }
 
   const percentCrop: Crop | undefined = region
@@ -280,6 +281,20 @@ export default function CropStage({
             </Button>
           )}
         </div>
+        {restCount > 0 && onConfirmRest && (
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600 sm:order-first sm:mr-2">
+            <input
+              type="checkbox"
+              checked={allRest}
+              onChange={(e) => setAllRest(e.target.checked)}
+              className="h-4 w-4 accent-blue-600"
+            />
+            <span>
+              남은 {restCount}장도 같은 방식으로 한 번에
+              <span className="block text-[11px] text-slate-400">luna 가 자른 자리대로 넣어요 (글자로 인식 제외)</span>
+            </span>
+          </label>
+        )}
         {/* 휴대폰에서는 두 칸씩 두 줄 — 한 손으로 연달아 누르는 자리다. */}
         <div className="grid grid-cols-2 gap-2 sm:flex">
           {/* 이미 깨끗한 인쇄물이면 다시 그릴 이유가 없다. 인식도 생성도 하지 않으므로

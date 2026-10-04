@@ -51,7 +51,9 @@ import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "
 import { runAiTask } from "@/lib/aiTask";
 import { prepareProblemForModel } from "@/lib/figureImage";
 import type { AnswerByNumber } from "@/lib/answerMap";
-import type { Region } from "@/lib/polygon";
+import { cropRegionToDataUrl, type Region } from "@/lib/polygon";
+import { regionForImage } from "@/lib/autoCrop";
+import { loadImage } from "@/lib/cropImage";
 import {
   clearQueue,
   loadQueue,
@@ -164,30 +166,73 @@ export default function AddProblemFlow({
    * 못 찾음(화면이 제 계산 그대로 둔다). 자르기 화면이 사용자가 손대기 전에 도착하면 그 자리로 바꾼다.
    */
   const [aiCrops, setAiCrops] = useState<Record<string, Region | null>>({});
-  const cropAskedRef = useRef(new Set<string>());
-  /** 사진을 줄여 올리는 일은 한 장씩(여러 장을 한꺼번에 디코딩하면 휴대폰 메모리가 모자란다). */
+  const cropPromisesRef = useRef(new Map<string, Promise<Region | null>>());
+  /**
+   * 사진을 줄여 올리는 일만 한 장씩 잇는다(여러 장을 한꺼번에 디코딩하면 휴대폰 메모리가 모자란다). 한 장이 서버 줄에
+   * 들어가면 곧바로 다음 장을 올린다 — **luna 호출은 여러 장이 동시에 돈다**(사용자 — "일괄로 업로드하면 luna 가 한 번에
+   * 처리해서 자동 자르기를 여러 개로 동시에 다 받고").
+   */
   const cropChainRef = useRef<Promise<void>>(Promise.resolve());
-  function requestAutoCrop(p: QueuedPhoto) {
-    if (cropAskedRef.current.has(p.id)) return;
-    cropAskedRef.current.add(p.id);
-    const run = async () => {
-      let box: Region | null = null;
+  function requestAutoCrop(p: QueuedPhoto): Promise<Region | null> {
+    const had = cropPromisesRef.current.get(p.id);
+    if (had) return had;
+    const promise = new Promise<Region | null>((resolve) => {
+      const run = async () => {
+        try {
+          // 모델은 긴 변 2048 을 넘으면 어차피 줄여 본다. 대비를 올려 글자와 종이의 경계를 또렷하게(영역 찾기와 같다).
+          const image = await enhanceContrast(await photoForModel(p, 2048));
+          let queued = () => {};
+          const inLine = new Promise<void>((r) => (queued = r));
+          void runAiTask<{ box: Region | null }>("crop", {
+            label: `자동 자르기 · ${p.name}`.slice(0, 100),
+            images: [image],
+            onQueued: () => queued(),
+          })
+            .then(({ result }) => resolve(result?.box ?? null), () => resolve(null))
+            .finally(() => queued());
+          await inLine;
+        } catch {
+          resolve(null);
+        }
+      };
+      cropChainRef.current = cropChainRef.current.then(run, run);
+    });
+    cropPromisesRef.current.set(p.id, promise);
+    void promise.then((box) => setAiCrops((prev) => ({ ...prev, [p.id]: box })));
+    return promise;
+  }
+
+  /**
+   * **남은 사진을 한 번에 넣는다**(사용자 — "손이 안 가게"). 지금 사진을 고른 방식으로 넣고, 남은 사진은 luna 가 자른
+   * 자리대로(없으면 화면 계산으로) 잘라 **같은 방식으로** 차례로 넣는다. 사진마다 luna 결과를 기다리지만 그동안 화면은
+   * 사진 고르기로 돌아가 다른 일을 할 수 있다. 브라우저 저장소의 사진은 넣은 것만 지운다(탭이 죽으면 남은 것이 되살아난다).
+   */
+  const [bulkLeft, setBulkLeft] = useState(0);
+  async function addAllRemaining(crop: string, addMode: "problem" | "asis" | "sol") {
+    const rest = pending;
+    quickAdd(crop, addMode, { advance: false });
+    setPending([]);
+    activate(null);
+    if (rest.length === 0) return;
+    setBulkLeft(rest.length);
+    for (const p of rest) {
       try {
-        const image = await photoForModel(p);
-        // 결과를 기다리는 것은 뒤에서 — 다음 사진 준비를 막지 않는다.
-        void runAiTask<{ box: Region | null }>("crop", { label: `자동 자르기 · ${p.name}`.slice(0, 100), images: [image] })
-          .then(({ result }) => {
-            box = result?.box ?? null;
-          })
-          .catch(() => {
-            box = null;
-          })
-          .finally(() => setAiCrops((prev) => ({ ...prev, [p.id]: box })));
-      } catch {
-        setAiCrops((prev) => ({ ...prev, [p.id]: null }));
+        const box = await requestAutoCrop(p);
+        const url = URL.createObjectURL(p.blob);
+        try {
+          const img = await loadImage(url);
+          const region = regionForImage(img, box);
+          quickAdd(cropRegionToDataUrl(img, region), addMode, { photo: p });
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      } catch (err) {
+        // 못 연 사진은 대기열에 되돌려 둔다(손으로 자를 수 있게).
+        setPending((prev) => [...prev, p].sort(byOrder));
+        setError(`"${p.name}" 을(를) 자동으로 넣지 못했어요 — 대기열에 남겨 뒀어요. ${err instanceof Error ? err.message : ""}`);
       }
-    };
-    cropChainRef.current = cropChainRef.current.then(run, run);
+      setBulkLeft((n) => Math.max(0, n - 1));
+    }
   }
 
   /** 지금 사진의 화면용 주소. 사진이 바뀌면 옛 주소를 풀어 준다. */
@@ -246,14 +291,14 @@ export default function AddProblemFlow({
 
   // 아직 저장이 안 끝난 문제가 있으면 탭 닫기를 되묻는다(사진이 통째로 사라진다).
   useEffect(() => {
-    if (unsaved === 0 && !preparing) return;
+    if (unsaved === 0 && !preparing && bulkLeft === 0) return;
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [unsaved, preparing]);
+  }, [unsaved, preparing, bulkLeft]);
 
   useEffect(() => {
     let cancelled = false;
@@ -459,15 +504,24 @@ export default function AddProblemFlow({
    * 쓴다) → 원본 크롭에서 읽은 번호를 붙이고 그 번호의 정답도 붙인다.
    * 번호는 AI 결과를 기다리지 않는다 — 같은 번호이고 몇 초면 읽힌다.
    */
-  function quickAdd(crop: string, addMode: "problem" | "asis" | "sol") {
+  function quickAdd(
+    crop: string,
+    addMode: "problem" | "asis" | "sol",
+    /** `photo`: 지금 사진이 아니라 이 사진을 넣는다(한 번에 넣기). `advance: false`: 다음 사진으로 넘기지 않는다. */
+    opts: { photo?: QueuedPhoto; advance?: boolean } = {},
+  ) {
     const key = crypto.randomUUID();
     const nth = ++quickCountRef.current;
     const patch = (next: Partial<QuickItem>) =>
       setQuick((prev) => prev.map((q) => (q.key === key ? { ...q, ...next } : q)));
     setQuick((prev) => [{ key, crop, status: "saving" as const }, ...prev].slice(0, 30));
-    setError(null);
-    markActiveUsed();
-    advanceQueue();
+    if (opts.photo) {
+      void removePhoto(opts.photo.id);
+    } else {
+      setError(null);
+      markActiveUsed();
+      if (opts.advance !== false) advanceQueue();
+    }
 
     const number = readNumberWithMathpix(crop);
     const saved = saveChainRef.current.then(async () => {
@@ -819,6 +873,8 @@ export default function AddProblemFlow({
               <CropStage
                 imageSrc={activeUrl}
                 aiRegion={active ? (active.id in aiCrops ? aiCrops[active.id] : undefined) : null}
+                restCount={pending.length}
+                onConfirmRest={(crop, m) => void addAllRemaining(crop, m)}
                 onConfirm={handleCropConfirm}
                 onCancel={exitToIdle}
                 onSkip={pending.length > 0 ? skipActive : undefined}
@@ -860,6 +916,11 @@ export default function AddProblemFlow({
         </section>
       )}
 
+      {bulkLeft > 0 && (
+        <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          남은 사진 {bulkLeft}장을 luna 가 자른 자리대로 넣는 중이에요 — 다른 일을 해도 돼요(창은 닫지 마세요).
+        </p>
+      )}
       {quick.length > 0 && stage !== "result" && stage !== "loading" && (
         <QuickList
           items={quick}

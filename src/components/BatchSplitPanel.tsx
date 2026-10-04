@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { NO_CROP_LIMIT, cropImageToDataUrl, fileToDataUrl, isHeicFile, openPageSource, type PageSource } from "@/lib/cropImage";
+import {
+  NO_CROP_LIMIT,
+  cropImageToDataUrl,
+  fileToDataUrl,
+  isHeicFile,
+  loadDrawableFromFile,
+  openPageSource,
+  type PageSource,
+} from "@/lib/cropImage";
 import { cropRegionToDataUrl, isRealPolygon, type Region } from "@/lib/polygon";
 import { useCropShape } from "@/lib/cropShape";
 import BoxEditor, { type EditBox } from "./BoxEditor";
@@ -65,6 +73,9 @@ const PAD = 0.004;
  * 있던 것을 이어 붙이면 폭을 다시 맞추고 사이에 띠가 들어가 잘렸다 붙인
  * 티가 난다 — 자리를 알고 있으면 아우르는 네모 하나로 다시 자를 수 있다.
  */
+/** luna 가 찾은 지면 자리. */
+type Found = { problems: DetectedProblem[]; model: string | null };
+
 type Piece = {
   id: string;
   crop: string;
@@ -143,6 +154,20 @@ export default function BatchSplitPanel({
   const [sourceInfo, setSourceInfo] = useState<{ w: number; h: number; degraded: boolean } | null>(null);
   /** 조각마다 실제 픽셀 크기(그림이 뜨면 잰다). 흐린지 눈으로 짐작하지 말고 숫자로 본다. */
   const [pieceSizes, setPieceSizes] = useState<Record<string, string>>({});
+  /**
+   * **지면을 여러 장 고르면 luna 가 전부 한꺼번에 자리를 찾는다**(2026-10-04, 사용자 — "일괄로 업로드하면 luna 가 한 번에
+   * 처리해서 … 지면도 마찬가지"). 고르는 순간 장마다 영역 찾기를 서버 대기열에 넣어 두고(줄이기·올리기만 한 장씩,
+   * luna 호출은 동시에), 그 지면을 열 때 결과를 그대로 쓴다 — 넘기면 다음 지면은 이미 잘려 있다. 무제한 계정만(영역 찾기는
+   * 무제한 전용이다).
+   */
+  const prefetchRef = useRef(new Map<File, Promise<Found>>());
+  const prefetchChainRef = useRef<Promise<void>>(Promise.resolve());
+  /** 열자마자 자동으로 찾은 지면(같은 지면을 두 번 찾지 않게). */
+  const autoDetectedRef = useRef<string | null>(null);
+  /** 남은 지면도 같은 방식으로 한 번에 넣는다. */
+  const [allRest, setAllRest] = useState(false);
+  /** 한 번에 넣는 중인 남은 지면 수. */
+  const [autoPages, setAutoPages] = useState(0);
 
   /**
    * 지면을 **여러 장** 고르면 첫 장부터 차례로 처리한다. 한 장을 넣고 나면(그대로 넣기·
@@ -151,20 +176,21 @@ export default function BatchSplitPanel({
    */
   // 뒤에서 저장 중일 때 탭을 닫으면 아직 안 넣은 조각이 사라진다 — 브라우저가 되묻게 한다.
   useEffect(() => {
-    if (bg.pending === 0) return;
+    if (bg.pending === 0 && autoPages === 0) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [bg.pending]);
+  }, [bg.pending, autoPages]);
 
   async function pick(list: FileList | null | undefined) {
     const files = Array.from(list ?? []);
     if (files.length === 0) return;
     setError(null);
     setTotalPages(files.length);
+    if (unlimited) files.forEach((f) => void prefetchDetect(f).catch(() => undefined));
     await loadFrom(files);
   }
 
@@ -173,6 +199,7 @@ export default function BatchSplitPanel({
     const files = Array.from(list ?? []);
     if (moreRef.current) moreRef.current.value = "";
     if (files.length === 0) return;
+    if (unlimited) files.forEach((f) => void prefetchDetect(f).catch(() => undefined));
     if (!pageImage) {
       setTotalPages(files.length);
       await loadFrom(files);
@@ -228,12 +255,12 @@ export default function BatchSplitPanel({
   }
 
   /** 지금 지면을 끝냈다(또는 건너뛴다) — 다음 지면이 있으면 이어서 연다. */
-  function nextPage() {
+  function nextPage(stop = false) {
     setPieces([]);
     setPicked(new Set());
     setBoxes([]);
     setUsedModel(null);
-    if (queue.length > 0) {
+    if (!stop && queue.length > 0) {
       void loadFrom(queue);
       return;
     }
@@ -339,6 +366,76 @@ export default function BatchSplitPanel({
     return enhanced.length <= MAX_UPLOAD_CHARS ? enhanced : last;
   }
 
+  /** 지면 한 장의 영역 찾기를 서버 대기열에 넣는다(이미 넣었으면 그것). 원본을 못 열면 실패 — 지면을 열 때 다시 찾는다. */
+  function prefetchDetect(file: File): Promise<Found> {
+    const had = prefetchRef.current.get(file);
+    if (had) return had;
+    const promise = new Promise<Found>((resolve, reject) => {
+      const run = async () => {
+        try {
+          const d = await loadDrawableFromFile(file);
+          let image: string;
+          try {
+            image = await detectImage({ img: d.src as HTMLImageElement | ImageBitmap, width: d.width, height: d.height, degraded: false, revoke: d.close });
+          } finally {
+            d.close();
+          }
+          let queued = () => {};
+          const inLine = new Promise<void>((r) => (queued = r));
+          void askDetect(image, `지면 자리 찾기 · ${file.name}`, () => queued())
+            .then(resolve, reject)
+            .finally(() => queued());
+          await inLine;
+        } catch (err) {
+          reject(err);
+        }
+      };
+      prefetchChainRef.current = prefetchChainRef.current.then(run, run);
+    });
+    promise.catch(() => undefined);
+    prefetchRef.current.set(file, promise);
+    return promise;
+  }
+
+  async function askDetect(image: string, label: string, onQueued?: () => void): Promise<Found> {
+    // **서버 대기열에서 찾는다**(`runAiTask` — 대기열 패널에 뜬다).
+    const { result } = await runAiTask<{ problems?: DetectedProblem[]; model?: string }>("detect", {
+      label,
+      images: [image],
+      params: { mode: "pages" },
+      onQueued,
+    });
+    return { problems: result.problems ?? [], model: result.model ?? null };
+  }
+
+  /**
+   * 찾은 자리로 조각을 만든다 — **테두리는 사진이 정한다**(`snapBoxes.ts`). 모델은 어느 문제가 어디쯤인지는 잘 알지만
+   * 테두리가 1~2% 어긋난다(지면을 줄여 본다). 변마다 가까운 흰 띠에 붙여 잘린 줄·남는 여백을 없앤다. 못 하면 그대로 간다.
+   * 단을 넘어 이어진 문제는 조각을 **읽는 차례대로 세로로 이어 붙인다.**
+   */
+  async function piecesFrom(source: PageSource, problems: DetectedProblem[]): Promise<{ pieces: Piece[]; snapped: number }> {
+    let found = problems;
+    const map = inkMapFromImage(source.img, source.width, source.height);
+    let snappedCount = 0;
+    if (map) {
+      const res = snapBoxes(map, found.flatMap((p) => p.boxes));
+      snappedCount = res.changed;
+      let k = 0;
+      found = found.map((p) => ({ ...p, boxes: p.boxes.map(() => res.boxes[k++]) }));
+    }
+    const img = source.img;
+    const pieces: Piece[] = await Promise.all(
+      found.map(async (prob) => ({
+        id: crypto.randomUUID(),
+        crop: await stitchVertically(prob.boxes.map((b) => cutBox(img, b, PAD))),
+        parts: prob.boxes.length,
+        boxes: prob.boxes,
+        pad: PAD,
+      })),
+    );
+    return { pieces, snapped: snappedCount };
+  }
+
   async function detect() {
     if (!pageImage) return;
     setBusy("사진을 여는 중...");
@@ -357,16 +454,15 @@ export default function BatchSplitPanel({
       // 영역 찾기와 자르기를 나눠 둔다. 한 덩어리로 감싸면 자르다 난 오류까지
       // "문제 영역 인식 실패"로 보여서 어디가 잘못됐는지 알 수 없다.
       let found: DetectedProblem[];
-      setBusy("문제 영역을 찾는 중...");
+      setBusy("luna 가 문제 영역을 찾는 중...");
       try {
-        // **서버 대기열에서 찾는다**(`runAiTask` — 대기열 패널에 뜬다).
-        const { result: json } = await runAiTask<{ problems?: DetectedProblem[]; model?: string }>("detect", {
-          label: "지면에서 문제 자리 찾기",
-          images: [await detectImage(source)],
-          params: { mode: "pages" },
-        });
-        found = json.problems ?? [];
-        setUsedModel(json.model ?? null);
+        // 고를 때 미리 넣어 둔 것이 있으면 그 결과를 기다린다(대개 이미 끝나 있다). 미리 못 찾았으면 지금 찾는다.
+        const pre = pageFile ? prefetchRef.current.get(pageFile) : undefined;
+        let got: Found | null = null;
+        if (pre) got = await pre.catch(() => null);
+        if (!got) got = await askDetect(await detectImage(source), "지면에서 문제 자리 찾기");
+        found = got.problems;
+        setUsedModel(got.model);
       } catch (err) {
         setError(err instanceof Error ? err.message : "문제 영역 인식에 실패했습니다.");
         return;
@@ -377,31 +473,10 @@ export default function BatchSplitPanel({
         return;
       }
 
-      // **테두리는 사진이 정한다**(`snapBoxes.ts`) — 모델은 어느 문제가 어디쯤인지는 잘 알지만 테두리가 1~2%
-      // 어긋난다(지면을 줄여 본다). 변마다 가까운 흰 띠에 붙여 잘린 줄·남는 여백을 없앤다. 못 하면 그대로 간다.
-      const map = inkMapFromImage(source.img, source.width, source.height);
-      let snappedCount = 0;
-      if (map) {
-        const res = snapBoxes(map, found.flatMap((p) => p.boxes));
-        snappedCount = res.changed;
-        let k = 0;
-        found = found.map((p) => ({ ...p, boxes: p.boxes.map(() => res.boxes[k++]) }));
-      }
-      setSnapped(snappedCount);
-
       setBusy(`영역 ${found.length}개를 자르는 중...`);
       try {
-        const img = source.img;
-        // 단을 넘어 이어진 문제는 조각을 **읽는 차례대로 세로로 이어 붙인다.**
-        const next: Piece[] = await Promise.all(
-          found.map(async (prob) => ({
-            id: crypto.randomUUID(),
-            crop: await stitchVertically(prob.boxes.map((b) => cutBox(img, b, PAD))),
-            parts: prob.boxes.length,
-            boxes: prob.boxes,
-            pad: PAD,
-          })),
-        );
+        const { pieces: next, snapped: n } = await piecesFrom(source, found);
+        setSnapped(n);
         setPieces(next);
         setPicked(new Set());
         setBoxes([]);
@@ -415,6 +490,46 @@ export default function BatchSplitPanel({
       source.revoke();
       setBusy(null);
     }
+  }
+
+  // 무제한 계정은 지면을 열자마자 luna 가 찾은 자리로 자른다 — 누를 것 없이 확인하고 넘기기만 하면 된다.
+  useEffect(() => {
+    if (!unlimited || !pageImage || pieces.length > 0 || boxes.length > 0) return;
+    if (autoDetectedRef.current === pageImage) return;
+    autoDetectedRef.current = pageImage;
+    void detect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageImage]);
+
+  /**
+   * **남은 지면을 한 번에 넣는다**(사용자 — "손이 안 가게"). 지면마다 luna 가 찾은 자리(미리 넣어 둔 것)로 잘라 같은 방식으로
+   * 저장 줄에 넣는다. 화면은 곧바로 비워지고 뒤에서 돈다. 못 찾은 지면은 건너뛰고 알린다(손으로 다시 올리면 된다).
+   */
+  async function processRestPages(kind: "asis" | "ai", files: File[], firstPageNo: number) {
+    setAutoPages(files.length);
+    const failed: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const pageTag = `지면 ${firstPageNo + i} · `;
+      try {
+        if (isHeicFile(file)) throw new Error("HEIC");
+        const got = await prefetchDetect(file);
+        if (got.problems.length === 0) throw new Error("문제 자리를 못 찾음");
+        const d = await loadDrawableFromFile(file);
+        let made: Piece[];
+        try {
+          made = (await piecesFrom({ img: d.src as HTMLImageElement | ImageBitmap, width: d.width, height: d.height, degraded: false, revoke: d.close }, got.problems)).pieces;
+        } finally {
+          d.close();
+        }
+        setBg((b) => ({ ...b, pending: b.pending + made.length }));
+        bgRef.current = bgRef.current.then(() => runBatch(kind, made, pageTag)).catch(() => undefined);
+      } catch (err) {
+        failed.push(`${file.name}(${err instanceof Error ? err.message : "실패"})`);
+      }
+      setAutoPages((n) => Math.max(0, n - 1));
+    }
+    if (failed.length) setError(`자동으로 넣지 못한 지면: ${failed.join(", ")} — 다시 올려 손으로 자르거나 다시 찾아 주세요.`);
   }
 
   /**
@@ -517,6 +632,13 @@ export default function BatchSplitPanel({
     bgRef.current = bgRef.current
       .then(() => runBatch(kind, batch, pageTag))
       .catch(() => undefined);
+    if (allRest && unlimited && queue.length > 0) {
+      const rest = queue;
+      setQueue([]);
+      nextPage(true);
+      void processRestPages(kind, rest, page + 1);
+      return;
+    }
     // 넘긴 조각은 화면에서 뺀다(같은 것을 두 번 넣지 않게). 다음 지면이 있으면 곧바로 연다.
     nextPage();
   }
@@ -651,7 +773,7 @@ export default function BatchSplitPanel({
             size="xs"
             className="ml-auto"
             disabled={busy !== null}
-            onClick={nextPage}
+            onClick={() => nextPage()}
           >
             {queue.length > 0 ? "이 지면 건너뛰기" : "지면 닫기"}
           </Button>
@@ -739,6 +861,22 @@ export default function BatchSplitPanel({
         </div>
       )}
 
+      {unlimited && pieces.length > 0 && queue.length > 0 && (
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={allRest}
+            onChange={(e) => setAllRest(e.target.checked)}
+            className="h-4 w-4 accent-blue-600"
+          />
+          남은 지면 {queue.length}장도 같은 방식으로 한 번에 넣기 (luna 가 찾은 자리대로)
+        </label>
+      )}
+      {autoPages > 0 && (
+        <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          남은 지면 {autoPages}장을 luna 가 찾은 자리대로 자르는 중이에요 — 창은 닫지 마세요.
+        </p>
+      )}
       {busy && <p className="text-xs text-slate-500">{busy}</p>}
       {!busy && usedModel && pieces.length > 0 && (
         <p className="text-[11px] text-slate-400">

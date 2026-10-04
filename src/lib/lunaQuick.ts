@@ -12,9 +12,9 @@
 import { callOpenAIVision, OPENAI_DETECT_MODEL, type DetectUsage } from "./detectProblems";
 import type { ProblemBox } from "./problemBoxes";
 
-/** 자동 자르기의 추론 강도. 재배포 없이 `OPENAI_CROP_EFFORT`(기본 low, `default` 면 안 보냄). */
+/** 자동 자르기의 추론 강도. 재배포 없이 `OPENAI_CROP_EFFORT`(기본 high — 사용자 "luna 가 매우 정확하게", `default` 면 안 보냄). */
 const CROP_EFFORT = (() => {
-  const v = (process.env.OPENAI_CROP_EFFORT ?? "low").trim();
+  const v = (process.env.OPENAI_CROP_EFFORT ?? "high").trim();
   return v === "" || v === "default" ? undefined : v;
 })();
 
