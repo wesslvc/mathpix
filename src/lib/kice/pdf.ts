@@ -882,25 +882,38 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   };
 
   /**
-   * 원래 번호를 흰 네모로 덮고 그 자리에 새 번호를 쓴다. 글자 크기는 원래 번호의 숫자 높이에 맞추고(숫자는 글자
-   * 크기의 약 0.72), 글자 줄은 원래 번호의 아래 끝에 맞춘다. 새 번호가 더 길면(3 → 12) 덮은 자리 안에 들어가게
-   * 줄인다(70% 까지) — 뒤의 본문을 덮으면 안 된다. 굵게는 본문 조판과 같은 식(조금 어긋나게 두 번)으로 흉내 낸다.
+   * 원래 번호를 흰 네모로 덮고 그 자리에 새 번호를 쓴다. **글자 크기는 문서 전체가 하나다**(`renumberSize`, 사용자 — "다 크기가
+   * 제각각인 게 별론데"): 문제마다 원래 번호 높이에 맞추면 그림 배율이 달라 새 번호 크기가 들쭉날쭉해진다. 글자 줄만 원래 번호의
+   * 아래 끝에 맞춘다. 새 번호가 원래보다 넓으면(3 → 12) 흰 네모를 늘리되 **뒤 글자 앞까지만**(`room`) — 그 크기는 아래에서
+   * 모든 문제에 들어가도록 고른다. 굵게는 본문 조판과 같은 식(조금 어긋나게 두 번)으로 흉내 낸다.
    */
+  let renumberSize = 10.5;
+  const coverGeom = async (it: Placed, cover: NumberCover) => {
+    const b = cover.box;
+    const label = await fontForText(BODY_FONT, `${cover.no}.`);
+    const unit = label.font.widthOfTextAtSize(label.text, 1) * 1.03;
+    const inset = Math.min(1, b.w * it.w * 0.1);
+    const roomPt = Math.max(b.room, b.w) * it.w - inset;
+    const leadPt = (b.lead ?? 0) * it.w;
+    return { label, unit, inset, roomPt, leadPt };
+  };
   const drawNumberCover = async (page: PDFPage, it: Placed, cover: NumberCover) => {
     const b = cover.box;
+    const { label, unit, inset, roomPt, leadPt } = await coverGeom(it, cover);
+    // 정해 둔 크기로도 안 들어가는 것만(아주 좁은 자리) 그 하나를 줄인다.
+    // 덮는 네모보다 키 큰 숫자는 그리지 않는다(숫자 높이 ≈ 글자 크기의 0.72) — 위아래 글자에 닿으면 안 된다.
+    const size = Math.min(renumberSize, (roomPt + leadPt) / unit, (b.h * it.h) / 0.72);
+    const tw = unit * size;
     const rx = it.x + b.x * it.w;
     const ry = it.y + b.y * it.h;
-    const rw = b.w * it.w;
     const rh = b.h * it.h;
-    page.drawRectangle({ x: rx, y: flip(ry + rh), width: rw, height: rh, color: rgb(1, 1, 1) });
-    const label = await fontForText(BODY_FONT, `${cover.no}.`);
-    const digitH = b.line * it.h;
-    let size = digitH / 0.72;
-    const room = rw;
-    const tw = label.font.widthOfTextAtSize(label.text, size);
-    if (tw > room) size *= Math.max(room / tw, 0.7);
+    // 오른쪽(뒤 글자 앞까지)에 들어가면 원래 자리에서 시작하고, 안 들어가면 그만큼 왼쪽 여백으로 내어 쓴다.
+    const shift = Math.min(leadPt, Math.max(0, tw - roomPt));
+    const tx = rx + inset - shift;
+    const left = Math.min(rx, tx - inset);
+    const right = Math.max(rx + b.w * it.w, Math.min(tx + tw + size * 0.04, rx + inset + roomPt));
+    page.drawRectangle({ x: left, y: flip(ry + rh), width: right - left, height: rh, color: rgb(1, 1, 1) });
     const baseY = flip(it.y + b.base * it.h);
-    const tx = rx + Math.min(digitH * 0.12, rw * 0.1);
     for (const dx of [0, size * 0.03]) {
       page.drawText(label.text, { x: tx + dx, y: baseY, size, font: label.font, color: rgb(0, 0, 0) });
     }
@@ -977,6 +990,25 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     : spec.pagePattern === "auto"
       ? layoutAuto(images, spec.frames)
       : layoutPages(images, spec.frames, pattern.length ? pattern : [4]);
+  // 새 번호 크기 — 원래 번호 숫자 높이(쪽에 놓인 크기)의 가운데 값으로 한 번만 정한다(숫자 높이 ≈ 글자 크기의 0.72).
+  {
+    const heights = pages
+      .flatMap((p) => p.items)
+      .filter((it) => it.cover)
+      .map((it) => it.cover!.box.line * it.h)
+      .sort((a, b) => a - b);
+    if (heights.length) {
+      const mid = heights[Math.floor(heights.length / 2)];
+      let size = Math.min(14, Math.max(8, mid / 0.72));
+      // 그다음 **모든 자리에 들어가는 크기**로 낮춘다(3 → 12 처럼 넓어지는 자리 때문에) — 너무 작아지지는 않게 7pt 까지.
+      for (const it of pages.flatMap((p) => p.items)) {
+        if (!it.cover) continue;
+        const { unit, roomPt, leadPt } = await coverGeom(it, it.cover);
+        size = Math.min(size, (roomPt + leadPt) / unit);
+      }
+      renumberSize = Math.max(7, size);
+    }
+  }
   const answers = (spec.answers ?? []).filter((a) => a.answer.trim() !== "");
   /**
    * 정답표를 미리 짠다 — **쪽수를 알아야 쪽번호 상자에 찍을 수 있다.**

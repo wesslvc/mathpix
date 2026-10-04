@@ -89,8 +89,6 @@ export type KiceItem = {
   source?: string;
   /** 국어 지문·문제 묶음. 국어 모드로 넣은 것에만 있다. */
   korean?: KoreanMeta | null;
-  /** 원래 문제 번호(번호를 다시 매길 때 그림 속 번호 자리를 찾는 데 자릿수를 쓴다). */
-  no?: number;
 };
 
 type Props = {
@@ -212,14 +210,15 @@ export default function KiceExportPanel({ title, items }: Props) {
     }
     const covers = new Map<number, NumberCover>();
     const newNo = new Map<number, number>();
+    order.forEach((i, k) => newNo.set(i, k + 1));
+    // 번호 자리는 luna 가 찾는다(대기열 없이 곧바로, 토큰 0). luna 는 동시에 많이 받으므로 한꺼번에 보낸다.
+    const boxes = await Promise.all(order.map((i) => findNumberBox(pngs[i], items[i].label || `${newNo.get(i)}번`)));
     const missed: number[] = [];
-    for (const [k, i] of order.entries()) {
-      newNo.set(i, k + 1);
-      const digits = items[i].no ? String(items[i].no).length : undefined;
-      const box = await findNumberBox(pngs[i], digits);
+    order.forEach((i, k) => {
+      const box = boxes[k];
       if (box) covers.set(i, { box, no: k + 1 });
       else missed.push(k + 1);
-    }
+    });
     return { order, covers, newNo, missed };
   }
 
@@ -239,7 +238,7 @@ export default function KiceExportPanel({ title, items }: Props) {
       const renum = doRenumber ? await planRenumber(pngs) : null;
       if (renum?.missed.length) {
         setNotice(
-          `${renum.missed.join(", ")}번은 그림에서 원래 번호 자리를 못 찾아 번호를 덮지 못했어요 — 정답표는 새 번호로 나갑니다.`,
+          `${renum.missed.join(", ")}번은 luna 가 그림에서 원래 번호를 못 찾아 덮지 못했어요 — 정답표는 새 번호로 나갑니다.`,
         );
       }
 

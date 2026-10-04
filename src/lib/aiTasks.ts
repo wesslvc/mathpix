@@ -49,13 +49,14 @@ import {
   type ChatTurn,
 } from "./problemCompare";
 import { askSol, loadPatchImages } from "./problemLoopRun";
-import { cropOneProblem, lunaUsage } from "./lunaQuick";
+import { cropOneProblem, findProblemNumber, lunaUsage } from "./lunaQuick";
 import type { ProblemBox } from "./problemBoxes";
 
 export type TaskKind =
   | "ocr"
   | "detect"
   | "crop"
+  | "numberBox"
   | "title"
   | "grade"
   | "answerKey"
@@ -68,6 +69,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
   "ocr",
   "detect",
   "crop",
+  "numberBox",
   "title",
   "grade",
   "answerKey",
@@ -82,7 +84,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
  * 할 수 있다면"). 전부 luna(+고정 요금)라 몇 초~수십 초면 끝난다 — 줄에 넣고 일꾼을 깨우고 1~2초마다 묻는 왕복을 뺀다.
  * `/api/ai-direct` 가 같은 `run` 을 요청 안에서 돌린다. 화면(`aiTask.ts` 의 `DIRECT_KINDS`)도 같은 목록을 든다.
  */
-export const DIRECT_TASKS: readonly TaskKind[] = ["crop", "detect", "title", "grade", "answerKey"];
+export const DIRECT_TASKS: readonly TaskKind[] = ["crop", "numberBox", "detect", "title", "grade", "answerKey"];
 
 export type TaskCtx = {
   admin: SupabaseClient;
@@ -253,6 +255,28 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         return { ok: true, result: { box, model }, model, estKrw, note: box ? undefined : "문제 자리를 못 찾았어요" };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "자동 자르기에 실패했습니다.") };
+      }
+    },
+  },
+
+  // 문제 그림에서 인쇄된 번호 자리(luna, 추론 강도 low). 여러 실모를 묶어 PDF 로 뽑으며 1번부터 다시 매길 때 원래 번호를 덮을
+  // 자리다 — 자동 자르기처럼 토큰을 안 뗀다(원가 몇 원, 장부에 적는다).
+  numberBox: {
+    deposit: () => 0,
+    flat: true,
+    needsOpenAI: false,
+    images: { min: 1, max: 1 },
+    name: "번호 자리 찾기",
+    async run(ctx) {
+      try {
+        const { box, text, model, usage } = await findProblemNumber(ctx.images[0]);
+        const estKrw = usage ? gradingEstKrw(lunaUsage(usage), OPENAI_DETECT_MODEL) : undefined;
+        if (estKrw && usage) {
+          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 번호 자리 찾기", krw: estKrw, tokens: usage });
+        }
+        return { ok: true, result: { box, text, model }, model, estKrw, note: box ? undefined : "번호를 못 찾았어요" };
+      } catch (err) {
+        return { ok: false, error: errorMessage(err, "번호 자리를 찾지 못했습니다.") };
       }
     },
   },

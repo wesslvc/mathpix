@@ -71,6 +71,65 @@ export function parseBox(text: string): ProblemBox | null {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
+/** 번호 자리 찾기의 추론 강도. 재배포 없이 `OPENAI_NUMBER_EFFORT`(기본 low — 쉬운 일이다, `default` 면 안 보냄). */
+const NUMBER_EFFORT = (() => {
+  const v = (process.env.OPENAI_NUMBER_EFFORT ?? "low").trim();
+  return v === "" || v === "default" ? undefined : v;
+})();
+
+const NUMBER_PROMPT = `This image is ONE exam problem (Korean exam/workbook). Find the PRINTED problem number that starts the problem —
+e.g. "17.", "3.", "112.", "05", "[22]", a number in a small box or circle tag — usually at the top-left, right before the question text.
+
+- Return the box that tightly encloses ONLY that number and its punctuation (period, bracket, box/tag border). Do not include the
+  question text after it.
+- If there is no printed problem number at the start (the problem begins directly with text such as "밑줄 친 ㉠…" or "가. …"),
+  return null. Choice markers (①~⑤), page numbers, and numbers inside the question are NOT the problem number.
+- Coordinates: box_2d = [ymin, xmin, ymax, xmax], each normalised to 0~1000 of the image.
+
+- "text": the number exactly as printed, including its punctuation (e.g. "17.", "05", "[22]").
+
+answer as JSON object only: {"box_2d":[ymin,xmin,ymax,xmax],"text":"17."}  — or {"box_2d":null}.`;
+
+/** 문제 그림에서 인쇄된 문제 번호의 자리(0~1). 없으면 box 가 null. 여러 실모를 묶어 1번부터 다시 매길 때 쓴다. */
+export async function findProblemNumber(
+  dataUrl: string,
+): Promise<{ box: ProblemBox | null; text: string; model: string; usage?: DetectUsage }> {
+  let usage: DetectUsage | undefined;
+  const text = await callOpenAIVision(dataUrl, NUMBER_PROMPT, OPENAI_DETECT_MODEL, NUMBER_EFFORT, (u) => {
+    usage = u;
+  });
+  const box = parseNumberBox(text);
+  let printed = "";
+  try {
+    const raw = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")) as { text?: unknown };
+    if (typeof raw?.text === "string") printed = raw.text.trim().slice(0, 12);
+  } catch {
+    /* 글자는 덤이다 */
+  }
+  return { box, text: box ? printed : "", model: OPENAI_DETECT_MODEL, usage };
+}
+
+/** 번호는 작다 — 문제 자리용 `parseBox` 의 "너무 작으면 버림"을 쓰면 안 된다. 대신 너무 크면(번호일 리 없다) 버린다. */
+export function parseNumberBox(text: string): ProblemBox | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  } catch {
+    return null;
+  }
+  const b = (raw as { box_2d?: unknown } | null)?.box_2d;
+  if (!Array.isArray(b) || b.length !== 4) return null;
+  const [ymin, xmin, ymax, xmax] = b.map((n) => Number(n));
+  if (![ymin, xmin, ymax, xmax].every(Number.isFinite)) return null;
+  const c = (v: number) => Math.max(0, Math.min(1, v / 1000));
+  const x0 = c(Math.min(xmin, xmax));
+  const x1 = c(Math.max(xmin, xmax));
+  const y0 = c(Math.min(ymin, ymax));
+  const y1 = c(Math.max(ymin, ymax));
+  if (x1 - x0 <= 0 || y1 - y0 <= 0 || x1 - x0 > 0.4 || y1 - y0 > 0.4) return null;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
 export type StartQuality = "low" | "medium" | "high";
 
 const ASSESS_PROMPT = `This is one cropped exam problem (photo or scan). It will be redrawn as a clean printed image by an image

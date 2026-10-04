@@ -1,12 +1,12 @@
 // **문제 그림에서 원래 번호가 찍힌 자리를 찾는다**(2026-10-04, 사용자 — "여러 개로 묶으면 1번부터 번호를 새로 써,
-// 원래 번호 있던 자리에 번호를 덮어 버리는 거지"). 브라우저 전용(캔버스로 픽셀을 본다).
+// 원래 번호 있던 자리에 번호를 덮어 버리는 거지" → "니가 찾지 말고 LUNA 쓰면 어떰"). 브라우저 전용.
 //
-// 문제 그림은 둘 중 하나다 — 우리가 조판한 카드(맨 앞 문단이 굵은 "17." 로 시작) 아니면 통째로 다시 그린/오려 낸
-// 문제 그림(역시 번호가 왼쪽 위에 먼저 온다). 그래서 **첫 글자 줄의 첫 덩어리**를 번호로 본다:
-//   ① 위에서부터 잉크가 있는 첫 줄(왼쪽 60% 안)을 찾아 그 줄의 위아래 끝을 잰다.
-//   ② 그 줄에서 왼쪽부터 잉크를 따라가다 **띄어쓰기만큼 빈 틈**(줄 높이의 28%)이 나오면 거기까지가 번호다.
-//   ③ 모양을 확인한다 — 왼쪽 25% 안에서 시작하고, 폭이 그 자릿수에 맞아야 한다(번호가 아닌 낱말을 덮으면 안 된다).
-// 못 찾으면 null — 부르는 쪽이 그 문제는 번호를 안 바꾸고 알린다(엉뚱한 글자를 덮는 것보다 낫다).
+// ① **luna 가 번호 자리를 찾는다**(`numberBox` 작업 — 대기열 없이 곧바로, 토큰 0). 번호가 없는 문제("밑줄 친 ㉠…")는 null.
+// ② 우리는 그 네모를 **글자 덩어리로 확인한다**(`tightenNumberBox`) — 모델 좌표는 몇 픽셀씩 어긋나 그대로 덮으면 번호 끝이
+//    삐져나오거나 뒤 글자를 물어뜯는다. 번호를 남김없이 덮을 수 있을 때만 덮고, 조금이라도 애매하면 null.
+// null 이면 부르는 쪽이 그 문제는 번호를 안 바꾸고 알린다(원래 번호가 그대로 남는다 — 엉뚱한 글자를 덮는 것보다 낫다).
+
+import { runAiTask } from "@/lib/aiTask";
 
 export type NumberBox = {
   /** 그림 대비 비율(0~1). 덮을 네모(여유 포함). */
@@ -14,17 +14,27 @@ export type NumberBox = {
   y: number;
   w: number;
   h: number;
-  /** 원래 글자 줄의 아래 끝(그림 대비, 0~1) — 새 번호의 글자 줄을 여기에 맞춘다. */
+  /** 원래 번호 잉크의 아래 끝(그림 대비, 0~1) — 새 번호의 글자 줄을 여기에 맞춘다. */
   base: number;
-  /** 원래 글자 줄 높이(그림 대비, 0~1). 새 번호 글자 크기를 여기서 정한다. */
+  /** 원래 번호 잉크 높이(그림 대비, 0~1). */
   line: number;
+  /**
+   * 새 번호가 쓸 수 있는 폭(그림 폭 대비, 덮는 네모 왼쪽부터) — 바로 뒤 글자 앞까지. 새 번호가 더 길어도(3 → 12) 이 안에서
+   * 그리면 뒤 글자를 안 덮는다.
+   */
+  room: number;
+  /** 덮는 네모 왼쪽으로 비어 있는 폭(그림 폭 대비) — 새 번호가 넓으면 왼쪽 여백으로 조금 내어 쓴다. */
+  lead: number;
 };
 
-const SCAN_W = 900;
+type Box = { x: number; y: number; w: number; h: number };
 
-async function grayOf(png: Uint8Array): Promise<{ g: Uint8ClampedArray; w: number; h: number }> {
+/** luna 에 보내는 크기(긴 변). 카드 PNG 는 폭 1280 이라 거의 그대로 간다. */
+const SEND_DIM = 1600;
+
+async function openPng(png: Uint8Array) {
   const bmp = await createImageBitmap(new Blob([png.slice().buffer], { type: "image/png" }));
-  const k = Math.min(1, SCAN_W / bmp.width);
+  const k = Math.min(1, SEND_DIM / Math.max(bmp.width, bmp.height));
   const w = Math.max(1, Math.round(bmp.width * k));
   const h = Math.max(1, Math.round(bmp.height * k));
   const canvas = document.createElement("canvas");
@@ -38,115 +48,184 @@ async function grayOf(png: Uint8Array): Promise<{ g: Uint8ClampedArray; w: numbe
   const d = ctx.getImageData(0, 0, w, h).data;
   const g = new Uint8ClampedArray(w * h);
   for (let i = 0; i < w * h; i++) g[i] = (d[i * 4] * 299 + d[i * 4 + 1] * 587 + d[i * 4 + 2] * 114) / 1000;
-  return { g, w, h };
+  return { g, w, h, dataUrl: canvas.toDataURL("image/jpeg", 0.9) };
 }
 
-/** 픽셀 밝기 배열에서 번호 자리를 찾는다(테스트하기 쉽게 따로 둔다). `digits` = 원래 번호의 자릿수(모르면 3). */
-export function findNumberBoxIn(g: ArrayLike<number>, w: number, h: number, digits = 3): NumberBox | null {
-  const INK = 130;
-  const ink = (x: number, y: number) => g[y * w + x] < INK;
-  const scanR = Math.round(w * 0.6);
-  const rowInk = (y: number) => {
-    let n = 0;
-    for (let x = 0; x < scanR; x++) if (ink(x, y)) n++;
-    return n;
-  };
-  // ① 첫 글자 줄. 잡티(한두 점)는 건너뛴다.
-  const minRow = Math.max(2, Math.round(w * 0.002));
-  let y0 = -1;
-  // 그림 위쪽 40% 안에서 찾되, 한두 줄짜리 짧은 그림은 위 여백만으로 40% 를 넘으므로 폭의 30% 까지는 본다.
-  for (let y = 0; y < Math.min(h, Math.round(Math.max(h * 0.4, w * 0.3))); y++) {
-    if (rowInk(y) >= minRow) {
-      y0 = y;
-      break;
-    }
-  }
-  if (y0 < 0) return null;
-  let y1 = y0;
-  while (y1 + 1 < h && rowInk(y1 + 1) > 0) y1++;
-  const lineH = y1 - y0 + 1;
-  if (lineH < w * 0.008 || lineH > w * 0.12) return null;
+type Comp = { x0: number; y0: number; x1: number; y1: number; n: number; edge: boolean };
 
-  // ② 그 줄을 글자 덩어리로 가른다(빈 세로줄에서 끊는다). 덩어리마다 잉크의 위아래도 잰다.
-  const colInk = (x: number) => {
-    for (let y = y0; y <= y1; y++) if (ink(x, y)) return true;
-    return false;
-  };
-  type Blob = { x0: number; x1: number; top: number; bot: number };
-  const blobs: Blob[] = [];
-  for (let x = 0; x < w && blobs.length < 12; x++) {
-    if (!colInk(x)) continue;
-    const bx0 = x;
-    while (x + 1 < w && colInk(x + 1)) x++;
-    let top = y1;
-    let bot = y0;
-    for (let y = y0; y <= y1; y++) {
-      for (let xx = bx0; xx <= x; xx++) {
-        if (ink(xx, y)) {
-          if (y < top) top = y;
-          if (y > bot) bot = y;
-          break;
+/**
+ * luna 가 준 네모(0~1)를 **글자 덩어리 단위로** 확인해 덮을 자리를 정한다(테스트하기 쉽게 따로 둔다).
+ *
+ * 규칙은 하나다 — **번호를 남김없이 덮거나, 아예 손대지 않는다**(사용자 — "문제를 가리거나 원래 번호를 덜 가리는 등의 문제는
+ * 일으키면 안 되지"). 그래서 모델 좌표를 그대로 덮지 않고:
+ *  ① 근처의 잉크를 이어진 덩어리(8방향)로 나눈다. luna 네모에 닿는 덩어리가 번호다.
+ *  ② 번호 덩어리가 살펴본 창 끝까지 이어지면(밑줄·박스 테두리·그림에 붙은 것) 어디까지 덮을지 모르므로 손대지 않는다.
+ *  ③ 덩어리 수가 luna 가 읽은 글자 수(`text`)보다 적으면 luna 네모가 글자를 잘라 먹은 것이다 — 바로 옆의 숫자 크기 덩어리를
+ *     차례로 더해 맞추고, 그래도 안 맞으면 손대지 않는다(번호 일부가 남는 것보다 낫다).
+ *  ④ 덮을 네모(여유 포함)가 번호 아닌 덩어리에 조금이라도 걸치면 여유를 줄이고, 그래도 걸치면 손대지 않는다.
+ *  ⑤ 새 번호가 넓을 때 내어 쓸 수 있는 폭도 덩어리로 잰다 — 그 줄에서 다음 글자 앞 / 앞 글자 뒤까지.
+ */
+export function tightenNumberBox(
+  g: ArrayLike<number>,
+  w: number,
+  h: number,
+  box: Box,
+  text = "",
+): NumberBox | null {
+  const INK = 140;
+  const bx0 = box.x * w;
+  const by0 = box.y * h;
+  const bx1 = (box.x + box.w) * w;
+  const by1 = (box.y + box.h) * h;
+  const bh = Math.max(4, by1 - by0);
+  // 살펴볼 창: luna 네모 둘레로 넉넉히(오른쪽은 다음 글자까지 보이게 더).
+  const rx0 = Math.max(0, Math.floor(bx0 - bh * 2));
+  const rx1 = Math.min(w - 1, Math.ceil(bx1 + bh * 3));
+  const ry0 = Math.max(0, Math.floor(by0 - bh * 1.2));
+  const ry1 = Math.min(h - 1, Math.ceil(by1 + bh * 1.2));
+  const rw = rx1 - rx0 + 1;
+  const rh = ry1 - ry0 + 1;
+  const label = new Int32Array(rw * rh);
+  const comps: Comp[] = [];
+  const stack: number[] = [];
+  for (let y = 0; y < rh; y++) {
+    for (let x = 0; x < rw; x++) {
+      const i = y * rw + x;
+      if (label[i] || g[(y + ry0) * w + (x + rx0)] >= INK) continue;
+      const id = comps.length + 1;
+      const c: Comp = { x0: x, y0: y, x1: x, y1: y, n: 0, edge: false };
+      label[i] = id;
+      stack.push(i);
+      while (stack.length) {
+        const j = stack.pop()!;
+        const cx = j % rw;
+        const cy = (j - cx) / rw;
+        c.n++;
+        if (cx < c.x0) c.x0 = cx;
+        if (cx > c.x1) c.x1 = cx;
+        if (cy < c.y0) c.y0 = cy;
+        if (cy > c.y1) c.y1 = cy;
+        if (cx === 0 || cy === 0 || cx === rw - 1 || cy === rh - 1) c.edge = true;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= rw || ny >= rh) continue;
+            const k = ny * rw + nx;
+            if (label[k] || g[(ny + ry0) * w + (nx + rx0)] >= INK) continue;
+            label[k] = id;
+            stack.push(k);
+          }
         }
       }
+      // 창 좌표 → 그림 좌표
+      c.x0 += rx0;
+      c.x1 += rx0;
+      c.y0 += ry0;
+      c.y1 += ry0;
+      comps.push(c);
     }
-    blobs.push({ x0: bx0, x1: x, top, bot });
   }
-  if (!blobs.length || blobs[0].x0 > w * 0.25) return null;
-  const x0 = blobs[0].x0;
-  // 번호는 마침표에서 끝난다 — **마침표**(작고 줄 아래쪽에 붙은 점)가 숫자 덩어리 뒤 몇 칸 안에 나오면 거기까지.
-  // 숫자 '1' 은 양옆이 많이 비어 있어 "빈 틈 = 띄어쓰기"로 자르면 112 가 1 에서 끊긴다(시험에서 그랬다).
-  const isDot = (b: Blob) => b.bot - b.top + 1 <= lineH * 0.3 && b.top > y0 + lineH * 0.5;
-  let end = -1;
-  for (let i = 1; i < Math.min(blobs.length, digits + 3); i++) {
-    if (isDot(blobs[i])) {
-      end = i;
-      break;
-    }
-    if (blobs[i].bot - blobs[i].top + 1 < lineH * 0.4) break; // 숫자가 아닌 작은 것 — 마침표 찾기를 그만둔다
+  // 아주 작은 점(잡티)은 덮을지 말지에 끼지 않는다 — 마침표보다 훨씬 작은 것만(한 변이 줄 높이의 5% 미만) 버린다.
+  const tiny = (c: Comp) => c.n < Math.max(2, (bh * 0.05) ** 2);
+  const touches = (c: Comp, m: number) =>
+    c.x1 >= bx0 - m && c.x0 <= bx1 + m && c.y1 >= by0 - m && c.y0 <= by1 + m;
+  const m0 = bh * 0.12;
+  // 가운데가 luna 네모 안에 드는 덩어리만 번호로 본다 — 네모가 뒤 글자에 살짝 걸쳤다고 그 글자까지 덮으면 안 된다.
+  const centered = (c: Comp) => {
+    const mx = (c.x0 + c.x1) / 2;
+    const my = (c.y0 + c.y1) / 2;
+    return mx >= bx0 - m0 && mx <= bx1 + m0 && my >= by0 - m0 && my <= by1 + m0;
+  };
+  const want = [...text.replace(/\s/g, "")].length;
+  // luna 가 번호 글자를 안 알려 주면 몇 개를 덮어야 하는지 모른다 — 손대지 않는다.
+  if (want === 0) return null;
+  let mine = comps.filter((c) => !tiny(c) && touches(c, m0) && centered(c));
+  if (!mine.length) return null;
+  // ② 끝없이 이어지는 것(밑줄·테두리·그림)에 닿았으면 손대지 않는다.
+  if (mine.some((c) => c.edge || c.x1 - c.x0 > bh * 2.5 || c.y1 - c.y0 > bh * 1.8)) return null;
+  const others = () => comps.filter((c) => !tiny(c) && !mine.includes(c));
+  const union = () => ({
+    x0: Math.min(...mine.map((c) => c.x0)),
+    y0: Math.min(...mine.map((c) => c.y0)),
+    x1: Math.max(...mine.map((c) => c.x1)),
+    y1: Math.max(...mine.map((c) => c.y1)),
+  });
+  // ③ luna 가 읽은 글자 수만큼 덩어리가 있어야 한다(괄호·네모 표지가 있으면 덩어리가 더 많을 수 있어 "모자랄 때"만 본다).
+  //    네모 밖으로 가운데가 나간 숫자(luna 가 잘라 먹은 것)는 여기서 다시 붙는다.
+  let guard = 0;
+  while (mine.length < want && guard++ < 4) {
+    const u = union();
+    const H = u.y1 - u.y0 + 1;
+    const near = others()
+      .filter((c) => c.y1 >= u.y0 && c.y0 <= u.y1) // 같은 줄
+      .filter((c) => c.y1 - c.y0 + 1 <= H * 1.15 && c.x1 - c.x0 + 1 <= H * 0.9) // 숫자·마침표만 한 크기
+      .map((c) => ({ c, gap: c.x0 > u.x1 ? c.x0 - u.x1 : u.x0 - c.x1 }))
+      .filter((o) => o.gap > 0 && o.gap <= H * 0.45)
+      .sort((a, b) => a.gap - b.gap)[0];
+    if (!near || near.c.edge) return null;
+    mine = [...mine, near.c];
   }
-  if (end < 0) {
-    // 마침표가 없는 번호(05 윗글을…) — 띄어쓰기만큼 빈 틈에서 끊는다.
-    const gapNeed = Math.max(2, Math.round(lineH * 0.28));
-    end = 0;
-    while (end + 1 < blobs.length && blobs[end + 1].x0 - blobs[end].x1 - 1 < gapNeed) end++;
+  if (mine.length < want) return null;
+  // 너무 많이 잡혔으면(낱말을 번호로 잘못 짚었을 때 — 자모 조각이 여럿 나온다) 손대지 않는다. 괄호·네모 표지만큼은 봐준다.
+  if (mine.length > want + 2) return null;
+  // 숫자다운가 — 다른 덩어리를 통째로 감싸는 표지(네모·동그라미)와 마침표는 빼고, 나머지는 한글 음절보다 좁아야 한다.
+  {
+    const encloses = (a: Comp) => mine.every((c) => c === a || (c.x0 >= a.x0 && c.x1 <= a.x1 && c.y0 >= a.y0 && c.y1 <= a.y1));
+    const body = mine.filter((c) => !(mine.length > 1 && encloses(c)));
+    const H = Math.max(...body.map((c) => c.y1 - c.y0 + 1));
+    const glyphs = body.filter((c) => c.y1 - c.y0 + 1 > H * 0.35); // 마침표·쉼표 빼고
+    if (!glyphs.length) return null;
+    if (glyphs.some((c) => c.x1 - c.x0 + 1 > H * 0.85)) return null;
+    // 숫자는 서로 키가 같다(±15%) — 한글 음절이 자모로 쪼개진 덩어리(ㄱ·ㅏ)는 키가 다르다.
+    const hs = glyphs.map((c) => c.y1 - c.y0 + 1);
+    if (Math.min(...hs) < Math.max(...hs) * 0.85) return null;
+    // 숫자 덩어리 수가 luna 가 읽은 숫자 수와 같아야 한다("가." 를 "7." 로 읽었으면 덩어리가 둘이라 걸린다).
+    const digits = (text.match(/[0-9]/g) ?? []).length;
+    if (digits > 0 && glyphs.length !== digits) return null;
   }
-  // 숫자답지 않으면 번호가 아니다 — 앞 글자를 숫자로 잘못 보고 덮으면 문제 글이 지워진다. 숫자는 한글 음절보다 좁고
-  // (줄 높이의 72% 아래), 키가 크고(60% 넘게), **서로 키가 같다**(±15%). 한글 음절이 자모로 쪼개진 덩어리
-  // (ㅇ·ㅣ, ㄱ·ㅏ)는 키가 서로 달라 여기서 걸러진다.
-  const digitBlobs = blobs.slice(0, end + 1).filter((b) => !isDot(b));
-  if (!digitBlobs.length || digitBlobs.length > digits + 1) return null;
-  const heights = digitBlobs.map((b) => b.bot - b.top + 1);
-  const hiH = Math.max(...heights);
-  const loH = Math.min(...heights);
-  if (hiH < lineH * 0.6 || loH < hiH * 0.85) return null;
-  if (digitBlobs.some((b) => b.x1 - b.x0 + 1 > lineH * 0.72)) return null;
-  const x1 = blobs[end].x1;
-  const cw = x1 - x0 + 1;
-  // ③ 번호다운가 — 자릿수 + 마침표 폭 안쪽이어야 한다. 너무 가늘면(세로줄·괄호 하나) 번호가 아니다.
-  if (cw > (digits + 1) * 0.8 * lineH || cw < lineH * 0.25) return null;
-  // 덮는 높이는 번호에 맞춘다(줄의 다른 글자가 더 클 수 있다).
-  const cy0 = Math.min(...blobs.slice(0, end + 1).map((b) => b.top));
-  const cy1 = Math.max(...blobs.slice(0, end + 1).map((b) => b.bot));
-  const pad = Math.max(1, Math.round(lineH * 0.12));
-  const bx0 = Math.max(0, x0 - pad);
-  const by0 = Math.max(0, Math.min(cy0, y0) - pad);
-  const bx1 = Math.min(w - 1, x1 + pad);
-  const by1 = Math.min(h - 1, Math.max(cy1, y1) + pad);
+
+  const u = union();
+  const lineH = u.y1 - u.y0 + 1;
+  const hits = (x0: number, y0: number, x1: number, y1: number) =>
+    others().some((c) => c.x1 >= x0 && c.x0 <= x1 && c.y1 >= y0 && c.y0 <= y1);
+  // ④ 여유를 주되 남의 글자에 걸치면 줄이고, 여유 없이도 걸치면 손대지 않는다.
+  let pad = Math.max(1, Math.round(lineH * 0.12));
+  while (pad > 0 && hits(u.x0 - pad, u.y0 - pad, u.x1 + pad, u.y1 + pad)) pad--;
+  if (hits(u.x0 - pad, u.y0 - pad, u.x1 + pad, u.y1 + pad)) return null;
+  const cx0 = Math.max(0, u.x0 - pad);
+  const cy0 = Math.max(0, u.y0 - pad);
+  const cx1 = Math.min(w - 1, u.x1 + pad);
+  const cy1 = Math.min(h - 1, u.y1 + pad);
+  // ⑤ 같은 줄(덮는 네모의 위아래 안)에서 다음 글자 앞 / 앞 글자 뒤까지가 새 번호에 내줄 수 있는 폭이다.
+  const rowOthers = others().filter((c) => c.y1 >= cy0 && c.y0 <= cy1);
+  const keep = Math.max(1, Math.round(lineH * 0.15));
+  const nextX = Math.min(rx1 + 1, ...rowOthers.filter((c) => c.x0 > cx1).map((c) => c.x0));
+  const prevX = Math.max(rx0 - 1, ...rowOthers.filter((c) => c.x1 < cx0).map((c) => c.x1));
+  const roomEnd = Math.max(cx1 + 1, nextX - keep);
+  const leadStart = Math.min(cx0, prevX + 1 + keep);
   return {
-    x: bx0 / w,
-    y: by0 / h,
-    w: (bx1 - bx0 + 1) / w,
-    h: (by1 - by0 + 1) / h,
-    base: (cy1 + 1) / h,
-    line: (cy1 - cy0 + 1) / h,
+    x: cx0 / w,
+    y: cy0 / h,
+    w: (cx1 - cx0 + 1) / w,
+    h: (cy1 - cy0 + 1) / h,
+    base: (u.y1 + 1) / h,
+    line: lineH / h,
+    room: (roomEnd - cx0) / w,
+    lead: Math.max(0, cx0 - leadStart) / w,
   };
 }
 
-/** 문제 그림(PNG)에서 원래 번호 자리. 못 찾으면 null. */
-export async function findNumberBox(png: Uint8Array, digits?: number): Promise<NumberBox | null> {
+/** 문제 그림(PNG)에서 원래 번호 자리 — luna 가 찾고 잉크에 맞게 조인다. 못 찾으면 null. */
+export async function findNumberBox(png: Uint8Array, label: string): Promise<NumberBox | null> {
   try {
-    const { g, w, h } = await grayOf(png);
-    return findNumberBoxIn(g, w, h, digits);
+    const { g, w, h, dataUrl } = await openPng(png);
+    const { result } = await runAiTask<{ box: Box | null; text?: string }>("numberBox", {
+      label: `번호 자리 · ${label}`.slice(0, 100),
+      images: [dataUrl],
+    });
+    if (!result?.box) return null;
+    return tightenNumberBox(g, w, h, result.box, result.text ?? "");
   } catch {
     return null;
   }

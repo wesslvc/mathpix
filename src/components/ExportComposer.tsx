@@ -317,8 +317,6 @@ export default function ExportComposer({
           ...answerParts(problem, showPicked),
           source: problem.source,
           korean: problem.korean ?? null,
-          // 그림 속에 찍혀 있는 원래 번호(묶어 뽑을 때 `numberFor` 는 차례 번호라 쓰지 않는다).
-          no: problem.manualNumber ?? problem.origNumber ?? undefined,
         }))}
       />
     </div>
