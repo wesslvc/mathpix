@@ -1,8 +1,45 @@
 "use client";
 
 import { SolChat } from "@/components/SolChat";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useFigureJobs, type FigureJob, type OfferDiffs } from "./FigureJobsProvider";
+import {
+  dismissLocalTask,
+  getLocalTasks,
+  getLocalTasksServer,
+  subscribeLocalTasks,
+  type LocalTask,
+} from "@/lib/aiTask";
+
+/**
+ * **작업을 범주로 묶어 보인다**(2026-10-04, 사용자 — "지금은 작업이 다 같이 섞여 보이잖아, 범주화시켜 줘"). 누가 무엇을 하는지로
+ * 가른다: 그림을 그리는 일(돈·시간이 가장 많이 든다) · 지문 글자 옮기기 · sol 이 하는 일 · Mathpix 글자 인식 · luna 가 하는 빠른 일.
+ */
+type Category = "draw" | "passage" | "sol" | "mathpix" | "luna";
+const CATEGORY_ORDER: Category[] = ["draw", "passage", "sol", "mathpix", "luna"];
+const CATEGORY_LABEL: Record<Category, string> = {
+  draw: "AI 그리기",
+  passage: "지문 글자로 옮기기",
+  sol: "sol 작업 (조판·대화·지문)",
+  mathpix: "Mathpix 글자 인식",
+  luna: "luna 빠른 작업 (자르기·자리 찾기·채점·제목)",
+};
+const LUNA_TASKS = new Set(["crop", "detect", "title", "grade", "answerKey"]);
+function categoryOf(j: FigureJob): Category {
+  if (j.mode === "passage") return "passage";
+  if (j.mode !== "task") return "draw";
+  const t = j.stage ?? "";
+  if (t === "ocr") return "mathpix";
+  if (LUNA_TASKS.has(t)) return "luna";
+  return "sol";
+}
+const LOCAL_RUNNING: Record<string, string> = {
+  crop: "luna 가 문제 자리를 자르는 중",
+  detect: "luna 가 문제·지문 자리를 찾는 중",
+  title: "luna 가 지문 제목을 짓는 중",
+  grade: "luna 가 채점하는 중",
+  answerKey: "luna 가 답지를 읽는 중",
+};
 
 const STATUS_TEXT = {
   pending: "차례 기다리는 중",
@@ -169,7 +206,14 @@ export default function FigureJobsPanel() {
   // 수정은 기본이 **sol 과 대화**다(사용자 — "수정모드 때는 sol 과 LLM 형태로 대화해서 최종 확정"). 글로만 적어 바로 고치는 길도 남겨 둔다.
   const [patchMode, setPatchMode] = useState<"chat" | "text">("chat");
 
-  if (jobs.length === 0) return null;
+  // 대기열을 안 타고 곧바로 부른 luna 일들(화면 안에서만 산다).
+  const localTasks = useSyncExternalStore(subscribeLocalTasks, getLocalTasks, getLocalTasksServer);
+  // 범주마다 접기. luna 는 많고 금방 끝나서 처음엔 접어 둔다.
+  const [collapsed, setCollapsed] = useState<Set<Category>>(() => new Set<Category>(["luna"]));
+
+  if (jobs.length === 0 && localTasks.length === 0) return null;
+  const localRunning = localTasks.filter((t) => t.status === "running").length;
+  const localFailed = localTasks.filter((t) => t.status === "error").length;
 
   // medium 까지 해도 차이가 남아 **max 확인을 기다리는** 문제들. max 는 사용자가 확인해야만 돈다.
   const offers = jobs.filter((j) => j.status === "done" && j.stage === "max-offer");
@@ -239,7 +283,8 @@ export default function FigureJobsPanel() {
     return n > 0 ? `${n.toLocaleString()}토큰` : "추가 토큰 없음";
   }
 
-  const failed = jobs.filter((j) => j.status === "error").length;
+  const failed = jobs.filter((j) => j.status === "error").length + localFailed;
+  const busyCount = activeCount + localRunning;
   const activeJobs = jobs.filter((j) => j.status === "pending" || j.status === "running");
   // 줄 전체가 끝나기까지 어림(일반 계정은 한 번에 하나씩, 무제한 계정은 여러 개가 동시에).
   // 무제한 계정은 여러 개를 동시에 돌리므로 그만큼 나눈다(가장 긴 한 개보다 짧아질 수는 없다).
@@ -309,7 +354,7 @@ export default function FigureJobsPanel() {
           onClick={() => setOpen((v) => !v)}
           className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
         >
-          {activeCount > 0 ? (
+          {busyCount > 0 ? (
             <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
           ) : failed > 0 ? (
             <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
@@ -319,8 +364,8 @@ export default function FigureJobsPanel() {
             <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
           )}
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
-            {activeCount > 0
-              ? `AI 작업 ${activeCount}개 진행 중`
+            {busyCount > 0
+              ? `AI 작업 ${busyCount}개 진행 중`
               : failed > 0
                 ? `${failed}개 실패`
                 : offers.length > 0
@@ -352,101 +397,151 @@ export default function FigureJobsPanel() {
           </p>
         )}
         {open && (
-          <ul className="max-h-64 overflow-auto border-t border-slate-200">
-            {jobs.map((j) => (
-              <li
-                key={j.id}
-                className="flex items-start gap-2 border-b border-slate-100 px-3 py-2 last:border-b-0"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[11px] font-medium text-slate-700">
-                    {j.label}
-                  </p>
-                  <p
-                    className={`text-[11px] ${
-                      j.status === "error"
-                        ? "text-red-600"
-                        : j.status === "done"
-                          ? "text-emerald-700"
-                          : "text-slate-500"
-                    } ${j.status === "running" ? "animate-soft-pulse" : ""}`}
+          <ul className="max-h-80 overflow-auto border-t border-slate-200">
+            {CATEGORY_ORDER.map((cat) => {
+              const list = jobs.filter((j) => categoryOf(j) === cat);
+              const locals = cat === "luna" ? localTasks : [];
+              const n = list.length + locals.length;
+              if (n === 0) return null;
+              const running =
+                list.filter((j) => j.status === "running" || j.status === "pending").length +
+                locals.filter((t) => t.status === "running").length;
+              const errs = list.filter((j) => j.status === "error").length + locals.filter((t) => t.status === "error").length;
+              const isCollapsed = collapsed.has(cat);
+              return (
+                <li key={cat} className="border-b border-slate-200 last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCollapsed((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(cat)) next.delete(cat);
+                        else next.add(cat);
+                        return next;
+                      })
+                    }
+                    className="sticky top-0 z-10 flex w-full items-center gap-2 bg-slate-50 px-3 py-1.5 text-left"
                   >
-                    {statusText(j, topQuality)}
-                    {(j.status === "running" || j.status === "pending") && (
-                      <span className="text-slate-400"> · 예상 {formatWait(remainingSeconds(j))}</span>
+                    {running > 0 ? (
+                      <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+                    ) : errs > 0 ? (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
+                    ) : (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                     )}
-                  </p>
-                  {j.note && (
-                    <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{j.note}</p>
-                  )}
-                  {/* 어느 문제가 비쌌는지 보이게 한다. 캐시에 걸린 작업에는
-                      값이 없다 — 그때는 돈이 안 나갔다. */}
-                  {(typeof j.costUsd === "number" ||
-                    typeof j.chargedTokens === "number") && (
-                    <p className="mt-0.5 text-[10px] text-slate-400">
-                      {typeof j.chargedTokens === "number" &&
-                        `${j.chargedTokens}토큰`}
-                      {typeof j.costUsd === "number" && (
-                        <>
-                          {typeof j.chargedTokens === "number" && " · "}약 $
-                          {j.costUsd.toFixed(3)}
-                          {typeof j.costKrw === "number" &&
-                            ` (${j.costKrw.toLocaleString()}원)`}
-                        </>
+                    <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-600">
+                      {CATEGORY_LABEL[cat]}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-slate-400">
+                      {running > 0 ? `${running}개 진행 · ` : ""}
+                      {errs > 0 ? `실패 ${errs} · ` : ""}
+                      {n}개 {isCollapsed ? "▸" : "▾"}
+                    </span>
+                  </button>
+                  {!isCollapsed && (
+                    <ul>
+                      {list.map((j) => (
+                  <li
+                    key={j.id}
+                    className="flex items-start gap-2 border-b border-slate-100 px-3 py-2 last:border-b-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[11px] font-medium text-slate-700">
+                        {j.label}
+                      </p>
+                      <p
+                        className={`text-[11px] ${
+                          j.status === "error"
+                            ? "text-red-600"
+                            : j.status === "done"
+                              ? "text-emerald-700"
+                              : "text-slate-500"
+                        } ${j.status === "running" ? "animate-soft-pulse" : ""}`}
+                      >
+                        {statusText(j, topQuality)}
+                        {(j.status === "running" || j.status === "pending") && (
+                          <span className="text-slate-400"> · 예상 {formatWait(remainingSeconds(j))}</span>
+                        )}
+                      </p>
+                      {j.note && (
+                        <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{j.note}</p>
                       )}
-                    </p>
+                      {/* 어느 문제가 비쌌는지 보이게 한다. 캐시에 걸린 작업에는
+                          값이 없다 — 그때는 돈이 안 나갔다. */}
+                      {(typeof j.costUsd === "number" ||
+                        typeof j.chargedTokens === "number") && (
+                        <p className="mt-0.5 text-[10px] text-slate-400">
+                          {typeof j.chargedTokens === "number" &&
+                            `${j.chargedTokens}토큰`}
+                          {typeof j.costUsd === "number" && (
+                            <>
+                              {typeof j.chargedTokens === "number" && " · "}약 $
+                              {j.costUsd.toFixed(3)}
+                              {typeof j.costKrw === "number" &&
+                                ` (${j.costKrw.toLocaleString()}원)`}
+                            </>
+                          )}
+                        </p>
+                      )}
+                      {j.error && (
+                        <p className="mt-0.5 text-[10px] leading-snug text-slate-400">
+                          {j.error}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      {j.status === "done" && j.stage === "max-offer" && (
+                        <button
+                          type="button"
+                          disabled={maxBusy}
+                          title="무엇이 다른지 보고 진행 여부를 정해요"
+                          onClick={() => void openConfirm([j])}
+                          className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                        >
+                          확인
+                        </button>
+                      )}
+                      {j.status === "done" && j.stage === "max-offer" && (
+                        <button
+                          type="button"
+                          disabled={maxBusy}
+                          title="더 고쳐 그리지 않고 지금 그림 그대로 써요"
+                          onClick={() => void closeOffers([j])}
+                          className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                        >
+                          패스
+                        </button>
+                      )}
+                      {/* 짧은 작업은 결과를 기다리던 화면이 이미 실패를 받았다 — 그 화면에서 다시 한다. */}
+                      {j.status === "error" && j.mode !== "task" && (
+                        <button
+                          type="button"
+                          onClick={() => retry(j.id)}
+                          className="rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
+                        >
+                          다시
+                        </button>
+                      )}
+                      {(j.status === "done" || j.status === "error") && (
+                        <button
+                          type="button"
+                          onClick={() => dismiss(j.id)}
+                          className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
+                        >
+                          지우기
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                          ))}
+                      {locals.map((t) => (
+                        <LocalRow key={t.id} t={t} />
+                      ))}
+                    </ul>
                   )}
-                  {j.error && (
-                    <p className="mt-0.5 text-[10px] leading-snug text-slate-400">
-                      {j.error}
-                    </p>
-                  )}
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  {j.status === "done" && j.stage === "max-offer" && (
-                    <button
-                      type="button"
-                      disabled={maxBusy}
-                      title="무엇이 다른지 보고 진행 여부를 정해요"
-                      onClick={() => void openConfirm([j])}
-                      className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-                    >
-                      확인
-                    </button>
-                  )}
-                  {j.status === "done" && j.stage === "max-offer" && (
-                    <button
-                      type="button"
-                      disabled={maxBusy}
-                      title="더 고쳐 그리지 않고 지금 그림 그대로 써요"
-                      onClick={() => void closeOffers([j])}
-                      className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-                    >
-                      패스
-                    </button>
-                  )}
-                  {/* 짧은 작업은 결과를 기다리던 화면이 이미 실패를 받았다 — 그 화면에서 다시 한다. */}
-                  {j.status === "error" && j.mode !== "task" && (
-                    <button
-                      type="button"
-                      onClick={() => retry(j.id)}
-                      className="rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
-                    >
-                      다시
-                    </button>
-                  )}
-                  {(j.status === "done" || j.status === "error") && (
-                    <button
-                      type="button"
-                      onClick={() => dismiss(j.id)}
-                      className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
-                    >
-                      지우기
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
             {/* 이 금액은 청구서가 아니라 우리가 역산한 단가로 계산한 값이다.
                 화면에서 분명히 해 두지 않으면 청구액으로 오해한다. */}
             {(spentUsd > 0 || spentTokens > 0) && (
@@ -770,5 +865,39 @@ export default function FigureJobsPanel() {
         </div>
       )}
     </div>
+  );
+}
+
+/** 곧바로 부른 luna 일 한 줄(대기열을 안 탔다 — 다시 하기는 그 화면에서). */
+function LocalRow({ t }: { t: LocalTask }) {
+  const secs = Math.round(((t.finishedAt ?? Date.now()) - t.startedAt) / 1000);
+  return (
+    <li className="flex items-start gap-2 border-b border-slate-100 px-3 py-2 last:border-b-0">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[11px] font-medium text-slate-700">{t.label}</p>
+        <p
+          className={`text-[11px] ${
+            t.status === "error" ? "text-red-600" : t.status === "done" ? "text-emerald-700" : "text-slate-500 animate-soft-pulse"
+          }`}
+        >
+          {t.status === "running"
+            ? (LOCAL_RUNNING[t.task] ?? "luna 가 처리하는 중")
+            : t.status === "done"
+              ? `완료 · ${secs}초${typeof t.chargedTokens === "number" ? ` · ${t.chargedTokens}토큰` : ""}`
+              : "실패"}
+        </p>
+        {t.note && <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{t.note}</p>}
+        {t.error && <p className="mt-0.5 text-[10px] leading-snug text-slate-400">{t.error}</p>}
+      </div>
+      {t.status !== "running" && (
+        <button
+          type="button"
+          onClick={() => dismissLocalTask(t.id)}
+          className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
+        >
+          지우기
+        </button>
+      )}
+    </li>
   );
 }

@@ -56,6 +56,127 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** 이만큼 넘게 안 끝나면 포기한다(서버는 7분 넘게 도는 작업을 오류로 돌린다). */
 const GIVE_UP_MS = 9 * 60 * 1000;
 
+/**
+ * **대기열 없이 곧바로 부르는 일들**(서버 `aiTasks.ts` 의 `DIRECT_TASKS` 와 같은 목록 — 서버 모듈은 화면에 못 싣는다).
+ * 전부 luna 라 금방 끝난다(사용자 — "luna 는 금방금방 끝나니까 서버에서 돌릴 필요는 없어, 더 빠르게 할 수 있다면").
+ * 줄에 넣고 일꾼을 깨우고 1~2초마다 묻는 왕복이 없어 그만큼 빠르다. 대신 이 화면이 결과를 받아야 한다.
+ */
+const DIRECT_KINDS: readonly AiTaskKind[] = ["crop", "detect", "title", "grade", "answerKey"];
+
+/** 본문에 그대로 실을 수 있는 그림 크기 합(Vercel 4.5MB 한도 안쪽). 넘으면 미리 올리고 경로만 보낸다. */
+const INLINE_LIMIT = 3_300_000;
+
+// ── 곧바로 부른 일들의 목록(대기열 패널이 "luna" 칸에 보여 준다) ──────────────
+export type LocalTask = {
+  id: string;
+  task: AiTaskKind;
+  label: string;
+  status: "running" | "done" | "error";
+  startedAt: number;
+  finishedAt?: number;
+  error?: string;
+  note?: string | null;
+  chargedTokens?: number | null;
+};
+let localTasks: LocalTask[] = [];
+const localListeners = new Set<() => void>();
+function setLocal(next: LocalTask[]) {
+  localTasks = next;
+  localListeners.forEach((fn) => fn());
+}
+function patchLocal(id: string, patch: Partial<LocalTask>) {
+  setLocal(localTasks.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+}
+export function subscribeLocalTasks(fn: () => void): () => void {
+  localListeners.add(fn);
+  return () => localListeners.delete(fn);
+}
+export function getLocalTasks(): LocalTask[] {
+  return localTasks;
+}
+const EMPTY: LocalTask[] = [];
+export function getLocalTasksServer(): LocalTask[] {
+  return EMPTY;
+}
+export function dismissLocalTask(id: string) {
+  setLocal(localTasks.filter((t) => t.id !== id));
+}
+/** 끝난 것은 잠시 보여 주고 치운다(성공 1분, 실패 10분). 너무 많이 쌓이지 않게 50개까지. */
+function sweepLocal() {
+  const now = Date.now();
+  const keep = localTasks.filter(
+    (t) => t.status === "running" || now - (t.finishedAt ?? now) < (t.status === "error" ? 600_000 : 60_000),
+  );
+  if (keep.length !== localTasks.length || keep.length > 50) setLocal(keep.slice(-50));
+}
+
+async function runDirect<T>(
+  task: AiTaskKind,
+  opts: { label: string; images?: string[]; params?: Record<string, unknown>; onQueued?: (taskId: string) => void },
+): Promise<AiTaskResult<T>> {
+  const id = crypto.randomUUID();
+  setLocal([...localTasks, { id, task, label: opts.label, status: "running", startedAt: Date.now() }]);
+  const uploaded: string[] = [];
+  try {
+    const images = await Promise.all((opts.images ?? []).map((src) => ensureDataUrl(src)));
+    const total = images.reduce((n, x) => n + x.length, 0);
+    let payload: { images?: string[]; paths?: string[] } = { images };
+    if (total > INLINE_LIMIT) {
+      // 크면 미리 올린다(서버가 읽고 지운다).
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new AiTaskError("로그인이 필요합니다.", 401);
+      await Promise.all(
+        images.map(async (src, i) => {
+          const blob = await (await fetch(src)).blob();
+          const type = blob.type || "image/jpeg";
+          const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+          const path = `${user.id}/_jobs/d-${id}-${i}.${ext}`;
+          const up = await putBlob(supabase, path, blob, type);
+          if (!up.ok) throw new AiTaskError(`사진을 올리지 못했어요 (${up.error})`);
+          uploaded[i] = path;
+        }),
+      );
+      payload = { paths: uploaded };
+    }
+    opts.onQueued?.(id);
+    const res = await fetch("/api/ai-direct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task, ...payload, params: opts.params ?? {} }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      result?: unknown;
+      error?: string;
+      chargedTokens?: number | null;
+      model?: string | null;
+      note?: string | null;
+    };
+    if (!res.ok) {
+      // 서버가 받기 전에 끊겼으면 올린 것을 치운다(받았으면 서버가 치웠다).
+      if (uploaded.length && res.status >= 500) await removeBlobs(uploaded.filter(Boolean)).catch(() => {});
+      throw new AiTaskError(json.error ?? `AI 작업이 실패했어요 (HTTP ${res.status}).`, res.status);
+    }
+    const out: AiTaskResult<T> = {
+      result: json.result as T,
+      chargedTokens: typeof json.chargedTokens === "number" ? json.chargedTokens : null,
+      model: json.model ?? null,
+      note: json.note ?? null,
+    };
+    patchLocal(id, { status: "done", finishedAt: Date.now(), note: out.note, chargedTokens: out.chargedTokens });
+    return out;
+  } catch (err) {
+    const e = err instanceof AiTaskError ? err : new AiTaskError(err instanceof Error ? err.message : String(err));
+    patchLocal(id, { status: "error", finishedAt: Date.now(), error: e.message });
+    throw e;
+  } finally {
+    setTimeout(sweepLocal, 61_000);
+    setTimeout(sweepLocal, 601_000);
+  }
+}
+
 export async function runAiTask<T>(
   task: AiTaskKind,
   opts: {
@@ -71,6 +192,7 @@ export async function runAiTask<T>(
     onQueued?: (taskId: string) => void;
   },
 ): Promise<AiTaskResult<T>> {
+  if (DIRECT_KINDS.includes(task)) return runDirect<T>(task, opts);
   const supabase = createClient();
   const {
     data: { user },

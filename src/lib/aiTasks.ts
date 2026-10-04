@@ -77,6 +77,13 @@ export const TASK_KINDS: readonly TaskKind[] = [
   "chat",
 ];
 
+/**
+ * **대기열을 안 타고 곧바로 부르는 일들**(2026-10-04, 사용자 — "luna 는 금방금방 끝나니까 서버에서 돌릴 필요는 없어, 더 빠르게
+ * 할 수 있다면"). 전부 luna(+고정 요금)라 몇 초~수십 초면 끝난다 — 줄에 넣고 일꾼을 깨우고 1~2초마다 묻는 왕복을 뺀다.
+ * `/api/ai-direct` 가 같은 `run` 을 요청 안에서 돌린다. 화면(`aiTask.ts` 의 `DIRECT_KINDS`)도 같은 목록을 든다.
+ */
+export const DIRECT_TASKS: readonly TaskKind[] = ["crop", "detect", "title", "grade", "answerKey"];
+
 export type TaskCtx = {
   admin: SupabaseClient;
   userId: string;
