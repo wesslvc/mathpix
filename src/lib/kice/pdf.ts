@@ -29,6 +29,7 @@ import type { Frame, FrameBox, FrameItem, FrameSet } from "./frames";
 import { framePassage, type RichBlock } from "./richText";
 import { hasOldHangul, oldHangulRuns } from "./oldHangul";
 import { planKoreanPages, type KoreanPage, type KoreanPassage, type KoreanSetIn } from "./koreanLayout";
+import type { NumberBox } from "./numberCover";
 import {
   DEFAULT_FLOW_STYLE,
   flowBlocks,
@@ -255,9 +256,14 @@ type Placed = {
    * 다시 인코딩할 필요가 없다.
    */
   clip?: { x: number; y: number; w: number; h: number };
+  /** 원래 번호를 덮고 새 번호를 쓸 자리(그림 대비 비율). */
+  cover?: NumberCover;
 };
 
-type Shot = { img: PDFImage; label: string };
+/** 문제 그림의 원래 번호를 덮고 새 번호를 쓴다(여러 실모를 묶어 1번부터 다시 매길 때 — `numberCover.ts`). */
+export type NumberCover = { box: NumberBox; no: number };
+
+type Shot = { img: PDFImage; label: string; cover?: NumberCover };
 
 /**
  * 한 단을 채운다. **넣기로 한 개수는 반드시 다 넣는다.**
@@ -300,6 +306,7 @@ function fitColumn(items: Shot[], x: number, top: number, bottom: number): Place
       y: y + heads[n],
       w,
       h: hs[n],
+      ...(it.cover ? { cover: it.cover } : {}),
     });
     y += heads[n] + hs[n] + gap;
   });
@@ -573,7 +580,7 @@ export type KiceSpec = {
   /** 틀이 쓰는 그림(교시 딱지) 이름 → PNG 바이트. */
   images: Record<string, Uint8Array>;
   /** `label` 은 문제 위에 작게 찍히는 출처 표기(빈 문자열이면 찍지 않는다). */
-  problems: { png: Uint8Array; label?: string }[];
+  problems: { png: Uint8Array; label?: string; cover?: NumberCover }[];
   /**
    * 쪽마다 넣을 문제 수. 쪽 순서대로 읽고 모자라면 되풀이한다(예: `[4,6,6,4]`).
    * `"auto"` 면 문제 높이를 재서 여백이 가장 적게 알아서 짠다(`layoutAuto`).
@@ -874,10 +881,39 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     }
   };
 
+  /**
+   * 원래 번호를 흰 네모로 덮고 그 자리에 새 번호를 쓴다. 글자 크기는 원래 번호의 숫자 높이에 맞추고(숫자는 글자
+   * 크기의 약 0.72), 글자 줄은 원래 번호의 아래 끝에 맞춘다. 새 번호가 더 길면(3 → 12) 덮은 자리 안에 들어가게
+   * 줄인다(70% 까지) — 뒤의 본문을 덮으면 안 된다. 굵게는 본문 조판과 같은 식(조금 어긋나게 두 번)으로 흉내 낸다.
+   */
+  const drawNumberCover = async (page: PDFPage, it: Placed, cover: NumberCover) => {
+    const b = cover.box;
+    const rx = it.x + b.x * it.w;
+    const ry = it.y + b.y * it.h;
+    const rw = b.w * it.w;
+    const rh = b.h * it.h;
+    page.drawRectangle({ x: rx, y: flip(ry + rh), width: rw, height: rh, color: rgb(1, 1, 1) });
+    const label = await fontForText(BODY_FONT, `${cover.no}.`);
+    const digitH = b.line * it.h;
+    let size = digitH / 0.72;
+    const room = rw;
+    const tw = label.font.widthOfTextAtSize(label.text, size);
+    if (tw > room) size *= Math.max(room / tw, 0.7);
+    const baseY = flip(it.y + b.base * it.h);
+    const tx = rx + Math.min(digitH * 0.12, rw * 0.1);
+    for (const dx of [0, size * 0.03]) {
+      page.drawText(label.text, { x: tx + dx, y: baseY, size, font: label.font, color: rgb(0, 0, 0) });
+    }
+  };
+
   // ── 쪽을 짜 두고, 그 결과를 보고 그린다 ─────────────────────────────
   const images: { img: PDFImage; label: string }[] = [];
   for (const p of spec.problems) {
-    images.push({ img: await embedProblemImage(pdf, p.png), label: p.label ?? "" });
+    images.push({
+      img: await embedProblemImage(pdf, p.png),
+      label: p.label ?? "",
+      ...(p.cover ? { cover: p.cover } : {}),
+    });
   }
 
   const pattern = spec.pagePattern === "auto" ? [] : spec.pagePattern.filter((n) => n > 0);
@@ -993,6 +1029,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       }
       page.drawImage(it.img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
       if (it.clip) page.pushOperators(popGraphicsState());
+      if (it.cover) await drawNumberCover(page, it, it.cover);
     }
     const planned = plan?.pages[n];
     if (planned?.kind === "toc") {

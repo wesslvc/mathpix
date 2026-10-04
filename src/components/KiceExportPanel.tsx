@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { buildKicePdf, LAYOUT, type KiceSpec } from "@/lib/kice/pdf";
+import { buildKicePdf, LAYOUT, type KiceSpec, type NumberCover } from "@/lib/kice/pdf";
+import { findNumberBox } from "@/lib/kice/numberCover";
 import { passageSplitAt } from "@/lib/kice/passageSplit";
 import {
   frameKeyFor,
@@ -88,6 +89,8 @@ export type KiceItem = {
   source?: string;
   /** 국어 지문·문제 묶음. 국어 모드로 넣은 것에만 있다. */
   korean?: KoreanMeta | null;
+  /** 원래 문제 번호(번호를 다시 매길 때 그림 속 번호 자리를 찾는 데 자릿수를 쓴다). */
+  no?: number;
 };
 
 type Props = {
@@ -132,6 +135,15 @@ export default function KiceExportPanel({ title, items }: Props) {
   const tamguSum = tamguPattern.reduce((sum, s) => sum + (Number(s) || 0), 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * **여러 실모를 묶으면 1번부터 번호를 새로 매긴다**(사용자 요청 — "여러 개로 묶으면 내가 틀렸던 답은 없애고
+   * 1번부터 번호를 새로 써, 원래 번호 있던 자리에 번호를 덮어 버리는 거지, 그다음 답지도 번호를 재배열해서 한 장에
+   * 들어오는 답지로"). 실모가 둘 이상일 때만 뜻이 있다(하나면 원래 번호가 곧 차례다).
+   */
+  const multiSource = new Set(items.map((it) => (it.source ?? "").trim()).filter(Boolean)).size >= 2;
+  const [renumber, setRenumber] = useState(true);
+  const doRenumber = multiSource && renumber;
 
   const subjects = KICE_SUBJECTS[area];
 
@@ -185,9 +197,36 @@ export default function KiceExportPanel({ title, items }: Props) {
     return { sets: out, loose: loose.map((q) => index.get(q.id)!) };
   }
 
+  /**
+   * 인쇄되는 차례대로 문제(지문 빼고)에 새 번호를 준다 → 그림 속 원래 번호 자리를 찾는다. 국어 배치는 세트 차례 →
+   * 지문 없는 문항 차례로 찍히므로(`planKoreanPages`) 같은 차례로 센다.
+   */
+  async function planRenumber(pngs: Uint8Array[]) {
+    let order: number[];
+    if (layoutKey === "korean") {
+      const index = new Map(items.map((it, i) => [it.id, i] as const));
+      const { sets, loose } = groupKoreanSets(items, (it) => it.korean ?? null);
+      order = [...sets.flatMap((set) => set.questions), ...loose].map((q) => index.get(q.id)!);
+    } else {
+      order = items.map((_, i) => i).filter((i) => items[i].korean?.role !== "passage");
+    }
+    const covers = new Map<number, NumberCover>();
+    const newNo = new Map<number, number>();
+    const missed: number[] = [];
+    for (const [k, i] of order.entries()) {
+      newNo.set(i, k + 1);
+      const digits = items[i].no ? String(items[i].no).length : undefined;
+      const box = await findNumberBox(pngs[i], digits);
+      if (box) covers.set(i, { box, no: k + 1 });
+      else missed.push(k + 1);
+    }
+    return { order, covers, newNo, missed };
+  }
+
   async function generate() {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const key = frameKeyFor(area);
       const [all, fonts] = await Promise.all([loadKiceFrames(), loadKiceFonts()]);
@@ -196,6 +235,13 @@ export default function KiceExportPanel({ title, items }: Props) {
         loadFrameImages(frames),
         Promise.all(items.map((item) => loadPng(item.imageUrl))),
       ]);
+
+      const renum = doRenumber ? await planRenumber(pngs) : null;
+      if (renum?.missed.length) {
+        setNotice(
+          `${renum.missed.join(", ")}번은 그림에서 원래 번호 자리를 못 찾아 번호를 덮지 못했어요 — 정답표는 새 번호로 나갑니다.`,
+        );
+      }
 
       // 틀에 적힌 글자를 무엇으로 바꿀지. 공백을 뗀 글자로 찾는다.
       const replace: Record<string, string> = {};
@@ -212,9 +258,14 @@ export default function KiceExportPanel({ title, items }: Props) {
         images,
         problems: pngs.map((png, i) => ({
           png,
+          ...(renum?.covers.has(i) ? { cover: renum.covers.get(i)! } : {}),
           // 지문에는 "N번" 표기를 붙이지 않는다 — 지문은 문제가 아니다.
           label:
-            showSource && items[i].korean?.role !== "passage" ? items[i].label : "",
+            showSource && items[i].korean?.role !== "passage"
+              ? renum?.newNo.has(i)
+                ? `${items[i].source ?? ""} ${renum.newNo.get(i)}번`.trim()
+                : items[i].label
+              : "",
         })),
         pagePattern:
           layoutKey === "tamgu"
@@ -223,8 +274,15 @@ export default function KiceExportPanel({ title, items }: Props) {
               : tamguPattern.map((s) => Number(s) || 0)
             : [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
         koreanSets: layoutKey === "korean" ? await buildKoreanSets(pngs) : undefined,
-        answers: showAnswers
-          ? items.map((item) => ({
+        answers: !showAnswers
+          ? []
+          : renum
+            ? // 새 번호 차례로 한 표에 — 출처별로 가르지 않고(번호가 이제 안 겹친다) 내가 고른 답도 뺀다.
+              renum.order.map((i) => ({
+                label: `${renum.newNo.get(i)}번`,
+                answer: items[i].answer,
+              }))
+            : items.map((item) => ({
               label: item.answerLabel,
               answer: item.answer,
               picked: item.picked,
@@ -232,8 +290,7 @@ export default function KiceExportPanel({ title, items }: Props) {
               // 실모마다 겹쳐서 한 덩어리로 붙여 놓으면 어느 시험지 답인지
               // 알 수 없다.
               source: item.source,
-            }))
-          : [],
+            })),
         onWarn: (m) => console.warn("[kice]", m),
       });
 
@@ -356,6 +413,23 @@ export default function KiceExportPanel({ title, items }: Props) {
         )}
       </div>
 
+      {multiSource && (
+        <label className="flex items-start gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={renumber}
+            onChange={(e) => setRenumber(e.target.checked)}
+          />
+          <span>
+            번호를 1번부터 새로 매기기
+            <span className="block text-xs text-slate-500">
+              문제 그림의 원래 번호 자리를 덮어 새 번호를 쓰고, 정답표도 새 번호로 한 표에 모아요(내가 고른 답은 빼요).
+            </span>
+          </span>
+        </label>
+      )}
+
       <label className="flex items-center gap-2 text-sm text-slate-700">
         <input
           type="checkbox"
@@ -389,6 +463,7 @@ export default function KiceExportPanel({ title, items }: Props) {
       </p>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-amber-700">{notice}</p>}
 
       <div className="flex justify-end">
         <Button
