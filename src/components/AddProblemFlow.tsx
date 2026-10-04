@@ -69,11 +69,12 @@ import BatchSplitPanel from "./BatchSplitPanel";
 import KoreanModePanel from "./KoreanModePanel";
 import BulkMappedImportPanel from "./BulkMappedImportPanel";
 import PhotoQueueStrip from "./PhotoQueueStrip";
+import CropReview, { type CropPreview } from "./CropReview";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-type Stage = "idle" | "upload" | "crop" | "loading" | "result";
+type Stage = "idle" | "upload" | "review" | "crop" | "loading" | "result";
 
 /** 문제를 넣는 길. 한 화면에 전부 펼쳐 두면 어지러워서 탭으로 가른다. */
 type Mode = "photo" | "page" | "korean" | "csv";
@@ -115,6 +116,8 @@ export default function AddProblemFlow({
 }) {
   const router = useRouter();
   const [stage, setStage] = useState<Stage>("idle");
+  const stageRef = useRef<Stage>("idle");
+  stageRef.current = stage;
   const [mode, setModeState] = useState<Mode>("photo");
   const [result, setResult] = useState<RecognizeResponse | null>(null);
   // 인식(result)을 만든 바로 그 이미지. 도형 영역을 오려낼 때 필요하다.
@@ -160,6 +163,8 @@ export default function AddProblemFlow({
   /** 지금 사진을 이미 다 썼는가(저장 대기열·결과 화면으로 넘어갔다). */
   const activeUsedRef = useRef(false);
   const activeRef = useRef<QueuedPhoto | null>(null);
+  const pendingRef = useRef<QueuedPhoto[]>([]);
+  pendingRef.current = pending;
   const orderRef = useRef(0);
   const addInputRef = useRef<HTMLInputElement>(null);
   /**
@@ -217,37 +222,113 @@ export default function AddProblemFlow({
   }
 
   /**
-   * **남은 사진을 한 번에 넣는다**(사용자 — "손이 안 가게"). 지금 사진을 고른 방식으로 넣고, 남은 사진은 luna 가 자른
-   * 자리대로(없으면 화면 계산으로) 잘라 **같은 방식으로** 차례로 넣는다. 사진마다 luna 결과를 기다리지만 그동안 화면은
-   * 사진 고르기로 돌아가 다른 일을 할 수 있다. 브라우저 저장소의 사진은 넣은 것만 지운다(탭이 죽으면 남은 것이 되살아난다).
+   * **한눈에 보기**(`CropReview`)의 미리보기 — 사진마다 luna 자리(없으면 화면 계산)로 자른 작은 그림과 그 자리.
+   * 넣을 때도 같은 자리로 자른다(보이는 것과 잘리는 것이 같게). 만드는 일은 한 장씩 잇는다(디코딩 메모리).
+   */
+  const [previews, setPreviews] = useState<Record<string, CropPreview>>({});
+  const previewsRef = useRef(previews);
+  previewsRef.current = previews;
+  const previewBusyRef = useRef(new Set<string>());
+  const previewLaneRef = useRef<Promise<void>>(Promise.resolve());
+  /** 다시 자를 사진(한눈에 보기에서 체크한 것). */
+  const [recrop, setRecrop] = useState<Set<string>>(new Set());
+
+  async function regionOf(p: QueuedPhoto, img: HTMLImageElement): Promise<Region> {
+    const had = previewsRef.current[p.id];
+    if (had) return had.region;
+    return regionForImage(img, await requestAutoCrop(p));
+  }
+
+  /**
+   * 사진들을 **luna 가 자른 자리대로** 잘라 같은 방식으로 차례로 넣는다(뒤에서 — 화면은 다른 일을 해도 된다). 사진마다
+   * luna 결과를 기다린다. 브라우저 저장소에서는 넣은 사진만 지운다(탭이 죽으면 남은 것이 되살아난다). 못 연 사진은 대기열로 되돌린다.
    */
   const [bulkLeft, setBulkLeft] = useState(0);
-  async function addAllRemaining(crop: string, addMode: "problem" | "asis" | "sol") {
-    const rest = pending;
-    quickAdd(crop, addMode, { advance: false });
-    setPending([]);
-    activate(null);
-    if (rest.length === 0) return;
-    setBulkLeft(rest.length);
-    for (const p of rest) {
+  async function addPhotosInBackground(photos: QueuedPhoto[], addMode: "problem" | "asis" | "sol") {
+    if (photos.length === 0) return;
+    setBulkLeft((n) => n + photos.length);
+    for (const p of photos) {
       try {
-        const box = await requestAutoCrop(p);
         const url = URL.createObjectURL(p.blob);
         try {
           const img = await loadImage(url);
-          const region = regionForImage(img, box);
+          const region = await regionOf(p, img);
           quickAdd(cropRegionToDataUrl(img, region), addMode, { photo: p });
         } finally {
           URL.revokeObjectURL(url);
         }
       } catch (err) {
-        // 못 연 사진은 대기열에 되돌려 둔다(손으로 자를 수 있게).
-        setPending((prev) => [...prev, p].sort(byOrder));
+        setPending((prev) => [...prev.filter((x) => x.id !== p.id), p].sort(byOrder));
         setError(`"${p.name}" 을(를) 자동으로 넣지 못했어요 — 대기열에 남겨 뒀어요. ${err instanceof Error ? err.message : ""}`);
       }
       setBulkLeft((n) => Math.max(0, n - 1));
     }
   }
+
+  /** 자르기 화면의 "남은 N장도 같은 방식으로 한 번에": 지금 사진은 고른 자리로, 남은 것은 luna 자리로. */
+  function addAllRemaining(crop: string, addMode: "problem" | "asis" | "sol") {
+    const rest = pending;
+    quickAdd(crop, addMode, { advance: false });
+    setPending([]);
+    activate(null);
+    void addPhotosInBackground(rest, addMode);
+  }
+
+  /** 한눈에 보기로 간다(지금 자르던 사진도 줄로 돌려놓는다). */
+  function openReview() {
+    backToReviewRef.current = false;
+    returnActive();
+    setResult(null);
+    setStage("review");
+  }
+
+  /** 한눈에 보기: 체크 안 한 것은 한꺼번에 넣고, 체크한 것은 하나씩 자르기 화면으로. */
+  function submitReview(addMode: "problem" | "asis" | "sol") {
+    const go = pending.filter((p) => !recrop.has(p.id));
+    const keep = pending.filter((p) => recrop.has(p.id));
+    setRecrop(new Set());
+    const [next, ...others] = keep;
+    setPending(others);
+    activate(next ?? null);
+    void addPhotosInBackground(go, addMode);
+  }
+
+  /** 한눈에 보기에서 사진 하나를 눌렀다 — 그 사진만 곧바로 자르기 화면으로(나머지는 줄에 남는다). */
+  function openFromReview(id: string) {
+    const target = pending.find((p) => p.id === id);
+    if (!target) return;
+    setPending((prev) => prev.filter((p) => p.id !== id));
+    setRecrop((prev) => {
+      const n = new Set(prev);
+      n.delete(id);
+      return n;
+    });
+    activate(target);
+    backToReviewRef.current = true;
+  }
+
+  // 한눈에 보기에 떠 있는 사진은 luna 결과가 오는 대로 미리보기를 만든다.
+  useEffect(() => {
+    if (stage !== "review") return;
+    for (const p of pending) {
+      if (!(p.id in aiCrops) || previews[p.id] || previewBusyRef.current.has(p.id)) continue;
+      previewBusyRef.current.add(p.id);
+      const box = aiCrops[p.id];
+      previewLaneRef.current = previewLaneRef.current.then(async () => {
+        const url = URL.createObjectURL(p.blob);
+        try {
+          const img = await loadImage(url);
+          const region = regionForImage(img, box);
+          const small = cropRegionToDataUrl(img, region, 0, { maxWidth: 520, maxHeight: 760 });
+          setPreviews((prev) => ({ ...prev, [p.id]: { region, url: small, ai: !!box } }));
+        } catch {
+          previewBusyRef.current.delete(p.id);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      });
+    }
+  }, [stage, pending, aiCrops, previews]);
 
   /** 지금 사진의 화면용 주소. 사진이 바뀌면 옛 주소를 풀어 준다. */
   const [activeUrl, setActiveUrl] = useState<string | null>(null);
@@ -351,12 +432,19 @@ export default function AddProblemFlow({
     setNotice(null);
     const failed: string[] = [];
     setPreparing({ done: 0, total: files.length });
+    // 여러 장이면(또는 이미 한눈에 보기 중이면) 하나씩 열지 않고 **한눈에 보기**로 — luna 가 자른 결과를 좌우로 넘겨 보고
+    // 다시 자를 것만 고른다.
+    const toReview = stageRef.current === "review" || (!activeRef.current && files.length + pendingRef.current.length >= 2);
+    if (toReview) {
+      returnActive();
+      setStage("review");
+    }
     for (let i = 0; i < files.length; i++) {
       try {
         const p = await preparePhoto(files[i], orderRef.current++);
         void savePhoto(categoryId, p);
-        requestAutoCrop(p);
-        if (!activeRef.current) activate(p);
+        void requestAutoCrop(p);
+        if (!toReview && !activeRef.current) activate(p);
         else setPending((prev) => [...prev, p]);
       } catch (err) {
         failed.push(err instanceof Error ? err.message : `"${files[i].name}" 사진을 열지 못했습니다.`);
@@ -379,8 +467,20 @@ export default function AddProblemFlow({
   }
 
   /** 다음 사진으로. 없으면 곧바로 사진 고르기 화면 — 계속 넣겠다는 뜻이므로. */
+  /** 한눈에 보기에서 사진 하나를 열었다 — 그 사진을 끝내면 다시 한눈에 보기로 돌아간다. */
+  const backToReviewRef = useRef(false);
+
   function advanceQueue() {
     setError(null);
+    if (backToReviewRef.current && pendingRef.current.length > 0) {
+      backToReviewRef.current = false;
+      activeRef.current = null;
+      setActive(null);
+      setResult(null);
+      setStage("review");
+      return;
+    }
+    backToReviewRef.current = false;
     const [next, ...rest] = pending;
     setPending(rest);
     activate(next ?? null);
@@ -796,9 +896,13 @@ export default function AddProblemFlow({
                   <ResumeCard
                     pending={pending}
                     onResume={() => {
+                      setNotice(null);
+                      if (pending.length >= 2) {
+                        setStage("review");
+                        return;
+                      }
                       const [next, ...rest] = pending;
                       setPending(rest);
-                      setNotice(null);
                       activate(next);
                     }}
                     onClear={() => void clearAll()}
@@ -843,17 +947,61 @@ export default function AddProblemFlow({
         </section>
       )}
 
-      {(inCrop || stage === "loading" || stage === "result") && (
+      {(inCrop || stage === "review" || stage === "loading" || stage === "result") && (
         <section className={cn(cardClass, "flex flex-col gap-4 p-4 sm:p-5")}>
           {inCrop && (active || pending.length > 0 || preparing) && (
-            <PhotoQueueStrip
-              active={active}
-              pending={pending}
-              preparing={preparing}
-              onJump={jumpTo}
-              onRemove={removeFromQueue}
-              onAdd={() => addInputRef.current?.click()}
-            />
+            <div className="flex flex-col gap-1.5">
+              <PhotoQueueStrip
+                active={active}
+                pending={pending}
+                preparing={preparing}
+                onJump={jumpTo}
+                onRemove={removeFromQueue}
+                onAdd={() => addInputRef.current?.click()}
+              />
+              {pending.length > 0 && (
+                <button
+                  type="button"
+                  onClick={openReview}
+                  className="self-start text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800"
+                >
+                  남은 {pending.length}장 자동 자르기 결과 한눈에 보기
+                </button>
+              )}
+            </div>
+          )}
+
+          {stage === "review" && (
+            <div key="review" className="animate-stage-in">
+              <CropReview
+                photos={pending}
+                previews={previews}
+                aiCrops={aiCrops}
+                checked={recrop}
+                preparing={preparing}
+                onToggle={(id) =>
+                  setRecrop((prev) => {
+                    const n = new Set(prev);
+                    if (n.has(id)) n.delete(id);
+                    else n.add(id);
+                    return n;
+                  })
+                }
+                onOpen={openFromReview}
+                onRemove={removeFromQueue}
+                onAddMore={() => addInputRef.current?.click()}
+                onSubmit={submitReview}
+                onOneByOne={() => {
+                  const [next, ...rest] = pending;
+                  setPending(rest);
+                  activate(next ?? null);
+                }}
+                onClose={exitToIdle}
+                problemTokenCost={tokenStatus?.figureCost ?? null}
+                unlimited={tokenStatus?.unlimited ?? false}
+                byok={tokenStatus?.byok ?? false}
+              />
+            </div>
           )}
 
           {stage === "upload" && (
@@ -862,6 +1010,10 @@ export default function AddProblemFlow({
                 <ResumeCard
                   pending={pending}
                   onResume={() => {
+                    if (pending.length >= 2) {
+                      setStage("review");
+                      return;
+                    }
                     const [next, ...rest] = pending;
                     setPending(rest);
                     activate(next);
@@ -890,7 +1042,7 @@ export default function AddProblemFlow({
                 restCount={pending.length}
                 onConfirmRest={(crop, m) => void addAllRemaining(crop, m)}
                 onConfirm={handleCropConfirm}
-                onCancel={exitToIdle}
+                onCancel={() => (backToReviewRef.current && pending.length > 0 ? openReview() : exitToIdle())}
                 onSkip={pending.length > 0 ? skipActive : undefined}
                 onError={handleCropImageError}
                 problemTokenCost={tokenStatus?.figureCost ?? null}

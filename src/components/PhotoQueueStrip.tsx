@@ -102,7 +102,7 @@ export default function PhotoQueueStrip({
  * 붙였다 뗐다 하면 멀쩡한 그림이 깨진다. 작은 그림 몇 장(장당 20kB 안팎)이라
  * 탭을 닫을 때까지 남아 있어도 문제없다.
  */
-function useThumbUrls(photos: QueuedPhoto[]): Map<string, string> {
+export function useThumbUrls(photos: QueuedPhoto[]): Map<string, string> {
   const cache = useRef(new Map<string, string>());
   const ids = photos.map((p) => p.id).join(",");
   return useMemo(() => {
