@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { buildKicePdf, LAYOUT, type KiceSpec, type NumberCover } from "@/lib/kice/pdf";
+import { LAYOUT, type KiceSpec, type NumberCover } from "@/lib/kice/pdf";
+import { buildKicePdfOffThread } from "@/lib/kice/pdfOffThread";
 import { findNumberBox, type NumberMiss } from "@/lib/kice/numberCover";
 import { passageSplitAt } from "@/lib/kice/passageSplit";
 import {
@@ -97,7 +98,9 @@ type Props = {
 };
 
 async function loadPng(url: string): Promise<Uint8Array> {
-  const res = await fetch(url, { cache: "no-store" });
+  // 카드 주소는 그림을 고칠 때마다 새로 생기므로(내용이 안 바뀐다) 브라우저 캐시를 그대로 쓴다 — 예전엔 no-store 라 PDF 를
+  // 만들 때마다 문제 그림을 전부 다시 받았다.
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`이미지를 불러오지 못했습니다 (HTTP ${res.status}).`);
   // 예전에 저장된 문제에는 카드 테두리가 구워져 있다. 실제 문제지에는 없는
   // 네모라서 여기서 지운다.
@@ -134,6 +137,7 @@ export default function KiceExportPanel({ title, items }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
   /**
    * **여러 실모를 묶으면 1번부터 번호를 새로 매긴다**(사용자 요청 — "여러 개로 묶으면 내가 틀렸던 답은 없애고
    * 1번부터 번호를 새로 써, 원래 번호 있던 자리에 번호를 덮어 버리는 거지, 그다음 답지도 번호를 재배열해서 한 장에
@@ -212,7 +216,21 @@ export default function KiceExportPanel({ title, items }: Props) {
     const newNo = new Map<number, number>();
     order.forEach((i, k) => newNo.set(i, k + 1));
     // 번호 자리는 luna 가 찾는다(대기열 없이 곧바로, 토큰 0). luna 는 동시에 많이 받으므로 한꺼번에 보낸다.
-    const found = await Promise.all(order.map((i) => findNumberBox(pngs[i], items[i].label || `${newNo.get(i)}번`)));
+    // 그림을 열고 줄이는 일은 화면 스레드라 한꺼번에 다 하면 화면이 멈춘다 — 몇 개씩만 겹쳐 돌린다(luna 응답을 기다리는
+    // 동안 다음 것을 준비하므로 전체 시간은 거의 안 는다).
+    const found: Awaited<ReturnType<typeof findNumberBox>>[] = new Array(order.length);
+    let next = 0;
+    let done = 0;
+    setProgress(`원래 번호 자리 찾는 중 0/${order.length}`);
+    const lane = async () => {
+      while (next < order.length) {
+        const k = next++;
+        const i = order[k];
+        found[k] = await findNumberBox(pngs[i], items[i].label || `${newNo.get(i)}번`);
+        setProgress(`원래 번호 자리 찾는 중 ${++done}/${order.length}`);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, order.length) }, lane));
     const missed: Record<NumberMiss, number[]> = { none: [], unsafe: [], error: [] };
     order.forEach((i, k) => {
       const { box, miss } = found[k];
@@ -257,7 +275,8 @@ export default function KiceExportPanel({ title, items }: Props) {
         replace["(사회문화)"] = subject ? `(${subject})` : "";
       }
 
-      const bytes = await buildKicePdf({
+      setProgress("PDF 조립 중...");
+      const bytes = await buildKicePdfOffThread({
         frames,
         replace,
         fonts,
@@ -311,6 +330,7 @@ export default function KiceExportPanel({ title, items }: Props) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "PDF 만들기에 실패했습니다.");
     } finally {
+      setProgress(null);
       setBusy(false);
     }
   }
@@ -478,7 +498,7 @@ export default function KiceExportPanel({ title, items }: Props) {
           disabled={busy || items.length === 0}
           variant="primary" className="px-5 py-2.5 text-sm"
  >
-          {busy ? "PDF 만드는 중..." : "평가원 양식 PDF 만들기"}
+          {busy ? (progress ?? "PDF 만드는 중...") : "평가원 양식 PDF 만들기"}
         </Button>
       </div>
     </Card>

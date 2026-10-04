@@ -48,7 +48,19 @@ async function openPng(png: Uint8Array) {
   const d = ctx.getImageData(0, 0, w, h).data;
   const g = new Uint8ClampedArray(w * h);
   for (let i = 0; i < w * h; i++) g[i] = (d[i * 4] * 299 + d[i * 4 + 1] * 587 + d[i * 4 + 2] * 114) / 1000;
-  return { g, w, h, canvas, dataUrl: canvas.toDataURL("image/jpeg", 0.9) };
+  return { g, w, h, canvas, dataUrl: await jpegDataUrl(canvas, 0.9) };
+}
+
+/** JPEG 데이터 URL — `toDataURL` 은 화면 스레드를 붙잡고 인코딩하므로 `toBlob`(비동기)으로 만든다. */
+async function jpegDataUrl(canvas: HTMLCanvasElement, quality: number): Promise<string> {
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", quality));
+  if (!blob) return canvas.toDataURL("image/jpeg", quality);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 /**
@@ -56,7 +68,7 @@ async function openPng(png: Uint8Array) {
  * "번호 없음"으로 넘기는 일이 잦았다(같은 그림이 회차마다 됐다 안 됐다 했다). 폭 60% × (그 폭의 절반) 를 잘라 크게 보낸다.
  * 돌려주는 `region` 은 원래 그림 대비 비율이다 — luna 좌표를 원래 그림으로 되돌리는 데 쓴다.
  */
-function topLeftZoom(src: HTMLCanvasElement) {
+async function topLeftZoom(src: HTMLCanvasElement) {
   const sw = Math.max(1, Math.round(src.width * 0.6));
   const sh = Math.max(1, Math.min(src.height, Math.round(sw * 0.5)));
   const k = SEND_DIM / Math.max(sw, sh);
@@ -67,7 +79,7 @@ function topLeftZoom(src: HTMLCanvasElement) {
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(src, 0, 0, sw, sh, 0, 0, canvas.width, canvas.height);
   return {
-    dataUrl: canvas.toDataURL("image/jpeg", 0.92),
+    dataUrl: await jpegDataUrl(canvas, 0.92),
     region: { x: 0, y: 0, w: sw / src.width, h: sh / src.height },
   };
 }
@@ -281,7 +293,7 @@ export async function findNumberBox(
   const first = await askLuna(dataUrl, label);
   const firstBox = settle(first);
   if (firstBox) return { box: firstBox };
-  const zoom = topLeftZoom(canvas);
+  const zoom = await topLeftZoom(canvas);
   const second = await askLuna(zoom.dataUrl, `${label} (다시)`, "medium");
   const secondBox = settle(second, zoom.region);
   if (secondBox) return { box: secondBox };
