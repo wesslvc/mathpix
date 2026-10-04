@@ -48,7 +48,28 @@ async function openPng(png: Uint8Array) {
   const d = ctx.getImageData(0, 0, w, h).data;
   const g = new Uint8ClampedArray(w * h);
   for (let i = 0; i < w * h; i++) g[i] = (d[i * 4] * 299 + d[i * 4 + 1] * 587 + d[i * 4 + 2] * 114) / 1000;
-  return { g, w, h, dataUrl: canvas.toDataURL("image/jpeg", 0.9) };
+  return { g, w, h, canvas, dataUrl: canvas.toDataURL("image/jpeg", 0.9) };
+}
+
+/**
+ * 다시 물을 때 보낼 **왼쪽 위 확대본**. 번호는 늘 문제 왼쪽 위에 있는데, 카드 전체를 보내면 번호가 그림의 1~2% 라 luna(강도 low)가
+ * "번호 없음"으로 넘기는 일이 잦았다(같은 그림이 회차마다 됐다 안 됐다 했다). 폭 60% × (그 폭의 절반) 를 잘라 크게 보낸다.
+ * 돌려주는 `region` 은 원래 그림 대비 비율이다 — luna 좌표를 원래 그림으로 되돌리는 데 쓴다.
+ */
+function topLeftZoom(src: HTMLCanvasElement) {
+  const sw = Math.max(1, Math.round(src.width * 0.6));
+  const sh = Math.max(1, Math.min(src.height, Math.round(sw * 0.5)));
+  const k = SEND_DIM / Math.max(sw, sh);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(sw * k);
+  canvas.height = Math.round(sh * k);
+  const ctx = canvas.getContext("2d")!;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, 0, 0, sw, sh, 0, 0, canvas.width, canvas.height);
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", 0.92),
+    region: { x: 0, y: 0, w: sw / src.width, h: sh / src.height },
+  };
 }
 
 type Comp = { x0: number; y0: number; x1: number; y1: number; n: number; edge: boolean };
@@ -216,17 +237,54 @@ export function tightenNumberBox(
   };
 }
 
-/** 문제 그림(PNG)에서 원래 번호 자리 — luna 가 찾고 잉크에 맞게 조인다. 못 찾으면 null. */
-export async function findNumberBox(png: Uint8Array, label: string): Promise<NumberBox | null> {
+/** 못 덮은 까닭 — none: luna 가 번호를 못 봄, unsafe: 찾았지만 남김없이·남의 글자 없이 덮을 수 없음, error: 호출 실패. */
+export type NumberMiss = "none" | "unsafe" | "error";
+
+type LunaNumber = { box: Box | null; text?: string };
+
+async function askLuna(dataUrl: string, label: string, effort?: string): Promise<LunaNumber | null> {
   try {
-    const { g, w, h, dataUrl } = await openPng(png);
-    const { result } = await runAiTask<{ box: Box | null; text?: string }>("numberBox", {
+    const { result } = await runAiTask<LunaNumber>("numberBox", {
       label: `번호 자리 · ${label}`.slice(0, 100),
       images: [dataUrl],
+      params: effort ? { effort } : undefined,
     });
-    if (!result?.box) return null;
-    return tightenNumberBox(g, w, h, result.box, result.text ?? "");
+    return result ?? null;
   } catch {
     return null;
   }
+}
+
+/**
+ * 문제 그림(PNG)에서 원래 번호 자리 — luna 가 찾고 잉크에 맞게 조인다.
+ * 처음엔 그림 전체를 강도 low 로, 못 찾았거나 안전하게 못 덮으면 **왼쪽 위를 확대해 강도 medium 으로 한 번 더** 묻는다.
+ * 두 번째도 좌표만 luna 것이고 덮을지 말지는 같은 규칙(`tightenNumberBox`)으로 원래 그림에서 정한다.
+ */
+export async function findNumberBox(
+  png: Uint8Array,
+  label: string,
+): Promise<{ box: NumberBox | null; miss?: NumberMiss }> {
+  let opened: Awaited<ReturnType<typeof openPng>>;
+  try {
+    opened = await openPng(png);
+  } catch {
+    return { box: null, miss: "error" };
+  }
+  const { g, w, h, canvas, dataUrl } = opened;
+  const settle = (r: LunaNumber | null, map?: Box): NumberBox | null => {
+    if (!r?.box) return null;
+    const b = map
+      ? { x: map.x + r.box.x * map.w, y: map.y + r.box.y * map.h, w: r.box.w * map.w, h: r.box.h * map.h }
+      : r.box;
+    return tightenNumberBox(g, w, h, b, r.text ?? "");
+  };
+  const first = await askLuna(dataUrl, label);
+  const firstBox = settle(first);
+  if (firstBox) return { box: firstBox };
+  const zoom = topLeftZoom(canvas);
+  const second = await askLuna(zoom.dataUrl, `${label} (다시)`, "medium");
+  const secondBox = settle(second, zoom.region);
+  if (secondBox) return { box: secondBox };
+  if (!first && !second) return { box: null, miss: "error" };
+  return { box: null, miss: first?.box || second?.box ? "unsafe" : "none" };
 }

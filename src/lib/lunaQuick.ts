@@ -82,8 +82,9 @@ e.g. "17.", "3.", "112.", "05", "[22]", a number in a small box or circle tag �
 
 - Return the box that tightly encloses ONLY that number and its punctuation (period, bracket, box/tag border). Do not include the
   question text after it.
-- If there is no printed problem number at the start (the problem begins directly with text such as "밑줄 친 ㉠…" or "가. …"),
-  return null. Choice markers (①~⑤), page numbers, and numbers inside the question are NOT the problem number.
+- Almost every problem here HAS a printed number. Look carefully at the top-left corner — it can be small, bold, a different font,
+  inside a small box/circle tag, or slightly separated from the text. Return null only when you are sure there is none (the
+  problem begins directly with text such as "밑줄 친 ㉠…" or "가. …"). Choice markers (①~⑤), page numbers, and numbers inside the question are NOT the problem number.
 - Coordinates: box_2d = [ymin, xmin, ymax, xmax], each normalised to 0~1000 of the image.
 
 - "text": the number exactly as printed, including its punctuation (e.g. "17.", "05", "[22]").
@@ -93,9 +94,10 @@ answer as JSON object only: {"box_2d":[ymin,xmin,ymax,xmax],"text":"17."}  — o
 /** 문제 그림에서 인쇄된 문제 번호의 자리(0~1). 없으면 box 가 null. 여러 실모를 묶어 1번부터 다시 매길 때 쓴다. */
 export async function findProblemNumber(
   dataUrl: string,
+  effort?: string,
 ): Promise<{ box: ProblemBox | null; text: string; model: string; usage?: DetectUsage }> {
   let usage: DetectUsage | undefined;
-  const text = await callOpenAIVision(dataUrl, NUMBER_PROMPT, OPENAI_DETECT_MODEL, NUMBER_EFFORT, (u) => {
+  const text = await callOpenAIVision(dataUrl, NUMBER_PROMPT, OPENAI_DETECT_MODEL, effort ?? NUMBER_EFFORT, (u) => {
     usage = u;
   });
   const box = parseNumberBox(text);

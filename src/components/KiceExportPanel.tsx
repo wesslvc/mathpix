@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { buildKicePdf, LAYOUT, type KiceSpec, type NumberCover } from "@/lib/kice/pdf";
-import { findNumberBox } from "@/lib/kice/numberCover";
+import { findNumberBox, type NumberMiss } from "@/lib/kice/numberCover";
 import { passageSplitAt } from "@/lib/kice/passageSplit";
 import {
   frameKeyFor,
@@ -212,12 +212,12 @@ export default function KiceExportPanel({ title, items }: Props) {
     const newNo = new Map<number, number>();
     order.forEach((i, k) => newNo.set(i, k + 1));
     // 번호 자리는 luna 가 찾는다(대기열 없이 곧바로, 토큰 0). luna 는 동시에 많이 받으므로 한꺼번에 보낸다.
-    const boxes = await Promise.all(order.map((i) => findNumberBox(pngs[i], items[i].label || `${newNo.get(i)}번`)));
-    const missed: number[] = [];
+    const found = await Promise.all(order.map((i) => findNumberBox(pngs[i], items[i].label || `${newNo.get(i)}번`)));
+    const missed: Record<NumberMiss, number[]> = { none: [], unsafe: [], error: [] };
     order.forEach((i, k) => {
-      const box = boxes[k];
+      const { box, miss } = found[k];
       if (box) covers.set(i, { box, no: k + 1 });
-      else missed.push(k + 1);
+      else missed[miss ?? "none"].push(k + 1);
     });
     return { order, covers, newNo, missed };
   }
@@ -236,10 +236,17 @@ export default function KiceExportPanel({ title, items }: Props) {
       ]);
 
       const renum = doRenumber ? await planRenumber(pngs) : null;
-      if (renum?.missed.length) {
-        setNotice(
-          `${renum.missed.join(", ")}번은 luna 가 그림에서 원래 번호를 못 찾아 덮지 못했어요 — 정답표는 새 번호로 나갑니다.`,
-        );
+      if (renum) {
+        // 왜 못 덮었는지 갈라 알린다 — 셋은 고칠 길이 다르다.
+        const { none, unsafe, error } = renum.missed;
+        const lines = [
+          none.length ? `${none.join(", ")}번: luna 가 두 번 봐도 원래 번호를 못 찾았어요(그림에 번호가 없을 수도 있어요).` : "",
+          unsafe.length
+            ? `${unsafe.join(", ")}번: 번호는 찾았지만 밑줄·테두리·옆 글자에 붙어 있어 남김없이 덮을 수 없어 그대로 뒀어요.`
+            : "",
+          error.length ? `${error.join(", ")}번: 번호 찾기 요청이 실패했어요 — 다시 만들어 보세요.` : "",
+        ].filter(Boolean);
+        if (lines.length) setNotice(`원래 번호를 못 덮은 문제(정답표는 새 번호로 나갑니다) — ${lines.join(" ")}`);
       }
 
       // 틀에 적힌 글자를 무엇으로 바꿀지. 공백을 뗀 글자로 찾는다.

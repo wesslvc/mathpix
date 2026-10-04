@@ -269,7 +269,9 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     name: "번호 자리 찾기",
     async run(ctx) {
       try {
-        const { box, text, model, usage } = await findProblemNumber(ctx.images[0]);
+        // 못 찾은 것을 다시 물을 때만 강도를 올린다(화면이 위쪽을 확대해 `effort: "medium"` 으로 보낸다).
+        const effort = ["low", "medium", "high"].includes(String(ctx.params.effort)) ? String(ctx.params.effort) : undefined;
+        const { box, text, model, usage } = await findProblemNumber(ctx.images[0], effort);
         const estKrw = usage ? gradingEstKrw(lunaUsage(usage), OPENAI_DETECT_MODEL) : undefined;
         if (estKrw && usage) {
           await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 번호 자리 찾기", krw: estKrw, tokens: usage });
