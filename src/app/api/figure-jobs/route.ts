@@ -238,6 +238,8 @@ export async function POST(req: NextRequest) {
       input_path: inputPath,
       ...(mode === "problem" && body.auto === true ? { payload: { auto: true } } : {}),
       ...(body.sol === true && (mode === "figure" || (mode === "problem" && body.auto !== true)) ? { payload: { sol: true } } : {}),
+      // 새로 만드는 문제 통째로 그리기는 luna 가 난이도를 보고 시작 quality 를 고르는 단계부터(`problemLoopRun.ts` 의 assess).
+      ...(mode === "problem" && body.auto !== true && body.sol !== true ? { stage: "assess" } : {}),
       width: typeof body.width === "number" && body.width > 0 ? Math.round(body.width) : null,
       height:
         typeof body.height === "number" && body.height > 0 ? Math.round(body.height) : null,

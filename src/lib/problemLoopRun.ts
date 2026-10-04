@@ -3,6 +3,9 @@
 // 예전에는 sunburst 를 한 번 불러 나온 그림을 그대로 저장했다. 글자·도형이 틀려도 알 방법이
 // 없었다. 비교 화면(`/admin/compare-problem`)에서 시험한 흐름을 운영으로 옮긴 것이다:
 //
+//   assess   luna(추론 강도 medium)가 난이도를 보고 **시작 칸**을 고른다(2026-10-04) — 글 위주·원문자 적음 → low,
+//            그리기 어려움 → medium, 아주 세밀한 그래프·손글씨가 아주 많음 → high. 수정 창의 sol 다시 그리기는 medium 부터.
+//            단계 이름의 N 은 사다리 칸 번호이고 그림 목록은 시작 칸부터 쌓인다(`ladderInfo`).
 //   gen:0    low 로 그린다
 //   verify:0 sol 이 원본과 대조한다(글자 · 깨진 글자 · 도형 · 남은 손글씨). 차이가 0곳이면 끝.
 //   (차이가 남으면 여기서 **멈춘다** — 가장 나은 그림을 먼저 저장하고 작업을 `max-offer` 로 남긴다.
@@ -49,6 +52,8 @@ import {
 } from "./problemCompare";
 import { gradingEstKrw } from "./tokens";
 import { imageTokens, logAiCost, solTokens } from "./costLog";
+import { OPENAI_DETECT_MODEL } from "./detectProblems";
+import { assessDifficulty, lunaUsage, type StartQuality } from "./lunaQuick";
 
 /**
  * 맨 위 단계(사용자 확인 뒤에만 돈다)의 quality. **기본은 high 다** — max 는 문제 한 장에 그림 출력이
@@ -71,6 +76,26 @@ export const EDIT_LADDER = ["medium", TOP_QUALITY] as const;
 
 function ladderOf(job: { edit?: boolean }): readonly string[] {
   return job.edit ? EDIT_LADDER : PROBLEM_LADDER;
+}
+
+/**
+ * 이 작업이 쓰는 사다리와 **시작 칸**. 단계 이름(`gen:N`/`verify:N`)의 N 은 사다리의 칸 번호(절대값)이고, 그린 그림 목록
+ * (`rounds`)은 시작 칸부터 차례로 쌓이므로 `rounds[N - start]` 다.
+ *
+ * `state.start` 가 있는 작업(2026-10-04 이후)은 늘 `PROBLEM_LADDER` 를 쓴다 — luna 가 고른 시작 칸이나(새로 만들기) 수정 창의
+ * medium(1) 부터. 없는 옛 작업은 예전처럼 수정 창이면 `EDIT_LADDER`, 아니면 `PROBLEM_LADDER` 의 0 부터.
+ */
+function ladderInfo(job: { edit?: boolean }, state: ProblemLoopState | null | undefined): { ladder: readonly string[]; start: number } {
+  if (state && typeof state.start === "number") return { ladder: PROBLEM_LADDER, start: state.start };
+  return { ladder: ladderOf(job), start: 0 };
+}
+
+/** luna 가 고른 시작 quality → 사다리 칸. */
+const START_ROUND: Record<StartQuality, number> = { low: 0, medium: 1, high: PROBLEM_LADDER.length - 1 };
+
+/** 그리기 전에 luna 가 난이도를 보고 시작 quality 를 고를지(`PROBLEM_ASSESS=off` 면 늘 low 부터). */
+function assessEnabled(): boolean {
+  return (process.env.PROBLEM_ASSESS ?? "on").trim().toLowerCase() !== "off";
 }
 
 /** sol 검수의 추론 강도. 재배포 없이 `OPENAI_VERIFY_EFFORT` 로 바꾼다(`default` 면 안 보낸다). */
@@ -101,6 +126,13 @@ type Round = {
 
 export type ProblemLoopState = {
   rounds: Round[];
+  /**
+   * 사다리(`PROBLEM_LADDER`)의 **시작 칸** — luna 가 난이도를 보고 고른다(low 0 · medium 1 · high 2). 수정 창의 sol 다시 그리기는
+   * 1(medium) 부터. 없으면 옛 작업이다(`ladderInfo`).
+   */
+  start?: number;
+  /** luna 의 난이도 판단(화면 메모용). */
+  assess?: { start: StartQuality; reason: string };
   /** 다음 그리기에 붙일 지시(앞선 **모든** 시도가 틀린 곳을 모은 것). */
   instruction?: string;
   /**
@@ -315,8 +347,10 @@ async function finalize(
  * 라운드 수만으로는 가릴 수 없다.
  */
 export function maxRoundDrawn(state: unknown): boolean {
-  const rounds = (state as ProblemLoopState | null)?.rounds;
-  const r = Array.isArray(rounds) ? rounds[offerTarget(state).round] : undefined;
+  const st = state as ProblemLoopState | null;
+  const rounds = st?.rounds;
+  const start = typeof st?.start === "number" ? st.start : 0;
+  const r = Array.isArray(rounds) ? rounds[offerTarget(state).round - start] : undefined;
   return !!r && !String(r.quality).startsWith("patch");
 }
 
@@ -351,7 +385,13 @@ export async function runProblemStage(
   job: ProblemLoopJob,
   ctx: Ctx,
 ): Promise<ProblemLoopOutcome> {
-  const state: ProblemLoopState = job.state ?? { rounds: [] };
+  // 새 작업(또는 처음부터 다시 시도): 시작 칸을 정한다. 수정 창은 medium 부터, 새로 만들기는 luna 가 보고 고른다.
+  if (!job.stage || job.stage === "assess") {
+    if (job.edit) return runGen(admin, job, { rounds: [], start: 1 }, 1, ctx);
+    if (job.mode === "problem" && assessEnabled()) return runAssess(admin, job, ctx);
+    return runGen(admin, job, { rounds: [], start: 0 }, 0, ctx);
+  }
+  const state: ProblemLoopState = job.state ?? { rounds: [], start: 0 };
   const stage = job.stage ?? "gen:0";
 
   const genIdx = indexOf(stage, "gen");
@@ -364,7 +404,50 @@ export async function runProblemStage(
   if (verIdx !== null) return runVerify(admin, job, state, verIdx, ctx);
 
   // 모르는 단계(옛 데이터)면 처음부터.
-  return runGen(admin, job, { rounds: [] }, 0, ctx);
+  return runProblemStage(admin, { ...job, stage: null, state: null }, ctx);
+}
+
+/**
+ * **그리기 전에 luna 가 난이도를 본다**(추론 강도 medium). 글 위주·원문자 적음 → low, 그리기 어려움 → medium, 아주 세밀한 그래프·
+ * 손글씨가 아주 많음 → high 부터 그린다. 싼 단계로 될 것을 비싼 단계로 그리지 않고, 어차피 안 될 것을 low 로 한 번 버리지 않는다.
+ * 못 보면 low 부터(예전과 같다). 추가 토큰은 없다(넣을 때 건 보증금 그대로) — 다음 단계로 올라가는 것만 확인을 받는다.
+ */
+async function runAssess(admin: SupabaseClient, job: ProblemLoopJob, ctx: Ctx): Promise<ProblemLoopOutcome> {
+  const original = await loadAsDataUrl(admin, job.input_path);
+  if (!original) return { kind: "fail", error: "올려 둔 그림을 찾지 못했어요. 다시 넣어주세요.", cleanup: [] };
+  let start: StartQuality = "low";
+  let reason = "";
+  let krw = 0;
+  try {
+    const out = await assessDifficulty(original);
+    start = out.start;
+    reason = out.reason;
+    if (out.usage) {
+      krw = gradingEstKrw(lunaUsage(out.usage), OPENAI_DETECT_MODEL) ?? 0;
+      if (krw > 0) {
+        await logAiCost(admin, {
+          userId: job.user_id,
+          jobId: job.id,
+          kind: "problem",
+          what: "luna 난이도 판단",
+          krw,
+          tokens: out.usage,
+        });
+      }
+    }
+    console.info(`[${ctx.tag}] luna 난이도 ${start}${reason ? ` (${reason})` : ""} est=${krw.toFixed(1)}원`);
+  } catch (err) {
+    console.warn(`[${ctx.tag}] 난이도 판단 실패 → low 부터: ${err instanceof Error ? err.message.slice(0, 200) : err}`);
+    reason = "난이도를 못 봐서 low 부터";
+  }
+  const round = START_ROUND[start];
+  const quality = PROBLEM_LADDER[round];
+  return {
+    kind: "next",
+    stage: `gen:${round}`,
+    state: { rounds: [], start: round, assess: { start, reason }, solKrw: krw },
+    note: `luna: ${quality} 부터 그려요${reason ? ` — ${reason}` : ""}`,
+  };
 }
 
 /** 수정의 바탕이 되는 그림 = 지금 저장돼 있는 라운드(`state.current`, 없으면 남은 차이가 가장 적은 것). */
@@ -570,8 +653,10 @@ async function runGen(
   i: number,
   ctx: Ctx,
 ): Promise<ProblemLoopOutcome> {
-  const ladder = ladderOf(job);
+  const { ladder, start } = ladderInfo(job, state);
   const quality = ladder[Math.min(i, ladder.length - 1)];
+  /** 이 그림이 놓일 `rounds` 자리. */
+  const r = Math.max(0, i - start);
   const original = await loadAsDataUrl(admin, job.input_path);
   if (!original) {
     return { kind: "fail", error: "올려 둔 그림을 찾지 못했어요. 다시 넣어주세요.", cleanup: pathsOf(state) };
@@ -581,7 +666,7 @@ async function runGen(
     image: original,
     mode: job.mode === "figure" ? "figure" : "problem",
     korean: job.korean,
-    instruction: joinInstructions(job.instruction, i === 0 ? undefined : state.instruction),
+    instruction: joinInstructions(job.instruction, r === 0 ? undefined : state.instruction),
     inputSize: job.width && job.height ? { width: job.width, height: job.height } : undefined,
     modelIds: ctx.modelIds,
     byokApiKey: ctx.byokApiKey,
@@ -622,12 +707,13 @@ async function runGen(
   }
 
   // 다시 그리기는 앞 라운드 뒤를 새로 쓴다 — 수정(`-p<k>`)으로 쌓인 라운드가 잘려 나가면 그 파일도 지운다.
-  const dropped = state.rounds.slice(i).map((r) => r.path).filter((pth) => pth !== path);
+  const dropped = state.rounds.slice(r).map((x) => x.path).filter((pth) => pth !== path);
   if (dropped.length) await removeStored(admin, dropped);
   const next: ProblemLoopState = {
+    // `start` 는 state 에 있던 그대로 간다(옛 작업은 없는 채로 — 옛 사다리를 계속 쓴다).
     ...state,
     usage,
-    rounds: [...state.rounds.slice(0, i), { quality, path }],
+    rounds: [...state.rounds.slice(0, r), { quality, path }],
     current: undefined,
   };
   return {
@@ -724,15 +810,17 @@ async function runVerify(
   i: number,
   ctx: Ctx,
 ): Promise<ProblemLoopOutcome> {
-  const round = state.rounds[i];
-  if (!round) return runGen(admin, job, { ...state, rounds: state.rounds.slice(0, i) }, i, ctx);
+  const { ladder, start } = ladderInfo(job, state);
+  const r = Math.max(0, i - start);
+  const round = state.rounds[r];
+  if (!round) return runGen(admin, job, { ...state, rounds: state.rounds.slice(0, r) }, i, ctx);
 
   const [original, candidate] = await Promise.all([
     loadAsDataUrl(admin, job.input_path),
     loadAsDataUrl(admin, round.path),
   ]);
   // 검수 재료를 못 읽었으면 검수 없이 이 그림으로 끝낸다.
-  if (!original || !candidate) return finalize(admin, state, i, ctx, "검수 재료를 못 읽음");
+  if (!original || !candidate) return finalize(admin, state, r, ctx, "검수 재료를 못 읽음");
 
   // sol 은 백그라운드로 걸고 묻는다(강도를 올리면 오래 걸린다). 시간이 다 되면 검수를 포기한다.
   const ask = await askSol(VERIFY_PROMPT, [original, candidate], ctx, "검수", { cacheKey: VERIFY_CACHE_KEY });
@@ -760,15 +848,14 @@ async function runVerify(
   const withCost: ProblemLoopState = { ...state, solKrw: (state.solKrw ?? 0) + solKrw };
   if (!diffs) {
     console.warn(`[${ctx.tag}] 검수 실패, 검수 없이 저장: ${fail.slice(0, 200)}`);
-    return finalize(admin, withCost, i, ctx, "검수 실패");
+    return finalize(admin, withCost, r, ctx, "검수 실패");
   }
 
-  const rounds = state.rounds.map((r, k) => (k === i ? { ...r, diffs: diffs!.length } : r));
+  const rounds = state.rounds.map((x, k) => (k === r ? { ...x, diffs: diffs!.length } : x));
   const checked: ProblemLoopState = { ...withCost, rounds };
   console.info(`[${ctx.tag}] 검수 ${round.quality} 차이 ${diffs.length}곳`);
 
   // 차이가 없거나 마지막 라운드면 끝. 그림 하나(figure, 수정 창이 아닌 것)는 low → medium 까지만 돈다.
-  const ladder = ladderOf(job);
   const lastIdx = job.mode === "figure" && !job.edit ? ladder.length - 2 : ladder.length - 1;
   if (diffs.length === 0 || i >= lastIdx) {
     return finalize(admin, checked, bestRound(rounds), ctx, "");

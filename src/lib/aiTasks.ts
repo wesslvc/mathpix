@@ -49,11 +49,13 @@ import {
   type ChatTurn,
 } from "./problemCompare";
 import { askSol, loadPatchImages } from "./problemLoopRun";
+import { cropOneProblem, lunaUsage } from "./lunaQuick";
 import type { ProblemBox } from "./problemBoxes";
 
 export type TaskKind =
   | "ocr"
   | "detect"
+  | "crop"
   | "title"
   | "grade"
   | "answerKey"
@@ -65,6 +67,7 @@ export type TaskKind =
 export const TASK_KINDS: readonly TaskKind[] = [
   "ocr",
   "detect",
+  "crop",
   "title",
   "grade",
   "answerKey",
@@ -222,6 +225,27 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         return { ok: true, result: { problems, model }, model, estKrw };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "문제 영역 인식에 실패했습니다.") };
+      }
+    },
+  },
+
+  // 사진 한 장의 자동 자르기(luna, 추론 강도 low). 업로드 직후 화면이 부른다 — 누구나, 토큰을 안 뗀다(원가 몇 원, 장부에 적는다).
+  crop: {
+    deposit: () => 0,
+    flat: true,
+    needsOpenAI: false,
+    images: { min: 1, max: 1 },
+    name: "자동 자르기",
+    async run(ctx) {
+      try {
+        const { box, model, usage } = await cropOneProblem(ctx.images[0]);
+        const estKrw = usage ? gradingEstKrw(lunaUsage(usage), OPENAI_DETECT_MODEL) : undefined;
+        if (estKrw && usage) {
+          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 자동 자르기", krw: estKrw, tokens: usage });
+        }
+        return { ok: true, result: { box, model }, model, estKrw, note: box ? undefined : "문제 자리를 못 찾았어요" };
+      } catch (err) {
+        return { ok: false, error: errorMessage(err, "자동 자르기에 실패했습니다.") };
       }
     },
   },

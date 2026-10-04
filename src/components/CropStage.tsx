@@ -8,6 +8,7 @@ import { detectContentRegion } from "@/lib/autoDetectRegion";
 import { rotateImageDataUrl } from "@/lib/cropImage";
 import { cropRegionToDataUrl, rectPoly, type Region } from "@/lib/polygon";
 import { useCropShape } from "@/lib/cropShape";
+import { inkMapFromImage, snapBoxes } from "@/lib/snapBoxes";
 import BoxEditor, { type EditBox } from "./BoxEditor";
 import CropShapeToggle from "./CropShapeToggle";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,15 @@ type Props = {
   onError: (message: string) => void;
   /** 이 사진을 건너뛴다(대기열 맨 뒤로). 여러 장을 넣을 때만 준다. */
   onSkip?: () => void;
+  /**
+   * luna 가 잡은 문제 자리(사진 대비 비율). `undefined` = 아직 자르는 중, `null` = 못 찾음(또는 안 씀) — 그때는 화면의
+   * 계산(`detectContentRegion`)을 그대로 둔다. 사용자가 손대기 전에 도착하면 그 자리로 바꾼다.
+   */
+  aiRegion?: Region | null;
 };
+
+/** luna 자리를 글자에 맞춰 다듬은 뒤 두르는 여유(사방). 딱 맞게 자르면 획 끝이 잘릴 수 있다. */
+const AI_PAD = 0.006;
 
 /** 한 문제 자르기에서 영역을 가리키는 id. 하나뿐이라 고정값이다. */
 const ONE = "crop";
@@ -46,6 +55,7 @@ export default function CropStage({
   problemTokenCost,
   unlimited = false,
   byok = false,
+  aiRegion,
 }: Props) {
   /** 자를 재료. 화면에 뜬 `<img>` 가 아니라 따로 연 것이라 모양을 바꿔도 그대로다. */
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -55,6 +65,12 @@ export default function CropStage({
   const [shape, setShape] = useCropShape();
   /** 자동 감지는 사진마다 한 번만 한다 — 모양을 바꿀 때 그림이 다시 붙어도 덮지 않는다. */
   const detectedFor = useRef<string | null>(null);
+  /** 사용자가 자리를 손댔다 — 그 뒤에 도착한 luna 자리로 덮지 않는다. */
+  const touched = useRef(false);
+  /** luna 자리를 이미 얹었다. */
+  const [aiApplied, setAiApplied] = useState(false);
+  const aiRef = useRef(aiRegion);
+  aiRef.current = aiRegion;
 
   /**
    * 사진 돌리기. 세로로 찍힌 사진이 누워서 들어오는 일이 흔하다.
@@ -101,6 +117,24 @@ export default function CropStage({
     );
   }
 
+  /**
+   * luna 자리를 얹는다 — 돌리지 않은 사진이고 사용자가 아직 손대지 않았을 때만(luna 는 돌리기 전 사진을 봤다).
+   * 테두리는 사진의 글자에 맞춰 다듬는다(`snapBoxes` — 지면 통째로 넣기와 같은 판단, 모델 테두리는 1~2% 어긋난다).
+   */
+  function applyAi(img: HTMLImageElement) {
+    const box = aiRef.current;
+    if (!box || touched.current || turns !== 0) return;
+    let b = { x: box.x, y: box.y, w: box.w, h: box.h };
+    const map = inkMapFromImage(img, img.naturalWidth, img.naturalHeight);
+    if (map) b = snapBoxes(map, [b]).boxes[0] ?? b;
+    const x0 = Math.max(0, b.x - AI_PAD);
+    const y0 = Math.max(0, b.y - AI_PAD);
+    const x1 = Math.min(1, b.x + b.w + AI_PAD);
+    const y1 = Math.min(1, b.y + b.h + AI_PAD);
+    setRegion({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+    setAiApplied(true);
+  }
+
   function handleImageLoad(img: HTMLImageElement) {
     imgRef.current = img;
     if (detectedFor.current === shown) return;
@@ -113,6 +147,19 @@ export default function CropStage({
       h: rect.height / img.naturalHeight,
     });
     setAutoDetected(true);
+    applyAi(img);
+  }
+
+  // luna 자리가 사진이 뜬 뒤에 도착했으면 그때 얹는다.
+  useEffect(() => {
+    if (aiRegion && imgRef.current && detectedFor.current === shown && !aiApplied) applyAi(imgRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiRegion]);
+
+  /** 사용자가 자리를 바꿨다(끌기·전체·새로 그리기·돌리기). */
+  function userSetRegion(r: Region | null) {
+    touched.current = true;
+    setRegion(r);
   }
 
   const ready = !!region && region.w > 0 && region.h > 0;
@@ -141,17 +188,28 @@ export default function CropStage({
               ? "사진을 여는 중…"
               : shape === "poly"
                 ? "점을 끌어 모양을 맞추세요. 변 가운데 점을 끌면 점이 늘어요."
-                : "자동으로 잡았어요. 손잡이를 끌어 범위를 맞추세요."}
+                : aiApplied
+                  ? "luna 가 문제 자리를 잘랐어요. 손잡이를 끌어 범위를 맞추세요."
+                  : aiRegion === undefined && !touched.current && turns === 0
+                    ? "자동으로 잡았어요 · luna 가 더 정확히 자르는 중…"
+                    : "자동으로 잡았어요. 손잡이를 끌어 범위를 맞추세요."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <CropShapeToggle value={shape} onChange={setShape} />
-          <Button type="button" onClick={() => setTurns((t) => t + 1)} variant="outline" size="sm">
+          <Button
+            type="button"
+            onClick={() => {
+              touched.current = true;
+              setTurns((t) => t + 1);
+            }}
+            variant="outline" size="sm"
+          >
             ↻ 돌리기
           </Button>
           <Button
             type="button"
-            onClick={() => setRegion({ x: 0.02, y: 0.02, w: 0.96, h: 0.96 })}
+            onClick={() => userSetRegion({ x: 0.02, y: 0.02, w: 0.96, h: 0.96 })}
             variant="outline" size="sm"
           >
             전체
@@ -159,7 +217,7 @@ export default function CropStage({
           {shape === "poly" && (
             <Button
               type="button"
-              onClick={() => setRegion(null)}
+              onClick={() => userSetRegion(null)}
               variant="outline" size="sm"
               title="지우고 점을 새로 찍습니다"
             >
@@ -174,7 +232,7 @@ export default function CropStage({
           <ReactCrop
             crop={percentCrop}
             onChange={(_, pc) =>
-              setRegion({ x: pc.x / 100, y: pc.y / 100, w: pc.width / 100, h: pc.height / 100 })
+              userSetRegion({ x: pc.x / 100, y: pc.y / 100, w: pc.width / 100, h: pc.height / 100 })
             }
             className="max-h-[58vh] sm:max-h-[70vh]"
           >
@@ -197,7 +255,7 @@ export default function CropStage({
             boxes={editBoxes}
             onChange={(list) => {
               const b = list[list.length - 1];
-              setRegion(b ? { x: b.x, y: b.y, w: b.w, h: b.h, poly: b.poly } : null);
+              userSetRegion(b ? { x: b.x, y: b.y, w: b.w, h: b.h, poly: b.poly } : null);
             }}
             shape="poly"
             single

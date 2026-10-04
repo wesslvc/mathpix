@@ -51,9 +51,11 @@ import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "
 import { runAiTask } from "@/lib/aiTask";
 import { prepareProblemForModel } from "@/lib/figureImage";
 import type { AnswerByNumber } from "@/lib/answerMap";
+import type { Region } from "@/lib/polygon";
 import {
   clearQueue,
   loadQueue,
+  photoForModel,
   preparePhoto,
   removePhoto,
   saveOrder,
@@ -156,8 +158,46 @@ export default function AddProblemFlow({
   const activeRef = useRef<QueuedPhoto | null>(null);
   const orderRef = useRef(0);
   const addInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * **luna 자동 자르기**(2026-10-04, 사용자 — "이미지 업로드하자마자 luna low 가 자동 자르기"). 사진이 들어오는 대로
+   * 서버 대기열에 `crop` 작업을 넣고(토큰 없음), 결과 자리를 사진 id 별로 든다. 없으면 아직 자르는 중, null 이면
+   * 못 찾음(화면이 제 계산 그대로 둔다). 자르기 화면이 사용자가 손대기 전에 도착하면 그 자리로 바꾼다.
+   */
+  const [aiCrops, setAiCrops] = useState<Record<string, Region | null>>({});
+  const cropAskedRef = useRef(new Set<string>());
+  /** 사진을 줄여 올리는 일은 한 장씩(여러 장을 한꺼번에 디코딩하면 휴대폰 메모리가 모자란다). */
+  const cropChainRef = useRef<Promise<void>>(Promise.resolve());
+  function requestAutoCrop(p: QueuedPhoto) {
+    if (cropAskedRef.current.has(p.id)) return;
+    cropAskedRef.current.add(p.id);
+    const run = async () => {
+      let box: Region | null = null;
+      try {
+        const image = await photoForModel(p);
+        // 결과를 기다리는 것은 뒤에서 — 다음 사진 준비를 막지 않는다.
+        void runAiTask<{ box: Region | null }>("crop", { label: `자동 자르기 · ${p.name}`.slice(0, 100), images: [image] })
+          .then(({ result }) => {
+            box = result?.box ?? null;
+          })
+          .catch(() => {
+            box = null;
+          })
+          .finally(() => setAiCrops((prev) => ({ ...prev, [p.id]: box })));
+      } catch {
+        setAiCrops((prev) => ({ ...prev, [p.id]: null }));
+      }
+    };
+    cropChainRef.current = cropChainRef.current.then(run, run);
+  }
+
   /** 지금 사진의 화면용 주소. 사진이 바뀌면 옛 주소를 풀어 준다. */
   const [activeUrl, setActiveUrl] = useState<string | null>(null);
+
+  // 대기열에서 되살린 사진은 고를 때 자르기를 안 걸었다 — 화면에 오를 때 건다.
+  useEffect(() => {
+    if (active) requestAutoCrop(active);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id]);
 
   useEffect(() => {
     if (!active) {
@@ -256,6 +296,7 @@ export default function AddProblemFlow({
       try {
         const p = await preparePhoto(files[i], orderRef.current++);
         void savePhoto(categoryId, p);
+        requestAutoCrop(p);
         if (!activeRef.current) activate(p);
         else setPending((prev) => [...prev, p]);
       } catch (err) {
@@ -777,6 +818,7 @@ export default function AddProblemFlow({
             <div key={activeUrl} className="animate-stage-in">
               <CropStage
                 imageSrc={activeUrl}
+                aiRegion={active ? (active.id in aiCrops ? aiCrops[active.id] : undefined) : null}
                 onConfirm={handleCropConfirm}
                 onCancel={exitToIdle}
                 onSkip={pending.length > 0 ? skipActive : undefined}

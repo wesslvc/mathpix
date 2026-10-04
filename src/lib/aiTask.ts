@@ -17,6 +17,7 @@ import { ensureDataUrl } from "./figureImage";
 export type AiTaskKind =
   | "ocr"
   | "detect"
+  | "crop"
   | "title"
   | "grade"
   | "answerKey"

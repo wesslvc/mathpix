@@ -80,6 +80,30 @@ export async function preparePhoto(file: File, order: number): Promise<QueuedPho
   }
 }
 
+/**
+ * 모델(luna 자동 자르기)에 보낼 크기로 줄인 데이터 URL. 사진 한 장에 문제 하나라 긴 변 1600px 이면 충분하다 — 모델은
+ * 어차피 짧은 변을 768px 쯤으로 줄여 본다.
+ */
+export async function photoForModel(p: QueuedPhoto, dim = 1600): Promise<string> {
+  const bmp = await createImageBitmap(p.blob);
+  try {
+    const scale = Math.min(1, dim / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("캔버스 컨텍스트를 생성할 수 없습니다.");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } finally {
+    bmp.close();
+  }
+}
+
 // ── IndexedDB ─────────────────────────────────────────────────────────────
 
 const DB = "reprint-photos";

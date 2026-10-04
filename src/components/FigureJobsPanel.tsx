@@ -22,6 +22,7 @@ const STATUS_TEXT = {
 const TASK_RUNNING: Record<string, string> = {
   ocr: "Mathpix 가 글자를 읽는 중",
   detect: "luna 가 문제·지문 자리를 찾는 중",
+  crop: "luna 가 문제 자리를 자르는 중",
   title: "luna 가 지문 제목을 짓는 중",
   grade: "luna 가 채점하는 중",
   answerKey: "luna 가 답지를 읽는 중",
@@ -34,6 +35,7 @@ const TASK_RUNNING: Record<string, string> = {
 const TASK_SECONDS: Record<string, number> = {
   ocr: 8,
   detect: 60,
+  crop: 10,
   title: 15,
   grade: 40,
   answerKey: 30,
@@ -53,12 +55,15 @@ function statusText(j: FigureJob, top: string): string {
   if (j.mode !== "passage" && j.stage) {
     if (j.stage === "patch-plan") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}sol 이 수정 요청을 해석하는 중`;
     if (j.stage === "patch") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}수정하는 중`;
+    if (j.stage === "assess") return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}luna 가 그리기 난이도를 보는 중`;
     const gen = /^gen:(\d+)$/.exec(j.stage);
     const ver = /^verify:(\d+)$/.exec(j.stage);
     const q = ["low", "medium", top];
     if (gen) {
       const n = Number(gen[1]);
-      return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}${n === 0 ? "" : "고쳐 "}그리는 중 (${q[Math.min(n, 2)]})`;
+      // luna 가 고른 시작 칸이면(메모가 "luna:" 로 시작) 첫 그리기다 — "고쳐" 를 붙이지 않는다.
+      const first = n === 0 || (j.note ?? "").startsWith("luna:");
+      return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}${first ? "" : "고쳐 "}그리는 중 (${q[Math.min(n, 2)]})`;
     }
     if (ver) return `${j.status === "pending" ? "차례 기다리는 중 · " : ""}sol 이 글자·도형 검수 중`;
     return STATUS_TEXT[j.status];
@@ -91,6 +96,7 @@ function remainingSeconds(j: FigureJob): number {
     const stage = j.stage ?? "gen:0";
     if (stage === "patch-plan") return 90;
     if (stage === "patch") return 120;
+    if (stage === "assess") return 10 + 35 + 15 + 0.3 * (45 + 15);
     const gen = /^gen:(\d+)$/.exec(stage);
     const ver = /^verify:(\d+)$/.exec(stage);
     const n = gen ? Number(gen[1]) : ver ? Number(ver[1]) : 0;
