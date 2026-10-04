@@ -96,6 +96,8 @@ type QuickItem = {
 };
 
 const byOrder = (a: QueuedPhoto, b: QueuedPhoto) => a.order - b.order;
+/** 자동 자르기를 위해 사진을 동시에 줄이는 장 수(luna 호출 자체는 제한 없이 동시에 돈다). */
+const CROP_PREP_LANES = 4;
 
 export default function AddProblemFlow({
   categoryId,
@@ -168,11 +170,23 @@ export default function AddProblemFlow({
   const [aiCrops, setAiCrops] = useState<Record<string, Region | null>>({});
   const cropPromisesRef = useRef(new Map<string, Promise<Region | null>>());
   /**
-   * 사진을 줄여 올리는 일만 한 장씩 잇는다(여러 장을 한꺼번에 디코딩하면 휴대폰 메모리가 모자란다). 한 장이 서버 줄에
-   * 들어가면 곧바로 다음 장을 올린다 — **luna 호출은 여러 장이 동시에 돈다**(사용자 — "일괄로 업로드하면 luna 가 한 번에
-   * 처리해서 자동 자르기를 여러 개로 동시에 다 받고").
+   * **luna 자동 자르기는 사진 수만큼 동시에 돈다**(사용자 — "luna 는 rpm 이 높기 때문에 동시 작업을 최대로"). luna 호출은 대기열을
+   * 안 타고(`/api/ai-direct`) 서버 쪽 상한도 없다. 브라우저에서 사진을 줄이는 일만 `CROP_PREP_LANES` 장까지 겹쳐 돈다 — 한 장이
+   * 요청을 보내면 곧바로 다음 장을 줄인다(줄이는 동안 휴대폰 메모리를 한꺼번에 쓰지 않게). 줄이기는 디코딩하며 바로 2048 로 줄여
+   * (`photoForModel`) 한 장에 수십 ms~수백 ms 다.
    */
-  const cropChainRef = useRef<Promise<void>>(Promise.resolve());
+  const cropPrepRef = useRef({ active: 0, waiting: [] as (() => void)[] });
+  async function withPrepLane<T>(fn: () => Promise<T>): Promise<T> {
+    const lane = cropPrepRef.current;
+    if (lane.active >= CROP_PREP_LANES) await new Promise<void>((r) => lane.waiting.push(r));
+    lane.active++;
+    try {
+      return await fn();
+    } finally {
+      lane.active--;
+      lane.waiting.shift()?.();
+    }
+  }
   function requestAutoCrop(p: QueuedPhoto): Promise<Region | null> {
     const had = cropPromisesRef.current.get(p.id);
     if (had) return had;
@@ -195,7 +209,7 @@ export default function AddProblemFlow({
           resolve(null);
         }
       };
-      cropChainRef.current = cropChainRef.current.then(run, run);
+      void withPrepLane(run);
     });
     cropPromisesRef.current.set(p.id, promise);
     void promise.then((box) => setAiCrops((prev) => ({ ...prev, [p.id]: box })));

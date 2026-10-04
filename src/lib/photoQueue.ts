@@ -85,7 +85,22 @@ export async function preparePhoto(file: File, order: number): Promise<QueuedPho
  * 어차피 짧은 변을 768px 쯤으로 줄여 본다.
  */
 export async function photoForModel(p: QueuedPhoto, dim = 1600): Promise<string> {
-  const bmp = await createImageBitmap(p.blob);
+  // 디코딩하면서 바로 줄인다(원본 크기로 펴지 않아 메모리·시간이 적다). 크기를 몰라 한 번 연 뒤 비율을 잰다 —
+  // 대기열 사진은 이미 긴 변 3000 이라 첫 디코딩도 가볍다.
+  let bmp = await createImageBitmap(p.blob);
+  if (Math.max(bmp.width, bmp.height) > dim) {
+    const landscape = bmp.width >= bmp.height;
+    const opts: ImageBitmapOptions = landscape
+      ? { resizeWidth: dim, resizeQuality: "high" }
+      : { resizeHeight: dim, resizeQuality: "high" };
+    try {
+      const small = await createImageBitmap(p.blob, opts);
+      bmp.close();
+      bmp = small;
+    } catch {
+      // 줄여 열기를 못 하는 브라우저면 아래 캔버스에서 줄인다.
+    }
+  }
   try {
     const scale = Math.min(1, dim / Math.max(bmp.width, bmp.height));
     const w = Math.max(1, Math.round(bmp.width * scale));
