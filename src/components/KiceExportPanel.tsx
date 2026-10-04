@@ -32,14 +32,15 @@ import { Card } from "@/components/ui/card";
 /**
  * 쪽마다 몇 문제를 넣을지.
  *
- * `탐구 기본` 은 실제 수능 탐구 문제지의 배치다(20문항 4쪽: 4·6·6·4).
- * 문제가 더 많으면 이 차례를 되풀이한다. 나머지는 단순히 한 단에 몇 개씩
+ * `탐구 기본` 은 문제 높이를 재서 여백이 가장 적게 알아서 짠다(사용자 요청 — "4664 가 아니라 알아서 여백
+ * 최소인 걸 생각해서"). 손으로 정하면 쪽마다 개수를 적고(예: 실제 수능의 4·6·6·4) 모자라면 되풀이한다. 나머지는 단순히 한 단에 몇 개씩
  * 넣을지 정하는 것이고, 한 쪽이 두 단이라 쪽당 개수는 그 두 배가 된다.
  */
 const LAYOUTS = [
   // 국어는 지문과 문제를 펼침면에 나란히 놓는다(아래 `koreanPlan` 참고).
   { key: "korean", label: "국어 기본 (짝수 지문·홀수 문제)", pattern: [1] },
-  { key: "tamgu", label: "탐구 기본 (4·6·6·4)", pattern: [4, 6, 6, 4] },
+  // 탐구 기본은 문제 높이를 재서 여백이 가장 적게 알아서 짠다(`tamguAuto`). 손으로 정할 때만 이 숫자를 쓴다.
+  { key: "tamgu", label: "탐구 기본 (여백 최소 자동)", pattern: [4, 6, 6, 4] },
   // 한 쪽에 하나만. 왼쪽 단에 문제, 오른쪽 단은 통째로 풀이 공간이 된다.
   { key: "p1", label: "한 쪽에 1개", pattern: [1] },
   { key: "c1", label: "한 단에 1개", pattern: [2] },
@@ -126,6 +127,8 @@ export default function KiceExportPanel({ title, items }: Props) {
   const [tamguPattern, setTamguPattern] = useState<string[]>(
     (LAYOUTS.find((l) => l.key === "tamgu")?.pattern ?? [4, 6, 6, 4]).map(String),
   );
+  /** 탐구 기본을 자동(여백 최소)으로 짤지. 끄면 아래 숫자 네 칸대로 짠다. */
+  const [tamguAuto, setTamguAuto] = useState(true);
   const tamguSum = tamguPattern.reduce((sum, s) => sum + (Number(s) || 0), 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -215,7 +218,9 @@ export default function KiceExportPanel({ title, items }: Props) {
         })),
         pagePattern:
           layoutKey === "tamgu"
-            ? tamguPattern.map((s) => Number(s) || 0)
+            ? tamguAuto
+              ? "auto"
+              : tamguPattern.map((s) => Number(s) || 0)
             : [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
         koreanSets: layoutKey === "korean" ? await buildKoreanSets(pngs) : undefined,
         answers: showAnswers
@@ -307,7 +312,11 @@ export default function KiceExportPanel({ title, items }: Props) {
             >
               {/* 탐구는 손으로 고친 값을 버튼 글자에도 그대로 보여준다 —
                   안 그러면 고쳐 놓고도 "4·6·6·4"라고 적힌 버튼만 보여 헷갈린다. */}
-              {l.key === "tamgu" ? `탐구 기본 (${tamguPattern.join("·")})` : l.label}
+              {l.key === "tamgu"
+                ? tamguAuto
+                  ? l.label
+                  : `탐구 기본 (${tamguPattern.join("·")})`
+                : l.label}
             </button>
           ))}
         </div>
@@ -319,8 +328,12 @@ export default function KiceExportPanel({ title, items }: Props) {
             있을 수 있어서다. */}
         {layoutKey === "tamgu" && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <span className="text-xs text-slate-500">쪽마다 문제 수(1→4쪽):</span>
-            {tamguPattern.map((value, i) => (
+            <label className="flex items-center gap-1.5 text-xs text-slate-600">
+              <input type="checkbox" checked={tamguAuto} onChange={(e) => setTamguAuto(e.target.checked)} />
+              여백이 가장 적게 알아서 (문제 높이를 재서 단을 꽉 채움)
+            </label>
+            {!tamguAuto && <span className="text-xs text-slate-500">쪽마다 문제 수(1→4쪽):</span>}
+            {!tamguAuto && tamguPattern.map((value, i) => (
               <Input
                 key={i}
                 type="text"
@@ -333,10 +346,12 @@ export default function KiceExportPanel({ title, items }: Props) {
                 className="w-12 rounded px-2 py-1 text-center text-sm"
               />
             ))}
-            <span className={`text-xs ${tamguSum === 20 ? "text-emerald-600" : "text-amber-600"}`}>
-              합 {tamguSum}
-              {tamguSum !== 20 && " (보통 20)"}
-            </span>
+            {!tamguAuto && (
+              <span className={`text-xs ${tamguSum === 20 ? "text-emerald-600" : "text-amber-600"}`}>
+                합 {tamguSum}
+                {tamguSum !== 20 && " (보통 20)"}
+              </span>
+            )}
           </div>
         )}
       </div>

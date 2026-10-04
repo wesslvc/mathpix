@@ -330,6 +330,52 @@ function layoutPages(images: Shot[], frames: FrameSet, pattern: number[]) {
   return layoutGroups(groups, frames);
 }
 
+/**
+ * **여백이 가장 적게 알아서 짠다**(사용자 요청 — "4664 가 아니라 알아서 여백 최소인 걸 생각해서 배치해줘").
+ *
+ * 문제마다 실제 높이(단 폭에 맞춘 높이 + 출처 표기)를 재서, 차례를 지킨 채 단을 위에서부터 채운다 — 다음 문제를
+ * 넣으면 `AUTO_MIN_SCALE` 아래로 줄여야 하는 순간 다음 단(오른쪽 단 → 다음 쪽)으로 넘긴다. 차례를 바꿀 수 없는
+ * 묶음에서는 이렇게 앞에서부터 꽉 채우는 것이 쪽 수가 가장 적은 배치다. 한 단보다 큰 문제는 혼자 한 단을 쓴다
+ * (줄여서 넣는다). 쪽마다 높이가 다르므로(표지 틀은 본문이 짧다) 쪽 번호를 보고 잰다.
+ * 남는 높이는 `fitColumn` 이 문제 사이에 고르게 나눠 준다.
+ */
+function layoutAuto(images: Shot[], frames: FrameSet) {
+  const pages: { items: Placed[] }[] = [];
+  let at = 0;
+  while (at < images.length) {
+    const pageNo = pages.length + 1;
+    const b = frameBounds(frameFor(frames, pageNo));
+    const top = b.headerBottom + LAYOUT.gap;
+    const avail = b.contentBottom - top;
+    const cols: Shot[][] = [];
+    for (let c = 0; c < 2; c++) {
+      const start = at;
+      while (at < images.length && columnScale(images.slice(start, at + 1), avail) >= AUTO_MIN_SCALE) at++;
+      if (at === start && at < images.length) at++; // 한 단보다 큰 문제 — 혼자 줄여서
+      cols.push(images.slice(start, at));
+    }
+    // 마지막 쪽은 남은 문제를 두 단에 높이로 고르게 가른다 — 앞에서부터 채우면 왼쪽 단에 몰리고 오른쪽 단이
+    // 통째로 비어, 왼쪽 문제들 사이만 휑하게 벌어진다(시험해 보니 그랬다).
+    if (at >= images.length) {
+      pages.push(layoutOnePage([...cols[0], ...cols[1]], frames, pageNo));
+      break;
+    }
+    pages.push({
+      items: [
+        ...fitColumn(cols[0], columnX(0), top, b.contentBottom),
+        ...fitColumn(cols[1], columnX(1), top, b.contentBottom),
+      ],
+    });
+  }
+  return pages;
+}
+
+/**
+ * 자동 배치에서 문제를 이만큼까지는 줄여서라도 같은 단에 넣는다. 조금만 줄이면 한 문제가 더 들어가는 단이 흔해서
+ * 1(줄이지 않음)보다 여백이 적다 — 다만 글씨가 눈에 띄게 작아지면 안 되므로 5% 까지만.
+ */
+const AUTO_MIN_SCALE = 0.95;
+
 /** 쪽마다 무엇을 넣을지 이미 정해졌을 때, 그것들을 단에 앉힌다. */
 function layoutGroups(groups: Shot[][], frames: FrameSet, firstPage = 1) {
   return groups.map((take, n) => layoutOnePage(take, frames, firstPage + n));
@@ -528,8 +574,11 @@ export type KiceSpec = {
   images: Record<string, Uint8Array>;
   /** `label` 은 문제 위에 작게 찍히는 출처 표기(빈 문자열이면 찍지 않는다). */
   problems: { png: Uint8Array; label?: string }[];
-  /** 쪽마다 넣을 문제 수. 쪽 순서대로 읽고 모자라면 되풀이한다(예: `[4,6,6,4]`). */
-  pagePattern: number[];
+  /**
+   * 쪽마다 넣을 문제 수. 쪽 순서대로 읽고 모자라면 되풀이한다(예: `[4,6,6,4]`).
+   * `"auto"` 면 문제 높이를 재서 여백이 가장 적게 알아서 짠다(`layoutAuto`).
+   */
+  pagePattern: number[] | "auto";
   /**
    * **국어 배치.** 있으면 `pagePattern` 대신 이 계획대로 쪽을 짠다.
    *
@@ -831,7 +880,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     images.push({ img: await embedProblemImage(pdf, p.png), label: p.label ?? "" });
   }
 
-  const pattern = spec.pagePattern.filter((n) => n > 0);
+  const pattern = spec.pagePattern === "auto" ? [] : spec.pagePattern.filter((n) => n > 0);
 
   // 글자 지문을 재고 그리는 글꼴·폭. **재는 쪽과 그리는 쪽이 같은 것을 써야
   // 한다** — 어긋나면 "한 단에 들어간다"고 판단한 지문이 넘쳐 잘린다.
@@ -889,7 +938,9 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
             return layoutOnePage(p.indexes.map((i) => images[i]), spec.frames, n + 1);
         }
       })
-    : layoutPages(images, spec.frames, pattern.length ? pattern : [4]);
+    : spec.pagePattern === "auto"
+      ? layoutAuto(images, spec.frames)
+      : layoutPages(images, spec.frames, pattern.length ? pattern : [4]);
   const answers = (spec.answers ?? []).filter((a) => a.answer.trim() !== "");
   /**
    * 정답표를 미리 짠다 — **쪽수를 알아야 쪽번호 상자에 찍을 수 있다.**
