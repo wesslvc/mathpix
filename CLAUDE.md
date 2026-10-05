@@ -4258,6 +4258,8 @@ Vercel 메일 — "wesslvcs-projects 가 무료 Fast Origin Transfer 10GB 를 10
 - **CORS 넣기**: 무제한 계정으로 `/api/admin/r2-cors?apply=1` 을 열면 S3 `PutBucketCors` 로 넣는다(토큰에 버킷 설정 권한이 있을 때).
   403 이면 Cloudflare 대시보드 R2 → 버킷 → Settings → CORS Policy 에 같은 페이지의 `suggested` 값을 붙여 넣는다. 허용 출처는 운영
   도메인 넷 + localhost:3000(미리보기 배포는 예전 길로 돈다).
+- **같은 날 사용자가 Vercel Pro 로 올렸다**(정지를 막는 길이 그것뿐이었다). Pro 는 포함량을 넘으면 정지 대신 **추가 요금**이 붙으므로
+  대시보드 Settings → Billing → Spend Management 에 상한을 걸어 두는 게 안전하다. 위 고침이 켜지면(버킷 CORS) 다시 무료로 내릴 수 있는지 Usage 로 볼 것.
 - **남은 것**: 평가원 글꼴(`/api/kice/font`, 처음 한 번 4MB 남짓)은 아직 함수를 지난다. 확인 못 한 것 — R2 가 `response-cache-control`
   을 서명 주소에서 받는지(안 받으면 CORS 시험이 실패해 예전 길로 남는다), 실제로 사용량이 얼마나 주는지(배포 뒤 대시보드로 볼 것).
 
