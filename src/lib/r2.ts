@@ -169,3 +169,62 @@ export async function r2PresignPut(
   });
   return signed.url;
 }
+
+/** 서명 주소가 바뀌는 주기(3일). 이 안에서는 같은 그림의 주소가 한 글자도 안 바뀌어 브라우저 캐시가 걸린다. */
+const GET_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+/** SigV4 서명 주소의 최대 유효 기간(7일). 창(3일)이 끝나도 4일은 더 쓸 수 있다. */
+const GET_EXPIRES_S = 7 * 24 * 60 * 60;
+
+/**
+ * 브라우저가 **R2 에서 직접** 받을 수 있는 주소(2026-10-05, Vercel Fast Origin Transfer 10GB 를 다 써서 정지 경고를 받았다).
+ * 예전에는 `/api/card` 가 그림 바이트를 통째로 흘려 보냈는데 그게 전부 Vercel 함수 전송량으로 셌다. 이제 `/api/card` 는
+ * 로그인·임자만 확인하고 이 주소로 넘겨 준다 — R2 는 전송 요금이 없다.
+ *
+ * - **주소가 3일 동안 고정이다**: 서명 시각을 3일 단위로 내려 맞춘다(`datetime`). 부를 때마다 주소가 달라지면 브라우저 캐시가
+ *   한 번도 안 걸린다(옛 Supabase 서명 URL 의 실패가 그것이었다).
+ * - `variant` 는 요청 방식(`Sec-Fetch-Mode`)마다 주소를 갈라 캐시가 섞이지 않게 한다 — `<img>`(no-cors)로 받아 둔 응답에는
+ *   CORS 헤더가 없어서, 같은 주소를 나중에 `fetch`(cors)로 부르면 캐시에서 꺼낸 그 응답 때문에 실패한다. 값은
+ *   `response-cache-control` 에 실어 서명에 넣는다(R2 가 그 헤더로 돌려준다).
+ */
+export async function r2PresignGet(path: string, variant: "cors" | "img"): Promise<{ url: string; validUntil: number }> {
+  const start = Math.floor(Date.now() / GET_WINDOW_MS) * GET_WINDOW_MS;
+  const datetime = new Date(start).toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const url = new URL(r2ObjectUrl(path));
+  url.searchParams.set("X-Amz-Expires", String(GET_EXPIRES_S));
+  url.searchParams.set(
+    "response-cache-control",
+    // 공백을 안 쓴다 — 주소에서 `+` 로 바뀌는데 저장소마다 그걸 공백으로 읽을지 갈려 서명이 어긋날 수 있다.
+    variant === "cors" ? "private,max-age=31536000,immutable,no-transform" : "private,max-age=31536000,immutable",
+  );
+  const signed = await aws().sign(url.toString(), { method: "GET", aws: { signQuery: true, datetime } });
+  return { url: signed.url, validUntil: start + GET_WINDOW_MS };
+}
+
+/** 버킷 CORS 설정을 읽는다(관리자 화면용). 권한이 없으면 그 응답을 그대로 알린다. */
+export async function r2GetBucketCors(): Promise<{ status: number; body: string }> {
+  const res = await aws().fetch(`https://${ACCOUNT_ID}.r2.cloudflarestorage.com/${BUCKET}?cors`, { method: "GET" });
+  return { status: res.status, body: await res.text() };
+}
+
+/**
+ * 버킷 CORS 를 넣는다(브라우저가 R2 와 직접 주고받으려면 필요하다). API 토큰에 버킷 설정 권한이 없으면 403 이 오고,
+ * 그때는 Cloudflare 대시보드(R2 → 버킷 → Settings → CORS Policy)에서 같은 값을 넣으면 된다.
+ */
+export async function r2PutBucketCors(origins: string[]): Promise<{ status: number; body: string }> {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?><CORSConfiguration><CORSRule>` +
+    origins.map((o) => `<AllowedOrigin>${esc(o)}</AllowedOrigin>`).join("") +
+    `<AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedMethod>HEAD</AllowedMethod>` +
+    `<AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>86400</MaxAgeSeconds>` +
+    `</CORSRule></CORSConfiguration>`;
+  const bytes = new TextEncoder().encode(xml);
+  const { createHash } = await import("node:crypto");
+  const md5 = createHash("md5").update(bytes).digest("base64");
+  const res = await aws().fetch(`https://${ACCOUNT_ID}.r2.cloudflarestorage.com/${BUCKET}?cors`, {
+    method: "PUT",
+    body: bytes as unknown as BodyInit,
+    headers: { "Content-Type": "application/xml", "Content-MD5": md5, "Content-Length": String(bytes.byteLength) },
+  });
+  return { status: res.status, body: await res.text() };
+}

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { putBlob, removeBlobs } from "./blobClient";
 import { ensureDataUrl } from "./figureImage";
+import { r2DirectReady } from "./r2Direct";
 
 /**
  * **짧은 AI 작업을 서버 대기열에 넣고 결과를 기다린다**(브라우저 쪽). 서버 쪽은 `aiTasks.ts`.
@@ -122,8 +123,9 @@ async function runDirect<T>(
     const images = await Promise.all((opts.images ?? []).map((src) => ensureDataUrl(src)));
     const total = images.reduce((n, x) => n + x.length, 0);
     let payload: { images?: string[]; paths?: string[] } = { images };
-    if (total > INLINE_LIMIT) {
-      // 크면 미리 올린다(서버가 읽고 지운다).
+    // 크거나, R2 로 바로 올릴 수 있으면 미리 올린다(서버가 읽고 지운다) — 본문에 실으면 그 바이트가 Vercel 함수
+    // 전송량(무료 10GB)으로 센다. R2 직접 올리기는 공짜다.
+    if (total > INLINE_LIMIT || (images.length > 0 && (await r2DirectReady()))) {
       const supabase = createClient();
       const {
         data: { user },

@@ -19,6 +19,7 @@ export async function passageSplitAt(
   const url = URL.createObjectURL(new Blob([png.slice().buffer], { type: "image/png" }));
   try {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.src = url;
     await img.decode();
 

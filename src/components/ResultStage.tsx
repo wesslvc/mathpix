@@ -457,6 +457,7 @@ export default function ResultStage({
       }
       setRasterFallbacks(crops);
     };
+    img.crossOrigin = "anonymous";
     img.src = sourceImage;
 
     return () => {

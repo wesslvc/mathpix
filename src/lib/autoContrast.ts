@@ -85,6 +85,7 @@ export async function enhanceContrast(dataUrl: string): Promise<string> {
       const el = new Image();
       el.onload = () => resolve(el);
       el.onerror = () => reject(new Error("이미지를 불러오지 못했습니다."));
+      el.crossOrigin = "anonymous";
       el.src = dataUrl;
     });
     const w = img.naturalWidth;

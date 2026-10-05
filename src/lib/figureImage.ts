@@ -96,6 +96,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("이미지를 불러오지 못했습니다."));
+    img.crossOrigin = "anonymous";
     img.src = src;
   });
 }

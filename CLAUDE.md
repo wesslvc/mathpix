@@ -4236,6 +4236,31 @@ ArrayBuffer · Blob 넷 다 붙는데(서버를 직접 띄워 쟀다) **Vercel(N
 인증·경로 규칙을 그대로 지난다**는 것이다 — 막힌 자리가 자격증명인지 세션인지
 경로인지 한 번에 갈린다.
 
+#### 그림 바이트가 Vercel 을 안 지나게 했다 — Fast Origin Transfer 10GB 초과 (2026-10-05)
+
+Vercel 메일 — "wesslvcs-projects 가 무료 Fast Origin Transfer 10GB 를 100% 썼다, 24시간 뒤 계정 정지". **Fast Origin Transfer 는 우리
+서버 함수(`/api/...`)를 오가는 본문 바이트**다(들어오는 요청 + 나가는 응답, 정적 파일은 안 셈). 이 앱은 그림이 전부 함수를 지났다 —
+보기는 `/api/card` 가 R2·Supabase 에서 받아 흘려 보내고, 올리기는 `/api/blob`·`/api/ai-direct` 가 본문으로 받았다. 무료 계정이라
+경로별 사용량은 API·로그로 못 봤다(대시보드 Usage 에서만 보인다). **이미 넘긴 이번 정지는 코드로 못 막는다** — 다음 달을 위한 고침이다.
+
+- **보기**: `/api/card` 가 로그인·임자만 확인하고 **R2 서명 주소로 302** 를 준다(`r2PresignGet`). 바이트는 브라우저 ↔ R2(전송 요금 없음).
+  - 서명 시각을 **3일 단위로 내려 맞춰**(`datetime`) 주소가 3일 동안 같다 — 브라우저 캐시가 걸린다. 유효 기간 7일.
+  - `Sec-Fetch-Mode` 로 주소를 가른다(`response-cache-control` 값이 다른 두 변형) — `<img>`(no-cors)로 받아 둔 응답엔 CORS 헤더가
+    없어서 같은 주소를 나중에 `fetch`·캔버스(cors)로 부르면 캐시 때문에 실패한다. 그 헤더가 없는 옛 브라우저는 예전처럼 흘려 보낸다.
+  - R2 에 없는 옛 그림(Supabase)은 **그 자리에서 R2 로 옮기고**(`directTarget`) 넘긴다 — 한 번만.
+  - `?proxy=1` 이면 늘 예전처럼.
+- **올리기**: `putBlob` 이 `/api/blob/sign` 으로 서명 PUT 주소(10분)를 받아 **R2 로 바로** 올린다. `runAiTask` 의 곧바로 부르는 luna 일도
+  그림을 본문에 안 싣고 이 길로 올려 경로만 보낸다. 실패하면 예전 길(서버 경유 → Supabase).
+- **켜는 조건 = 버킷 CORS**: 브라우저가 R2 와 직접 주고받으려면 CORS 가 있어야 한다. `r2Direct.ts` 가 앱을 열 때 한 번 시험하고
+  (`/api/blob/cors` 가 준 GET·PUT 서명 주소로) 되면 `r2d=1` 쿠키(12시간), 안 되면 `r2d=0`(1시간) — `/api/card` 도 이 쿠키를 본다.
+  **CORS 가 없으면 전부 예전처럼 돈다**(깨지지 않는다). 캔버스로 그리는 `new Image()` 다섯 곳에 `crossOrigin="anonymous"` 를 붙였다
+  (R2 로 넘어간 그림을 캔버스에 그리면 안 그러면 캔버스가 오염돼 `toDataURL` 이 던진다).
+- **CORS 넣기**: 무제한 계정으로 `/api/admin/r2-cors?apply=1` 을 열면 S3 `PutBucketCors` 로 넣는다(토큰에 버킷 설정 권한이 있을 때).
+  403 이면 Cloudflare 대시보드 R2 → 버킷 → Settings → CORS Policy 에 같은 페이지의 `suggested` 값을 붙여 넣는다. 허용 출처는 운영
+  도메인 넷 + localhost:3000(미리보기 배포는 예전 길로 돈다).
+- **남은 것**: 평가원 글꼴(`/api/kice/font`, 처음 한 번 4MB 남짓)은 아직 함수를 지난다. 확인 못 한 것 — R2 가 `response-cache-control`
+  을 서명 주소에서 받는지(안 받으면 CORS 시험이 실패해 예전 길로 남는다), 실제로 사용량이 얼마나 주는지(배포 뒤 대시보드로 볼 것).
+
 #### `box_range.figures[].markup`/`.origin` 도 스토리지로 (2026-09-17)
 
 카드 원본(`image_path`)을 R2 로 옮긴 것과는 **다른 문제**다. 그건 egress

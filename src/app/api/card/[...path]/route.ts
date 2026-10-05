@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { r2Configured, r2Get } from "@/lib/r2";
+import { r2Configured, r2Get, r2Head, r2PresignGet, r2Put } from "@/lib/r2";
 
 /**
  * 저장된 카드 그림을 **우리 주소로** 내보낸다.
@@ -91,6 +91,32 @@ export async function GET(
     );
   }
 
+  // **R2 에서 직접 받게 넘겨 준다**(2026-10-05 — 그림 바이트가 이 함수를 지나며 Vercel Fast Origin Transfer 10GB 를 다 썼다).
+  // 브라우저가 R2 와 CORS 로 주고받을 수 있다고 확인해 둔 경우(`r2d=1` 쿠키, `r2Direct.ts`)에만 넘긴다 — 안 그러면 캔버스로
+  // 그리는 자리(자르기·카드 캡처·PDF)가 깨진다. `Sec-Fetch-Mode` 가 없는 옛 브라우저도 예전처럼 여기서 흘려 보낸다(캐시가 섞일 수 있다).
+  // `?proxy=1` 이면 언제나 예전처럼.
+  const mode = req.headers.get("sec-fetch-mode");
+  const direct =
+    r2Configured() &&
+    getCookie(req, "r2d") === "1" &&
+    !new URL(req.url).searchParams.has("proxy") &&
+    (mode === "cors" || mode === "no-cors" || mode === "navigate");
+  if (direct) {
+    try {
+      const target = await directTarget(supabase, path);
+      if (target) {
+        const { url, validUntil } = await r2PresignGet(target, mode === "cors" ? "cors" : "img");
+        const maxAge = Math.max(60, Math.min(6 * 3600, Math.floor((validUntil - Date.now()) / 1000)));
+        return new NextResponse(null, {
+          status: 302,
+          headers: { Location: url, "Cache-Control": `private, max-age=${maxAge}`, Vary: "Sec-Fetch-Mode, Cookie" },
+        });
+      }
+    } catch (err) {
+      console.error("[card] R2 직접 넘기기 실패, 예전처럼 흘려 보냄:", err);
+    }
+  }
+
   // **R2 를 먼저 본다.** 그림은 R2 로 옮겨 가는 중이라 두 곳에 나뉘어 있다 —
   // 여기서 한쪽씩 차례로 보면 이관이 끝나기 전에도 둘 다 정상으로 보인다.
   // R2 가 꺼져 있으면(환경변수 없음) 이 블록은 통째로 건너뛴다.
@@ -152,4 +178,27 @@ function imageResponse(
       ETag: `"${path}"`,
     },
   });
+}
+
+/**
+ * R2 에서 직접 받을 경로. R2 에 있으면 그대로, 없으면(옛 그림은 Supabase 에 있다) **그 자리에서 R2 로 옮겨 둔다** — 한 번 옮기면
+ * 다음부터는 이 함수를 안 지난다. 옛 문제의 `.thumb.webp` 가 없으면 원본을 쓴다(예전 동작과 같다). 끝내 없으면 `null`.
+ */
+async function directTarget(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  path: string,
+): Promise<string | null> {
+  const candidates = [path];
+  if (path.endsWith(".thumb.webp")) candidates.push(`${path.replace(/\.thumb\.webp$/, "")}.png`);
+  for (const p of candidates) {
+    if ((await r2Head(p)) !== null) return p;
+  }
+  for (const p of candidates) {
+    const file = await supabase.storage.from(BUCKET).download(p);
+    if (file.error || !file.data) continue;
+    await r2Put(p, new Uint8Array(await file.data.arrayBuffer()), file.data.type || "image/png");
+    console.log(`[card] Supabase → R2 로 옮김: ${p}`);
+    return p;
+  }
+  return null;
 }

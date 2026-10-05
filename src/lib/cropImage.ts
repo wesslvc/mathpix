@@ -337,6 +337,7 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
     // 화면에서 HEIC 사진을 골랐을 때 "채점에 실패했습니다"만 뜨고 이유를
     // 알 수 없었다. Error로 감싸 항상 사람이 읽을 문구가 나오게 한다.
     img.onerror = () => reject(new Error("이미지를 불러오지 못했습니다."));
+    img.crossOrigin = "anonymous";
     img.src = src;
   });
 }

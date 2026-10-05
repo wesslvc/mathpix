@@ -1,5 +1,6 @@
 "use client";
 
+import { r2DirectReady } from "@/lib/r2Direct";
 import {
   createContext,
   useCallback,
@@ -1058,6 +1059,11 @@ export default function FigureJobsProvider({
     (j) => j.serverId && (j.status === "pending" || j.status === "running"),
   );
   const awaitingResult = jobs.some(needsResult);
+
+  // 이 브라우저가 R2 와 직접 주고받을 수 있는지 먼저 본다 — 되면 그림 보기·올리기가 우리 서버를 안 거친다(`r2Direct.ts`).
+  useEffect(() => {
+    void r2DirectReady();
+  }, []);
 
   // 처음 열 때 · 화면으로 돌아올 때 서버 목록을 되살린다.
   useEffect(() => {

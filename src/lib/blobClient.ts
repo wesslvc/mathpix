@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { putDirect, r2DirectReady } from "./r2Direct";
 
 /**
  * 그림을 올리고 지우는 자리 — **화면이 쓰는 쪽.**
@@ -45,6 +46,11 @@ export async function putBlob(
   blob: Blob,
   contentType: string,
 ): Promise<{ ok: true; store: "r2" | "supabase" } | { ok: false; error: string }> {
+  // **R2 로 바로 올린다**(2026-10-05) — 우리 서버를 거치면 그 바이트가 Vercel 함수 전송량(무료 10GB)으로 센다.
+  // 버킷 CORS 가 확인된 브라우저에서만(`r2Direct.ts`), 안 되면 아래 예전 길로.
+  if (await r2DirectReady()) {
+    if (await putDirect(path, blob, contentType)) return { ok: true, store: "r2" };
+  }
   if (blob.size <= MAX_VIA_SERVER) {
     try {
       const res = await fetch(`/api/blob?path=${encodeURIComponent(path)}`, {
