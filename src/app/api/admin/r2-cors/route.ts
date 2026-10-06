@@ -31,6 +31,9 @@ const SUGGESTED = [
  * 이 브라우저가 실제로 R2 와 직접 주고받는지는 버킷 설정을 읽는 것보다 이 쿠키가 정확하다 — 앱이 열릴 때 서명 주소로
  * 직접 받기·올리기를 해 보고 남긴 결과다(`r2Direct.ts`). 토큰에 버킷 설정 권한이 없어 위 값이 403 이어도 이게 "1" 이면 된다.
  */
+// 브라우저가 JSON 을 바로 열 때 한글이 깨지지 않게 charset 을 적는다.
+const UTF8 = { headers: { "content-type": "application/json; charset=utf-8" } };
+
 function browserState(req: NextRequest): string {
   const v = req.cookies.get("r2d")?.value;
   if (v === "1") return "직접 연결 됨 (r2d=1) — 그림이 Vercel 을 거치지 않습니다";
@@ -51,12 +54,12 @@ export async function GET(req: NextRequest) {
       const put = await r2PutBucketCors(ORIGINS);
       const now = await r2GetBucketCors();
       const note = put.status === 403 ? TOKEN_NOTE : undefined;
-      return NextResponse.json({ browser, applied: put.status < 300, note, put, now, suggested: SUGGESTED });
+      return NextResponse.json({ browser, applied: put.status < 300, note, put, now, suggested: SUGGESTED }, UTF8);
     }
     const now = await r2GetBucketCors();
     const note = now.status === 403 ? TOKEN_NOTE : undefined;
-    return NextResponse.json({ browser, note, now, suggested: SUGGESTED });
+    return NextResponse.json({ browser, note, now, suggested: SUGGESTED }, UTF8);
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err), suggested: SUGGESTED }, { status: 502 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err), suggested: SUGGESTED }, { status: 502, ...UTF8 });
   }
 }
