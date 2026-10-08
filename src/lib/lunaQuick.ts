@@ -25,7 +25,7 @@ const ASSESS_EFFORT = (() => {
 })();
 
 const CROP_PROMPT = `A student photographed a page of a Korean exam/workbook to save ONE problem they got wrong.
-Find that problem and return the box that tightly encloses ALL of it: the problem number, the question stem, any
+Find that problem and return the box that encloses ALL of it: the problem number, the question stem, any
 condition box / <보기> box, figures, graphs, tables, maps, and the answer choices (①~⑤) or answer blank.
 
 - If the photo shows exactly one problem (or one problem fills most of it), box that problem.
@@ -34,30 +34,63 @@ condition box / <보기> box, figures, graphs, tables, maps, and the answer choi
   the desk / background outside the paper, the paper edge, fingers, shadows.
 - Keep the box tight to the printed content (no wide empty margins), but never cut through any line of text,
   a figure, or the choices. Handwriting inside the problem area may be included; handwriting far outside is not part of it.
-- Coordinates: box_2d = [ymin, xmin, ymax, xmax], each normalised to 0~1000 of the photo.
 
-answer as JSON object only: {"box_2d":[ymin,xmin,ymax,xmax]}  — or {"box_2d":null} if no problem is visible.`;
+CHECK BEFORE YOU ANSWER — the most common mistake is cutting off the problem number or the last choices:
+1. Locate the printed problem number (e.g. "17.", "03", a number in a small box) at the start of the problem.
+   Give its own box in "number". Your main box MUST contain it completely.
+2. Locate EVERY answer choice. Multiple-choice problems have FIVE (① ② ③ ④ ⑤); they may be on one line, two lines,
+   in two columns, or one per line, and the last ones are often at the very bottom or far right — look there.
+   Give one box per choice in "choices", each covering the marker AND the whole choice text/formula/figure after it.
+   Your main box MUST contain all of them completely. If you found fewer than five, look again before answering.
+   If the problem has no choices (short-answer), "choices" is [].
+3. The main box must also contain the last line of the stem and any figure/table below it.
+- Coordinates: every box is [ymin, xmin, ymax, xmax], each normalised to 0~1000 of the photo.
+
+answer as JSON object only:
+{"box_2d":[ymin,xmin,ymax,xmax],"number":{"text":"17.","box_2d":[...]},"choices":[{"label":"①","box_2d":[...]},...]}
+— "number" is null if no printed number is visible; {"box_2d":null} if no problem is visible.`;
+
+/** luna 가 짚은 "꼭 들어가야 할 것"(번호·선지)과 함께 돌려주는 자리. `keep` 은 화면이 글자에 맞춰 다듬은 뒤에도 꼭 품는다. */
+export type CropBox = ProblemBox & { keep?: ProblemBox[] };
+
+export interface CropFinding {
+  box: CropBox | null;
+  /** luna 가 읽은 번호 글자(못 봤으면 없음). */
+  number?: string;
+  /** 찾은 선지 수. */
+  choices: number;
+}
 
 /** 사진 한 장에서 문제 하나의 자리(0~1). 못 찾으면 box 가 null. */
 export async function cropOneProblem(
   dataUrl: string,
-): Promise<{ box: ProblemBox | null; model: string; usage?: DetectUsage }> {
-  let usage: DetectUsage | undefined;
-  const text = await callOpenAIVision(dataUrl, CROP_PROMPT, OPENAI_DETECT_MODEL, CROP_EFFORT, (u) => {
-    usage = u;
-  });
-  return { box: parseBox(text), model: OPENAI_DETECT_MODEL, usage };
+): Promise<{ box: CropBox | null; model: string; usage?: DetectUsage; number?: string; choices: number; retried: boolean }> {
+  const total: DetectUsage = { input: 0, cached: 0, output: 0 };
+  const add = (u: DetectUsage) => {
+    total.input += u.input;
+    total.cached += u.cached;
+    total.output += u.output;
+  };
+  let first = parseCrop(await callOpenAIVision(dataUrl, CROP_PROMPT, OPENAI_DETECT_MODEL, CROP_EFFORT, add));
+  let retried = false;
+  // 선지를 일부만 찾았으면(1~4개) 한 번 더 — 대개 맨 아래·오른쪽 선지를 놓친 경우다.
+  if (first.box && first.choices > 0 && first.choices < 5) {
+    retried = true;
+    const again = parseCrop(
+      await callOpenAIVision(
+        dataUrl,
+        `${CROP_PROMPT}\n\nA previous look found only ${first.choices} of the five choices (${first.choices} boxes). The missing ones are almost always below or to the right of the found ones — find all five this time and make the main box contain them.`,
+        OPENAI_DETECT_MODEL,
+        CROP_EFFORT,
+        add,
+      ),
+    );
+    if (again.box && again.choices >= first.choices) first = again;
+  }
+  return { ...first, model: OPENAI_DETECT_MODEL, usage: total.input || total.output ? total : undefined, retried };
 }
 
-/** `{"box_2d":[…]}` → 0~1 상자. 모양이 이상하거나 너무 작으면 null(그때는 화면이 제 계산을 쓴다). */
-export function parseBox(text: string): ProblemBox | null {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
-  } catch {
-    return null;
-  }
-  const b = (raw as { box_2d?: unknown } | null)?.box_2d;
+function toBox(b: unknown): ProblemBox | null {
   if (!Array.isArray(b) || b.length !== 4) return null;
   const [ymin, xmin, ymax, xmax] = b.map((n) => Number(n));
   if (![ymin, xmin, ymax, xmax].every(Number.isFinite)) return null;
@@ -66,9 +99,56 @@ export function parseBox(text: string): ProblemBox | null {
   const x1 = c(Math.max(xmin, xmax));
   const y0 = c(Math.min(ymin, ymax));
   const y1 = c(Math.max(ymin, ymax));
-  // 너무 작으면 문제가 아니라 부스러기다.
-  if (x1 - x0 < 0.08 || y1 - y0 < 0.04) return null;
+  if (x1 <= x0 || y1 <= y0) return null;
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/**
+ * 자동 자르기 응답 → 자리. **번호·선지 자리는 본 자리 안으로 끌어들인다**(합집합) — luna 가 본 자리를 좁게 잡아도 스스로 짚은
+ * 번호·선지는 잘리지 않게. 본 자리보다 멀리(사진의 25% 넘게) 떨어진 것은 옆 문제를 짚은 것으로 보고 안 넣는다.
+ */
+export function parseCrop(text: string): CropFinding {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  } catch {
+    return { box: null, choices: 0 };
+  }
+  const o = (raw ?? {}) as { box_2d?: unknown; number?: { text?: unknown; box_2d?: unknown } | null; choices?: unknown };
+  const main = toBox(o.box_2d);
+  // 너무 작으면 문제가 아니라 부스러기다.
+  if (!main || main.w < 0.08 || main.h < 0.04) return { box: null, choices: 0 };
+  const near = (b: ProblemBox) =>
+    b.x < main.x + main.w + 0.25 && b.x + b.w > main.x - 0.25 && b.y < main.y + main.h + 0.25 && b.y + b.h > main.y - 0.25;
+  const keep: ProblemBox[] = [];
+  const nb = o.number && typeof o.number === "object" ? toBox(o.number.box_2d) : null;
+  if (nb && near(nb)) keep.push(nb);
+  let choices = 0;
+  if (Array.isArray(o.choices)) {
+    for (const c of o.choices.slice(0, 8)) {
+      const cb = toBox((c as { box_2d?: unknown })?.box_2d);
+      if (cb && near(cb)) {
+        keep.push(cb);
+        choices++;
+      }
+    }
+  }
+  let x0 = main.x, y0 = main.y, x1 = main.x + main.w, y1 = main.y + main.h;
+  for (const k of keep) {
+    x0 = Math.min(x0, k.x);
+    y0 = Math.min(y0, k.y);
+    x1 = Math.max(x1, k.x + k.w);
+    y1 = Math.max(y1, k.y + k.h);
+  }
+  const number = o.number && typeof o.number.text === "string" ? o.number.text.trim().slice(0, 12) : undefined;
+  return { box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0, ...(keep.length ? { keep } : {}) }, number: number || undefined, choices };
+}
+
+/** `{"box_2d":[…]}` → 0~1 상자. 모양이 이상하거나 너무 작으면 null(그때는 화면이 제 계산을 쓴다). */
+export function parseBox(text: string): ProblemBox | null {
+  const box = parseCrop(text).box;
+  if (!box) return null;
+  return { x: box.x, y: box.y, w: box.w, h: box.h };
 }
 
 /** 번호 자리 찾기의 추론 강도. 재배포 없이 `OPENAI_NUMBER_EFFORT`(기본 low — 쉬운 일이다, `default` 면 안 보냄). */

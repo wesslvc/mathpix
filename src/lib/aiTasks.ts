@@ -247,12 +247,15 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     name: "자동 자르기",
     async run(ctx) {
       try {
-        const { box, model, usage } = await cropOneProblem(ctx.images[0]);
+        const { box, model, usage, number, choices, retried } = await cropOneProblem(ctx.images[0]);
         const estKrw = usage ? gradingEstKrw(lunaUsage(usage), OPENAI_DETECT_MODEL) : undefined;
         if (estKrw && usage) {
           await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 자동 자르기", krw: estKrw, tokens: usage });
         }
-        return { ok: true, result: { box, model }, model, estKrw, note: box ? undefined : "문제 자리를 못 찾았어요" };
+        const note = !box
+          ? "문제 자리를 못 찾았어요"
+          : `${number ? `번호 ${number}` : "번호 못 봄"} · 선지 ${choices}개${retried ? " (다시 봄)" : ""}`;
+        return { ok: true, result: { box, model, number, choices }, model, estKrw, note };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "자동 자르기에 실패했습니다.") };
       }
