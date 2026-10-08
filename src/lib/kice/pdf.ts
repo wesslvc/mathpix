@@ -347,6 +347,37 @@ function layoutPages(images: Shot[], frames: FrameSet, pattern: number[]) {
  * 남는 높이는 `fitColumn` 이 문제 사이에 고르게 나눠 준다.
  */
 function layoutAuto(images: Shot[], frames: FrameSet) {
+  const budget = autoPageBudget(images.length);
+  const first = layoutAutoAt(images, frames, AUTO_MIN_SCALE);
+  if (first.length <= budget) return first;
+  // 넘치면 더 줄여도 되는 하한을 낮춰 가며 쪽 수 안에 드는 가장 큰 값을 찾는다(쪽 수는 하한을 낮출수록 줄어든다).
+  let lo = AUTO_FLOOR_SCALE;
+  let hi = AUTO_MIN_SCALE;
+  let best = layoutAutoAt(images, frames, lo);
+  if (best.length > budget) return layoutPages(images, frames, [4, 6, 6, 4]); // 그래도 넘치면 고정 배치
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) / 2;
+    const pages = layoutAutoAt(images, frames, mid);
+    if (pages.length <= budget) {
+      best = pages;
+      lo = mid;
+    } else hi = mid;
+  }
+  return best;
+}
+
+/**
+ * 자동 배치가 넘지 말아야 할 쪽 수 — 실제 탐구 문제지(4·6·6·4, 20문항 4쪽)와 같은 밀도(쪽당 5문항).
+ * 사용자 요청 — "여백최소자동은 20문제가 4장 안에 들어와야 해".
+ */
+function autoPageBudget(n: number): number {
+  return Math.max(1, Math.ceil(n / 5));
+}
+
+/** 쪽 수를 맞추려고 줄일 수 있는 아래 끝. 이보다 줄여야 하면 고정 4·6·6·4 로 짠다. */
+const AUTO_FLOOR_SCALE = 0.4;
+
+function layoutAutoAt(images: Shot[], frames: FrameSet, minScale: number) {
   const pages: { items: Placed[] }[] = [];
   let at = 0;
   while (at < images.length) {
@@ -357,7 +388,7 @@ function layoutAuto(images: Shot[], frames: FrameSet) {
     const cols: Shot[][] = [];
     for (let c = 0; c < 2; c++) {
       const start = at;
-      while (at < images.length && columnScale(images.slice(start, at + 1), avail) >= AUTO_MIN_SCALE) at++;
+      while (at < images.length && columnScale(images.slice(start, at + 1), avail) >= minScale) at++;
       if (at === start && at < images.length) at++; // 한 단보다 큰 문제 — 혼자 줄여서
       cols.push(images.slice(start, at));
     }
