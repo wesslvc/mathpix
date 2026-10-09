@@ -125,7 +125,7 @@ export default function ComparePageCropPage() {
           const c = Number(m.pricing?.completion ?? 0) * 1e6;
           return { id: m.id as string, free: (m.id as string).endsWith(":free") || (p === 0 && c === 0), p, c };
         })
-        .sort((a, b) => Number(b.free) - Number(a.free) || a.id.localeCompare(b.id));
+        .sort((a, b) => Number(b.free) - Number(a.free) || a.p + a.c - (b.p + b.c) || a.id.localeCompare(b.id));
       setOrList(list);
     } catch (err) {
       alert(`목록을 못 불러왔어요: ${err instanceof Error ? err.message : err}`);
@@ -285,12 +285,13 @@ export default function ComparePageCropPage() {
                   key={m.id}
                   type="button"
                   onClick={() => addOr(m.id)}
-                  title={m.free ? "무료" : `입력 $${m.p.toFixed(2)} · 출력 $${m.c.toFixed(2)} / 100만 토큰`}
+                  title={m.free ? "무료" : `입력 $${m.p.toFixed(3)} · 출력 $${m.c.toFixed(3)} / 100만 토큰 (칩 숫자 = 입력/출력)`}
                   className={`rounded-full border px-2 py-0.5 text-[11px] ${
                     m.free ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-600"
                   } hover:border-blue-400`}
                 >
                   {m.id}
+                  {!m.free && <span className="ml-1 text-slate-400">${m.p.toFixed(2)}/${m.c.toFixed(2)}</span>}
                 </button>
               ))}
             </div>
