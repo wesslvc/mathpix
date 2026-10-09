@@ -101,6 +101,11 @@ export interface CropFinding {
 export async function cropOneProblem(
   dataUrl: string,
   target?: { box: ProblemBox; number?: string },
+  /**
+   * 비교 화면(`/admin/compare-crop`)용: 이 모델 **하나로만** 부른다(실패해도 다른 모델로 안 넘어간다 — 넘어가면 무엇을 견줬는지
+   * 모른다). `effort` 는 OpenAI 만.
+   */
+  only?: { engine: "gemini" | "openai"; model: string; effort?: string },
 ): Promise<CropFinding & { model: string; usage?: DetectUsage; retried: boolean }> {
   const total: DetectUsage = { input: 0, cached: 0, output: 0 };
   const add = (u: DetectUsage) => {
@@ -113,6 +118,12 @@ export async function cropOneProblem(
   // 자동 자르기는 Gemini 가 먼저 한다(`CROP_GEMINI_MODEL`). 못 하면(자리 없음·오류) luna 로 — 어느 쪽이 했는지 `model` 로 돌려준다.
   let model = OPENAI_DETECT_MODEL;
   const ask = async (p: string) => {
+    if (only) {
+      model = only.model;
+      return only.engine === "gemini"
+        ? callGeminiVision(dataUrl, p, only.model, add)
+        : callOpenAIVision(dataUrl, p, only.model, only.effort, add);
+    }
     if (CROP_GEMINI_MODEL) {
       try {
         const t = await callGeminiVision(dataUrl, p, CROP_GEMINI_MODEL, add);
