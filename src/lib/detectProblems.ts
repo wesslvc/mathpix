@@ -257,8 +257,35 @@ function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
   return { ...problem, boxes: unionByColumn(problem.boxes) };
 }
 
+/**
+ * 모델 박스를 사방으로 넓힌다(지면 대비 비율, 기본 1.2%p — 사용자 "좀 더 넓게 잡은 게 차라리 나은데 좁게 잡은 게 문제임").
+ * 손으로 맞춘 정답과 견주니 모델이 주로 안쪽으로 틀렸다. 넓은 쪽의 빈 여백은 뒤의 `snapBoxes` 가 글자에 맞춰 줄이고 이웃과 겹친 곳은
+ * `separateOverlaps` 가 가른다 — 잘린 글자는 못 되살리니 바깥으로 틀리는 편이 낫다. 재배포 없이 `PAGE_BOX_PAD`(0~0.05).
+ */
+const PAGE_BOX_PAD = (() => {
+  const v = Number(process.env.PAGE_BOX_PAD ?? "0.012");
+  return Number.isFinite(v) && v >= 0 && v <= 0.05 ? v : 0.012;
+})();
+
+function padBoxes(list: DetectedProblem[]): DetectedProblem[] {
+  const pad = PAGE_BOX_PAD;
+  if (!pad) return list;
+  return list.map((p) => ({
+    ...p,
+    boxes: p.boxes.map((b) => {
+      const x0 = Math.max(0, b.x - pad), y0 = Math.max(0, b.y - pad);
+      const x1 = Math.min(1, b.x + b.w + pad), y1 = Math.min(1, b.y + b.h + pad);
+      return { ...b, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }),
+  }));
+}
+
 /** 모델이 돌려준 글에서 배열을 꺼내 묶는다. 두 갈래가 똑같이 쓴다. */
 function parse(text: string): DetectedProblem[] {
+  return padBoxes(parseRaw(text));
+}
+
+function parseRaw(text: string): DetectedProblem[] {
   // 모델이 ```json 울타리로 감싸 주는 일이 흔하다.
   text = text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
   const take = (raw: unknown) => {
