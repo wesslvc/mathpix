@@ -95,6 +95,8 @@ export default function ComparePageCropPage() {
   const [customText, setCustomText] = useState("");
   const [orList, setOrList] = useState<{ id: string; free: boolean; p: number; c: number }[] | null>(null);
   const [orBusy, setOrBusy] = useState(false);
+  const [orQuery, setOrQuery] = useState("");
+  const [orFreeOnly, setOrFreeOnly] = useState(false);
   const [refine, setRefine] = useState(true);
   const [results, setResults] = useState<Record<string, Res>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -141,6 +143,8 @@ export default function ComparePageCropPage() {
     });
   }
 
+  const orWords = orQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  const orShown = (orList ?? []).filter((m) => (!orFreeOnly || m.free) && orWords.every((w) => m.id.toLowerCase().includes(w)));
   const cands = [...PRESETS, ...custom].filter((c) => !removed.has(c.key));
   const chosen = cands.filter((c) => on.has(c.key));
 
@@ -389,8 +393,26 @@ export default function ComparePageCropPage() {
             )}
           </div>
           {orList && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={orQuery}
+                onChange={(e) => setOrQuery(e.target.value)}
+                placeholder="모델 검색: qwen, glm, flash …(공백으로 여러 단어)"
+                className="min-w-0 flex-1"
+              />
+              <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap text-xs text-slate-600">
+                <input type="checkbox" checked={orFreeOnly} onChange={(e) => setOrFreeOnly(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
+                무료만
+              </label>
+              <span className="text-xs text-slate-400">
+                {orShown.length}/{orList.length}개
+              </span>
+            </div>
+          )}
+          {orList && (
             <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
-              {orList.map((m) => (
+              {orShown.length === 0 && <span className="text-xs text-slate-400">맞는 모델이 없어요.</span>}
+              {orShown.map((m) => (
                 <button
                   key={m.id}
                   type="button"
