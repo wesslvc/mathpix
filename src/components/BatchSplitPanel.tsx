@@ -63,6 +63,8 @@ import { Button } from "@/components/ui/button";
  * 넓히면 보이는 것과 잘리는 것이 달라진다.
  */
 const PAD = 0.012;
+/** 문제마다 확대해 luna 로 다시 맞추기. 정답과 견주니 하이쿠 원자리(0.70~0.97%p)보다 나빠져(최종 1.3~1.6%p) 껐다(2026-10-09). 되살리려면 true. */
+const PAGE_REFINE = false;
 
 /**
  * 잘린 문제 하나.
@@ -513,7 +515,7 @@ export default function BatchSplitPanel({
    * 잇고(메모리), luna 호출은 문제마다 동시에 돈다. 못 하면 찾은 자리 그대로.
    */
   async function refineWithFile(file: File, got: Found): Promise<Found> {
-    if (got.problems.length === 0) return got;
+    if (!PAGE_REFINE || got.problems.length === 0) return got;
     let windows: ReturnType<typeof cutRefineWindows> = [];
     const cut = async () => {
       const d = await loadDrawableFromFile(file);
@@ -593,7 +595,7 @@ export default function BatchSplitPanel({
         if (pre) got = await pre.catch(() => null);
         if (!got) {
           got = await askDetect(await detectImage(source), "지면에서 문제 자리 찾기");
-          if (got.problems.length > 0) {
+          if (PAGE_REFINE && got.problems.length > 0) {
             setBusy("luna 가 문제마다 확대해 테두리를 다시 맞추는 중...");
             const windows = cutRefineWindows(source.img, source.width, source.height, got.problems);
             const r = await refineProblems(got.problems, windows, "지면");

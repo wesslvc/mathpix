@@ -129,7 +129,7 @@ export default function ComparePageCropPage() {
   const [orBusy, setOrBusy] = useState(false);
   const [orQuery, setOrQuery] = useState("");
   const [orFreeOnly, setOrFreeOnly] = useState(false);
-  const [refine, setRefine] = useState(true);
+  const [refine, setRefine] = useState(false);
   const [refineEffort, setRefineEffort] = useState<"low" | "medium" | "high">("medium");
   const [results, setResults] = useState<Record<string, Res>>({});
   const [busy, setBusy] = useState<string | null>(null);

@@ -144,7 +144,7 @@ export function snapPageProblems(
     problems: problems.map((p) => ({
       ...p,
       boxes: p.boxes.map((orig) => {
-        const kept = protectModelBox(withKeep(res.boxes[k++], orig), orig);
+        const kept = protectModelBox(withKeep(res.boxes[k++], orig), (orig as ProblemBox & { was?: ProblemBox }).was ?? orig);
         const was = (orig as ProblemBox & { was?: ProblemBox }).was;
         return was ? restoreBottom(map, kept, was) : kept;
       }),
