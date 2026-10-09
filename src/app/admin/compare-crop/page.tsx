@@ -32,12 +32,34 @@ type Cand = { key: string; engine: "gemini" | "openai" | "openrouter"; model: st
 
 const LUNA = "gpt-6-luna";
 // 하이쿠로 확정(2026-10-09) — 다른 후보는 전부 걷어냈다(git 이력에 있다). 다른 모델은 아래 "직접 적기"나 오픈라우터 목록으로 다시 추가할 수 있다.
-const SOL = "gpt-6.1-sol"; // 서버 OPENAI_TEXT_MODEL 기본값과 같다(다르면 서버가 거절한다)
-const PRESETS: Cand[] = [
-  { key: "orHaiku", engine: "openrouter", model: "anthropic/claude-haiku-5.5" },
-  { key: "solL", engine: "openai", model: SOL, effort: "low" },
-];
-const DEFAULT_ON = new Set(["orHaiku", "solL"]);
+const PRESETS: Cand[] = [{ key: "orHaiku", engine: "openrouter", model: "anthropic/claude-haiku-5.5" }];
+const DEFAULT_ON = new Set(["orHaiku"]);
+
+// ── 하이쿠 N회 합산 실험: 같은 지면을 하이쿠로 5번 동시에 돌려, 변마다 중앙값으로 합친 박스의 오차를 1~5개 합산별로 견준다.
+const ENS_RUNS = 5;
+type Edges = [number, number, number, number]; // 위,아래,왼,오른 (지면 대비 %)
+const edgesOf = (b: ProblemBox): Edges => [b.y * 100, (b.y + b.h) * 100, b.x * 100, (b.x + b.w) * 100];
+const median = (v: number[]) => {
+  const a = [...v].sort((x, y) => x - y);
+  const m = a.length >> 1;
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+};
+const mean = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
+const std = (v: number[]) => {
+  const m = mean(v);
+  return Math.sqrt(mean(v.map((x) => (x - m) ** 2)));
+};
+/** 여러 실행의 결과를 문제 번호(없으면 차례)로 맞춰 변마다 중앙값으로 합친다. */
+function mergeRuns(runs: DetectedProblem[][], n: number, start: number): (Edges | null)[] {
+  return Array.from({ length: n }, (_, i) => {
+    const es: Edges[] = [];
+    for (const r of runs) {
+      const pr = r.find((q) => q.no === String(start + i)) ?? r[i];
+      if (pr?.boxes[0]) es.push(edgesOf(pr.boxes[0]));
+    }
+    return es.length ? ([0, 1, 2, 3].map((k) => median(es.map((e) => e[k]))) as Edges) : null;
+  });
+}
 const PAD = 0.012;
 const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
@@ -123,6 +145,95 @@ export default function ComparePageCropPage() {
   /** 손으로 맞춘 정답 박스(지면별, 읽는 차례 = 그린 차례). 모델과의 오차를 결과 복사에 수치로 싣는다. */
   const [truth, setTruth] = useState<Record<string, EditBox[]>>({});
   const [truthStart, setTruthStart] = useState<Record<string, number>>({});
+  /** 하이쿠 N회 합산 실험 결과(지면별 실행 5개). */
+  const [ens, setEns] = useState<Record<string, { runs: DetectedProblem[][]; krw: number; ms: number; fail: number }>>({});
+  const [ensBusy, setEnsBusy] = useState(false);
+
+  async function runEnsemble() {
+    setEnsBusy(true);
+    setEns({});
+    try {
+      await Promise.all(
+        pages.map(async (p) => {
+          const t0 = performance.now();
+          const rs = await Promise.all(
+            Array.from({ length: ENS_RUNS }, async () => {
+              try {
+                const res = await fetch("/api/admin/compare-crop", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ image: p.image, engine: "openrouter", model: "anthropic/claude-haiku-5.5" }),
+                });
+                const j = await res.json();
+                return j.ok ? { problems: (j.problems ?? []) as DetectedProblem[], krw: (j.estKrw as number | null) ?? 0 } : null;
+              } catch {
+                return null;
+              }
+            }),
+          );
+          const ok = rs.filter((r): r is { problems: DetectedProblem[]; krw: number } => !!r);
+          setEns((m) => ({
+            ...m,
+            [p.id]: { runs: ok.map((r) => r.problems), krw: ok.reduce((a, r) => a + r.krw, 0), ms: Math.round(performance.now() - t0), fail: rs.length - ok.length },
+          }));
+        }),
+      );
+    } finally {
+      setEnsBusy(false);
+    }
+  }
+
+  /** 지면 하나의 합산 분석: k=1..N 개를 합친 오차(가능한 모든 조합의 평균), 변별 편향, 실행 간 흔들림. */
+  function analyzeEnsemble(p: Page) {
+    const e = ens[p.id];
+    const t = truth[p.id];
+    if (!e || !t?.length || e.runs.length === 0) return null;
+    const st = truthStart[p.id] ?? 1;
+    const tr: Edges[] = t.map((b) => edgesOf(b));
+    const N = e.runs.length;
+    const rows: { k: number; combos: number; mae: number; worst: number; bias: Edges }[] = [];
+    for (let k = 1; k <= N; k++) {
+      const maes: number[] = [];
+      const worsts: number[] = [];
+      const biasAcc: number[][] = [[], [], [], []];
+      let combos = 0;
+      for (let mask = 1; mask < 1 << N; mask++) {
+        if (mask.toString(2).replace(/0/g, "").length !== k) continue;
+        combos++;
+        const sub = e.runs.filter((_, i) => mask & (1 << i));
+        const merged = mergeRuns(sub, tr.length, st);
+        const errs: number[] = [];
+        merged.forEach((m, i) => {
+          if (!m) return;
+          [0, 1, 2, 3].forEach((d) => {
+            const v = m[d] - tr[i][d];
+            errs.push(Math.abs(v));
+            biasAcc[d].push(v);
+          });
+        });
+        if (errs.length) {
+          maes.push(mean(errs));
+          worsts.push(Math.max(...errs));
+        }
+      }
+      rows.push({ k, combos, mae: mean(maes), worst: mean(worsts), bias: [0, 1, 2, 3].map((d) => mean(biasAcc[d])) as Edges });
+    }
+    // 실행 간 흔들림: 문제·변마다 N번 값의 표준편차의 평균.
+    const stds: number[] = [];
+    const perProblem: { no: string; bias: Edges; sd: Edges }[] = [];
+    tr.forEach((_, i) => {
+      const per = e.runs.map((r) => {
+        const pr = r.find((q) => q.no === String(st + i)) ?? r[i];
+        return pr?.boxes[0] ? edgesOf(pr.boxes[0]) : null;
+      }).filter((x): x is Edges => !!x);
+      if (!per.length) return;
+      const sd = [0, 1, 2, 3].map((d) => std(per.map((x) => x[d]))) as Edges;
+      const bias = [0, 1, 2, 3].map((d) => mean(per.map((x) => x[d])) - tr[i][d]) as Edges;
+      stds.push(...sd);
+      perProblem.push({ no: String(st + i), bias, sd });
+    });
+    return { rows, noise: mean(stds), perProblem, krw: e.krw, runs: N, fail: e.fail, ms: e.ms };
+  }
   useEffect(() => {
     try {
       const raw = localStorage.getItem("reprint.cropRemoved");
@@ -380,6 +491,18 @@ export default function ComparePageCropPage() {
         });
         out.push("");
       }
+    }
+    for (const p of pages) {
+      const a = analyzeEnsemble(p);
+      if (!a) continue;
+      const f = (v: number) => (v > 0 ? "+" : "") + v.toFixed(2);
+      out.push(`## 하이쿠 ${a.runs}회 합산 실험: ${p.name} (원가 합계 ${a.krw.toFixed(1)}원 · ${(a.ms / 1000).toFixed(1)}s${a.fail ? ` · 실패 ${a.fail}회` : ""})`);
+      out.push("| 합산 개수 | 조합 수 | 변 평균 절대 오차 %p | 최대 오차 평균 | 편향 위/아래/왼/오른 |", "|---|---|---|---|---|");
+      for (const r of a.rows) out.push(`| ${r.k} | ${r.combos} | ${r.mae.toFixed(2)} | ${r.worst.toFixed(2)} | ${r.bias.map(f).join(" / ")} |`);
+      out.push(`실행 간 흔들림(변 표준편차 평균): ${a.noise.toFixed(2)}%p`);
+      out.push("문제별 평균 편향(모델−정답) / 표준편차 [위,아래,왼,오른]:");
+      for (const q of a.perProblem) out.push(`  - ${q.no}번: 편향 ${q.bias.map(f).join(", ")} · σ ${q.sd.map((v) => v.toFixed(2)).join(", ")}`);
+      out.push("");
     }
     return out.join("\n");
   }
@@ -662,6 +785,9 @@ export default function ComparePageCropPage() {
           <Button type="button" variant="outline" size="sm" disabled={Object.keys(results).length === 0} onClick={downloadReport}>
             파일로 받기
           </Button>
+          <Button type="button" variant="outline" size="sm" disabled={!pages.length || ensBusy || busy !== null} onClick={() => void runEnsemble()}>
+            {ensBusy ? "하이쿠 5회 도는 중…" : `하이쿠 ${ENS_RUNS}회 합산 실험`}
+          </Button>
         </div>
       </section>
 
@@ -701,6 +827,31 @@ export default function ComparePageCropPage() {
           </table>
         </section>
       )}
+
+      {pages.map((p) => {
+        const a = analyzeEnsemble(p);
+        if (!a) return null;
+        const f = (v: number) => (v > 0 ? "+" : "") + v.toFixed(2);
+        return (
+          <section key={`ens-${p.id}`} className={cn(cardClass, "overflow-x-auto p-4")}>
+            <h2 className="mb-2 text-sm font-medium text-slate-700">
+              {p.name} — 하이쿠 {a.runs}회 합산(변마다 중앙값) <span className="text-xs text-slate-400">원가 {a.krw.toFixed(1)}원 · 실행 간 흔들림 σ {a.noise.toFixed(2)}%p</span>
+            </h2>
+            <table className="w-full min-w-[560px] text-left text-sm">
+              <thead className="text-xs text-slate-500">
+                <tr><th className="py-1">합산 개수</th><th>조합 수</th><th>변 평균 오차(%p)</th><th>최대 오차 평균</th><th>편향 위/아래/왼/오른</th></tr>
+              </thead>
+              <tbody>
+                {a.rows.map((r) => (
+                  <tr key={r.k} className="border-t border-slate-100">
+                    <td className="py-1.5 font-medium">{r.k}개</td><td>{r.combos}</td><td>{r.mae.toFixed(2)}</td><td>{r.worst.toFixed(2)}</td><td>{r.bias.map(f).join(" / ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        );
+      })}
 
       {pages.map((p) => (
         <section key={p.id} className="flex flex-col gap-2">
