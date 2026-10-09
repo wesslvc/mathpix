@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cropImageToDataUrl, loadDrawableFromFile, loadImage } from "@/lib/cropImage";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { DETECT_INPUT_DIM, MAX_UPLOAD_CHARS, stitchVertically } from "@/lib/figureImage";
@@ -99,7 +99,48 @@ export default function ComparePageCropPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [ran, setRan] = useState<Cand[]>([]);
 
-  const cands = [...PRESETS, ...custom];
+  // 결과를 보고 "패스"(남김 표시) / "실패"(목록에서 지움)를 고른다. 지운 것은 기기에 기억해 다음에도 안 나온다.
+  const [marks, setMarks] = useState<Record<string, "pass">>({});
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("reprint.cropRemoved");
+      if (raw) setRemoved(new Set(JSON.parse(raw) as string[]));
+    } catch {
+      /* 저장소가 막혀 있어도 화면은 그대로 */
+    }
+  }, []);
+  function saveRemoved(n: Set<string>) {
+    setRemoved(n);
+    try {
+      localStorage.setItem("reprint.cropRemoved", JSON.stringify([...n]));
+    } catch {
+      /* 무시 */
+    }
+  }
+  function markPass(key: string) {
+    setMarks((m) => {
+      const n = { ...m };
+      if (n[key]) delete n[key];
+      else n[key] = "pass";
+      return n;
+    });
+  }
+  function markFail(key: string) {
+    saveRemoved(new Set(removed).add(key));
+    setOn((s) => {
+      const n = new Set(s);
+      n.delete(key);
+      return n;
+    });
+    setMarks((m) => {
+      const n = { ...m };
+      delete n[key];
+      return n;
+    });
+  }
+
+  const cands = [...PRESETS, ...custom].filter((c) => !removed.has(c.key));
   const chosen = cands.filter((c) => on.has(c.key));
 
   async function pick(files: FileList | null) {
@@ -153,10 +194,10 @@ export default function ComparePageCropPage() {
     const out: string[] = [`# 지면 자르기 비교 ${new Date().toLocaleString("ko-KR")}`, `다시 맞추기: ${refine ? "켬" : "끔"}`, ""];
     for (const p of pages) {
       out.push(`## 지면: ${p.name} (${p.w}×${p.h})`);
-      for (const c of chosen) {
+      for (const c of ran.filter((x) => !removed.has(x.key))) {
         const r = results[`${p.id}|${c.key}`];
         if (!r) continue;
-        const head = `### ${nameOf(c)} [${c.engine}]`;
+        const head = `### ${nameOf(c)} [${c.engine}]${marks[c.key] ? " ✅패스" : ""}`;
         if (r.state === "error") {
           out.push(head, `- 실패: ${r.error ?? "?"}`, "");
           continue;
@@ -256,7 +297,7 @@ export default function ComparePageCropPage() {
     await Promise.all(pages.flatMap((p) => chosen.map((c) => runOne(p, c, refine))));
   }
 
-  const summary = ran.map((c) => {
+  const summary = ran.filter((c) => !removed.has(c.key)).map((c) => {
     const rs = pages.map((p) => results[`${p.id}|${c.key}`]).filter((r): r is Res => !!r && (r.state === "done" || r.state === "error"));
     const done = rs.filter((r) => r.state === "done");
     const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
@@ -374,6 +415,11 @@ export default function ComparePageCropPage() {
             {pages.length}장 × {chosen.length}개 모델 자르기
           </Button>
           {busy && <span className="text-xs text-slate-500">{busy}</span>}
+          {removed.size > 0 && (
+            <button type="button" className="text-xs text-slate-500 underline" onClick={() => saveRemoved(new Set())}>
+              지운 모델 {removed.size}개 되살리기
+            </button>
+          )}
           <Button type="button" variant="outline" size="sm" disabled={Object.keys(results).length === 0} onClick={() => void copyReport()}>
             결과 복사
           </Button>
@@ -424,11 +470,37 @@ export default function ComparePageCropPage() {
             {p.name} <span className="text-xs text-slate-400">{p.w}×{p.h}</span>
           </h2>
           <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
-            {(ran.length ? ran : chosen).map((c) => {
+            {(ran.length ? ran : chosen).filter((c) => !removed.has(c.key)).map((c) => {
               const r = results[`${p.id}|${c.key}`];
               return (
                 <div key={c.key} className={cn(cardClass, "flex w-80 shrink-0 flex-col gap-2 p-2")}>
-                  <div className="text-xs font-semibold text-slate-700">{nameOf(c)}</div>
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="min-w-0 truncate text-xs font-semibold text-slate-700" title={nameOf(c)}>
+                      {nameOf(c)}
+                    </div>
+                    {r && (r.state === "done" || r.state === "error") && (
+                      <div className="flex shrink-0 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => markPass(c.key)}
+                          className={cn(
+                            "rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                            marks[c.key] ? "border-emerald-500 bg-emerald-500 text-white" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50",
+                          )}
+                        >
+                          패스
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => markFail(c.key)}
+                          title="이 모델을 목록에서 지워요(다음에도 안 나와요)"
+                          className="rounded-full border border-red-300 px-2 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50"
+                        >
+                          실패
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <div className="relative w-full bg-slate-100" style={{ aspectRatio: `${p.w} / ${p.h}` }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.image} alt="" className="absolute inset-0 h-full w-full" />
