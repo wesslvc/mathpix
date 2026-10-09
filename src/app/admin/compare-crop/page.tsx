@@ -36,11 +36,15 @@ const PRESETS: Cand[] = [
   { key: "lunaL", engine: "openai", model: LUNA, effort: "low" },
   { key: "lunaM", engine: "openai", model: LUNA, effort: "medium" },
   { key: "lunaH", engine: "openai", model: LUNA, effort: "high" },
-  // OpenRouter 무료 — 이름은 제3자 안내에서 본 것이라 없으면 404 로 그대로 나온다. 아래 "오픈라우터 이미지 모델 불러오기"로 실제 목록을 본다.
-  { key: "orGem", engine: "openrouter", model: "google/gemma-4-31b-it:free" },
-  { key: "orNano", engine: "openrouter", model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" },
+  // OpenRouter — 이름·단가는 비교 화면의 "오픈라우터 이미지 모델 불러오기" 목록에서 그대로 옮겼다(2026-10-09, $ 입력/출력 100만 토큰당).
+  { key: "or25l", engine: "openrouter", model: "google/gemini-2.5-flash-lite" }, // $0.10/$0.40
+  { key: "or31l", engine: "openrouter", model: "google/gemini-3.1-flash-lite" }, // $0.25/$1.50
+  { key: "orQ32", engine: "openrouter", model: "qwen/qwen3-vl-32b-instruct" }, // $0.10/$0.42
+  { key: "orQ38", engine: "openrouter", model: "qwen/qwen3.8-flash" }, // $0.15/$0.47
+  { key: "orG31", engine: "openrouter", model: "google/gemma-4-31b-it" }, // $0.09/$0.34
+  { key: "orGf", engine: "openrouter", model: "google/gemma-4-31b-it:free" },
 ];
-const DEFAULT_ON = new Set(["gfll", "lunaM"]);
+const DEFAULT_ON = new Set(["gfll", "lunaM", "or25l", "orQ32"]);
 const PAD = 0.008;
 const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
