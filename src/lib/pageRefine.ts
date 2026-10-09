@@ -144,13 +144,29 @@ export function snapPageProblems(
     problems: problems.map((p) => ({
       ...p,
       boxes: p.boxes.map((orig) => {
-        const kept = withKeep(res.boxes[k++], orig);
+        const kept = protectModelBox(withKeep(res.boxes[k++], orig), orig);
         const was = (orig as ProblemBox & { was?: ProblemBox }).was;
         return was ? restoreBottom(map, kept, was) : kept;
       }),
     })),
     snapped: res.changed,
   };
+}
+
+/**
+ * 모델이 준 박스(서버가 사방 `MODEL_PAD` 넓힌 것) 안쪽 = 모델이 실제로 짚은 자리는 **다듬기가 줄일 수 없다**(2026-10-09, 사용자 정답과 견주니
+ * 다시 맞추기를 끄면 다듬기가 14번 위쪽을 6.2%p 잘라 내 모델 원자리(0.70%p)보다 나빠졌다 — 최종 1.34%p). 다듬기는 넓히는 쪽으로만 쓴다.
+ * `detectProblems.ts` 의 `PAGE_BOX_PAD`(0.012)와 같은 값이어야 한다.
+ */
+const MODEL_PAD = 0.012;
+function protectModelBox(snapped: ProblemBox, orig: ProblemBox): ProblemBox {
+  const px0 = Math.min(1, orig.x + MODEL_PAD);
+  const py0 = Math.min(1, orig.y + MODEL_PAD);
+  const px1 = Math.max(px0, orig.x + orig.w - MODEL_PAD);
+  const py1 = Math.max(py0, orig.y + orig.h - MODEL_PAD);
+  const x0 = Math.min(snapped.x, px0), y0 = Math.min(snapped.y, py0);
+  const x1 = Math.max(snapped.x + snapped.w, px1), y1 = Math.max(snapped.y + snapped.h, py1);
+  return { ...snapped, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 /** 되살릴 때 글자 덩어리를 같은 것으로 보는 가장 큰 흰 간격(지면 높이 대비) — 선지 줄 사이는 이보다 좁고, 다음 문제는 멀다. */
