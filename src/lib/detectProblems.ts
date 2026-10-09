@@ -87,6 +87,14 @@ function toBox(raw: unknown): ProblemBox | null {
 
 function toBoxes(raw: unknown): (ProblemBox & { no: string; cont?: boolean })[] {
   if (!Array.isArray(raw)) return [];
+  // 일부 모델(Llama 비전 등)은 0~1000 이 아니라 0~1 로 좌표를 준다 — 모든 좌표가 1 이하면 그 배율로 읽는다.
+  const nums = (raw as GeminiBox[]).flatMap((it) => (Array.isArray(it?.box_2d) ? (it.box_2d as unknown[]).map(Number) : []));
+  const unit = nums.length > 0 && nums.every((n) => Number.isFinite(n) && n >= 0 && n <= 1.0001) && nums.some((n) => n > 0) ? 1000 : 1;
+  if (unit === 1000) {
+    raw = (raw as GeminiBox[]).map((it) =>
+      Array.isArray(it?.box_2d) ? { ...it, box_2d: (it.box_2d as unknown[]).map((n) => Number(n) * 1000) } : it,
+    );
+  }
   const out: (ProblemBox & { no: string; cont?: boolean })[] = [];
   for (const item of raw as GeminiBox[]) {
     const b = item?.box_2d;
@@ -259,6 +267,12 @@ function parse(text: string): DetectedProblem[] {
       throw new DetectError("영역을 읽지 못했습니다.", 502);
     }
   }
+}
+
+/** 일꾼 프로브(`nvidia-scan`)가 실제 지면 지시문·해석으로 모델을 시험하려고 내보낸다. */
+export const PAGE_PROMPT_FOR_PROBE = PROMPT;
+export function parsePageForProbe(text: string): DetectedProblem[] {
+  return parse(text);
 }
 
 /** Gemini 한 번 부르기. 프롬프트만 갈아 끼우면 다른 일에도 쓸 수 있다. */

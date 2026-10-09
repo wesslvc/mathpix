@@ -14,7 +14,7 @@ import {
 } from "@/lib/figureRun";
 import { logAiCost } from "@/lib/costLog";
 import { GLOBAL_CONCURRENCY, UNLIMITED_CONCURRENCY, kickWorker, workerToken } from "@/lib/figureJobsServer";
-import { callOpenAIVision } from "@/lib/detectProblems";
+import { PAGE_PROMPT_FOR_PROBE, callOpenAIVision, parsePageForProbe } from "@/lib/detectProblems";
 import { callNvidiaVision, listNvidiaModels } from "@/lib/nvidiaVision";
 import {
   OPENAI_TEXT_MODEL,
@@ -105,6 +105,7 @@ export async function POST(req: NextRequest) {
   let probeEffort = "";
   let probeId = "";
   let probeModels: string[] | null = null;
+  let probePrompt = "";
   try {
     const body = (await req.json()) as {
       preferUser?: unknown;
@@ -117,6 +118,7 @@ export async function POST(req: NextRequest) {
     if (typeof body.preferUser === "string") preferUser = body.preferUser;
     if (typeof body.probe === "string") probe = body.probe;
     if (typeof body.model === "string") probeModel = body.model;
+    if (typeof (body as { prompt?: unknown }).prompt === "string") probePrompt = (body as { prompt: string }).prompt;
     const ms = (body as { models?: unknown }).models;
     if (Array.isArray(ms)) probeModels = ms.filter((x): x is string => typeof x === "string");
   } catch {
@@ -134,24 +136,37 @@ export async function POST(req: NextRequest) {
   }
   // 여러 모델을 **동시에** 한 번에 시험한다(모델마다 40초에서 끊는다). `models` 는 본문 배열.
   if (probe === "nvidia-scan") {
+    const pageMode = probePrompt === "page";
     const models = (probeModels ?? []).filter((m) => /^[\w./-]{3,100}$/.test(m)).slice(0, 20);
     let image = `data:image/png;base64,${PROBE_PNG}`;
     if (probeId) {
       const got = await loadAsDataUrl(createAdminClient(), probeId);
       if (got) image = got;
     }
-    const prompt = probeId
-      ? 'This is one exam problem. Find the printed problem number and the box enclosing the whole problem. Reply ONLY with JSON: {"box_2d":[ymin,xmin,ymax,xmax],"number":"17."} with coordinates normalised 0-1000.'
-      : 'Reply ONLY with a JSON object: {"ok": true, "shape": "<what you see>"}';
+    const prompt = pageMode
+      ? `${PAGE_PROMPT_FOR_PROBE}\n\nanswer as JSON object: {"problems": [...]}`
+      : probeId
+        ? 'This is one exam problem. Find the printed problem number and the box enclosing the whole problem. Reply ONLY with JSON: {"box_2d":[ymin,xmin,ymax,xmax],"number":"17."} with coordinates normalised 0-1000.'
+        : 'Reply ONLY with a JSON object: {"ok": true, "shape": "<what you see>"}';
+    const limitMs = pageMode ? 150_000 : 40_000;
     const results = await Promise.all(
       models.map(async (model) => {
         const t0 = Date.now();
         const ac = new AbortController();
-        const timer = setTimeout(() => ac.abort(), 40_000);
+        const timer = setTimeout(() => ac.abort(), limitMs);
         let usage: unknown = null;
         try {
-          const text = await callNvidiaVision(image, prompt, model, (u) => (usage = u), 1024, ac.signal);
-          return { model, ok: true, ms: Date.now() - t0, usage, text: text.slice(0, 300) };
+          const text = await callNvidiaVision(image, prompt, model, (u) => (usage = u), pageMode ? 4096 : 1024, ac.signal);
+          let parsed: unknown = undefined;
+          if (pageMode) {
+            try {
+              const pr = parsePageForProbe(text);
+              parsed = pr.map((x) => ({ no: x.no, boxes: x.boxes.map((b) => [b.x, b.y, b.w, b.h].map((n) => Math.round(n * 100) / 100)) }));
+            } catch (e) {
+              parsed = `해석 실패: ${e instanceof Error ? e.message : e}`;
+            }
+          }
+          return { model, ok: true, ms: Date.now() - t0, usage, parsed, text: text.slice(0, pageMode ? 200 : 300) };
         } catch (err) {
           return { model, ok: false, ms: Date.now() - t0, error: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
         } finally {
