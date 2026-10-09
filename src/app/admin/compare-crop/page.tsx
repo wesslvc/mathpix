@@ -51,12 +51,18 @@ const std = (v: number[]) => {
   const m = mean(v);
   return Math.sqrt(mean(v.map((x) => (x - m) ** 2)));
 };
+/** 한 실행에서 번호 `no`(없으면 차례 i) 문제를 찾는다. 번호를 적어 준 실행이면 번호로만 맞춘다(차례로 맞추면 번호가 밀린 실행이 엉뚱한 문제와 섞인다). */
+function pickProblem(r: DetectedProblem[], no: string, i: number): DetectedProblem | null {
+  const hit = r.find((q) => q.no === no);
+  if (hit) return hit;
+  return r.every((q) => !q.no) ? r[i] ?? null : null;
+}
 /** 여러 실행의 결과를 문제 번호(없으면 차례)로 맞춰 변마다 중앙값으로 합친다. */
 function mergeRuns(runs: DetectedProblem[][], n: number, start: number): (Edges | null)[] {
   return Array.from({ length: n }, (_, i) => {
     const es: Edges[] = [];
     for (const r of runs) {
-      const pr = r.find((q) => q.no === String(start + i)) ?? r[i];
+      const pr = pickProblem(r, String(start + i), i);
       if (pr?.boxes[0]) es.push(edgesOf(pr.boxes[0]));
     }
     return es.length ? ([0, 1, 2, 3].map((k) => median(es.map((e) => e[k]))) as Edges) : null;
@@ -265,7 +271,7 @@ export default function ComparePageCropPage() {
     const perProblem: { no: string; bias: Edges; sd: Edges }[] = [];
     tr.forEach((_, i) => {
       const per = e.runs.map((r) => {
-        const pr = r.find((q) => q.no === String(st + i)) ?? r[i];
+        const pr = pickProblem(r, String(st + i), i);
         return pr?.boxes[0] ? edgesOf(pr.boxes[0]) : null;
       }).filter((x): x is Edges => !!x);
       if (!per.length) return;
@@ -281,7 +287,19 @@ export default function ComparePageCropPage() {
       const errs = d.flatMap((x) => (x ? x.map(Math.abs) : []));
       return { k, merged, d, mae: errs.length ? mean(errs) : 0, worst: errs.length ? Math.max(...errs) : 0 };
     });
-    return { rows, cases, truthEdges: tr, start: st, noise: mean(stds), perProblem, krw: e.krw, runs: N, fail: e.fail, ms: e.ms };
+    const perRun = e.runs.map((r, ri) => ({
+      ri,
+      nos: r.map((q) => (q.no || "?") + (q.boxes.length > 1 ? `+${q.boxes.length - 1}` : "")).join(" "),
+      mae: (() => {
+        const errs: number[] = [];
+        tr.forEach((t, i) => {
+          const pr = pickProblem(r, String(st + i), i);
+          if (pr?.boxes[0]) edgesOf(pr.boxes[0]).forEach((v, d) => errs.push(Math.abs(v - t[d])));
+        });
+        return errs.length ? mean(errs) : NaN;
+      })(),
+    }));
+    return { rows, cases, perRun, truthEdges: tr, start: st, noise: mean(stds), perProblem, krw: e.krw, runs: N, fail: e.fail, ms: e.ms };
   }
   useEffect(() => {
     try {
@@ -549,6 +567,8 @@ export default function ComparePageCropPage() {
       out.push("| 합산 개수 | 조합 수 | 변 평균 절대 오차 %p | 최대 오차 평균 | 편향 위/아래/왼/오른 |", "|---|---|---|---|---|");
       for (const r of a.rows) out.push(`| ${r.k} | ${r.combos} | ${r.mae.toFixed(2)} | ${r.worst.toFixed(2)} | ${r.bias.map(f).join(" / ")} |`);
       out.push(`실행 간 흔들림(변 표준편차 평균): ${a.noise.toFixed(2)}%p`);
+      out.push("실행별(번호 순서 · 정답 대비 변 평균 오차):");
+      for (const r of a.perRun) out.push(`  - 실행 ${r.ri + 1}: ${r.nos} · ${Number.isNaN(r.mae) ? "–" : r.mae.toFixed(2)}%p`);
       for (const c of a.cases) {
         out.push(`${c.k}개 합산(앞에서 ${c.k}개, 동시에 돌린 ${a.runs}회 중) — 변 평균 오차 ${c.mae.toFixed(2)}%p · 최대 ${c.worst.toFixed(2)}%p`);
         c.d.forEach((x, i) => out.push(`  - ${a.start + i}번 Δ(위,아래,왼,오른): ${x ? x.map(f).join(", ") : "못 찾음"}`));
@@ -926,6 +946,11 @@ export default function ComparePageCropPage() {
                     ))}
                   </div>
                 </div>
+              ))}
+            </div>
+            <div className="mt-2 text-[10px] leading-snug text-slate-600">
+              {a.perRun.map((r) => (
+                <div key={r.ri}>실행 {r.ri + 1}: {r.nos} · {Number.isNaN(r.mae) ? "–" : r.mae.toFixed(2)}%p</div>
               ))}
             </div>
             <p className="mt-1 text-[10px] text-slate-400">초록 점선 = 정답, 실선 = 합산 결과. 숫자 = 위/아래/왼/오른 오차(%p, 모델−정답).</p>
