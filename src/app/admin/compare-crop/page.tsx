@@ -46,8 +46,9 @@ const PRESETS: Cand[] = [
   { key: "orG26", engine: "openrouter", model: "google/gemma-4-26b-a4b-it" }, // $0.09/$0.30
   { key: "orScout", engine: "openrouter", model: "meta-llama/llama-4-scout" }, // $0.10/$0.30
   { key: "or31l", engine: "openrouter", model: "google/gemini-3.1-flash-lite" }, // $0.25/$1.50
+  { key: "orGlm", engine: "openrouter", model: "z-ai/glm-5v-turbo" }, // $1.20/$4.00 — GLM 비전(V) 계열 중 가장 새것
 ];
-const DEFAULT_ON = new Set(["gfll", "lunaM", "or25l", "orQ32", "orSeed", "orLing"]);
+const DEFAULT_ON = new Set(["gfll", "lunaM", "or25l", "orQ32", "orSeed", "orLing", "orGlm"]);
 const PAD = 0.008;
 const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
