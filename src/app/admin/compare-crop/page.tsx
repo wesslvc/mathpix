@@ -58,7 +58,7 @@ const PRESETS: Cand[] = [
   { key: "orGlm", engine: "openrouter", model: "z-ai/glm-5v-turbo" }, // $1.20/$4.00 — GLM 비전(V) 계열 중 가장 새것
 ];
 const DEFAULT_ON = new Set(["orHaiku", "orHaikuM", "orHaikuH", "g35l"]);
-const PAD = 0.008;
+const PAD = 0.012;
 const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
 const nameOf = (c: Cand) => (c.effort ? `${c.model} (${c.effort})` : c.model);

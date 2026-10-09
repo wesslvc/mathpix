@@ -62,7 +62,7 @@ import { Button } from "@/components/ui/button";
  * **손으로 그린 네모에는 주지 않는다.** 그건 사용자가 정한 자리라 우리가 몰래
  * 넓히면 보이는 것과 잘리는 것이 달라진다.
  */
-const PAD = 0.008;
+const PAD = 0.012;
 
 /**
  * 잘린 문제 하나.
