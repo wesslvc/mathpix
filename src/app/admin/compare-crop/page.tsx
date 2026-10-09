@@ -61,6 +61,24 @@ const DEFAULT_ON = new Set(["orHaiku", "orHaikuM", "orHaikuH", "g35l"]);
 const PAD = 0.012;
 const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
+/**
+ * **손으로 맞춘 정답(상수)** — 파일 이름이 같은 지면을 올리면 자동으로 채워진다(사용자 — "손으로 짜른 걸 상수 취급해").
+ * 지면 대비 비율(0~1) x,y,w,h, 읽는 차례대로. 2026-10-09 에 사용자가 손으로 맞춘 값이다. 새 지면은 화면의 "손으로 정답 맞추기"로 만든 뒤 여기에 옮겨 적는다.
+ */
+const KNOWN_TRUTH: Record<string, { start: number; boxes: [number, number, number, number][] }> = {
+  "IMG_2209.jpeg": { start: 12, boxes: [[0.141, 0.229, 0.788, 0.68]] },
+  "IMG_2319.jpeg": {
+    start: 11,
+    boxes: [
+      [0.124, 0.077, 0.394, 0.239],
+      [0.11, 0.321, 0.412, 0.263],
+      [0.082, 0.575, 0.453, 0.354],
+      [0.522, 0.057, 0.423, 0.453],
+      [0.543, 0.523, 0.427, 0.384],
+    ],
+  },
+};
+
 const nameOf = (c: Cand) => (c.effort ? `${c.model} (${c.effort})` : c.model);
 
 type Res = {
@@ -179,6 +197,15 @@ export default function ComparePageCropPage() {
       }
     }
     setPages((p) => [...p, ...out]);
+    for (const pg of out) {
+      const k = KNOWN_TRUTH[pg.name];
+      if (!k) continue;
+      setTruthStart((m) => ({ ...m, [pg.id]: k.start }));
+      setTruth((m) => ({
+        ...m,
+        [pg.id]: k.boxes.map(([x, y, w, h], i) => ({ id: `k${pg.id}${i}`, group: `k${i}`, x, y, w, h })),
+      }));
+    }
     setBusy(null);
   }
 
