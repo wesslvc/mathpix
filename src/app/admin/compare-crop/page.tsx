@@ -37,6 +37,8 @@ const DEFAULT_ON = new Set(["orHaiku"]);
 
 // ── 하이쿠 N회 합산 실험: 같은 지면을 하이쿠로 5번 동시에 돌려, 변마다 중앙값으로 합친 박스의 오차를 1~5개 합산별로 견준다.
 const ENS_RUNS = 5;
+/** 나란히 견줄 합산 개수(5회를 동시에 돌려 앞에서 k개씩 합친다). */
+const ENS_SHOW = [1, 2, 3, 5];
 type Edges = [number, number, number, number]; // 위,아래,왼,오른 (지면 대비 %)
 const edgesOf = (b: ProblemBox): Edges => [b.y * 100, (b.y + b.h) * 100, b.x * 100, (b.x + b.w) * 100];
 const median = (v: number[]) => {
@@ -192,7 +194,7 @@ export default function ComparePageCropPage() {
     const tr: Edges[] = t.map((b) => edgesOf(b));
     const N = e.runs.length;
     const rows: { k: number; combos: number; mae: number; worst: number; bias: Edges }[] = [];
-    for (let k = 1; k <= N; k++) {
+    for (const k of ENS_SHOW.filter((v) => v <= N)) {
       const maes: number[] = [];
       const worsts: number[] = [];
       const biasAcc: number[][] = [[], [], [], []];
@@ -232,7 +234,14 @@ export default function ComparePageCropPage() {
       stds.push(...sd);
       perProblem.push({ no: String(st + i), bias, sd });
     });
-    return { rows, noise: mean(stds), perProblem, krw: e.krw, runs: N, fail: e.fail, ms: e.ms };
+    // 나란히 보는 네 칸: 앞에서 k개를 합친 박스(결정적)와 정답 대비 변별 오차.
+    const cases = ENS_SHOW.filter((v) => v <= N).map((k) => {
+      const merged = mergeRuns(e.runs.slice(0, k), tr.length, st);
+      const d = merged.map((m, i) => (m ? ([0, 1, 2, 3].map((q) => m[q] - tr[i][q]) as Edges) : null));
+      const errs = d.flatMap((x) => (x ? x.map(Math.abs) : []));
+      return { k, merged, d, mae: errs.length ? mean(errs) : 0, worst: errs.length ? Math.max(...errs) : 0 };
+    });
+    return { rows, cases, truthEdges: tr, start: st, noise: mean(stds), perProblem, krw: e.krw, runs: N, fail: e.fail, ms: e.ms };
   }
   useEffect(() => {
     try {
@@ -500,6 +509,10 @@ export default function ComparePageCropPage() {
       out.push("| 합산 개수 | 조합 수 | 변 평균 절대 오차 %p | 최대 오차 평균 | 편향 위/아래/왼/오른 |", "|---|---|---|---|---|");
       for (const r of a.rows) out.push(`| ${r.k} | ${r.combos} | ${r.mae.toFixed(2)} | ${r.worst.toFixed(2)} | ${r.bias.map(f).join(" / ")} |`);
       out.push(`실행 간 흔들림(변 표준편차 평균): ${a.noise.toFixed(2)}%p`);
+      for (const c of a.cases) {
+        out.push(`${c.k}개 합산(앞에서 ${c.k}개, 동시에 돌린 ${a.runs}회 중) — 변 평균 오차 ${c.mae.toFixed(2)}%p · 최대 ${c.worst.toFixed(2)}%p`);
+        c.d.forEach((x, i) => out.push(`  - ${a.start + i}번 Δ(위,아래,왼,오른): ${x ? x.map(f).join(", ") : "못 찾음"}`));
+      }
       out.push("문제별 평균 편향(모델−정답) / 표준편차 [위,아래,왼,오른]:");
       for (const q of a.perProblem) out.push(`  - ${q.no}번: 편향 ${q.bias.map(f).join(", ")} · σ ${q.sd.map((v) => v.toFixed(2)).join(", ")}`);
       out.push("");
@@ -849,6 +862,33 @@ export default function ComparePageCropPage() {
                 ))}
               </tbody>
             </table>
+            <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+              {a.cases.map((c) => (
+                <div key={c.k} className="w-64 shrink-0">
+                  <div className="mb-1 text-xs font-semibold text-slate-700">
+                    {c.k}개 합산 <span className="font-normal text-slate-500">오차 {c.mae.toFixed(2)} · 최대 {c.worst.toFixed(1)}%p</span>
+                  </div>
+                  <div className="relative w-full bg-slate-100" style={{ aspectRatio: `${p.w} / ${p.h}` }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.view} alt="" className="absolute inset-0 h-full w-full" />
+                    {a.truthEdges.map((t, i) => (
+                      <Rect key={`t${i}`} b={{ x: t[2] / 100, y: t[0] / 100, w: (t[3] - t[2]) / 100, h: (t[1] - t[0]) / 100 }} className="border border-dashed border-emerald-600" />
+                    ))}
+                    {c.merged.map((m, i) =>
+                      m ? (
+                        <Rect key={`m${i}`} b={{ x: m[2] / 100, y: m[0] / 100, w: (m[3] - m[2]) / 100, h: (m[1] - m[0]) / 100 }} className="border-2" style={{ borderColor: COLORS[i % COLORS.length] }} />
+                      ) : null,
+                    )}
+                  </div>
+                  <div className="mt-1 text-[10px] leading-snug text-slate-600">
+                    {c.d.map((x, i) => (
+                      <div key={i}>{a.start + i}번 {x ? x.map(f).join(" / ") : "–"}</div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-1 text-[10px] text-slate-400">초록 점선 = 정답, 실선 = 합산 결과. 숫자 = 위/아래/왼/오른 오차(%p, 모델−정답).</p>
           </section>
         );
       })}
