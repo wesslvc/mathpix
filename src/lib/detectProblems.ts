@@ -245,6 +245,8 @@ function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
 
 /** 모델이 돌려준 글에서 배열을 꺼내 묶는다. 두 갈래가 똑같이 쓴다. */
 function parse(text: string): DetectedProblem[] {
+  // 모델이 ```json 울타리로 감싸 주는 일이 흔하다.
+  text = text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "");
   const take = (raw: unknown) => {
     // `json_object` 를 강제하면 배열을 객체로 감싸 준다. 둘 다 받는다.
     if (Array.isArray(raw)) return raw;
@@ -467,7 +469,7 @@ export type DetectedKoreanPassages = {
 };
 
 /** 영역 찾기 한 번에 쓴 토큰(입력 전체 · 그중 캐시 · 출력). luna 갈래에서만 온다 — 원가 장부에 적는다. */
-export type DetectUsage = { input: number; cached: number; output: number };
+export type DetectUsage = { input: number; cached: number; output: number; /** 오픈라우터가 응답에 실어 준 실제 청구액(USD). */ costUsd?: number };
 
 async function callDetect(dataUrl: string, prompt: string): Promise<{ text: string; model: string; usage?: DetectUsage }> {
   if (DETECT_PROVIDER === "gemini") {
@@ -763,7 +765,13 @@ async function withPageOpenRouter(
   const timer = setTimeout(() => ac.abort(), 120_000);
   try {
     const text = await callOpenRouterVision(dataUrl, PROMPT, model, (u) => (usage = u), 4096, ac.signal);
-    return { problems: parse(text), model, usage };
+    try {
+      return { problems: parse(text), model, usage };
+    } catch (err) {
+      // 어떤 글을 줬는지 보여야 고칠 수 있다(예전엔 "영역을 읽지 못했습니다"만 나왔다).
+      const why = text ? `모델 글: ${text.slice(0, 300).replace(/\s+/g, " ")}` : "모델이 빈 글을 돌려줌";
+      throw new Error(`${err instanceof Error ? err.message : err} · ${why}`);
+    }
   } finally {
     clearTimeout(timer);
   }

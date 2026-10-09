@@ -55,6 +55,7 @@ export async function callOpenRouterVision(
     temperature: 0,
     max_tokens: maxTokens,
     stream: false,
+    usage: { include: true }, // 응답에 실제 청구액(usage.cost, USD)을 실어 준다
   });
   let last = "";
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -79,14 +80,19 @@ export async function callOpenRouterVision(
     const json = JSON.parse(text) as {
       choices?: { message?: { content?: string | null } }[];
       error?: { message?: string };
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
+      usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
     };
     if (json.error && !json.choices?.length) {
       last = String(json.error.message ?? "오류").slice(0, 300);
       continue;
     }
     if (json.usage && onUsage) {
-      onUsage({ input: json.usage.prompt_tokens ?? 0, cached: 0, output: json.usage.completion_tokens ?? 0 });
+      onUsage({
+        input: json.usage.prompt_tokens ?? 0,
+        cached: 0,
+        output: json.usage.completion_tokens ?? 0,
+        ...(typeof json.usage.cost === "number" ? { costUsd: json.usage.cost } : {}),
+      });
     }
     return String(json.choices?.[0]?.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
   }

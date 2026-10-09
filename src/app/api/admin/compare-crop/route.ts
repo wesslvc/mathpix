@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireFontAdmin } from "../kice-font/auth";
 import { detectProblems, OPENAI_DETECT_MODEL } from "@/lib/detectProblems";
-import { gradingEstKrw } from "@/lib/tokens";
+import { gradingEstKrw, USD_KRW_RATE } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +37,10 @@ export async function POST(req: NextRequest) {
   const t0 = Date.now();
   try {
     const r = await detectProblems(image, { engine, model, effort });
-    const estKrw = r.usage
+    // 오픈라우터는 응답에 실제 청구액을 준다 — 단가표를 따로 들 필요가 없다(이미지 토큰 계산까지 반영된 값).
+    const estKrw = r.usage?.costUsd != null
+      ? r.usage.costUsd * USD_KRW_RATE
+      : r.usage
       ? gradingEstKrw(
           { inputTokens: r.usage.input, outputTokens: r.usage.output, cachedInputTokens: r.usage.cached },
           engine === "openai" ? OPENAI_DETECT_MODEL : `${engine}:${model}`,
@@ -45,6 +48,8 @@ export async function POST(req: NextRequest) {
       : undefined;
     return NextResponse.json({ ok: true, ms: Date.now() - t0, problems: r.problems, usage: r.usage ?? null, estKrw: estKrw ?? null });
   } catch (err) {
-    return NextResponse.json({ ok: false, ms: Date.now() - t0, error: err instanceof Error ? err.message.slice(0, 500) : String(err) });
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[compare-crop] ${engine} ${model} 실패 (${Date.now() - t0}ms):`, msg.slice(0, 800));
+    return NextResponse.json({ ok: false, ms: Date.now() - t0, error: msg.slice(0, 700) });
   }
 }
