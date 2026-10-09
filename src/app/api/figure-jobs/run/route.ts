@@ -15,6 +15,7 @@ import {
 import { logAiCost } from "@/lib/costLog";
 import { GLOBAL_CONCURRENCY, UNLIMITED_CONCURRENCY, kickWorker, workerToken } from "@/lib/figureJobsServer";
 import { callOpenAIVision } from "@/lib/detectProblems";
+import { callNvidiaVision, listNvidiaModels } from "@/lib/nvidiaVision";
 import {
   OPENAI_TEXT_MODEL,
   deleteVisionResponse,
@@ -117,6 +118,44 @@ export async function POST(req: NextRequest) {
     if (typeof body.model === "string") probeModel = body.model;
   } catch {
     // 본문이 없어도 된다(pg_cron 은 빈 객체를 보낸다).
+  }
+
+  // **NVIDIA 모델 확인용**(2026-10-09). 목록(무료)과, 모델 하나에 사진 + JSON 요청을 실제로 보내 본 결과(시간·글). `path` 를 주면 저장소의
+  // 그 그림(예: 문제 카드)으로, 없으면 64×64 그림으로 보낸다. 키는 내보내지 않는다.
+  if (probe === "nvidia-models") {
+    try {
+      return NextResponse.json({ models: await listNvidiaModels() });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+    }
+  }
+  if (probe === "nvidia-vision") {
+    const model = probeModel;
+    if (!/^[\w./-]{3,100}$/.test(model)) return NextResponse.json({ error: "model 이 필요합니다." }, { status: 400 });
+    let image = `data:image/png;base64,${PROBE_PNG}`;
+    if (probeId) {
+      const got = await loadAsDataUrl(createAdminClient(), probeId);
+      if (!got) return NextResponse.json({ error: "그림을 못 읽음" }, { status: 400 });
+      image = got;
+    }
+    const t0 = Date.now();
+    let usage: unknown = null;
+    try {
+      const text = await callNvidiaVision(
+        image,
+        probeId
+          ? 'This is one exam problem. Find the printed problem number and the box enclosing the whole problem. Reply ONLY with JSON: {"box_2d":[ymin,xmin,ymax,xmax],"number":"17."} with coordinates normalised 0-1000.'
+          : 'Reply ONLY with a JSON object: {"ok": true, "shape": "<what you see>"}',
+        model,
+        (u) => {
+          usage = u;
+        },
+        1024,
+      );
+      return NextResponse.json({ ok: true, model, ms: Date.now() - t0, usage, text: text.slice(0, 500) });
+    } catch (err) {
+      return NextResponse.json({ ok: false, model, ms: Date.now() - t0, error: err instanceof Error ? err.message.slice(0, 500) : String(err) });
+    }
   }
 
   // **모델 이름 확인용.** 이 계정이 실제로 부를 수 있는 gpt 이름 목록을 준다
