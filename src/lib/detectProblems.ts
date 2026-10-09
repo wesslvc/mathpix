@@ -624,6 +624,16 @@ export async function callOpenAIVision(
   }
 }
 
+/**
+ * 지면 영역 찾기의 추론 강도(2026-10-09, 기본 medium — 사용자 "자동 자르기 너무 오래 걸리고"). 지면에서는 어느 문제가 어디쯤인지만
+ * 맞으면 된다 — 테두리는 문제마다 확대해 다시 맞추는 단계(`pageRefine.ts`)와 `snapBoxes` 가 정한다. 국어 지문·문제 자리는 그런 단계가
+ * 없어 `OPENAI_DETECT_EFFORT`(high) 그대로다. 재배포 없이 `OPENAI_PAGE_DETECT_EFFORT`.
+ */
+const OPENAI_PAGE_DETECT_EFFORT = (() => {
+  const v = (process.env.OPENAI_PAGE_DETECT_EFFORT ?? "medium").trim();
+  return v === "" || v === "default" ? undefined : v;
+})();
+
 async function withOpenAI(
   dataUrl: string,
 ): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
@@ -632,12 +642,13 @@ async function withOpenAI(
     dataUrl,
     `${PROMPT}\n\nanswer as JSON object: {"problems": [...]}`,
     OPENAI_DETECT_MODEL,
-    OPENAI_DETECT_EFFORT,
+    OPENAI_PAGE_DETECT_EFFORT,
     (u) => {
       usage = u;
     },
   );
-  return { problems: parse(text), model: DETECT_OPENAI_LABEL, usage };
+  const label = OPENAI_PAGE_DETECT_EFFORT ? `${OPENAI_DETECT_MODEL} (${OPENAI_PAGE_DETECT_EFFORT})` : OPENAI_DETECT_MODEL;
+  return { problems: parse(text), model: label, usage };
 }
 
 /**

@@ -18,6 +18,15 @@ const CROP_EFFORT = (() => {
   return v === "" || v === "default" ? undefined : v;
 })();
 
+/**
+ * 지면 정밀 자르기(표적이 있는 자동 자르기)의 추론 강도. 기본 medium — 작은 창에서 번호·자리를 받은 문제 하나라 쉽다(2026-10-09,
+ * "자동 자르기 너무 오래 걸리고"). 재배포 없이 `OPENAI_REFINE_EFFORT`.
+ */
+const REFINE_EFFORT = (() => {
+  const v = (process.env.OPENAI_REFINE_EFFORT ?? "medium").trim();
+  return v === "" || v === "default" ? undefined : v;
+})();
+
 /** 난이도 판단의 추론 강도. 재배포 없이 `OPENAI_ASSESS_EFFORT`(기본 medium, `default` 면 안 보냄). */
 const ASSESS_EFFORT = (() => {
   const v = (process.env.OPENAI_ASSESS_EFFORT ?? "medium").trim();
@@ -89,7 +98,8 @@ export async function cropOneProblem(
     total.output += u.output;
   };
   const prompt = target ? `${CROP_PROMPT}${targetNote(target)}` : CROP_PROMPT;
-  let first = parseCrop(await callOpenAIVision(dataUrl, prompt, OPENAI_DETECT_MODEL, CROP_EFFORT, add));
+  const effort = target ? REFINE_EFFORT : CROP_EFFORT;
+  let first = parseCrop(await callOpenAIVision(dataUrl, prompt, OPENAI_DETECT_MODEL, effort, add));
   let retried = false;
   // 선지를 일부만 찾았으면(1~4개) 한 번 더 — 대개 맨 아래·오른쪽 선지를 놓친 경우다.
   if (first.box && first.choices > 0 && first.choices < 5) {
@@ -99,7 +109,7 @@ export async function cropOneProblem(
         dataUrl,
         `${prompt}\n\nA previous look found only ${first.choices} of the five choices (${first.choices} boxes). The missing ones are almost always below or to the right of the found ones — find all five this time and make the main box contain them.`,
         OPENAI_DETECT_MODEL,
-        CROP_EFFORT,
+        effort,
         add,
       ),
     );

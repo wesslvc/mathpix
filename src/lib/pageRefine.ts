@@ -99,7 +99,7 @@ export async function refineProblems(
         });
         const r = result.box;
         if (!r) return;
-        const box: KeepBox = toPage(r, w.win);
+        const box: KeepBox & { refined?: boolean } = { ...toPage(r, w.win), refined: true };
         if (Array.isArray(r.keep)) box.keep = r.keep.map((k) => toPage(k, w.win));
         const orig = problems[w.index].boxes[0];
         if (!acceptRefined(orig, box)) return;

@@ -14,6 +14,7 @@ import { cropRegionToDataUrl, isRealPolygon, type Region } from "@/lib/polygon";
 import { useCropShape } from "@/lib/cropShape";
 import BoxEditor, { type EditBox } from "./BoxEditor";
 import CropShapeToggle from "./CropShapeToggle";
+import PageReview, { type ReviewPage } from "./PageReview";
 import {
   DETECT_INPUT_DIM,
   MAX_UPLOAD_CHARS,
@@ -62,7 +63,7 @@ import { Button } from "@/components/ui/button";
  * **손으로 그린 네모에는 주지 않는다.** 그건 사용자가 정한 자리라 우리가 몰래
  * 넓히면 보이는 것과 잘리는 것이 달라진다.
  */
-const PAD = 0.004;
+const PAD = 0.008;
 
 /**
  * 잘린 문제 하나.
@@ -174,6 +175,15 @@ export default function BatchSplitPanel({
   const [allRest, setAllRest] = useState(false);
   /** 한 번에 넣는 중인 남은 지면 수. */
   const [autoPages, setAutoPages] = useState(0);
+  /**
+   * **지면 여러 장을 한눈에**(`PageReview`) — 무제한 계정이 두 장 이상 고르면 하나씩 열지 않고 전부 찾아 자른 조각을 한꺼번에 보여 준다.
+   * `file` 은 고치러 갈 때 다시 연다.
+   */
+  const [review, setReview] = useState<(ReviewPage & { file: File; full: Piece[] })[] | null>(null);
+  /** 다시 자를 조각. */
+  const [redo, setRedo] = useState<Set<string>>(new Set());
+  /** 손으로 고치러 열 지면에 미리 놓을 네모(그 지면의 다시 자를 조각 자리). */
+  const fixBoxesRef = useRef(new Map<File, EditBox[]>());
 
   /**
    * 지면을 **여러 장** 고르면 첫 장부터 차례로 처리한다. 한 장을 넣고 나면(그대로 넣기·
@@ -195,9 +205,98 @@ export default function BatchSplitPanel({
     const files = Array.from(list ?? []);
     if (files.length === 0) return;
     setError(null);
+    if (unlimited && (files.length >= 2 || review)) {
+      startReview(files);
+      return;
+    }
     setTotalPages(files.length);
     if (unlimited) files.forEach((f) => void prefetchDetect(f).catch(() => undefined));
     await loadFrom(files);
+  }
+
+  /** 한눈에 보기에 지면들을 더한다 — 장마다 luna 가 찾고(동시에), 여는 일만 한 장씩 이어 원본에서 자른다. */
+  function startReview(files: File[]) {
+    const heic = files.filter((f) => isHeicFile(f));
+    if (heic.length) setError(`열지 못해 건너뛴 사진: ${heic.map((f) => f.name).join(", ")}(HEIC 는 JPG 로 바꿔 주세요)`);
+    const pages = files
+      .filter((f) => !isHeicFile(f))
+      .map((file) => ({ key: crypto.randomUUID(), name: file.name, file, status: "finding" as const, pieces: [], full: [] }));
+    setReview((prev) => [...(prev ?? []), ...pages]);
+    for (const pg of pages) void buildReviewPage(pg.key, pg.file);
+  }
+
+  async function buildReviewPage(key: string, file: File) {
+    const update = (patch: Partial<ReviewPage> & { full?: Piece[] }) =>
+      setReview((prev) => prev?.map((p) => (p.key === key ? { ...p, ...patch } : p)) ?? prev);
+    try {
+      const got = await prefetchDetect(file);
+      if (got.problems.length === 0) throw new Error("문제를 못 찾았어요");
+      let made: Piece[] = [];
+      const cut = async () => {
+        const d = await loadDrawableFromFile(file);
+        try {
+          made = (
+            await piecesFrom(
+              { img: d.src as HTMLImageElement | ImageBitmap, width: d.width, height: d.height, degraded: false, revoke: d.close },
+              got.problems,
+            )
+          ).pieces;
+        } finally {
+          d.close();
+        }
+      };
+      const step = prefetchChainRef.current.then(cut, cut);
+      prefetchChainRef.current = step.catch(() => undefined);
+      await step;
+      update({
+        status: "done",
+        full: made,
+        pieces: made.map((p) => ({ id: p.id, crop: p.crop, parts: p.parts, no: p.no })),
+        note: got.refined ? `확대해 ${got.refined}곳 다시 맞춤` : undefined,
+      });
+    } catch (err) {
+      update({ status: "error", note: err instanceof Error ? err.message : "문제를 못 찾았어요" });
+    }
+  }
+
+  /**
+   * 한눈에 보기에서 넣기: 체크 안 한 조각은 저장 줄로, 다시 자를 조각이 든 지면(과 못 찾은 지면)은 손으로 고치는 화면으로 차례로 연다 —
+   * 그 조각들의 네모를 미리 놓아 둔다.
+   */
+  function submitReview(kind: "asis" | "ai") {
+    if (!review) return;
+    const fixes: File[] = [];
+    review.forEach((pg, idx) => {
+      const keep = pg.full.filter((p) => !redo.has(p.id));
+      if (keep.length) {
+        setBg((b) => ({ ...b, pending: b.pending + keep.length }));
+        bgRef.current = bgRef.current.then(() => runBatch(kind, keep, `지면 ${idx + 1} · `)).catch(() => undefined);
+      }
+      const bad = pg.full.filter((p) => redo.has(p.id));
+      if (bad.length || pg.status === "error") {
+        fixBoxesRef.current.set(
+          pg.file,
+          bad.flatMap((p) =>
+            p.boxes.map((b) => ({
+              id: crypto.randomUUID(),
+              x: b.x,
+              y: b.y,
+              w: b.w,
+              h: b.h,
+              group: p.id,
+              ...(b.poly ? { poly: b.poly } : {}),
+            })),
+          ),
+        );
+        fixes.push(pg.file);
+      }
+    });
+    setReview(null);
+    setRedo(new Set());
+    if (fixes.length) {
+      setTotalPages(fixes.length);
+      void loadFrom(fixes);
+    }
   }
 
   /** 대기열 끝에 지면을 더 붙인다(지금 지면이 없으면 그것부터 연다). */
@@ -205,6 +304,10 @@ export default function BatchSplitPanel({
     const files = Array.from(list ?? []);
     if (moreRef.current) moreRef.current.value = "";
     if (files.length === 0) return;
+    if (review) {
+      startReview(files);
+      return;
+    }
     if (unlimited) files.forEach((f) => void prefetchDetect(f).catch(() => undefined));
     if (!pageImage) {
       setTotalPages(files.length);
@@ -231,7 +334,9 @@ export default function BatchSplitPanel({
           const url = await fileToDataUrl(file);
           setPieces([]);
           setPicked(new Set());
-          setBoxes([]);
+          // 한눈에 보기에서 "다시 자르기"로 온 지면이면 그 조각들의 네모를 미리 놓는다(자동으로 다시 찾지 않는다).
+          setBoxes(fixBoxesRef.current.get(file) ?? []);
+          fixBoxesRef.current.delete(file);
           setUsedModel(null);
           setSourceInfo(null);
           setPageImage(url);
@@ -769,7 +874,7 @@ export default function BatchSplitPanel({
         void (pageImage ? addMore(dt.files) : pick(dt.files));
       }}
     >
-      {!pageImage && (
+      {!pageImage && !review && (
         <p className="text-xs text-slate-500">
           지면 사진을 <b>여러 장 한꺼번에</b> 고르거나 끌어다 놓으세요 — 한 장씩 차례로 열리고, 넣는 동안 다음 지면은 미리 잘라 둡니다.
         </p>
@@ -804,6 +909,40 @@ export default function BatchSplitPanel({
         )}
         {pageImage && <CropShapeToggle value={shape} onChange={setShape} />}
       </div>
+
+      {review && (
+        <PageReview
+          pages={review}
+          checked={redo}
+          onToggle={(id) =>
+            setRedo((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            })
+          }
+          onRemove={(id) => {
+            setReview((prev) =>
+              prev?.map((pg) => ({ ...pg, pieces: pg.pieces.filter((x) => x.id !== id), full: pg.full.filter((x) => x.id !== id) })) ?? prev,
+            );
+            setRedo((prev) => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+          }}
+          onAddMore={() => moreRef.current?.click()}
+          onSubmit={submitReview}
+          onClose={() => {
+            setReview(null);
+            setRedo(new Set());
+            if (fileRef.current) fileRef.current.value = "";
+          }}
+          cost={typeof figureCost === "number" ? figureCost : null}
+          showCost={!unlimited && !byok}
+        />
+      )}
 
       {pageImage && totalPages > 1 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
@@ -1070,13 +1209,27 @@ export default function BatchSplitPanel({
  * 번호·선지 둘레 여유(지면 대비). 사진 한 장 자르기(`KEEP_PAD` 1.2%)보다 좁다 — 지면에서는 바로 아래가 다음 문제라 넓게
  * 두르면 그 첫 줄이 딸려 온다.
  */
-const PAGE_KEEP_PAD = 0.005;
+const PAGE_KEEP_PAD = 0.008;
 
-/** 다듬은 자리가 luna 가 짚은 번호·선지(`keep`)를 다 품게 넓힌다. keep 이 없으면 그대로. */
+/**
+ * 다듬은 자리가 luna 가 짚은 번호·선지(`keep`)를 다 품게 넓힌다.
+ *
+ * **문제마다 확대해 다시 본 자리(`refined`)는 다듬기가 줄일 수 없다**(2026-10-09, 사용자 — "여전히 글씨가 잘리는 느낌"). `snapBoxes` 는
+ * 변에 걸친 줄이 바깥에 더 걸쳤으면 이웃 것으로 보고 잘라 내는데, luna 가 마지막 줄 바로 위에 변을 두면 그 줄이 통째로 빠진다. 확대해
+ * 본 자리는 "빈 띠에 두라"는 지시를 받고 가까이서 본 것이라 더 믿을 만하다 — 그래서 다듬은 자리와 그 자리를 **합친다**(남는 여백 몇 px 이
+ * 잘린 글자보다 낫다). 다듬기가 넓힌 것(잘린 줄을 품은 것)은 그대로 산다.
+ */
 function withKeep(b: ProblemBox, orig: ProblemBox): ProblemBox {
-  const keep = (orig as ProblemBox & { keep?: ProblemBox[] }).keep;
-  if (!Array.isArray(keep) || keep.length === 0) return b;
+  const o = orig as ProblemBox & { keep?: ProblemBox[]; refined?: boolean };
   let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
+  if (o.refined) {
+    x0 = Math.min(x0, o.x);
+    y0 = Math.min(y0, o.y);
+    x1 = Math.max(x1, o.x + o.w);
+    y1 = Math.max(y1, o.y + o.h);
+  }
+  const keep = o.keep;
+  if (!Array.isArray(keep) || keep.length === 0) return { ...b, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   for (const k of keep) {
     x0 = Math.max(0, Math.min(x0, k.x - PAGE_KEEP_PAD));
     y0 = Math.max(0, Math.min(y0, k.y - PAGE_KEEP_PAD));
