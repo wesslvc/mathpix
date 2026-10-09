@@ -26,8 +26,7 @@ import { mergeChosen, type ProblemBox } from "@/lib/problemBoxes";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
 import { runAiTask } from "@/lib/aiTask";
-import { inkMapFromImage, snapBoxes } from "@/lib/snapBoxes";
-import { cutRefineWindows, refineProblems } from "@/lib/pageRefine";
+import { cutRefineWindows, refineProblems, snapPageProblems } from "@/lib/pageRefine";
 import type { AnswerByNumber } from "@/lib/answerMap";
 import { useFigureJobs } from "./FigureJobsProvider";
 import { Button } from "@/components/ui/button";
@@ -553,17 +552,7 @@ export default function BatchSplitPanel({
    * 단을 넘어 이어진 문제는 조각을 **읽는 차례대로 세로로 이어 붙인다.**
    */
   async function piecesFrom(source: PageSource, problems: DetectedProblem[]): Promise<{ pieces: Piece[]; snapped: number }> {
-    let found = problems;
-    const map = inkMapFromImage(source.img, source.width, source.height);
-    let snappedCount = 0;
-    if (map) {
-      const res = snapBoxes(map, found.flatMap((p) => p.boxes));
-      snappedCount = res.changed;
-      let k = 0;
-      // 확대해 다시 맞출 때 luna 가 짚은 번호·선지(`keep`)는 글자에 맞춰 다듬은 뒤에도 반드시 품는다(자동 자르기와 같은 규칙) —
-      // 다듬기가 끝 선지 줄을 "이웃 것"으로 보고 잘라 내는 일이 있었다.
-      found = found.map((p) => ({ ...p, boxes: p.boxes.map((orig) => withKeep(res.boxes[k++], orig)) }));
-    }
+    const { problems: found, snapped: snappedCount } = snapPageProblems(source.img, source.width, source.height, problems);
     const img = source.img;
     const pieces: Piece[] = await Promise.all(
       found.map(async (prob) => ({
@@ -1203,38 +1192,4 @@ export default function BatchSplitPanel({
       )}
     </div>
   );
-}
-
-/**
- * 번호·선지 둘레 여유(지면 대비). 사진 한 장 자르기(`KEEP_PAD` 1.2%)보다 좁다 — 지면에서는 바로 아래가 다음 문제라 넓게
- * 두르면 그 첫 줄이 딸려 온다.
- */
-const PAGE_KEEP_PAD = 0.008;
-
-/**
- * 다듬은 자리가 luna 가 짚은 번호·선지(`keep`)를 다 품게 넓힌다.
- *
- * **문제마다 확대해 다시 본 자리(`refined`)는 다듬기가 줄일 수 없다**(2026-10-09, 사용자 — "여전히 글씨가 잘리는 느낌"). `snapBoxes` 는
- * 변에 걸친 줄이 바깥에 더 걸쳤으면 이웃 것으로 보고 잘라 내는데, luna 가 마지막 줄 바로 위에 변을 두면 그 줄이 통째로 빠진다. 확대해
- * 본 자리는 "빈 띠에 두라"는 지시를 받고 가까이서 본 것이라 더 믿을 만하다 — 그래서 다듬은 자리와 그 자리를 **합친다**(남는 여백 몇 px 이
- * 잘린 글자보다 낫다). 다듬기가 넓힌 것(잘린 줄을 품은 것)은 그대로 산다.
- */
-function withKeep(b: ProblemBox, orig: ProblemBox): ProblemBox {
-  const o = orig as ProblemBox & { keep?: ProblemBox[]; refined?: boolean };
-  let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
-  if (o.refined) {
-    x0 = Math.min(x0, o.x);
-    y0 = Math.min(y0, o.y);
-    x1 = Math.max(x1, o.x + o.w);
-    y1 = Math.max(y1, o.y + o.h);
-  }
-  const keep = o.keep;
-  if (!Array.isArray(keep) || keep.length === 0) return { ...b, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-  for (const k of keep) {
-    x0 = Math.max(0, Math.min(x0, k.x - PAGE_KEEP_PAD));
-    y0 = Math.max(0, Math.min(y0, k.y - PAGE_KEEP_PAD));
-    x1 = Math.min(1, Math.max(x1, k.x + k.w + PAGE_KEEP_PAD));
-    y1 = Math.min(1, Math.max(y1, k.y + k.h + PAGE_KEEP_PAD));
-  }
-  return { ...b, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }

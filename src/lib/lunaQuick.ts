@@ -34,7 +34,8 @@ const REFINE_EFFORT = (() => {
  * 사진 한 장 자르기와 지면 다시 맞추기(표적 있는 자르기) 둘 다 이 길이다.
  */
 const CROP_GEMINI_MODEL = (() => {
-  const v = (process.env.CROP_GEMINI_MODEL ?? "gemini-3.5-flash-lite").trim();
+  // 기본은 꺼짐(luna) — "3.5 flash lite 시켜보자"는 지면 자르기 얘기였다(같은 날 사용자 정정). 사진 한 장에도 써 보려면 이름을 넣는다.
+  const v = (process.env.CROP_GEMINI_MODEL ?? "off").trim();
   return v === "" || v === "off" || !process.env.GEMINI_API_KEY ? null : v;
 })();
 

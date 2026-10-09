@@ -65,12 +65,14 @@ don't miss questions continuing across columns (matters most):
 - block starting WITHOUT number (plain text or choice marker ①②③④⑤) = NOT new question, = rest of previous one
 - right-column top starting without number -> left column's last question continues there
 - in that case: each piece = own region, but SAME question number in \`no\` for both (use leading piece's number even if trailing piece shows none) -> lets us stitch into one question
-- crop continuation piece tight too -> pieces must join as if never separated
+- AND mark the trailing piece with "cont": true (it continues the question just before it in reading order). every other region has "cont": false
+- check every column top: if it does not start with a printed number, it IS a continuation -> "cont": true
+- continuation piece edges follow the same rule (blank gap, never clip) -> pieces must join as if never separated
 
-answer: JSON array only. each item = {"box_2d": [ymin, xmin, ymax, xmax], "no": "12"}
+answer: JSON array only. each item = {"box_2d": [ymin, xmin, ymax, xmax], "no": "12", "cont": false}
 coords normalised 0-1000. \`no\` = question number (digits only), empty if unknown. no explanation.`;
 
-type GeminiBox = { box_2d?: unknown; no?: unknown; label?: unknown };
+type GeminiBox = { box_2d?: unknown; no?: unknown; label?: unknown; cont?: unknown };
 
 /** 응답에서 배열을 뽑아 0~1 좌표로 바꾼다. 모양이 이상한 항목은 버린다. */
 /** `box_2d`(0~1000 정규화) 하나를 0~1 상자로 바꾼다. 모양이 아니면 null. */
@@ -82,9 +84,9 @@ function toBox(raw: unknown): ProblemBox | null {
   return box;
 }
 
-function toBoxes(raw: unknown): (ProblemBox & { no: string })[] {
+function toBoxes(raw: unknown): (ProblemBox & { no: string; cont?: boolean })[] {
   if (!Array.isArray(raw)) return [];
-  const out: (ProblemBox & { no: string })[] = [];
+  const out: (ProblemBox & { no: string; cont?: boolean })[] = [];
   for (const item of raw as GeminiBox[]) {
     const b = item?.box_2d;
     if (!Array.isArray(b) || b.length !== 4) continue;
@@ -104,6 +106,7 @@ function toBoxes(raw: unknown): (ProblemBox & { no: string })[] {
       w: Math.min(w, 1 - Math.max(0, Math.min(1, x))),
       h: Math.min(h, 1 - Math.max(0, Math.min(1, y))),
       no,
+      ...(item?.cont === true || item?.cont === "true" ? { cont: true } : {}),
     });
   }
   // 왼쪽 단 → 오른쪽 단, 각 단에서는 위에서 아래로. 모델이 순서를 지키지
@@ -177,16 +180,28 @@ function continuesAcrossColumn(prev: DetectedProblem, box: ProblemBox): boolean 
  * 어느 쪽이든 위의 기준을 통과해야 한다. 묶음의 순서는 **첫 조각이 나온
  * 차례**다(자른 차례가 곧 문제 차례다).
  */
-function group(boxes: (ProblemBox & { no: string })[]): DetectedProblem[] {
+function group(boxes: (ProblemBox & { no: string; cont?: boolean })[]): DetectedProblem[] {
   const out: DetectedProblem[] = [];
   const byNo = new Map<string, DetectedProblem>();
   // 모델이 번호를 실제로 적어 주고 있는가. 아니면 "번호 없음"은 아무 뜻도 없다.
   const numbersUsable = boxes.filter((b) => b.no).length * 2 >= boxes.length;
   let prevColumn = -1;
-  for (const { no, ...box } of boxes) {
+  for (const { no, cont, ...box } of boxes) {
     const column = columnOf(box);
     const firstInColumn = column !== prevColumn;
     prevColumn = column;
+
+    // **모델이 "앞 문제의 나머지"라고 표시한 조각**(`cont`, 2026-10-09 사용자 — "양단에 걸린 문제를 끌어와서 합치는 거까지")은
+    // 단을 넘어온 자리면 앞 문제에 붙인다. 번호가 다르게 적혀 있으면(다른 문제다) 안 붙인다. 같은 단 안에서 cont 라고 하면 모델이
+    // 헷갈린 것이라 아래의 보통 규칙에 맡긴다(같은 단이면 붙어 있을 때만 합친다).
+    const prevP = out[out.length - 1];
+    if (cont && prevP && firstInColumn && (!no || !prevP.no || no === prevP.no)) {
+      const last = prevP.boxes[prevP.boxes.length - 1];
+      if (columnOf(last) !== column) {
+        prevP.boxes.push(box);
+        continue;
+      }
+    }
 
     const sameNo = no ? byNo.get(no) : undefined;
     if (sameNo && canJoin(sameNo, box)) {
@@ -702,20 +717,42 @@ const OPENAI_PAGE_DETECT_EFFORT = (() => {
   return v === "" || v === "default" ? undefined : v;
 })();
 
+/**
+ * **지면 자르기는 Gemini 가 먼저 찾는다**(2026-10-09, 사용자 — "자동 자르기 3.5 flash lite 시켜보자"·"지면 자르기를 얘기한 거임").
+ * 이름은 계정 목록(`probe: "gemini-models"`)에서 확인했다. 실패하면(자리 없음·오류·못 읽음) luna 로 넘어간다 — 어느 쪽이 했는지는
+ * `model` 로 화면에 찍힌다. 끄려면 재배포 없이 `PAGE_GEMINI_MODEL=off`, 다른 Gemini 는 이름을 넣는다.
+ */
+export const PAGE_GEMINI_MODEL = (() => {
+  const v = (process.env.PAGE_GEMINI_MODEL ?? "gemini-3.5-flash-lite").trim();
+  return v === "" || v === "off" || !process.env.GEMINI_API_KEY ? null : v;
+})();
+
+async function withPageGemini(
+  dataUrl: string,
+  model: string,
+): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
+  let usage: DetectUsage | undefined;
+  const text = await callGeminiVision(dataUrl, PROMPT, model, (u) => {
+    usage = u;
+  });
+  return { problems: parse(text), model, usage };
+}
+
 async function withOpenAI(
   dataUrl: string,
+  effort: string | undefined = OPENAI_PAGE_DETECT_EFFORT,
 ): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
   let usage: DetectUsage | undefined;
   const text = await callOpenAIVision(
     dataUrl,
     `${PROMPT}\n\nanswer as JSON object: {"problems": [...]}`,
     OPENAI_DETECT_MODEL,
-    OPENAI_PAGE_DETECT_EFFORT,
+    effort,
     (u) => {
       usage = u;
     },
   );
-  const label = OPENAI_PAGE_DETECT_EFFORT ? `${OPENAI_DETECT_MODEL} (${OPENAI_PAGE_DETECT_EFFORT})` : OPENAI_DETECT_MODEL;
+  const label = effort ? `${OPENAI_DETECT_MODEL} (${effort})` : OPENAI_DETECT_MODEL;
   return { problems: parse(text), model: label, usage };
 }
 
@@ -730,6 +767,19 @@ export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "gemini" ? "gemin
 
 export async function detectProblems(
   dataUrl: string,
+  /** 비교 화면용: 이 모델 하나로만(실패해도 안 넘어간다). */
+  only?: { engine: "gemini" | "openai"; model: string; effort?: string },
 ): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
-  return DETECT_PROVIDER === "openai" ? withOpenAI(dataUrl) : withGemini(dataUrl);
+  if (only) return only.engine === "gemini" ? withPageGemini(dataUrl, only.model) : withOpenAI(dataUrl, only.effort);
+  if (DETECT_PROVIDER !== "openai") return withGemini(dataUrl);
+  if (PAGE_GEMINI_MODEL) {
+    try {
+      const r = await withPageGemini(dataUrl, PAGE_GEMINI_MODEL);
+      if (r.problems.length > 0) return r;
+      console.warn(`[detect] ${PAGE_GEMINI_MODEL} 가 문제를 하나도 못 찾음 → luna`);
+    } catch (err) {
+      console.warn(`[detect] ${PAGE_GEMINI_MODEL} 실패 → luna:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return withOpenAI(dataUrl);
 }

@@ -3581,26 +3581,30 @@ low 스타트해서 최대한 비용 절감을 노리자. luna medium 이 AI 생
   안내 한 줄("여러 장 한꺼번에 고르거나 끌어다 놓으세요")과 **끌어다 놓기**를 붙였다 — 지금 지면이 있으면 대기열 끝에(`addMore`), 없으면 처음부터(`pick`).
 - 문제마다 다시 맞출 때(`targetNote`)는 회전·추천을 묻지 않는다(쓸 데가 없다 — 출력 토큰만 준다).
 
-#### 자동 자르기는 Gemini 3.5 Flash Lite 가 먼저 (2026-10-09)
+#### 지면 자르기는 Gemini 3.5 Flash Lite 가 먼저 · AI 가 단을 넘은 문제를 묶는다 · 비교 화면 (2026-10-09)
 
-사용자 — "자동 자르기 3.5 flash lite 시켜보자". `cropOneProblem`(사진 한 장 자동 자르기 + 지면 문제마다 다시 맞추기)이 `CROP_GEMINI_MODEL`
-(기본 `gemini-3.5-flash-lite`)을 먼저 부르고(`callGeminiVision`, `detectProblems.ts`), 안 되면 luna 로 넘어간다.
+사용자 — "자동 자르기 3.5 flash lite 시켜보자" → (처음에 사진 한 장 자동 자르기에 붙였다가) "자동 자르기는 지면 자르기를 얘기한 거임",
+"테스트하는 걸 지면 자르기로, 그리고 지면 자르기 시에 AI 가 양단에 걸린 문제를 끌어와서 합치는 거까지 해".
 
-- **이름은 짐작하지 않았다** — 일꾼 `probe: "gemini-models"` 를 DB `http` 확장(Vault 토큰)으로 불러 계정 목록에 `gemini-3.5-flash-lite` 가
-  있는 것을 봤다(같은 목록에 3.6/3.7/3.8-flash, flash-lite-latest 도 있다).
-- 프롬프트·해석은 그대로다(`box_2d` 0~1000 은 원래 Gemini 규격이다). 선지를 1~4개만 찾았을 때 한 번 더 묻는 것도 같은 길(`ask`)을 탄다.
-- 503·429·5xx 는 1초·3초 뒤 두 번 더, 그래도 안 되면 luna(강도는 예전 그대로 — 사진 high · 다시 맞추기 medium). 어느 모델이 했는지
-  대기열 메모 맨 앞에 찍힌다("gemini-3.5-flash-lite · 번호 17. · 선지 5개").
-- **원가는 Gemini 단가를 몰라 장부에 안 적는다**(luna 로 넘어간 것만 적힌다) — 공표 단가를 알면 `GRADING_PRICES` 에 넣을 것.
-- 끄려면 재배포 없이 `CROP_GEMINI_MODEL=off`(예전처럼 luna 만), 다른 Gemini 로 견주려면 이름을 넣는다.
-- 검증: 가로챈 fetch 로 — Gemini 성공(호출 1번, 모델 이름·토큰 1200/180(생각 포함)·선지 5개·번호), 503 세 번 → luna 1번. **실제 사진으로
-  luna 보다 나은지·빠른지는 배포 뒤 사용자 계정으로 볼 것.**
-- **비교 화면 `/admin/compare-crop`**(같은 날, 사용자 — "자동 자르기 비교 화면 만들어 줘", 무제한 계정 전용, 토큰 안 뗌): 사진 여러 장 × 고른 모델
-  (Gemini 3.5 Flash Lite · flash-lite-latest · 3.8 Flash · flash-latest · luna low/medium/high, 직접 적어 추가도 됨 — "gpt-6-luna xhigh")을
-  동시에 자른다. 운영과 같은 그림(긴 변 2048 + 대비)·같은 `cropOneProblem`(같은 프롬프트·선지 다시 묻기)을 쓰고 **모델 하나로만** 부른다(`only`,
-  실패해도 안 넘어간다 — `/api/admin/compare-crop`). 카드마다 점선 = 모델 자리, 실선 = `refineAiBox` 로 다듬은 **실제로 잘리는 자리**, 주황 =
-  짚은 번호·선지, 잘린 그림, 시간(화면에서 잰 왕복)·토큰·원가(단가 아는 모델만)·번호·선지 수. 맨 위 표가 모델마다 평균 시간·선지 5개 비율·번호
-  찾은 비율·실패·원가 합계. 가짜 응답으로 화면을 띄워 확인했다(링크는 없다 — 주소로 연다).
+- **지면 영역 찾기**(`detectProblems`)가 `PAGE_GEMINI_MODEL`(기본 `gemini-3.5-flash-lite`)을 먼저 부르고(`callGeminiVision`), 실패하거나
+  문제를 하나도 못 찾으면 luna(medium)로 넘어간다. 어느 쪽이 했는지 화면에 모델 이름이 찍힌다. Gemini 로 찾은 것은 단가를 몰라 원가 장부에
+  안 적는다(지어내지 않는다). 끄려면 재배포 없이 `PAGE_GEMINI_MODEL=off`.
+- **이름은 짐작하지 않았다** — 일꾼 `probe: "gemini-models"` 를 DB `http` 확장(Vault 토큰)으로 불러 계정 목록에서 확인했다(3.5-flash-lite,
+  flash-lite-latest, 3.6/3.7/3.8-flash, flash-latest 등).
+- `callGeminiVision`: 503·429·5xx 는 1초·3초 뒤 두 번 더, 404 면 이름을 그대로 알린다, 생각 토큰은 출력에 더한다.
+- **사진 한 장 자동 자르기는 luna 그대로**(`CROP_GEMINI_MODEL` 기본 `off` — 잘못 붙였던 것을 되돌렸다; 이름을 넣으면 Gemini 먼저).
+  지면 문제마다 다시 맞추기도 luna medium 그대로.
+- **AI 가 단을 넘은 문제를 표시한다**: 지면 프롬프트가 조각마다 `"cont": true|false` 를 받는다 — 앞 문제의 나머지(단 맨 위가 번호 없이
+  시작하는 조각)면 true. `group()` 이 cont 조각을 **단이 바뀐 첫 조각일 때** 바로 앞 문제에 붙인다(번호가 다르게 적혀 있으면 안 붙인다,
+  같은 단 안의 cont 는 무시하고 보통 규칙). 예전에는 "번호가 없으면 이어짐"을 모델이 절반 넘게 번호를 적어 줄 때만 믿었는데, 이제 모델이
+  직접 짚으면 번호를 거의 안 적어도 묶인다. 가짜 응답으로 확인: 번호 없는 cont → 2번에 붙음, 번호 거의 없음 + cont → 붙음, cont 없음 →
+  따로, cont 인데 번호 다름 → 따로.
+- **비교 화면 `/admin/compare-crop` 은 지면 자르기 비교다**(무제한 계정, 토큰 안 뗌): 지면 여러 장 × 고른 모델(Gemini 3.5 Flash Lite ·
+  flash-lite-latest · 3.8 Flash · flash-latest · luna low/medium/high, 직접 적어 추가)을 운영과 같은 그림(긴 변 3000 부터 본문 한도에 맞춰
+  + 대비)·같은 프롬프트로 **모델 하나로만**(`detectProblems(image, only)`, `/api/admin/compare-crop`) 찾게 하고, 화면이 운영과 같은 함수로
+  (켜면) 문제마다 다시 맞추고(`refineProblems`) 글자에 맞춰 다듬어(`snapPageProblems` — `BatchSplitPanel` 과 같은 함수로 옮겼다) 자른다.
+  카드: 지면 위 점선 = 모델 자리, 실선 = 실제로 잘리는 자리(문제마다 색, "2+1" = 단 넘어 합침), 잘린 조각들. 표: 찾기·다시 맞추기 평균 시간,
+  문제 수, 단 넘어 합친 수, 번호 없음, 실패, 원가. 기본 체크는 flash-lite-latest 와 luna(medium). 가짜 응답으로 화면만 확인했다.
 
 #### 지면 여러 장도 사진 넣기처럼 한눈에 · 자동 자르기 빠르게 · 글씨 안 잘리게 (2026-10-09)
 

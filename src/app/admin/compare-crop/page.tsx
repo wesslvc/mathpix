@@ -3,76 +3,86 @@
 import { useState } from "react";
 import { cropImageToDataUrl, loadDrawableFromFile, loadImage } from "@/lib/cropImage";
 import { enhanceContrast } from "@/lib/autoContrast";
-import { refineAiBox } from "@/lib/autoCrop";
-import { cropRegionToDataUrl, type Region } from "@/lib/polygon";
+import { DETECT_INPUT_DIM, MAX_UPLOAD_CHARS, stitchVertically } from "@/lib/figureImage";
+import { cropRegionToDataUrl } from "@/lib/polygon";
+import { cutRefineWindows, refineProblems, snapPageProblems } from "@/lib/pageRefine";
+import type { DetectedProblem } from "@/lib/detectProblems";
+import type { ProblemBox } from "@/lib/problemBoxes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 /**
- * **자동 자르기 비교**(2026-10-09, 사용자 — "자동 자르기 비교 화면 만들어 줘"). 무제한 계정 전용, 토큰 안 뗌.
+ * **지면 자르기 비교**(2026-10-09, 사용자 — "자동 자르기 비교 화면 만들어 줘"·"테스트하는 걸 지면 자르기로 테스트하자"). 무제한 계정 전용,
+ * 토큰 안 뗌.
  *
- * 사진을 여러 장 올리고 견줄 모델을 고르면 사진 × 모델마다 운영과 **같은 자동 자르기**(`cropOneProblem` — 같은 프롬프트·번호·선지
- * 확인·선지 다시 묻기)를 동시에 부른다. 보내는 그림도 운영과 같다(긴 변 2048 + 대비 올리기). 카드마다:
- *   - 점선 = 모델이 준 자리(번호·선지까지 합친 것), 실선 = 화면이 글자에 맞춰 다듬은 **실제로 잘리는 자리**(`refineAiBox`),
- *     작은 주황 네모 = 모델이 짚은 번호·선지
- *   - 실제로 잘린 그림, 걸린 시간(화면에서 잰 왕복), 토큰, 원가(단가를 아는 모델만), 번호·선지 수·다시 물었는지·회전·추천
- * 맨 아래 표가 모델마다 평균 시간·선지 다섯 개 찾은 비율·번호 찾은 비율·원가 합계를 모은다.
+ * 지면 사진을 여러 장 올리고 견줄 모델을 고르면 사진 × 모델마다 운영과 **같은** 지면 영역 찾기(같은 프롬프트·같은 그림 — 긴 변 3000 부터
+ * 본문 한도에 맞춰 줄이고 대비 올리기 · 단을 넘어 이어진 문제를 묶는 규칙까지)를 동시에 부른다. 그 뒤 화면이 운영과 같은 함수로
+ * ① (켜면) 문제마다 확대해 luna 로 다시 맞추고(`refineProblems`) ② 글자에 맞춰 다듬어(`snapPageProblems`) 잘린 조각을 보여 준다.
+ *
+ * 카드마다: 지면 위 점선 = 모델이 준 자리, 실선 = 실제로 잘리는 자리(문제마다 색), 그 아래 잘린 조각들(단을 넘어 합친 것은 "N조각 합침").
+ * 맨 위 표: 모델마다 평균 찾기 시간·다시 맞추기 시간·찾은 문제 수·합친 문제 수·실패·원가.
  */
 
 type Cand = { key: string; engine: "gemini" | "openai"; model: string; effort?: string };
 
+const LUNA = "gpt-6-luna";
 const PRESETS: Cand[] = [
   { key: "g35l", engine: "gemini", model: "gemini-3.5-flash-lite" },
   { key: "gfll", engine: "gemini", model: "gemini-flash-lite-latest" },
   { key: "g38", engine: "gemini", model: "gemini-3.8-flash" },
   { key: "gfl", engine: "gemini", model: "gemini-flash-latest" },
-  { key: "lunaL", engine: "openai", model: "gpt-6-luna", effort: "low" },
-  { key: "lunaM", engine: "openai", model: "gpt-6-luna", effort: "medium" },
-  { key: "lunaH", engine: "openai", model: "gpt-6-luna", effort: "high" },
+  { key: "lunaL", engine: "openai", model: LUNA, effort: "low" },
+  { key: "lunaM", engine: "openai", model: LUNA, effort: "medium" },
+  { key: "lunaH", engine: "openai", model: LUNA, effort: "high" },
 ];
-const DEFAULT_ON = new Set(["gfll", "lunaH"]);
+const DEFAULT_ON = new Set(["gfll", "lunaM"]);
+const PAD = 0.008;
+const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
 const nameOf = (c: Cand) => (c.effort ? `${c.model} (${c.effort})` : c.model);
 
 type Res = {
-  state: "running" | "done" | "error";
+  state: "running" | "refining" | "done" | "error";
   ms?: number;
+  refineMs?: number;
+  refined?: number;
   error?: string;
-  box?: (Region & { keep?: Region[] }) | null;
-  final?: Region | null;
-  cut?: string | null;
-  number?: string | null;
-  choices?: number;
-  retried?: boolean;
-  rotate?: number;
-  advice?: string | null;
-  adviceReason?: string | null;
+  raw?: DetectedProblem[];
+  final?: DetectedProblem[];
+  pieces?: { crop: string; parts: number; no?: string }[];
   usage?: { input: number; cached: number; output: number } | null;
   estKrw?: number | null;
 };
 
-type Photo = { id: string; name: string; image: string; w: number; h: number };
+type Page = { id: string; name: string; image: string; w: number; h: number };
 
-/** 운영 자동 자르기와 같은 그림: 긴 변 2048 + 대비 올리기. */
-async function prepare(file: File): Promise<Photo> {
+/** 운영 지면 영역 찾기와 같은 그림(`BatchSplitPanel.detectImage`). */
+async function prepare(file: File): Promise<Page> {
   const d = await loadDrawableFromFile(file);
+  let last = "";
   try {
-    const raw = cropImageToDataUrl(d.src, { x: 0, y: 0, width: d.width, height: d.height }, { maxWidth: 2048, maxHeight: 2048 });
-    const image = await enhanceContrast(raw);
-    const img = await loadImage(image);
-    return { id: crypto.randomUUID(), name: file.name, image, w: img.naturalWidth, h: img.naturalHeight };
+    const whole = { x: 0, y: 0, width: d.width, height: d.height };
+    for (const dim of [DETECT_INPUT_DIM, 2400, 2000, 1600, 1200]) {
+      last = cropImageToDataUrl(d.src, whole, { maxWidth: dim, maxHeight: dim });
+      if (last.length <= MAX_UPLOAD_CHARS) break;
+    }
   } finally {
     d.close();
   }
+  const enhanced = await enhanceContrast(last);
+  const image = enhanced.length <= MAX_UPLOAD_CHARS ? enhanced : last;
+  const img = await loadImage(image);
+  return { id: crypto.randomUUID(), name: file.name, image, w: img.naturalWidth, h: img.naturalHeight };
 }
 
-export default function CompareCropPage() {
-  const [photos, setPhotos] = useState<Photo[]>([]);
+export default function ComparePageCropPage() {
+  const [pages, setPages] = useState<Page[]>([]);
   const [on, setOn] = useState<Set<string>>(new Set(DEFAULT_ON));
   const [custom, setCustom] = useState<Cand[]>([]);
   const [customText, setCustomText] = useState("");
+  const [refine, setRefine] = useState(true);
   const [results, setResults] = useState<Record<string, Res>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [ran, setRan] = useState<Cand[]>([]);
@@ -83,8 +93,8 @@ export default function CompareCropPage() {
   async function pick(files: FileList | null) {
     const list = Array.from(files ?? []);
     if (!list.length) return;
-    setBusy("사진을 준비하는 중…");
-    const out: Photo[] = [];
+    setBusy("지면을 준비하는 중…");
+    const out: Page[] = [];
     for (const f of list) {
       try {
         out.push(await prepare(f));
@@ -92,7 +102,7 @@ export default function CompareCropPage() {
         alert(`${f.name}: ${err instanceof Error ? err.message : "열지 못함"}`);
       }
     }
-    setPhotos((p) => [...p, ...out]);
+    setPages((p) => [...p, ...out]);
     setBusy(null);
   }
 
@@ -107,9 +117,10 @@ export default function CompareCropPage() {
     setCustomText("");
   }
 
-  async function runOne(p: Photo, c: Cand) {
+  async function runOne(p: Page, c: Cand, withRefine: boolean) {
     const k = `${p.id}|${c.key}`;
-    setResults((r) => ({ ...r, [k]: { state: "running" } }));
+    const set = (r: Res) => setResults((all) => ({ ...all, [k]: r }));
+    set({ state: "running" });
     const t0 = performance.now();
     try {
       const res = await fetch("/api/admin/compare-crop", {
@@ -120,34 +131,45 @@ export default function CompareCropPage() {
       const j = await res.json();
       const ms = Math.round(performance.now() - t0);
       if (!res.ok || !j.ok) {
-        setResults((r) => ({ ...r, [k]: { state: "error", ms, error: j.error ?? `HTTP ${res.status}` } }));
+        set({ state: "error", ms, error: j.error ?? `HTTP ${res.status}` });
         return;
       }
-      let final: Region | null = null;
-      let cut: string | null = null;
-      if (j.box) {
-        const img = await loadImage(p.image);
-        final = refineAiBox(img, j.box, img.naturalWidth, img.naturalHeight);
-        cut = cropRegionToDataUrl(img, final, 0);
+      const raw = (j.problems ?? []) as DetectedProblem[];
+      const img = await loadImage(p.image);
+      let found = raw;
+      let refineMs: number | undefined;
+      let refined: number | undefined;
+      if (withRefine && raw.length) {
+        set({ state: "refining", ms, raw, usage: j.usage, estKrw: j.estKrw });
+        const t1 = performance.now();
+        const r = await refineProblems(raw, cutRefineWindows(img, img.naturalWidth, img.naturalHeight, raw), `비교 ${nameOf(c)}`);
+        refineMs = Math.round(performance.now() - t1);
+        refined = r.refined;
+        found = r.problems;
       }
-      setResults((r) => ({ ...r, [k]: { state: "done", ...j, ms, final, cut } }));
+      const final = snapPageProblems(img, img.naturalWidth, img.naturalHeight, found).problems;
+      const pieces = await Promise.all(
+        final.map(async (pr) => ({
+          crop: await stitchVertically(pr.boxes.map((b) => cropRegionToDataUrl(img, b, PAD))),
+          parts: pr.boxes.length,
+          no: pr.no,
+        })),
+      );
+      set({ state: "done", ms, refineMs, refined, raw, final, pieces, usage: j.usage, estKrw: j.estKrw });
     } catch (err) {
-      setResults((r) => ({
-        ...r,
-        [k]: { state: "error", ms: Math.round(performance.now() - t0), error: err instanceof Error ? err.message : String(err) },
-      }));
+      set({ state: "error", ms: Math.round(performance.now() - t0), error: err instanceof Error ? err.message : String(err) });
     }
   }
 
   async function runAll() {
-    if (!photos.length || !chosen.length) return;
+    if (!pages.length || !chosen.length) return;
     setRan(chosen);
     setResults({});
-    await Promise.all(photos.flatMap((p) => chosen.map((c) => runOne(p, c))));
+    await Promise.all(pages.flatMap((p) => chosen.map((c) => runOne(p, c, refine))));
   }
 
   const summary = ran.map((c) => {
-    const rs = photos.map((p) => results[`${p.id}|${c.key}`]).filter((r): r is Res => !!r && r.state !== "running");
+    const rs = pages.map((p) => results[`${p.id}|${c.key}`]).filter((r): r is Res => !!r && (r.state === "done" || r.state === "error"));
     const done = rs.filter((r) => r.state === "done");
     const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
     return {
@@ -155,31 +177,32 @@ export default function CompareCropPage() {
       n: rs.length,
       errors: rs.length - done.length,
       ms: avg(rs.map((r) => r.ms ?? 0)),
-      five: done.filter((r) => (r.choices ?? 0) >= 5).length,
-      num: done.filter((r) => r.number).length,
-      none: done.filter((r) => !r.box).length,
+      refineMs: avg(done.filter((r) => r.refineMs != null).map((r) => r.refineMs!)),
+      problems: done.reduce((a, r) => a + (r.final?.length ?? 0), 0),
+      merged: done.reduce((a, r) => a + (r.final?.filter((x) => x.boxes.length > 1).length ?? 0), 0),
+      noNumber: done.reduce((a, r) => a + (r.final?.filter((x) => !x.no).length ?? 0), 0),
+      refined: done.reduce((a, r) => a + (r.refined ?? 0), 0),
       krw: done.reduce((a, r) => a + (r.estKrw ?? 0), 0),
       krwKnown: done.some((r) => r.estKrw != null),
-      outTok: avg(done.map((r) => r.usage?.output ?? 0)),
     };
   });
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-6">
       <div>
-        <h1 className="text-xl font-semibold text-ink">자동 자르기 비교</h1>
+        <h1 className="text-xl font-semibold text-ink">지면 자르기 비교</h1>
         <p className="text-xs text-slate-500">
-          운영 자동 자르기와 같은 프롬프트·같은 그림(긴 변 2048 + 대비)으로 모델만 바꿔 자릅니다. 점선 = 모델이 준 자리, 실선 = 글자에
-          맞춰 다듬은 실제로 잘리는 자리, 주황 = 짚은 번호·선지. 토큰은 차감하지 않아요.
+          운영 지면 영역 찾기와 같은 프롬프트·같은 그림으로 모델만 바꿔 찾습니다(단을 넘어 이어진 문제 묶기 포함). 그 뒤 운영과 같은 함수로
+          다시 맞추고(켜면, luna) 글자에 맞춰 다듬어 자릅니다. 점선 = 모델이 준 자리, 실선 = 실제로 잘리는 자리. 토큰은 차감하지 않아요.
         </p>
       </div>
 
       <section className={cn(cardClass, "flex flex-col gap-3 p-4")}>
         <div className="flex flex-wrap items-center gap-2">
           <input type="file" accept="image/*" multiple onChange={(e) => void pick(e.target.files)} className="g-file min-w-0 flex-1" />
-          {photos.length > 0 && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => { setPhotos([]); setResults({}); }}>
-              사진 비우기 ({photos.length}장)
+          {pages.length > 0 && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => { setPages([]); setResults({}); }}>
+              지면 비우기 ({pages.length}장)
             </Button>
           )}
         </div>
@@ -215,9 +238,13 @@ export default function CompareCropPage() {
             추가
           </Button>
         </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={refine} onChange={(e) => setRefine(e.target.checked)} className="h-4 w-4 accent-blue-600" />
+          문제마다 확대해 다시 맞추기(운영과 같이 luna medium — 문제당 1원 안팎)
+        </label>
         <div className="flex items-center gap-3">
-          <Button type="button" variant="primary" disabled={!photos.length || !chosen.length || busy !== null} onClick={() => void runAll()}>
-            {photos.length}장 × {chosen.length}개 모델 자르기
+          <Button type="button" variant="primary" disabled={!pages.length || !chosen.length || busy !== null} onClick={() => void runAll()}>
+            {pages.length}장 × {chosen.length}개 모델 자르기
           </Button>
           {busy && <span className="text-xs text-slate-500">{busy}</span>}
         </div>
@@ -225,17 +252,18 @@ export default function CompareCropPage() {
 
       {summary.length > 0 && (
         <section className={cn(cardClass, "overflow-x-auto p-4")}>
-          <table className="w-full min-w-[640px] text-left text-sm">
+          <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="text-xs text-slate-500">
               <tr>
                 <th className="py-1">모델</th>
-                <th>평균 시간</th>
-                <th>선지 5개</th>
-                <th>번호 찾음</th>
-                <th>못 찾음</th>
+                <th>찾기 평균</th>
+                <th>다시 맞추기 평균</th>
+                <th>문제 수</th>
+                <th>단 넘어 합침</th>
+                <th>번호 없음</th>
+                <th>다시 맞춘 곳</th>
                 <th>실패</th>
-                <th>평균 출력 토큰</th>
-                <th>원가 합계</th>
+                <th>찾기 원가</th>
               </tr>
             </thead>
             <tbody>
@@ -243,11 +271,12 @@ export default function CompareCropPage() {
                 <tr key={s.c.key} className="border-t border-slate-100">
                   <td className="py-1.5 font-medium">{nameOf(s.c)}</td>
                   <td>{s.ms != null ? `${(s.ms / 1000).toFixed(1)}초` : "…"}</td>
-                  <td>{s.five}/{s.n - s.errors}</td>
-                  <td>{s.num}/{s.n - s.errors}</td>
-                  <td>{s.none}</td>
+                  <td>{s.refineMs != null ? `${(s.refineMs / 1000).toFixed(1)}초` : "–"}</td>
+                  <td>{s.problems}</td>
+                  <td>{s.merged}</td>
+                  <td>{s.noNumber}</td>
+                  <td>{s.refined}</td>
                   <td className={s.errors ? "text-red-600" : ""}>{s.errors}</td>
-                  <td>{s.outTok != null ? Math.round(s.outTok) : "–"}</td>
                   <td>{s.krwKnown ? `${s.krw.toFixed(1)}원` : "단가 모름"}</td>
                 </tr>
               ))}
@@ -256,7 +285,7 @@ export default function CompareCropPage() {
         </section>
       )}
 
-      {photos.map((p) => (
+      {pages.map((p) => (
         <section key={p.id} className="flex flex-col gap-2">
           <h2 className="truncate text-sm font-medium text-slate-700">
             {p.name} <span className="text-xs text-slate-400">{p.w}×{p.h}</span>
@@ -265,39 +294,64 @@ export default function CompareCropPage() {
             {(ran.length ? ran : chosen).map((c) => {
               const r = results[`${p.id}|${c.key}`];
               return (
-                <div key={c.key} className={cn(cardClass, "flex w-72 shrink-0 flex-col gap-2 p-2")}>
+                <div key={c.key} className={cn(cardClass, "flex w-80 shrink-0 flex-col gap-2 p-2")}>
                   <div className="text-xs font-semibold text-slate-700">{nameOf(c)}</div>
                   <div className="relative w-full bg-slate-100" style={{ aspectRatio: `${p.w} / ${p.h}` }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.image} alt="" className="absolute inset-0 h-full w-full" />
-                    {r?.box && <Rect b={r.box} className="border-2 border-dashed border-blue-500" />}
-                    {r?.box?.keep?.map((k, i) => <Rect key={i} b={k} className="border border-orange-500 bg-orange-400/15" />)}
-                    {r?.final && <Rect b={r.final} className="border-2 border-emerald-600" />}
-                    {r?.state === "running" && (
-                      <span className="absolute inset-0 flex items-center justify-center bg-white/40">
+                    {r?.raw?.map((pr, i) =>
+                      pr.boxes.map((b, j) => (
+                        <Rect key={`r${i}-${j}`} b={b} style={{ borderColor: COLORS[i % COLORS.length] }} className="border border-dashed opacity-70" />
+                      )),
+                    )}
+                    {r?.final?.map((pr, i) =>
+                      pr.boxes.map((b, j) => (
+                        <Rect key={`f${i}-${j}`} b={b} style={{ borderColor: COLORS[i % COLORS.length] }} className="border-2">
+                          {j === 0 && (
+                            <span className="absolute left-0 top-0 rounded-br px-1 text-[9px] font-bold text-white" style={{ background: COLORS[i % COLORS.length] }}>
+                              {pr.no || "?"}
+                              {pr.boxes.length > 1 && `+${pr.boxes.length - 1}`}
+                            </span>
+                          )}
+                        </Rect>
+                      )),
+                    )}
+                    {(r?.state === "running" || r?.state === "refining") && (
+                      <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-white/50 text-[11px] text-slate-600">
                         <span className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+                        {r.state === "running" ? "찾는 중" : "다시 맞추는 중"}
                       </span>
                     )}
                   </div>
-                  {r?.cut && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={r.cut} alt="잘린 결과" className="max-h-56 w-full rounded border border-slate-200 bg-white object-contain" />
-                  )}
-                  {r && r.state !== "running" && (
+                  {r && (r.state === "done" || r.state === "error") && (
                     <div className="text-[11px] leading-relaxed text-slate-600">
                       {r.state === "error" ? (
                         <span className="text-red-600">{r.error}</span>
                       ) : (
                         <>
-                          <b>{((r.ms ?? 0) / 1000).toFixed(1)}초</b>
-                          {r.box ? ` · 번호 ${r.number ?? "못 봄"} · 선지 ${r.choices}개${r.retried ? " (다시 물음)" : ""}` : " · 문제를 못 찾음"}
-                          {r.rotate ? ` · ${r.rotate * 90}° 돌림` : ""}
-                          {r.advice && ` · ${r.advice === "asis" ? "원본 그대로" : "AI 추천"}${r.adviceReason ? `(${r.adviceReason})` : ""}`}
+                          찾기 <b>{((r.ms ?? 0) / 1000).toFixed(1)}초</b>
+                          {r.refineMs != null && ` · 다시 맞추기 ${(r.refineMs / 1000).toFixed(1)}초(${r.refined}곳)`}
+                          {` · 문제 ${r.final?.length ?? 0}개`}
+                          {r.final?.some((x) => x.boxes.length > 1) && ` · 합침 ${r.final.filter((x) => x.boxes.length > 1).length}`}
                           <br />
                           {r.usage && `입력 ${r.usage.input} · 출력 ${r.usage.output}`}
                           {r.estKrw != null ? ` · ${r.estKrw.toFixed(2)}원` : " · 단가 모름"}
                         </>
                       )}
+                    </div>
+                  )}
+                  {r?.pieces && (
+                    <div className="flex max-h-[32rem] flex-col gap-1.5 overflow-y-auto">
+                      {r.pieces.map((pc, i) => (
+                        <div key={i} className="relative rounded border border-slate-200 bg-white">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={pc.crop} alt="" className="w-full" />
+                          <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] text-white">
+                            {pc.no ? `${pc.no}번` : "번호 ?"}
+                            {pc.parts > 1 && ` · ${pc.parts}조각 합침`}
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -310,11 +364,23 @@ export default function CompareCropPage() {
   );
 }
 
-function Rect({ b, className }: { b: Region; className: string }) {
+function Rect({
+  b,
+  className,
+  style,
+  children,
+}: {
+  b: ProblemBox;
+  className: string;
+  style?: React.CSSProperties;
+  children?: React.ReactNode;
+}) {
   return (
     <span
       className={cn("pointer-events-none absolute", className)}
-      style={{ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` }}
-    />
+      style={{ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%`, ...style }}
+    >
+      {children}
+    </span>
   );
 }

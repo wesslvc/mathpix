@@ -244,7 +244,8 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           return { ok: true, result: { regions, model }, model, estKrw };
         }
         const { problems, model, usage } = await detectProblems(ctx.images[0]);
-        const estKrw = await cost(usage, "지면 자리 찾기", "problem");
+        // 단가를 아는 luna 로 찾았을 때만 원가를 적는다(Gemini 단가는 아직 모른다 — 지어내지 않는다).
+        const estKrw = model.startsWith(OPENAI_DETECT_MODEL) ? await cost(usage, "지면 자리 찾기", "problem") : undefined;
         return { ok: true, result: { problems, model }, model, estKrw };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "문제 영역 인식에 실패했습니다.") };

@@ -18,6 +18,7 @@ import { enhanceContrast } from "./autoContrast";
 import { runAiTask } from "./aiTask";
 import type { DetectedProblem } from "./detectProblems";
 import type { ProblemBox } from "./problemBoxes";
+import { inkMapFromImage, snapBoxes } from "./snapBoxes";
 
 /** 확대 창: 문제 둘레로 지면 대비 이만큼 더 오린다(이웃 줄이 걸쳐야 어디서 끊을지 보인다). */
 const WIN_MX = 0.03;
@@ -115,4 +116,58 @@ export async function refineProblems(
     }),
   );
   return { problems: next, refined };
+}
+
+/**
+ * 찾은 자리를 사진의 글자에 맞춰 다듬는다(`snapBoxes`) — 지면 통째로 넣기와 비교 화면(`/admin/compare-crop`)이 **같은 함수**를 쓴다(보이는
+ * 것과 잘리는 것이 같아야 한다). luna 가 짚은 번호·선지와 확대해 다시 본 자리는 `withKeep` 이 지킨다.
+ */
+export function snapPageProblems(
+  img: HTMLImageElement | ImageBitmap,
+  width: number,
+  height: number,
+  problems: DetectedProblem[],
+): { problems: DetectedProblem[]; snapped: number } {
+  const map = inkMapFromImage(img, width, height);
+  if (!map) return { problems, snapped: 0 };
+  const res = snapBoxes(map, problems.flatMap((p) => p.boxes));
+  let k = 0;
+  return {
+    problems: problems.map((p) => ({ ...p, boxes: p.boxes.map((orig) => withKeep(res.boxes[k++], orig)) })),
+    snapped: res.changed,
+  };
+}
+
+/**
+ * 번호·선지 둘레 여유(지면 대비). 사진 한 장 자르기(`KEEP_PAD` 1.2%)보다 좁다 — 지면에서는 바로 아래가 다음 문제라 넓게
+ * 두르면 그 첫 줄이 딸려 온다.
+ */
+const PAGE_KEEP_PAD = 0.008;
+
+/**
+ * 다듬은 자리가 luna 가 짚은 번호·선지(`keep`)를 다 품게 넓힌다.
+ *
+ * **문제마다 확대해 다시 본 자리(`refined`)는 다듬기가 줄일 수 없다**(2026-10-09, 사용자 — "여전히 글씨가 잘리는 느낌"). `snapBoxes` 는
+ * 변에 걸친 줄이 바깥에 더 걸쳤으면 이웃 것으로 보고 잘라 내는데, luna 가 마지막 줄 바로 위에 변을 두면 그 줄이 통째로 빠진다. 확대해
+ * 본 자리는 "빈 띠에 두라"는 지시를 받고 가까이서 본 것이라 더 믿을 만하다 — 그래서 다듬은 자리와 그 자리를 **합친다**(남는 여백 몇 px 이
+ * 잘린 글자보다 낫다). 다듬기가 넓힌 것(잘린 줄을 품은 것)은 그대로 산다.
+ */
+function withKeep(b: ProblemBox, orig: ProblemBox): ProblemBox {
+  const o = orig as ProblemBox & { keep?: ProblemBox[]; refined?: boolean };
+  let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
+  if (o.refined) {
+    x0 = Math.min(x0, o.x);
+    y0 = Math.min(y0, o.y);
+    x1 = Math.max(x1, o.x + o.w);
+    y1 = Math.max(y1, o.y + o.h);
+  }
+  const keep = o.keep;
+  if (!Array.isArray(keep) || keep.length === 0) return { ...b, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  for (const k of keep) {
+    x0 = Math.max(0, Math.min(x0, k.x - PAGE_KEEP_PAD));
+    y0 = Math.max(0, Math.min(y0, k.y - PAGE_KEEP_PAD));
+    x1 = Math.min(1, Math.max(x1, k.x + k.w + PAGE_KEEP_PAD));
+    y1 = Math.min(1, Math.max(y1, k.y + k.h + PAGE_KEEP_PAD));
+  }
+  return { ...b, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
