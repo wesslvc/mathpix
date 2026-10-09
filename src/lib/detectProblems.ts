@@ -262,19 +262,24 @@ function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
  * 손으로 맞춘 정답과 견주니 모델이 주로 안쪽으로 틀렸다. 넓은 쪽의 빈 여백은 뒤의 `snapBoxes` 가 글자에 맞춰 줄이고 이웃과 겹친 곳은
  * `separateOverlaps` 가 가른다 — 잘린 글자는 못 되살리니 바깥으로 틀리는 편이 낫다. 재배포 없이 `PAGE_BOX_PAD`(0~0.05).
  */
-const PAGE_BOX_PAD = (() => {
-  const v = Number(process.env.PAGE_BOX_PAD ?? "0");
-  return Number.isFinite(v) && v >= 0 && v <= 0.05 ? v : 0;
+/** 변마다 따로 넓힌다 [위, 아래, 왼, 오른](지면 대비 비율). 지면 4장·문제 20개를 정답과 견준 평균 치우침(위 +0.7 · 아래 -1.3 · 왼 +1.4 · 오른 -1.2 %p)을 되돌리는 값이다. */
+const DEFAULT_PAD: [number, number, number, number] = [0.007, 0.013, 0.014, 0.012];
+const PAGE_BOX_PAD: [number, number, number, number] = (() => {
+  const raw = process.env.PAGE_BOX_PAD;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_PAD;
+  const v = Number(raw);
+  // 숫자 하나면 사방 같은 값(0 = 보정 없음).
+  return Number.isFinite(v) && v >= 0 && v <= 0.05 ? [v, v, v, v] : DEFAULT_PAD;
 })();
 
 function padBoxes(list: DetectedProblem[]): DetectedProblem[] {
-  const pad = PAGE_BOX_PAD;
-  if (!pad) return list;
+  const [pt, pb, pl, pr] = PAGE_BOX_PAD;
+  if (!pt && !pb && !pl && !pr) return list;
   return list.map((p) => ({
     ...p,
     boxes: p.boxes.map((b) => {
-      const x0 = Math.max(0, b.x - pad), y0 = Math.max(0, b.y - pad);
-      const x1 = Math.min(1, b.x + b.w + pad), y1 = Math.min(1, b.y + b.h + pad);
+      const x0 = Math.max(0, b.x - pl), y0 = Math.max(0, b.y - pt);
+      const x1 = Math.min(1, b.x + b.w + pr), y1 = Math.min(1, b.y + b.h + pb);
       return { ...b, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
     }),
   }));
