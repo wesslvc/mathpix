@@ -265,13 +265,14 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           ctx.images[0],
           readTarget(ctx.params.target),
         );
-        const estKrw = usage ? gradingEstKrw(lunaUsage(usage), OPENAI_DETECT_MODEL) : undefined;
+        // 단가를 아는 모델(luna)만 원가를 적는다 — Gemini 단가는 아직 표에 없다(지어내지 않는다).
+        const estKrw = usage ? gradingEstKrw(lunaUsage(usage), model) : undefined;
         if (estKrw && usage) {
           await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 자동 자르기", krw: estKrw, tokens: usage });
         }
         const note = !box
-          ? "문제 자리를 못 찾았어요"
-          : `${number ? `번호 ${number}` : "번호 못 봄"} · 선지 ${choices}개${retried ? " (다시 봄)" : ""}${rotate ? ` · ${rotate * 90}° 돌림` : ""}${advice ? ` · 추천 ${advice === "asis" ? "원본 그대로" : "AI로 다시 그리기"}` : ""}`;
+          ? `${model} · 문제 자리를 못 찾았어요`
+          : `${model} · ${number ? `번호 ${number}` : "번호 못 봄"} · 선지 ${choices}개${retried ? " (다시 봄)" : ""}${rotate ? ` · ${rotate * 90}° 돌림` : ""}${advice ? ` · 추천 ${advice === "asis" ? "원본 그대로" : "AI로 다시 그리기"}` : ""}`;
         return { ok: true, result: { box, model, number, choices, rotate, advice, adviceReason }, model, estKrw, note };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "자동 자르기에 실패했습니다.") };

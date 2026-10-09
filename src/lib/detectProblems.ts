@@ -281,6 +281,74 @@ async function callGemini(dataUrl: string, prompt: string): Promise<string> {
   }
 }
 
+/**
+ * Gemini 로 사진 한 장 + 지시를 보내고 JSON 글을 받는다(모델 이름을 받는다 — 자동 자르기가 쓴다, 2026-10-09). 토큰 수를 `onUsage` 로
+ * 넘긴다(생각 토큰은 출력 단가라 출력에 더한다). **자리가 없다는 503·429 는 1초·3초 뒤 두 번 더 해 본다**(지문 인식 때 운영에서 503
+ * "high demand" 가 실제로 났다). 404 면 그 이름을 그대로 알린다.
+ */
+export async function callGeminiVision(
+  dataUrl: string,
+  prompt: string,
+  model: string,
+  onUsage?: (u: DetectUsage) => void,
+): Promise<string> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new DetectError("GEMINI_API_KEY가 설정되지 않았습니다.", 500);
+  const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!m) throw new DetectError("이미지를 읽을 수 없습니다.", 400);
+  const body = JSON.stringify({
+    contents: [{ parts: [{ inline_data: { mime_type: m[1], data: m[2] } }, { text: prompt }] }],
+    generationConfig: { responseMimeType: "application/json", temperature: 0 },
+  });
+  let last = 0;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, attempt === 1 ? 1000 : 3000));
+    const res = await fetch(`${ENDPOINT}/${model}:generateContent?key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      last = res.status;
+      if (res.status === 503 || res.status === 429 || res.status >= 500) continue;
+      throw new DetectError(
+        res.status === 404
+          ? `모델 "${model}"을 찾을 수 없습니다.`
+          : `Gemini 호출 실패 (${model}, HTTP ${res.status}): ${text.slice(0, 200)}`,
+        res.status,
+      );
+    }
+    let json: {
+      candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        thoughtsTokenCount?: number;
+        cachedContentTokenCount?: number;
+      };
+    };
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new DetectError("모델이 정상적인 응답을 주지 않았습니다.", 502);
+    }
+    const u = json.usageMetadata;
+    if (u && onUsage) {
+      onUsage({
+        input: u.promptTokenCount ?? 0,
+        cached: u.cachedContentTokenCount ?? 0,
+        output: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0),
+      });
+    }
+    return (json.candidates?.[0]?.content?.parts ?? [])
+      .filter((p) => !p.thought)
+      .map((p) => p.text ?? "")
+      .join("");
+  }
+  throw new DetectError(`Gemini 가 지금 자리가 없어요 (${model}, HTTP ${last}).`, last || 503);
+}
+
 async function withGemini(dataUrl: string): Promise<{ problems: DetectedProblem[]; model: string }> {
   return { problems: parse(await callGemini(dataUrl, PROMPT)), model: DETECT_MODEL };
 }

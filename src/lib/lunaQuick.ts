@@ -9,7 +9,7 @@
 //
 // 둘 다 서버 키로 부른다(BYOK 계정도) — 값이 몇 원이고 우리 쪽 판단이라서다. 원가는 부르는 쪽이 장부에 적는다.
 
-import { callOpenAIVision, OPENAI_DETECT_MODEL, type DetectUsage } from "./detectProblems";
+import { callGeminiVision, callOpenAIVision, OPENAI_DETECT_MODEL, type DetectUsage } from "./detectProblems";
 import type { ProblemBox } from "./problemBoxes";
 
 /** 자동 자르기의 추론 강도. 재배포 없이 `OPENAI_CROP_EFFORT`(기본 high — 사용자 "luna 가 매우 정확하게", `default` 면 안 보냄). */
@@ -25,6 +25,17 @@ const CROP_EFFORT = (() => {
 const REFINE_EFFORT = (() => {
   const v = (process.env.OPENAI_REFINE_EFFORT ?? "medium").trim();
   return v === "" || v === "default" ? undefined : v;
+})();
+
+/**
+ * **자동 자르기는 Gemini 가 먼저 한다**(2026-10-09, 사용자 — "자동 자르기 3.5 flash lite 시켜보자"). 이름은 짐작하지 않고 계정의 모델
+ * 목록(일꾼 `probe: "gemini-models"`)에서 확인했다. Gemini 는 `box_2d`(0~1000, [ymin,xmin,ymax,xmax]) 규격으로 훈련돼 있어 자리 재기에
+ * 맞다. 실패하면 luna 로 넘어간다(어느 쪽이 했는지는 결과의 `model`·대기열 메모에 찍힌다). 끄려면 재배포 없이 `CROP_GEMINI_MODEL=off`.
+ * 사진 한 장 자르기와 지면 다시 맞추기(표적 있는 자르기) 둘 다 이 길이다.
+ */
+const CROP_GEMINI_MODEL = (() => {
+  const v = (process.env.CROP_GEMINI_MODEL ?? "gemini-3.5-flash-lite").trim();
+  return v === "" || v === "off" || !process.env.GEMINI_API_KEY ? null : v;
 })();
 
 /** 난이도 판단의 추론 강도. 재배포 없이 `OPENAI_ASSESS_EFFORT`(기본 medium, `default` 면 안 보냄). */
@@ -99,23 +110,34 @@ export async function cropOneProblem(
   };
   const prompt = target ? `${CROP_PROMPT}${targetNote(target)}` : CROP_PROMPT;
   const effort = target ? REFINE_EFFORT : CROP_EFFORT;
-  let first = parseCrop(await callOpenAIVision(dataUrl, prompt, OPENAI_DETECT_MODEL, effort, add));
+  // 자동 자르기는 Gemini 가 먼저 한다(`CROP_GEMINI_MODEL`). 못 하면(자리 없음·오류) luna 로 — 어느 쪽이 했는지 `model` 로 돌려준다.
+  let model = OPENAI_DETECT_MODEL;
+  const ask = async (p: string) => {
+    if (CROP_GEMINI_MODEL) {
+      try {
+        const t = await callGeminiVision(dataUrl, p, CROP_GEMINI_MODEL, add);
+        model = CROP_GEMINI_MODEL;
+        return t;
+      } catch (err) {
+        console.warn(`[crop] ${CROP_GEMINI_MODEL} 실패 → ${OPENAI_DETECT_MODEL} 로 넘어감:`, err instanceof Error ? err.message : err);
+      }
+    }
+    model = OPENAI_DETECT_MODEL;
+    return callOpenAIVision(dataUrl, p, OPENAI_DETECT_MODEL, effort, add);
+  };
+  let first = parseCrop(await ask(prompt));
   let retried = false;
   // 선지를 일부만 찾았으면(1~4개) 한 번 더 — 대개 맨 아래·오른쪽 선지를 놓친 경우다.
   if (first.box && first.choices > 0 && first.choices < 5) {
     retried = true;
     const again = parseCrop(
-      await callOpenAIVision(
-        dataUrl,
+      await ask(
         `${prompt}\n\nA previous look found only ${first.choices} of the five choices (${first.choices} boxes). The missing ones are almost always below or to the right of the found ones — find all five this time and make the main box contain them.`,
-        OPENAI_DETECT_MODEL,
-        effort,
-        add,
       ),
     );
     if (again.box && again.choices >= first.choices) first = again;
   }
-  return { ...first, model: OPENAI_DETECT_MODEL, usage: total.input || total.output ? total : undefined, retried };
+  return { ...first, model, usage: total.input || total.output ? total : undefined, retried };
 }
 
 /**
