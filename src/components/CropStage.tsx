@@ -8,7 +8,7 @@ import { detectContentRegion } from "@/lib/autoDetectRegion";
 import { rotateImageDataUrl } from "@/lib/cropImage";
 import { cropRegionToDataUrl, rectPoly, type Region } from "@/lib/polygon";
 import { useCropShape } from "@/lib/cropShape";
-import { refineAiBox } from "@/lib/autoCrop";
+import { refineAiBox, rotateRegion } from "@/lib/autoCrop";
 import BoxEditor, { type EditBox } from "./BoxEditor";
 import CropShapeToggle from "./CropShapeToggle";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,11 @@ type Props = {
    * 계산(`detectContentRegion`)을 그대로 둔다. 사용자가 손대기 전에 도착하면 그 자리로 바꾼다.
    */
   aiRegion?: Region | null;
+  /** luna 가 본 "똑바로 서려면 시계 방향으로 몇 번 돌려야 하는지"(0~3). 손대기 전이면 저절로 돌린다. */
+  aiTurns?: number;
+  /** luna 추천 — 원본 그대로(asis) / 다시 그리기(redraw). 그 버튼에 표시가 붙는다. */
+  aiAdvice?: "asis" | "redraw";
+  aiAdviceReason?: string;
   /** 이 사진 뒤에 남은 사진 수. 있으면 "남은 사진도 같은 방식으로 한 번에" 고르기가 뜬다. */
   restCount?: number;
   /** 지금 사진과 남은 사진을 모두 같은 방식으로 넣는다(남은 것은 luna 가 자른 자리대로). */
@@ -58,6 +63,9 @@ export default function CropStage({
   unlimited = false,
   byok = false,
   aiRegion,
+  aiTurns = 0,
+  aiAdvice,
+  aiAdviceReason,
   restCount = 0,
   onConfirmRest,
 }: Props) {
@@ -77,6 +85,8 @@ export default function CropStage({
   const [allRest, setAllRest] = useState(false);
   const aiRef = useRef(aiRegion);
   aiRef.current = aiRegion;
+  const aiTurnsRef = useRef(aiTurns);
+  aiTurnsRef.current = aiTurns;
 
   /**
    * 사진 돌리기. 세로로 찍힌 사진이 누워서 들어오는 일이 흔하다.
@@ -129,8 +139,14 @@ export default function CropStage({
    */
   function applyAi(img: HTMLImageElement) {
     const box = aiRef.current;
-    if (!box || touched.current || turns !== 0) return;
-    setRegion(refineAiBox(img, box, img.naturalWidth, img.naturalHeight));
+    if (!box || touched.current) return;
+    // luna 가 사진이 누웠다고 봤으면 **먼저 저절로 돌린다**(돌아간 사진이 다시 뜨면 그때 자리를 얹는다).
+    if (turns === 0 && aiTurnsRef.current > 0) {
+      setTurns(aiTurnsRef.current);
+      return;
+    }
+    if (turns !== aiTurnsRef.current) return;
+    setRegion(refineAiBox(img, rotateRegion(box, turns), img.naturalWidth, img.naturalHeight));
     setAiApplied(true);
   }
 
@@ -190,8 +206,8 @@ export default function CropStage({
               : shape === "poly"
                 ? "점을 끌어 모양을 맞추세요. 변 가운데 점을 끌면 점이 늘어요."
                 : aiApplied
-                  ? "luna 가 문제 자리를 잘랐어요. 손잡이를 끌어 범위를 맞추세요."
-                  : aiRegion === undefined && !touched.current && turns === 0
+                  ? `luna 가 문제 자리를 잘랐어요${turns ? " (사진도 똑바로 돌렸어요)" : ""}. 손잡이를 끌어 범위를 맞추세요.`
+                  : aiRegion === undefined && !touched.current
                     ? "자동으로 잡았어요 · luna 가 더 정확히 자르는 중…"
                     : "자동으로 잡았어요. 손잡이를 끌어 범위를 맞추세요."}
           </p>
@@ -303,9 +319,14 @@ export default function CropStage({
             type="button"
             onClick={() => handleConfirm("asis")}
             disabled={!ready}
-            variant="outline" className="whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm"
+            variant={aiAdvice === "asis" ? "primary" : "outline"}
+            title={aiAdvice === "asis" ? `luna 추천${aiAdviceReason ? ` — ${aiAdviceReason}` : ""}` : undefined}
+            className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
           >
             원본 그대로
+            {aiAdvice === "asis" && (
+              <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">luna 추천{aiAdviceReason ? ` · ${aiAdviceReason}` : ""}</span>
+            )}
           </Button>
           {/* 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다
               통째로 다시 그리는 편이 원본에 가깝다. */}
@@ -313,9 +334,13 @@ export default function CropStage({
             type="button"
             onClick={() => handleConfirm("problem")}
             disabled={!ready}
-            variant="soft" className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
+            variant={aiAdvice === "redraw" ? "primary" : "soft"}
+            title={aiAdvice === "redraw" ? `luna 추천${aiAdviceReason ? ` — ${aiAdviceReason}` : ""}` : undefined} className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
           >
             AI로 다시 그리기
+            {aiAdvice === "redraw" && (
+              <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">luna 추천{aiAdviceReason ? ` · ${aiAdviceReason}` : ""}</span>
+            )}
             {typeof problemTokenCost === "number" && !unlimited && !byok && (
               <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{problemTokenCost}토큰</span>
             )}

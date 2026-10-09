@@ -47,3 +47,19 @@ export function regionForImage(img: HTMLImageElement, box: Region | null | undef
     h: rect.height / img.naturalHeight,
   };
 }
+
+/**
+ * 사진 대비 자리를 사진과 함께 **시계 방향으로 90° × turns** 돌린다(`rotateImageDataUrl` 과 같은 방향). luna 는 돌리기 전 사진에서
+ * 자리를 짚으므로, 자르기 화면이 사진을 똑바로 세우면 자리도 같이 돌려야 한다. 짚은 번호·선지(`keep`)도 함께 돌린다.
+ */
+export function rotateRegion<T extends Region & { keep?: Region[] }>(box: T, turns: number): T {
+  const t = ((Math.round(turns) % 4) + 4) % 4;
+  const once = (b: Region): Region => ({ x: 1 - (b.y + b.h), y: b.x, w: b.h, h: b.w });
+  let out: Region = { x: box.x, y: box.y, w: box.w, h: box.h };
+  let keep = box.keep;
+  for (let i = 0; i < t; i++) {
+    out = once(out);
+    keep = keep?.map(once);
+  }
+  return { ...box, ...out, poly: undefined, ...(keep ? { keep } : {}) } as T;
+}

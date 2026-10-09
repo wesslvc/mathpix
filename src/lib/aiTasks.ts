@@ -49,13 +49,14 @@ import {
   type ChatTurn,
 } from "./problemCompare";
 import { askSol, loadPatchImages } from "./problemLoopRun";
-import { cropOneProblem, findProblemNumber, lunaUsage } from "./lunaQuick";
+import { cropOneProblem, findProblemNumber, lunaUsage, placeFigures } from "./lunaQuick";
 import type { ProblemBox } from "./problemBoxes";
 
 export type TaskKind =
   | "ocr"
   | "detect"
   | "crop"
+  | "figures"
   | "numberBox"
   | "title"
   | "grade"
@@ -69,6 +70,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
   "ocr",
   "detect",
   "crop",
+  "figures",
   "numberBox",
   "title",
   "grade",
@@ -84,7 +86,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
  * 할 수 있다면"). 전부 luna(+고정 요금)라 몇 초~수십 초면 끝난다 — 줄에 넣고 일꾼을 깨우고 1~2초마다 묻는 왕복을 뺀다.
  * `/api/ai-direct` 가 같은 `run` 을 요청 안에서 돌린다. 화면(`aiTask.ts` 의 `DIRECT_KINDS`)도 같은 목록을 든다.
  */
-export const DIRECT_TASKS: readonly TaskKind[] = ["crop", "numberBox", "detect", "title", "grade", "answerKey"];
+export const DIRECT_TASKS: readonly TaskKind[] = ["crop", "figures", "numberBox", "detect", "title", "grade", "answerKey"];
 
 export type TaskCtx = {
   admin: SupabaseClient;
@@ -247,17 +249,41 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     name: "자동 자르기",
     async run(ctx) {
       try {
-        const { box, model, usage, number, choices, retried } = await cropOneProblem(ctx.images[0]);
+        const { box, model, usage, number, choices, retried, rotate, advice, adviceReason } = await cropOneProblem(ctx.images[0]);
         const estKrw = usage ? gradingEstKrw(lunaUsage(usage), OPENAI_DETECT_MODEL) : undefined;
         if (estKrw && usage) {
           await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 자동 자르기", krw: estKrw, tokens: usage });
         }
         const note = !box
           ? "문제 자리를 못 찾았어요"
-          : `${number ? `번호 ${number}` : "번호 못 봄"} · 선지 ${choices}개${retried ? " (다시 봄)" : ""}`;
-        return { ok: true, result: { box, model, number, choices }, model, estKrw, note };
+          : `${number ? `번호 ${number}` : "번호 못 봄"} · 선지 ${choices}개${retried ? " (다시 봄)" : ""}${rotate ? ` · ${rotate * 90}° 돌림` : ""}${advice ? ` · 추천 ${advice === "asis" ? "원본 그대로" : "AI로 다시 그리기"}` : ""}`;
+        return { ok: true, result: { box, model, number, choices, rotate, advice, adviceReason }, model, estKrw, note };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "자동 자르기에 실패했습니다.") };
+      }
+    },
+  },
+
+  // 글자로 인식한 문제의 그림 자리와 그 그림이 어느 문단 앞에 오는지(luna, 추론 강도 low). 자동 자르기처럼 토큰을 안 뗀다.
+  figures: {
+    deposit: () => 0,
+    flat: true,
+    needsOpenAI: false,
+    images: { min: 1, max: 1 },
+    name: "그림 자리 찾기",
+    async run(ctx) {
+      const blocks = Array.isArray(ctx.params.blocks)
+        ? (ctx.params.blocks as unknown[]).slice(0, 60).map((b) => str(b, 200))
+        : [];
+      try {
+        const { figures, model, usage } = await placeFigures(ctx.images[0], blocks);
+        const estKrw = usage ? gradingEstKrw(lunaUsage(usage), OPENAI_DETECT_MODEL) : undefined;
+        if (estKrw && usage) {
+          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 그림 자리 찾기", krw: estKrw, tokens: usage });
+        }
+        return { ok: true, result: { figures, model }, model, estKrw, note: `그림 ${figures.length}개` };
+      } catch (err) {
+        return { ok: false, error: errorMessage(err, "그림 자리를 찾지 못했습니다.") };
       }
     },
   },

@@ -24,7 +24,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
   mathpix: "Mathpix 글자 인식",
   luna: "luna 빠른 작업 (자르기·자리 찾기·채점·제목)",
 };
-const LUNA_TASKS = new Set(["crop", "numberBox", "detect", "title", "grade", "answerKey"]);
+const LUNA_TASKS = new Set(["crop", "figures", "numberBox", "detect", "title", "grade", "answerKey"]);
 function categoryOf(j: FigureJob): Category {
   if (j.mode === "passage") return "passage";
   if (j.mode !== "task") return "draw";
@@ -35,6 +35,7 @@ function categoryOf(j: FigureJob): Category {
 }
 const LOCAL_RUNNING: Record<string, string> = {
   crop: "luna 가 문제 자리를 자르는 중",
+  figures: "luna 가 그림 자리를 찾는 중",
   numberBox: "luna 가 문제 번호 자리를 찾는 중",
   detect: "luna 가 문제·지문 자리를 찾는 중",
   title: "luna 가 지문 제목을 짓는 중",
@@ -61,6 +62,7 @@ const TASK_RUNNING: Record<string, string> = {
   ocr: "Mathpix 가 글자를 읽는 중",
   detect: "luna 가 문제·지문 자리를 찾는 중",
   crop: "luna 가 문제 자리를 자르는 중",
+  figures: "luna 가 그림 자리를 찾는 중",
   numberBox: "luna 가 문제 번호 자리를 찾는 중",
   title: "luna 가 지문 제목을 짓는 중",
   grade: "luna 가 채점하는 중",

@@ -53,7 +53,7 @@ import { prepareProblemForModel } from "@/lib/figureImage";
 import type { AnswerByNumber } from "@/lib/answerMap";
 import { cropRegionToDataUrl, type Region } from "@/lib/polygon";
 import { regionForImage } from "@/lib/autoCrop";
-import { loadImage } from "@/lib/cropImage";
+import { loadImage, rotateImageDataUrl } from "@/lib/cropImage";
 import {
   clearQueue,
   loadQueue,
@@ -177,6 +177,14 @@ export default function AddProblemFlow({
   /** luna 가 자르며 읽은 문제 번호(사진 id 별). 넣을 때 Mathpix 로 다시 읽지 않고 이걸 쓴다. */
   const lunaNumbersRef = useRef(new Map<string, number | null>());
   /**
+   * luna 가 자르며 함께 본 것들(사진 id 별, 2026-10-09 — "luna 를 써서 편해질 수 있으면 다 때려박자"):
+   * 사진을 몇 번 돌려야 똑바로 서는지(`turns` — 자르기 화면이 저절로 돌린다), 선지가 없는 주관식인지(`short` — 정답 유형을
+   * 저절로 맞춘다), 원본 그대로 넣어도 되는지 다시 그려야 하는지(`advice` — 버튼에 "luna 추천" 표시, 한눈에 보기의 "추천대로 넣기").
+   */
+  type LunaInfo = { turns: number; short: boolean; advice?: "asis" | "redraw"; reason?: string };
+  const [lunaInfo, setLunaInfo] = useState<Record<string, LunaInfo>>({});
+  const lunaInfoRef = useRef(new Map<string, LunaInfo>());
+  /**
    * **luna 자동 자르기는 사진 수만큼 동시에 돈다**(사용자 — "luna 는 rpm 이 높기 때문에 동시 작업을 최대로"). luna 호출은 대기열을
    * 안 타고(`/api/ai-direct`) 서버 쪽 상한도 없다. 브라우저에서 사진을 줄이는 일만 `CROP_PREP_LANES` 장까지 겹쳐 돈다 — 한 장이
    * 요청을 보내면 곧바로 다음 장을 줄인다(줄이는 동안 휴대폰 메모리를 한꺼번에 쓰지 않게). 줄이기는 디코딩하며 바로 2048 로 줄여
@@ -204,7 +212,14 @@ export default function AddProblemFlow({
           const image = await enhanceContrast(await photoForModel(p, 2048));
           let queued = () => {};
           const inLine = new Promise<void>((r) => (queued = r));
-          void runAiTask<{ box: Region | null; number?: string | null }>("crop", {
+          void runAiTask<{
+            box: Region | null;
+            number?: string | null;
+            choices?: number;
+            rotate?: number;
+            advice?: "asis" | "redraw";
+            adviceReason?: string;
+          }>("crop", {
             label: `자동 자르기 · ${p.name}`.slice(0, 100),
             images: [image],
             onQueued: () => queued(),
@@ -215,6 +230,16 @@ export default function AddProblemFlow({
                 const m = /\d{1,3}/.exec(String(result?.number ?? ""));
                 const n = m && !/\d{4}/.test(String(result?.number ?? "")) && Number(m[0]) > 0 ? Number(m[0]) : null;
                 lunaNumbersRef.current.set(p.id, n);
+                if (result?.box) {
+                  const info: LunaInfo = {
+                    turns: Math.max(0, Math.min(3, Math.round(Number(result.rotate) || 0))),
+                    short: result.choices === 0,
+                    advice: result.advice,
+                    reason: result.adviceReason,
+                  };
+                  lunaInfoRef.current.set(p.id, info);
+                  setLunaInfo((prev) => ({ ...prev, [p.id]: info }));
+                }
                 resolve(result?.box ?? null);
               },
               () => resolve(null),
@@ -255,7 +280,12 @@ export default function AddProblemFlow({
    * luna 결과를 기다린다. 브라우저 저장소에서는 넣은 사진만 지운다(탭이 죽으면 남은 것이 되살아난다). 못 연 사진은 대기열로 되돌린다.
    */
   const [bulkLeft, setBulkLeft] = useState(0);
-  async function addPhotosInBackground(photos: QueuedPhoto[], addMode: "problem" | "asis" | "sol") {
+  /** luna 추천대로 넣을 방식(추천이 없으면 AI로 다시 그리기 — 손이 안 가는 쪽). */
+  function adviceMode(photoId: string): "problem" | "asis" {
+    return lunaInfoRef.current.get(photoId)?.advice === "asis" ? "asis" : "problem";
+  }
+
+  async function addPhotosInBackground(photos: QueuedPhoto[], addMode: "problem" | "asis" | "sol" | "advice") {
     if (photos.length === 0) return;
     setBulkLeft((n) => n + photos.length);
     for (const p of photos) {
@@ -264,7 +294,10 @@ export default function AddProblemFlow({
         try {
           const img = await loadImage(url);
           const region = await regionOf(p, img);
-          quickAdd(cropRegionToDataUrl(img, region), addMode, { photo: p });
+          // luna 가 사진이 누웠다고 봤으면 자른 뒤 똑바로 세운다(자리는 돌리기 전 사진 기준이다).
+          const turns = lunaInfoRef.current.get(p.id)?.turns ?? 0;
+          const crop = await rotateImageDataUrl(cropRegionToDataUrl(img, region), turns);
+          quickAdd(crop, addMode === "advice" ? adviceMode(p.id) : addMode, { photo: p });
         } finally {
           URL.revokeObjectURL(url);
         }
@@ -294,7 +327,7 @@ export default function AddProblemFlow({
   }
 
   /** 한눈에 보기: 체크 안 한 것은 한꺼번에 넣고, 체크한 것은 하나씩 자르기 화면으로. */
-  function submitReview(addMode: "problem" | "asis" | "sol") {
+  function submitReview(addMode: "problem" | "asis" | "sol" | "advice") {
     const go = pending.filter((p) => !recrop.has(p.id));
     const keep = pending.filter((p) => recrop.has(p.id));
     setRecrop(new Set());
@@ -330,7 +363,10 @@ export default function AddProblemFlow({
         try {
           const img = await loadImage(url);
           const region = regionForImage(img, box);
-          const small = cropRegionToDataUrl(img, region, 0, { maxWidth: 520, maxHeight: 760 });
+          const small = await rotateImageDataUrl(
+            cropRegionToDataUrl(img, region, 0, { maxWidth: 520, maxHeight: 760 }),
+            lunaInfoRef.current.get(p.id)?.turns ?? 0,
+          );
           setPreviews((prev) => ({ ...prev, [p.id]: { region, url: small, ai: !!box } }));
         } catch {
           previewBusyRef.current.delete(p.id);
@@ -685,6 +721,13 @@ export default function AddProblemFlow({
         })();
       }
       patch({ status: "saved" });
+      // luna 가 선지를 하나도 못 봤으면(주관식) 정답 유형을 저절로 주관식으로 — 정답을 적을 때 유형을 바꾸는 수고를 던다.
+      if (photoId) {
+        void (cropPromisesRef.current.get(photoId) ?? Promise.resolve(null)).then(async () => {
+          if (!lunaInfoRef.current.get(photoId)?.short) return;
+          await createClient().from("problems").update({ answer_type: "short" }).eq("id", problemId);
+        }).catch(() => undefined);
+      }
       return problemId;
     });
     saveChainRef.current = saved.then(
@@ -1003,6 +1046,7 @@ export default function AddProblemFlow({
                 photos={pending}
                 previews={previews}
                 aiCrops={aiCrops}
+                advice={lunaInfo}
                 checked={recrop}
                 preparing={preparing}
                 onToggle={(id) =>
@@ -1065,6 +1109,9 @@ export default function AddProblemFlow({
               <CropStage
                 imageSrc={activeUrl}
                 aiRegion={active ? (active.id in aiCrops ? aiCrops[active.id] : undefined) : null}
+                aiTurns={active ? lunaInfo[active.id]?.turns : undefined}
+                aiAdvice={active ? lunaInfo[active.id]?.advice : undefined}
+                aiAdviceReason={active ? lunaInfo[active.id]?.reason : undefined}
                 restCount={pending.length}
                 onConfirmRest={(crop, m) => void addAllRemaining(crop, m)}
                 onConfirm={handleCropConfirm}

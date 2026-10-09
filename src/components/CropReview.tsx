@@ -7,7 +7,7 @@ import { useThumbUrls } from "./PhotoQueueStrip";
 import { Button } from "@/components/ui/button";
 
 export type CropPreview = { region: Region; url: string; ai: boolean };
-type AddMode = "asis" | "problem" | "sol";
+type AddMode = "asis" | "problem" | "sol" | "advice";
 
 /**
  * **자동 자르기 결과를 한눈에 본다**(2026-10-04, 사용자 — "자동 자르기 했을 때 한 번에 보여 줘서 다시 자르기 대상자를
@@ -19,6 +19,7 @@ export default function CropReview({
   photos,
   previews,
   aiCrops,
+  advice = {},
   checked,
   preparing,
   onToggle,
@@ -36,6 +37,8 @@ export default function CropReview({
   previews: Record<string, CropPreview>;
   /** luna 결과(없으면 자르는 중, null 이면 못 찾음). */
   aiCrops: Record<string, Region | null>;
+  /** luna 의 추천(사진 id 별) — 원본 그대로(asis) / 다시 그리기(redraw)와 그 까닭. */
+  advice?: Record<string, { advice?: "asis" | "redraw"; reason?: string }>;
   checked: Set<string>;
   preparing: { done: number; total: number } | null;
   onToggle: (id: string) => void;
@@ -52,6 +55,9 @@ export default function CropReview({
   const thumbs = useThumbUrls(photos);
   const rest = photos.length - photos.filter((p) => checked.has(p.id)).length;
   const waiting = photos.filter((p) => !previews[p.id]).length;
+  const unchecked = photos.filter((p) => !checked.has(p.id));
+  const advised = unchecked.filter((p) => advice[p.id]?.advice);
+  const asisCount = unchecked.filter((p) => advice[p.id]?.advice === "asis").length;
   const cost = (n: number | null) =>
     byok ? <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">본인 키</span>
       : !unlimited && typeof n === "number" ? <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{n}토큰씩</span>
@@ -104,6 +110,17 @@ export default function CropReview({
                 <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-white/85 px-1.5 text-[10px] text-slate-600">
                   {state}
                 </span>
+                {advice[p.id]?.advice && (
+                  <span
+                    className={`pointer-events-none absolute bottom-1.5 right-1.5 max-w-[70%] truncate rounded px-1.5 text-[10px] font-medium ${
+                      advice[p.id].advice === "asis" ? "bg-emerald-600/90 text-white" : "bg-blue-600/90 text-white"
+                    }`}
+                    title={advice[p.id].reason}
+                  >
+                    {advice[p.id].advice === "asis" ? "원본 그대로" : "AI 추천"}
+                    {advice[p.id].reason ? ` · ${advice[p.id].reason}` : ""}
+                  </span>
+                )}
               </button>
               <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/55 px-1.5 text-[11px] font-medium text-white">
                 {i + 1}
@@ -158,6 +175,15 @@ export default function CropReview({
           )}
         </p>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          {rest > 0 && advised.length > 0 && (
+            // luna 가 사진마다 고른 대로 — 깨끗한 인쇄는 원본 그대로(공짜), 손글씨·그림자가 있으면 AI로 다시 그리기.
+            <Button type="button" variant="primary" onClick={() => onSubmit("advice")} className="col-span-2 flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm">
+              luna 추천대로 넣기
+              <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">
+                원본 {asisCount} · AI {rest - asisCount}
+              </span>
+            </Button>
+          )}
           {rest > 0 && (
             <>
               <Button type="button" variant="outline" onClick={() => onSubmit("asis")} className="whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm">

@@ -19,6 +19,7 @@ export type AiTaskKind =
   | "ocr"
   | "detect"
   | "crop"
+  | "figures"
   | "numberBox"
   | "title"
   | "grade"
@@ -63,7 +64,7 @@ const GIVE_UP_MS = 9 * 60 * 1000;
  * 전부 luna 라 금방 끝난다(사용자 — "luna 는 금방금방 끝나니까 서버에서 돌릴 필요는 없어, 더 빠르게 할 수 있다면").
  * 줄에 넣고 일꾼을 깨우고 1~2초마다 묻는 왕복이 없어 그만큼 빠르다. 대신 이 화면이 결과를 받아야 한다.
  */
-const DIRECT_KINDS: readonly AiTaskKind[] = ["crop", "numberBox", "detect", "title", "grade", "answerKey"];
+const DIRECT_KINDS: readonly AiTaskKind[] = ["crop", "figures", "numberBox", "detect", "title", "grade", "answerKey"];
 
 /** 본문에 그대로 실을 수 있는 그림 크기 합(Vercel 4.5MB 한도 안쪽). 넘으면 미리 올리고 경로만 보낸다. */
 const INLINE_LIMIT = 3_300_000;

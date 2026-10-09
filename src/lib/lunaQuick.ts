@@ -46,8 +46,19 @@ CHECK BEFORE YOU ANSWER — the most common mistake is cutting off the problem n
 3. The main box must also contain the last line of the stem and any figure/table below it.
 - Coordinates: every box is [ymin, xmin, ymax, xmax], each normalised to 0~1000 of the photo.
 
+ALSO TELL US (the student will not have to do these by hand):
+- "rotate": how many quarter turns CLOCKWISE (0, 1, 2 or 3) the photo must be turned so the printed text reads upright.
+  0 if it is already upright. Photos taken sideways are common (text running top-to-bottom → 1 or 3; upside down → 2).
+  Box coordinates always refer to the photo AS GIVEN (not rotated).
+- "advice": what to do with this problem image —
+  "asis"   = the printed problem is already clean enough to print as it is: flat, sharp, good contrast, little or no handwriting
+             or pen marks over the problem area, no strong shadow.
+  "redraw" = it should be redrawn cleanly: handwriting / pen or pencil marks / circled answers over the problem, strong shadow
+             or uneven lighting, blur, curled or skewed paper, low contrast, or stains.
+  "advice_reason": one short Korean phrase for the student (e.g. "깨끗한 인쇄", "손글씨가 많음", "그림자·기울어짐").
+
 answer as JSON object only:
-{"box_2d":[ymin,xmin,ymax,xmax],"number":{"text":"17.","box_2d":[...]},"choices":[{"label":"①","box_2d":[...]},...]}
+{"box_2d":[ymin,xmin,ymax,xmax],"number":{"text":"17.","box_2d":[...]},"choices":[{"label":"①","box_2d":[...]},...],"rotate":0,"advice":"asis","advice_reason":"깨끗한 인쇄"}
 — "number" is null if no printed number is visible; {"box_2d":null} if no problem is visible.`;
 
 /** luna 가 짚은 "꼭 들어가야 할 것"(번호·선지)과 함께 돌려주는 자리. `keep` 은 화면이 글자에 맞춰 다듬은 뒤에도 꼭 품는다. */
@@ -59,12 +70,17 @@ export interface CropFinding {
   number?: string;
   /** 찾은 선지 수. */
   choices: number;
+  /** 글자가 똑바로 서려면 시계 방향으로 몇 번(90°) 돌려야 하는지(0~3). */
+  rotate?: number;
+  /** luna 의 추천 — 원본 그대로(asis) / 깨끗하게 다시 그리기(redraw). */
+  advice?: "asis" | "redraw";
+  adviceReason?: string;
 }
 
 /** 사진 한 장에서 문제 하나의 자리(0~1). 못 찾으면 box 가 null. */
 export async function cropOneProblem(
   dataUrl: string,
-): Promise<{ box: CropBox | null; model: string; usage?: DetectUsage; number?: string; choices: number; retried: boolean }> {
+): Promise<CropFinding & { model: string; usage?: DetectUsage; retried: boolean }> {
   const total: DetectUsage = { input: 0, cached: 0, output: 0 };
   const add = (u: DetectUsage) => {
     total.input += u.input;
@@ -141,7 +157,19 @@ export function parseCrop(text: string): CropFinding {
     y1 = Math.max(y1, k.y + k.h);
   }
   const number = o.number && typeof o.number.text === "string" ? o.number.text.trim().slice(0, 12) : undefined;
-  return { box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0, ...(keep.length ? { keep } : {}) }, number: number || undefined, choices };
+  const extra = raw as { rotate?: unknown; advice?: unknown; advice_reason?: unknown };
+  const r = Math.round(Number(extra.rotate));
+  const rotate = Number.isFinite(r) && r >= 0 && r <= 3 ? r : 0;
+  const advice = extra.advice === "asis" || extra.advice === "redraw" ? extra.advice : undefined;
+  const adviceReason = typeof extra.advice_reason === "string" ? extra.advice_reason.trim().slice(0, 40) : undefined;
+  return {
+    box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0, ...(keep.length ? { keep } : {}) },
+    number: number || undefined,
+    choices,
+    rotate,
+    ...(advice ? { advice } : {}),
+    ...(adviceReason ? { adviceReason } : {}),
+  };
 }
 
 /** `{"box_2d":[…]}` → 0~1 상자. 모양이 이상하거나 너무 작으면 null(그때는 화면이 제 계산을 쓴다). */
@@ -250,4 +278,63 @@ export function parseAssess(text: string): { start: StartQuality; reason: string
 /** luna 사용량 → 원가 계산에 쓰는 모양. */
 export function lunaUsage(u: DetectUsage) {
   return { inputTokens: u.input, outputTokens: u.output, ...(u.cached ? { cachedInputTokens: u.cached } : {}) };
+}
+
+/** 그림 자리 찾기의 추론 강도. 재배포 없이 `OPENAI_FIGURES_EFFORT`(기본 low, `default` 면 안 보냄). */
+const FIGURES_EFFORT = (() => {
+  const v = (process.env.OPENAI_FIGURES_EFFORT ?? "low").trim();
+  return v === "" || v === "default" ? undefined : v;
+})();
+
+function figuresPrompt(blocks: string[]): string {
+  const list = blocks.map((b, i) => `B${i}: ${b.replace(/\s+/g, " ").slice(0, 90)}`).join("\n");
+  return `This image is ONE exam problem. Its text was already read by OCR and split into these blocks (reading order):
+${list || "(no text blocks)"}
+
+Find every VISUAL element that text cannot express: graphs, geometry figures, diagrams, maps, photos, drawn apparatus,
+and tables that are pictures (not plain text). Do NOT include ordinary text, condition boxes made of text, <보기> boxes of text,
+the problem number, or answer choices that are only text/formulas.
+
+For each visual element give:
+- "box_2d": [ymin, xmin, ymax, xmax] tight around it (include its own labels and captions), normalised to 0~1000 of the image.
+- "before": the index of the text block that comes RIGHT AFTER the visual in reading order (${blocks.length} if it comes after the last block).
+
+answer as JSON object only: {"figures":[{"box_2d":[...],"before":2}, ...]}  — {"figures":[]} if there is none.`;
+}
+
+export type FigurePlace = ProblemBox & { before: number };
+
+/**
+ * **글자로 인식한 문제의 그림 자리**(2026-10-09, "luna 를 써서 편해질 수 있으면 다 때려박자"). 그림을 오려 붙이고 문단 사이
+ * 제자리로 옮기는 일을 사람이 하던 것을 luna 가 한다 — 자리와 "어느 문단 앞에 오는지"를 짚는다.
+ */
+export async function placeFigures(
+  dataUrl: string,
+  blocks: string[],
+): Promise<{ figures: FigurePlace[]; model: string; usage?: DetectUsage }> {
+  let usage: DetectUsage | undefined;
+  const text = await callOpenAIVision(dataUrl, figuresPrompt(blocks), OPENAI_DETECT_MODEL, FIGURES_EFFORT, (u) => {
+    usage = u;
+  });
+  return { figures: parseFigures(text, blocks.length), model: OPENAI_DETECT_MODEL, usage };
+}
+
+export function parseFigures(text: string, blockCount: number): FigurePlace[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  } catch {
+    return [];
+  }
+  const list = (raw as { figures?: unknown } | null)?.figures;
+  if (!Array.isArray(list)) return [];
+  const out: FigurePlace[] = [];
+  for (const f of list.slice(0, 8)) {
+    const box = toBox((f as { box_2d?: unknown })?.box_2d);
+    // 너무 작은 것은 부스러기, 거의 전부를 덮는 것은 문제 전체를 짚은 것이다.
+    if (!box || box.w < 0.04 || box.h < 0.03 || box.w * box.h > 0.85) continue;
+    const b = Math.round(Number((f as { before?: unknown }).before));
+    out.push({ ...box, before: Number.isFinite(b) ? Math.max(0, Math.min(blockCount, b)) : blockCount });
+  }
+  return out;
 }

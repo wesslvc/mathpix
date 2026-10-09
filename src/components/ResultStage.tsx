@@ -7,7 +7,22 @@ import {
   renderMathTextWithInfo,
   toBoxRanges,
   type BoxOverride,
+  type RenderedBlock,
 } from "@/lib/renderMathText";
+import { runAiTask } from "@/lib/aiTask";
+import { enhanceContrast } from "@/lib/autoContrast";
+import { loadImage } from "@/lib/cropImage";
+import { cropRegionToDataUrl } from "@/lib/polygon";
+
+/** 블록마다 사람이 읽는 글(수식은 TeX 그대로) — luna 에게 "이 그림은 몇 번째 문단 앞" 을 물을 때 보낸다. */
+function blocksText(blocks: RenderedBlock[]): string[] {
+  const parser = new DOMParser();
+  return blocks.map((b) => {
+    const doc = parser.parseFromString(blockToHtml(b), "text/html");
+    doc.querySelectorAll(".katex-html").forEach((e) => e.remove());
+    return (doc.body.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 90);
+  });
+}
 import type { RecognizeResponse } from "@/lib/types";
 import { CARD_CAPTURE_OPTIONS, PROBLEM_CARD_WIDTH, waitForImages } from "@/lib/layout";
 import FigurePanel from "./FigurePanel";
@@ -258,6 +273,10 @@ export default function ResultStage({
    * 몇 번째 줄 앞이다(lines.length면 박스 안 맨 끝).
    */
   const anchors = useMemo(() => buildAnchors(blocks), [blocks]);
+  const blocksNowRef = useRef<RenderedBlock[]>([]);
+  const anchorsNowRef = useRef<{ block: number; line: number | null }[]>([]);
+  blocksNowRef.current = blocks;
+  anchorsNowRef.current = anchors;
 
   /**
    * 본문에 들어 있는 표들. 그림과 똑같이 끌어 옮길 수 있는 물건으로 다룬다 —
@@ -464,6 +483,90 @@ export default function ResultStage({
       cancelled = true;
     };
   }, [sourceImage, result.diagrams]);
+
+  /**
+   * **luna 가 그림을 오려 제자리에 붙인다**(2026-10-09, "luna 를 써서 편해질 수 있으면 다 때려박자"). 글자로 인식하면 Mathpix 가
+   * 잡은 도형은 늘 맨 아래에 붙고 놓친 그래프·지도는 사람이 오려내야 했다. luna 가 원본에서 그림 자리와 "어느 문단 앞에
+   * 오는지"를 짚으면 — Mathpix 가 잡은 것과 겹치면 그 그림을 그 자리로 옮기고, 못 잡은 것은 원본에서 오려 그 자리에 붙인다.
+   * 사람이 이미 옮긴 자리는 건드리지 않는다. 토큰은 안 든다(원가 몇 원, 장부에 적힌다).
+   */
+  const [lunaFig, setLunaFig] = useState<{ state: "running" | "done" | "error"; added: number; moved: number } | null>(null);
+  const [lunaAdded, setLunaAdded] = useState<Set<string>>(new Set());
+  const lunaFigKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sourceImage || isImageOnly || lunaFigKeyRef.current === problemKey) return;
+    lunaFigKeyRef.current = problemKey;
+    let cancelled = false;
+    let finished = false;
+    setLunaFig({ state: "running", added: 0, moved: 0 });
+    void (async () => {
+      try {
+        const { result: r } = await runAiTask<{
+          figures?: { x: number; y: number; w: number; h: number; before: number }[];
+        }>("figures", {
+          label: `그림 자리 · ${problemLabel}`,
+          images: [await enhanceContrast(sourceImage)],
+          params: { blocks: blocksText(blocksNowRef.current) },
+        });
+        if (cancelled) return;
+        const found = r?.figures ?? [];
+        const img = await loadImage(sourceImage);
+        if (cancelled) return;
+        const W = img.naturalWidth;
+        const H = img.naturalHeight;
+        const blocksNow = blocksNowRef.current;
+        const anchorsNow = anchorsNowRef.current;
+        const anchorFor = (before: number) => {
+          for (let k = before; k < blocksNow.length; k++) {
+            const i = anchorsNow.findIndex((a) => a.block === k && a.line === null);
+            if (i !== -1) return i;
+          }
+          return anchorsNow.length - 1;
+        };
+        const pos: Record<string, number> = {};
+        const added: ManualFigure[] = [];
+        let moved = 0;
+        for (const f of found) {
+          // Mathpix 가 이미 잡은 그림이면(겹침이 작은 쪽의 절반 넘게) 그 그림을 옮기기만 한다.
+          const hit = (result.diagrams ?? []).find((d) => {
+            const ix = Math.max(0, Math.min(d.left + d.width, (f.x + f.w) * W) - Math.max(d.left, f.x * W));
+            const iy = Math.max(0, Math.min(d.top + d.height, (f.y + f.h) * H) - Math.max(d.top, f.y * H));
+            return ix * iy > 0.5 * Math.min(d.width * d.height, f.w * W * f.h * H);
+          });
+          if (hit) {
+            pos[hit.id] = anchorFor(f.before);
+            moved++;
+            continue;
+          }
+          const pad = 0.01;
+          const x = Math.max(0, f.x - pad);
+          const y = Math.max(0, f.y - pad);
+          const crop = cropRegionToDataUrl(img, { x, y, w: Math.min(1, f.x + f.w + pad) - x, h: Math.min(1, f.y + f.h + pad) - y });
+          const id = crypto.randomUUID();
+          added.push({ id, svg: await rasterToSvg(crop) });
+          pos[id] = anchorFor(f.before);
+        }
+        if (cancelled) return;
+        if (added.length) {
+          setManualDiagramSvgs((prev) => [...prev, ...added]);
+          setLunaAdded((prev) => new Set([...prev, ...added.map((a) => a.id)]));
+        }
+        // 사람이 이미 옮겨 둔 자리가 이긴다.
+        if (Object.keys(pos).length) setFigurePos((prev) => ({ ...pos, ...prev }));
+        setLunaFig({ state: "done", added: added.length, moved });
+        finished = true;
+      } catch {
+        if (!cancelled) setLunaFig({ state: "error", added: 0, moved: 0 });
+        finished = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      // 끝나기 전에 걷혔으면(개발 모드의 두 번 실행 등) 다음 실행이 다시 하게 비워 둔다.
+      if (!finished) lunaFigKeyRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [problemKey, sourceImage, isImageOnly]);
 
   /** 이 문제에서 아직 처리되지 않은 AI 작업 수. 게이지에 쓴다. */
   const pendingJobCount = jobs.filter(
@@ -747,6 +850,17 @@ export default function ResultStage({
           <p className="text-xs font-medium text-slate-500">
             그림·표 크기·위치
           </p>
+          {lunaFig && (
+            <p className="text-[11px] text-slate-500">
+              {lunaFig.state === "running"
+                ? "luna 가 그림 자리를 찾는 중… 찾으면 원본에서 오려 제자리에 붙여요."
+                : lunaFig.state === "error"
+                  ? "luna 가 그림 자리를 못 찾았어요 — 필요하면 아래에서 직접 오려 붙이세요."
+                  : lunaFig.added + lunaFig.moved > 0
+                    ? `luna 가 그림 ${lunaFig.added + lunaFig.moved}개를 제자리에 놓았어요${lunaFig.added ? ` (새로 오려 붙인 것 ${lunaFig.added}개)` : ""}. 틀리면 끌어 옮기거나 지우세요.`
+                    : "luna 가 본 그림은 없어요."}
+            </p>
+          )}
           <p className="text-[11px] text-slate-400">
             위 미리보기에서 그림이나 표를 손가락(또는 마우스)으로 잡아 끌면
             원하는 문단 사이로 옮길 수 있어요. 파란 선이 들어갈 자리입니다.
@@ -796,6 +910,7 @@ export default function ResultStage({
               key={d.id}
               label={
                 (isImageOnly ? "문제 이미지" : `그림 ${idx + 1}`) +
+                (lunaAdded.has(d.id) ? " · luna 가 오려 붙임" : "") +
                 (jobOf(d.id)?.status === "running"
                   ? " · AI가 그리는 중…"
                   : jobOf(d.id)?.status === "pending"
