@@ -59,6 +59,7 @@ type Res = {
   ms?: number;
   refineMs?: number;
   refined?: number;
+  refineKrw?: number;
   error?: string;
   raw?: DetectedProblem[];
   final?: DetectedProblem[];
@@ -102,6 +103,7 @@ export default function ComparePageCropPage() {
   const [orQuery, setOrQuery] = useState("");
   const [orFreeOnly, setOrFreeOnly] = useState(false);
   const [refine, setRefine] = useState(true);
+  const [refineEffort, setRefineEffort] = useState<"low" | "medium" | "high">("medium");
   const [results, setResults] = useState<Record<string, Res>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [ran, setRan] = useState<Cand[]>([]);
@@ -200,7 +202,7 @@ export default function ComparePageCropPage() {
   /** 결과 전부(모델·지면별 상태·시간·오류·토큰·원가·찾은 박스)를 글 한 덩어리로 — 복사하거나 파일로 받는다. */
   function buildReport(): string {
     const f1 = (n: number) => (Math.round(n * 1000) / 10).toFixed(1);
-    const out: string[] = [`# 지면 자르기 비교 ${new Date().toLocaleString("ko-KR")}`, `다시 맞추기: ${refine ? "켬" : "끔"}`, ""];
+    const out: string[] = [`# 지면 자르기 비교 ${new Date().toLocaleString("ko-KR")}`, `다시 맞추기: ${refine ? `켬(${refineEffort})` : "끔"}`, ""];
     for (const p of pages) {
       out.push(`## 지면: ${p.name} (${p.w}×${p.h})`);
       for (const c of ran.filter((x) => !removed.has(x.key))) {
@@ -213,7 +215,7 @@ export default function ComparePageCropPage() {
         }
         out.push(
           head,
-          `- 상태: ${r.state} · 찾기 ${r.ms != null ? (r.ms / 1000).toFixed(1) : "?"}s${r.refineMs != null ? ` · 다시 맞추기 ${(r.refineMs / 1000).toFixed(1)}s(${r.refined ?? 0}곳)` : ""}`,
+          `- 상태: ${r.state} · 찾기 ${r.ms != null ? (r.ms / 1000).toFixed(1) : "?"}s${r.refineMs != null ? ` · 다시 맞추기 ${(r.refineMs / 1000).toFixed(1)}s(${r.refined ?? 0}곳${r.refineKrw ? `, ${r.refineKrw.toFixed(2)}원` : ""})` : ""}`,
           `- 토큰: 입력 ${r.usage?.input ?? "?"} · 출력 ${r.usage?.output ?? "?"} · 원가 ${r.estKrw != null ? `${r.estKrw.toFixed(2)}원` : "단가 모름"}`,
           `- 찾은 문제 ${r.raw?.length ?? 0}개 (모델 자리, 지면 대비 % — x,y,w,h):`,
         );
@@ -278,12 +280,14 @@ export default function ComparePageCropPage() {
       let found = raw;
       let refineMs: number | undefined;
       let refined: number | undefined;
+      let refineKrw: number | undefined;
       if (withRefine && raw.length) {
         set({ state: "refining", ms, raw, usage: j.usage, estKrw: j.estKrw });
         const t1 = performance.now();
-        const r = await refineProblems(raw, cutRefineWindows(img, src.width, src.height, raw), `비교 ${nameOf(c)}`);
+        const r = await refineProblems(raw, cutRefineWindows(img, src.width, src.height, raw), `비교 ${nameOf(c)}`, refineEffort);
         refineMs = Math.round(performance.now() - t1);
         refined = r.refined;
+        refineKrw = r.krw;
         found = r.problems;
       }
       const final = snapPageProblems(img, src.width, src.height, found).problems;
@@ -294,7 +298,7 @@ export default function ComparePageCropPage() {
           no: pr.no,
         })),
       );
-      set({ state: "done", ms, refineMs, refined, raw, final, pieces, usage: j.usage, estKrw: j.estKrw });
+      set({ state: "done", ms, refineMs, refined, refineKrw, raw, final, pieces, usage: j.usage, estKrw: j.estKrw });
     } catch (err) {
       set({ state: "error", ms: Math.round(performance.now() - t0), error: err instanceof Error ? err.message : String(err) });
     }
@@ -334,6 +338,7 @@ export default function ComparePageCropPage() {
       noNumber: done.reduce((a, r) => a + (r.final?.filter((x) => !x.no).length ?? 0), 0),
       refined: done.reduce((a, r) => a + (r.refined ?? 0), 0),
       krw: done.reduce((a, r) => a + (r.estKrw ?? 0), 0),
+      refineKrw: done.reduce((a, r) => a + (r.refineKrw ?? 0), 0),
       krwKnown: done.some((r) => r.estKrw != null),
     };
   });
@@ -448,8 +453,24 @@ export default function ComparePageCropPage() {
         </div>
         <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={refine} onChange={(e) => setRefine(e.target.checked)} className="h-4 w-4 accent-blue-600" />
-          문제마다 확대해 다시 맞추기(운영과 같이 luna medium — 문제당 1원 안팎)
+          문제마다 확대해 다시 맞추기(luna, 문제 하나당 한 번씩 — 시간·비용이 가장 많이 드는 단계)
         </label>
+        {refine && (
+          <div className="flex flex-wrap items-center gap-2 pl-6 text-xs text-slate-600">
+            추론 강도
+            {(["low", "medium", "high"] as const).map((e) => (
+              <button
+                key={e}
+                type="button"
+                onClick={() => setRefineEffort(e)}
+                className={cn("rounded-full border px-2.5 py-0.5", refineEffort === e ? "border-blue-500 bg-blue-500 text-white" : "border-slate-300 hover:bg-slate-50")}
+              >
+                {e}
+              </button>
+            ))}
+            <span className="text-slate-400">운영 기본은 medium. 낮출수록 빠르고 싸요 — 결과 카드·요약 표의 "다시 맞추기 원가·시간"으로 견주세요.</span>
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <Button type="button" variant="primary" disabled={!pages.length || !chosen.length || busy !== null} onClick={() => void runAll()}>
             {pages.length}장 × {chosen.length}개 모델 자르기
@@ -483,6 +504,7 @@ export default function ComparePageCropPage() {
                 <th>다시 맞춘 곳</th>
                 <th>실패</th>
                 <th>찾기 원가</th>
+                <th>다시 맞추기 원가</th>
               </tr>
             </thead>
             <tbody>
@@ -497,6 +519,7 @@ export default function ComparePageCropPage() {
                   <td>{s.refined}</td>
                   <td className={s.errors ? "text-red-600" : ""}>{s.errors}</td>
                   <td>{s.krwKnown ? `${s.krw.toFixed(1)}원` : "단가 모름"}</td>
+                  <td>{s.refineKrw > 0 ? `${s.refineKrw.toFixed(1)}원` : "–"}</td>
                 </tr>
               ))}
             </tbody>
@@ -575,7 +598,7 @@ export default function ComparePageCropPage() {
                       ) : (
                         <>
                           찾기 <b>{((r.ms ?? 0) / 1000).toFixed(1)}초</b>
-                          {r.refineMs != null && ` · 다시 맞추기 ${(r.refineMs / 1000).toFixed(1)}초(${r.refined}곳)`}
+                          {r.refineMs != null && ` · 다시 맞추기 ${(r.refineMs / 1000).toFixed(1)}초(${r.refined}곳${r.refineKrw ? `, ${r.refineKrw.toFixed(1)}원` : ""})`}
                           {` · 문제 ${r.final?.length ?? 0}개`}
                           {r.final?.some((x) => x.boxes.length > 1) && ` · 합침 ${r.final.filter((x) => x.boxes.length > 1).length}`}
                           <br />

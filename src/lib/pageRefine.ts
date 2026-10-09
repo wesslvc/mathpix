@@ -103,18 +103,22 @@ export async function refineProblems(
   problems: DetectedProblem[],
   windows: RefineWindow[],
   label: string,
-): Promise<{ problems: DetectedProblem[]; refined: number }> {
+  /** 다시 맞추기 추론 강도(low|medium|high). 없으면 서버 기본(`OPENAI_REFINE_EFFORT`, medium). */
+  effort?: string,
+): Promise<{ problems: DetectedProblem[]; refined: number; krw: number }> {
   const next = problems.map((p) => ({ ...p, boxes: [...p.boxes] }));
   let refined = 0;
+  let krw = 0;
   await Promise.all(
     windows.map(async (w) => {
       try {
         const image = await enhanceContrast(w.image);
-        const { result } = await runAiTask<{ box?: KeepBox | null; number?: string }>("crop", {
+        const { result } = await runAiTask<{ box?: KeepBox | null; number?: string; estKrw?: number }>("crop", {
           label: `${label} · ${w.no ? `${w.no}번` : `${w.index + 1}번째`} 다시 맞추기`,
           images: [image],
-          params: { target: { box: w.hint, ...(w.no ? { number: w.no } : {}) } },
+          params: { target: { box: w.hint, ...(w.no ? { number: w.no } : {}) }, ...(effort ? { effort } : {}) },
         });
+        if (typeof result.estKrw === "number") krw += result.estKrw;
         const r = result.box;
         if (!r) return;
         const orig = problems[w.index].boxes[0];
@@ -133,7 +137,7 @@ export async function refineProblems(
       }
     }),
   );
-  return { problems: next, refined };
+  return { problems: next, refined, krw };
 }
 
 /**

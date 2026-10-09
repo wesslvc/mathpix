@@ -107,6 +107,8 @@ export async function cropOneProblem(
    * 모른다). `effort` 는 OpenAI 만.
    */
   only?: { engine: "gemini" | "openai"; model: string; effort?: string },
+  /** 표적이 있는 다시 맞추기에서만: 이 강도로(low|medium|high). 없으면 `OPENAI_REFINE_EFFORT`. */
+  refineEffort?: string,
 ): Promise<CropFinding & { model: string; usage?: DetectUsage; retried: boolean }> {
   const total: DetectUsage = { input: 0, cached: 0, output: 0 };
   const add = (u: DetectUsage) => {
@@ -115,7 +117,7 @@ export async function cropOneProblem(
     total.output += u.output;
   };
   const prompt = target ? `${CROP_PROMPT}${targetNote(target)}` : CROP_PROMPT;
-  const effort = target ? REFINE_EFFORT : CROP_EFFORT;
+  const effort = target ? (refineEffort && /^(low|medium|high)$/.test(refineEffort) ? refineEffort : REFINE_EFFORT) : CROP_EFFORT;
   // 자동 자르기는 Gemini 가 먼저 한다(`CROP_GEMINI_MODEL`). 못 하면(자리 없음·오류) luna 로 — 어느 쪽이 했는지 `model` 로 돌려준다.
   let model = OPENAI_DETECT_MODEL;
   const ask = async (p: string) => {

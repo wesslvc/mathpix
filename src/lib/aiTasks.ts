@@ -265,6 +265,8 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         const { box, model, usage, number, choices, retried, rotate, advice, adviceReason } = await cropOneProblem(
           ctx.images[0],
           readTarget(ctx.params.target),
+          undefined,
+          typeof ctx.params.effort === "string" ? ctx.params.effort : undefined,
         );
         // 단가를 아는 모델(luna)만 원가를 적는다 — Gemini 단가는 아직 표에 없다(지어내지 않는다).
         const estKrw = usage ? gradingEstKrw(lunaUsage(usage), model) : undefined;
@@ -274,7 +276,9 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         const note = !box
           ? `${model} · 문제 자리를 못 찾았어요`
           : `${model} · ${number ? `번호 ${number}` : "번호 못 봄"} · 선지 ${choices}개${retried ? " (다시 봄)" : ""}${rotate ? ` · ${rotate * 90}° 돌림` : ""}${advice ? ` · 추천 ${advice === "asis" ? "원본 그대로" : "AI로 다시 그리기"}` : ""}`;
-        return { ok: true, result: { box, model, number, choices, rotate, advice, adviceReason }, model, estKrw, note };
+        // 비교 화면이 다시 맞추기 비용을 합산하려고 금액을 결과에 싣는다 — 금액은 무제한·BYOK 에게만(다른 화면과 같은 규칙).
+        const shownKrw = (ctx.unlimited || ctx.byok) && estKrw ? { estKrw: Math.round(estKrw * 100) / 100 } : {};
+        return { ok: true, result: { box, model, number, choices, rotate, advice, adviceReason, ...shownKrw }, model, estKrw, note };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "자동 자르기에 실패했습니다.") };
       }
