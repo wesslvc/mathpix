@@ -263,8 +263,8 @@ function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
  * `separateOverlaps` 가 가른다 — 잘린 글자는 못 되살리니 바깥으로 틀리는 편이 낫다. 재배포 없이 `PAGE_BOX_PAD`(0~0.05).
  */
 const PAGE_BOX_PAD = (() => {
-  const v = Number(process.env.PAGE_BOX_PAD ?? "0.012");
-  return Number.isFinite(v) && v >= 0 && v <= 0.05 ? v : 0.012;
+  const v = Number(process.env.PAGE_BOX_PAD ?? "0");
+  return Number.isFinite(v) && v >= 0 && v <= 0.05 ? v : 0;
 })();
 
 function padBoxes(list: DetectedProblem[]): DetectedProblem[] {

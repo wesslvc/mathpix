@@ -108,6 +108,8 @@ export default function ComparePageCropPage() {
   const [orQuery, setOrQuery] = useState("");
   const [orFreeOnly, setOrFreeOnly] = useState(false);
   const [refine, setRefine] = useState(false);
+  /** 글자에 맞춰 다듬기(`snapPageProblems`). 끄면 최종 = 모델 박스 그대로(서버 넓힘만). */
+  const [snap, setSnap] = useState(false);
   const [refineEffort, setRefineEffort] = useState<"low" | "medium" | "high">("medium");
   const [results, setResults] = useState<Record<string, Res>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -340,7 +342,7 @@ export default function ComparePageCropPage() {
         refineKrw = r.krw;
         found = r.problems;
       }
-      const final = snapPageProblems(img, src.width, src.height, found).problems;
+      const final = snap ? snapPageProblems(img, src.width, src.height, found).problems : found;
       const pieces = await Promise.all(
         final.map(async (pr) => ({
           crop: await stitchVertically(pr.boxes.map((b) => cropRegionToDataUrl(img, b, PAD, NO_CROP_LIMIT))),
@@ -501,6 +503,10 @@ export default function ComparePageCropPage() {
             </div>
           )}
         </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={snap} onChange={(e) => setSnap(e.target.checked)} className="h-4 w-4 accent-blue-600" />
+          글자에 맞춰 다듬기(끄면 최종 = 모델 박스 그대로)
+        </label>
         <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={refine} onChange={(e) => setRefine(e.target.checked)} className="h-4 w-4 accent-blue-600" />
           문제마다 확대해 다시 맞추기(luna, 문제 하나당 한 번씩 — 시간·비용이 가장 많이 드는 단계)
