@@ -156,9 +156,9 @@ export function snapPageProblems(
 /**
  * 모델이 준 박스(서버가 사방 `MODEL_PAD` 넓힌 것) 안쪽 = 모델이 실제로 짚은 자리는 **다듬기가 줄일 수 없다**(2026-10-09, 사용자 정답과 견주니
  * 다시 맞추기를 끄면 다듬기가 14번 위쪽을 6.2%p 잘라 내 모델 원자리(0.70%p)보다 나빠졌다 — 최종 1.34%p). 다듬기는 넓히는 쪽으로만 쓴다.
- * `detectProblems.ts` 의 `PAGE_BOX_PAD`(0.012)와 같은 값이어야 한다.
+ * **보호 폭 0** = 서버가 넓힌 박스 전체를 못 줄인다(2026-10-09: 1.2%p 안쪽까지 줄이게 두면 하이쿠 최종이 모델 원자리 0.51 보다 나쁜 1.07%p 였다).
  */
-const MODEL_PAD = 0.012;
+const MODEL_PAD = 0;
 function protectModelBox(snapped: ProblemBox, orig: ProblemBox): ProblemBox {
   const px0 = Math.min(1, orig.x + MODEL_PAD);
   const py0 = Math.min(1, orig.y + MODEL_PAD);
