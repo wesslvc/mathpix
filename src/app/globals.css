@@ -439,6 +439,8 @@ body {
 
 .problem-figure > svg,
 .problem-figure > img {
+  /* 브라우저 기본 "그림 끌어 놓기"가 우리 끌기를 가로채지 않게. */
+  -webkit-user-drag: none;
   display: block;
   width: 100%;
   height: auto;

@@ -76,6 +76,14 @@ export default function DraggableCard({
     [blocks, figures],
   );
 
+  /**
+   * `{ __html }` 객체를 **한 번만** 만든다. 이 앱의 React(Next 14 앱 라우터에 실린 것)는 `dangerouslySetInnerHTML`
+   * 을 글자가 아니라 **객체가 바뀌었는지**로 견준다 — 렌더마다 새 객체를 주면 글자가 같아도 본문 innerHTML 을 통째로
+   * 다시 넣는다. 그래서 그림을 누르기만 해도(고른 것 표시로 다시 그림) 카드 전체가 갈아 끼워지고 그림을 다시 풀었다
+   * (실제 브라우저로 확인 — pointerdown 한 번에 본문 교체 2번). 위 주석의 "누르자마자 자식이 교체된다"도 이것이었다.
+   */
+  const cardHtmlProp = useMemo(() => ({ __html: cardHtml }), [cardHtml]);
+
   const figureOf = (id: string) => figures.find((f) => f.id === id);
 
   // ── 손으로 끌어 옮기기 ────────────────────────────────────────────────
@@ -133,8 +141,23 @@ export default function DraggableCard({
       }
     | null
   >(null);
-  /** 드래그 중 "여기로 들어갑니다" 선의 위치(px). null이면 드래그 중이 아니다. */
-  const [dropLineTop, setDropLineTop] = useState<number | null>(null);
+  /**
+   * **끄는 동안에는 React 를 다시 그리지 않는다**(2026-10-09, 사용자 — "그림 덧붙이고 움직일 때 뚝뚝 끊긴다").
+   * 예전에는 pointermove 마다 안내선·고른 상자를 state 로 바꿔 컴포넌트 전체가 다시 그려지고, 그때마다 자리 전부의
+   * getBoundingClientRect 를 다시 재서(강제 레이아웃) 한 번 움직일 때 레이아웃이 여러 번 돌았다. 지금은
+   *  · 안내선·고른 상자를 ref 로 잡고 style 만 바꾸고,
+   *  · 자리 높이는 끌기 시작할 때 한 번만 재 두고(`anchorCacheRef`, 카드 기준 좌표라 스크롤해도 맞다),
+   *  · pointermove 는 화면 한 프레임에 한 번만 처리한다(`requestAnimationFrame`).
+   */
+  const dropLineRef = useRef<HTMLDivElement>(null);
+  const selBoxRef = useRef<HTMLDivElement>(null);
+  const anchorCacheRef = useRef<{ slot: number; y: number }[] | null>(null);
+  function showDropLine(top: number | null) {
+    const el = dropLineRef.current;
+    if (!el) return;
+    el.style.display = top === null ? "none" : "block";
+    if (top !== null) el.style.top = `${top}px`;
+  }
 
   /**
    * 그림·표가 아닌 자식들. 문서 순서가 곧 구조 순서다.
@@ -178,10 +201,21 @@ export default function DraggableCard({
     return out;
   }
 
+  /** 자리 높이를 카드 좌표(축소 배율을 되돌린 값)로. 끌기 시작할 때 한 번만 잰다. */
+  function cardAnchorPoints(): { slot: number; y: number }[] {
+    const wrap = cardWrapRef.current;
+    if (!wrap) return [];
+    const top = wrap.getBoundingClientRect().top;
+    const s = scaleRef.current || 1;
+    return anchorPoints().map((p) => ({ slot: p.slot, y: (p.y - top) / s }));
+  }
+
   /** 손을 놓은 높이에서 가장 가까운 자리. */
   function slotAtY(clientY: number): number {
-    const points = anchorPoints();
-    if (points.length === 0) return 0;
+    const wrap = cardWrapRef.current;
+    const points = anchorCacheRef.current ?? cardAnchorPoints();
+    if (points.length === 0 || !wrap) return 0;
+    clientY = (clientY - wrap.getBoundingClientRect().top) / (scaleRef.current || 1);
     let best = points[0];
     for (const p of points) {
       if (Math.abs(p.y - clientY) < Math.abs(best.y - clientY)) best = p;
@@ -190,14 +224,8 @@ export default function DraggableCard({
   }
 
   function dropLineFor(slot: number): number | null {
-    const wrap = cardWrapRef.current;
-    if (!wrap) return null;
-    const point = anchorPoints().find((p) => p.slot === slot);
-    if (!point) return null;
-    // getBoundingClientRect는 화면 좌표(축소된 값)라, 안내선을 놓을 카드
-    // 좌표계로 되돌리려면 배율로 나눠야 한다.
-    const s = scaleRef.current || 1;
-    return (point.y - wrap.getBoundingClientRect().top) / s;
+    const point = (anchorCacheRef.current ?? cardAnchorPoints()).find((p) => p.slot === slot);
+    return point ? point.y : null;
   }
 
   /** 지금 화면에 있는 그 요소. 카드가 다시 그려져도 id로 찾으면 늘 최신이다. */
@@ -225,7 +253,17 @@ export default function DraggableCard({
     const s = scaleRef.current || 1;
     const w = wrap.getBoundingClientRect();
     const r = el.getBoundingClientRect();
-    setSelBox({ left: (r.left - w.left) / s, top: (r.top - w.top) / s, width: r.width / s, height: r.height / s });
+    const box = { left: (r.left - w.left) / s, top: (r.top - w.top) / s, width: r.width / s, height: r.height / s };
+    // 끄는 중이면 state 를 안 건드리고 상자 style 만 바꾼다(다시 그리기 없음).
+    const sel = selBoxRef.current;
+    if (dragRef.current && sel) {
+      sel.style.left = `${box.left}px`;
+      sel.style.top = `${box.top}px`;
+      sel.style.width = `${box.width}px`;
+      sel.style.height = `${box.height}px`;
+      return;
+    }
+    setSelBox(box);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const selectedRef = useRef<string | null>(null);
@@ -288,7 +326,8 @@ export default function DraggableCard({
       slot,
     };
     setDragging(true);
-    setDropLineTop(dropLineFor(slot));
+    anchorCacheRef.current = cardAnchorPoints();
+    showDropLine(dropLineFor(slot));
     startListening();
   }
 
@@ -339,7 +378,6 @@ export default function DraggableCard({
   function handleDragMove(e: PointerEvent) {
     const drag = dragRef.current;
     if (!drag) return;
-    e.preventDefault();
     const s = scaleRef.current || 1;
     const dx = (e.clientX - drag.startX) / s;
     const dy = (e.clientY - ("startY" in drag ? drag.startY : 0)) / s;
@@ -418,9 +456,12 @@ export default function DraggableCard({
         : `calc(${(100 - scale) / 2}% + ${offsetX}px)`;
     }
 
-    // 위아래: 놓을 자리를 정하고 안내선을 옮긴다.
-    drag.slot = slotAtY(e.clientY);
-    setDropLineTop(dropLineFor(drag.slot));
+    // 위아래: 놓을 자리를 정하고 안내선을 옮긴다(자리가 바뀔 때만).
+    const slot = slotAtY(e.clientY);
+    if (slot !== drag.slot) {
+      drag.slot = slot;
+      showDropLine(dropLineFor(slot));
+    }
     measureSel();
   }
 
@@ -429,10 +470,20 @@ export default function DraggableCard({
     window.removeEventListener("pointermove", winMove);
     window.removeEventListener("pointerup", winUp);
     window.removeEventListener("pointercancel", winUp);
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    // 아직 그리지 못한 마지막 움직임을 반영하고 끝낸다(손을 뗀 자리와 저장되는 자리가 같게).
+    const pending = pendingMoveRef.current;
+    pendingMoveRef.current = null;
+    if (drag && pending) handleDragMove(pending);
     if (!drag) return;
     dragRef.current = null;
+    anchorCacheRef.current = null;
     setDragging(false);
-    setDropLineTop(null);
+    showDropLine(null);
+    measureSel();
 
     if (drag.kind === "overlayMove") {
       onOverlayChange?.(drag.id, drag.next);
@@ -458,11 +509,25 @@ export default function DraggableCard({
   useEffect(() => {
     handlers.current = { move: handleDragMove, end: handleDragEnd };
   });
-  const winMove = useCallback((e: PointerEvent) => handlers.current.move(e), []);
+  const rafRef = useRef<number | null>(null);
+  const pendingMoveRef = useRef<PointerEvent | null>(null);
+  const winMove = useCallback((e: PointerEvent) => {
+    // 스크롤을 막는 건 그 자리에서(나중에 하면 늦다). 실제 처리는 한 프레임에 한 번.
+    if (e.cancelable) e.preventDefault();
+    pendingMoveRef.current = e;
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const ev = pendingMoveRef.current;
+      pendingMoveRef.current = null;
+      if (ev) handlers.current.move(ev);
+    });
+  }, []);
   const winUp = useCallback((e: PointerEvent) => handlers.current.end(e), []);
   // 화면을 떠날 때 붙여둔 게 남지 않게 한다.
   useEffect(
     () => () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       window.removeEventListener("pointermove", winMove);
       window.removeEventListener("pointerup", winUp);
       window.removeEventListener("pointercancel", winUp);
@@ -521,21 +586,21 @@ export default function DraggableCard({
               onPointerDown={handlePointerDown}
               // 그림이 늦게 열리면 상자 높이가 바뀐다 — 손잡이를 다시 맞춘다.
               onLoadCapture={() => editMode && measureSel()}
-              dangerouslySetInnerHTML={{ __html: cardHtml }}
+              dangerouslySetInnerHTML={cardHtmlProp}
             />
           </div>
 
           {/* 놓으면 여기로 들어간다는 안내선. */}
-          {dropLineTop !== null && (
-            <div
-              className="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded bg-blue-500"
-              style={{ top: dropLineTop }}
-            />
-          )}
+          <div
+            ref={dropLineRef}
+            className="pointer-events-none absolute left-2 right-2 z-10 h-0.5 rounded bg-blue-500"
+            style={{ display: "none" }}
+          />
 
           {/* 고른 그림의 테두리와 크기 손잡이(사진 자를 때처럼 네 귀퉁이). */}
           {editMode && selBox && (
             <div
+              ref={selBoxRef}
               className="pointer-events-none absolute z-20 border-2 border-blue-500"
               style={{
                 left: selBox.left,
