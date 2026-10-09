@@ -38,13 +38,16 @@ const PRESETS: Cand[] = [
   { key: "lunaH", engine: "openai", model: LUNA, effort: "high" },
   // OpenRouter — 이름·단가는 비교 화면의 "오픈라우터 이미지 모델 불러오기" 목록에서 그대로 옮겼다(2026-10-09, $ 입력/출력 100만 토큰당).
   { key: "or25l", engine: "openrouter", model: "google/gemini-2.5-flash-lite" }, // $0.10/$0.40
-  { key: "or31l", engine: "openrouter", model: "google/gemini-3.1-flash-lite" }, // $0.25/$1.50
-  { key: "orQ32", engine: "openrouter", model: "qwen/qwen3-vl-32b-instruct" }, // $0.10/$0.42
+  { key: "orQ32", engine: "openrouter", model: "qwen/qwen3-vl-32b-instruct" }, // $0.104/$0.416
+  { key: "orQ30", engine: "openrouter", model: "qwen/qwen3-vl-30b-a3b-instruct" }, // $0.15/$0.60
   { key: "orQ38", engine: "openrouter", model: "qwen/qwen3.8-flash" }, // $0.15/$0.47
-  { key: "orG31", engine: "openrouter", model: "google/gemma-4-31b-it" }, // $0.09/$0.34
-  { key: "orGf", engine: "openrouter", model: "google/gemma-4-31b-it:free" },
+  { key: "orSeed", engine: "openrouter", model: "bytedance-seed/seed-1.6-flash" }, // $0.075/$0.30
+  { key: "orLing", engine: "openrouter", model: "inclusionai/ling-3.0-flash-vl" }, // $0.021/$0.062
+  { key: "orG26", engine: "openrouter", model: "google/gemma-4-26b-a4b-it" }, // $0.09/$0.30
+  { key: "orScout", engine: "openrouter", model: "meta-llama/llama-4-scout" }, // $0.10/$0.30
+  { key: "or31l", engine: "openrouter", model: "google/gemini-3.1-flash-lite" }, // $0.25/$1.50
 ];
-const DEFAULT_ON = new Set(["gfll", "lunaM", "or25l", "orQ32"]);
+const DEFAULT_ON = new Set(["gfll", "lunaM", "or25l", "orQ32", "orSeed", "orLing"]);
 const PAD = 0.008;
 const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
