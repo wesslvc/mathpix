@@ -1,6 +1,7 @@
 "use client";
 
 import { SolChat } from "@/components/SolChat";
+import { ModelBadge, withModelLogo, type ModelKey } from "@/components/ModelBadge";
 import { useState, useSyncExternalStore } from "react";
 import { useFigureJobs, type FigureJob, type OfferDiffs } from "./FigureJobsProvider";
 import {
@@ -15,21 +16,25 @@ import {
  * **작업을 범주로 묶어 보인다**(2026-10-04, 사용자 — "지금은 작업이 다 같이 섞여 보이잖아, 범주화시켜 줘"). 누가 무엇을 하는지로
  * 가른다: 그림을 그리는 일(돈·시간이 가장 많이 든다) · 지문 글자 옮기기 · sol 이 하는 일 · Mathpix 글자 인식 · luna 가 하는 빠른 일.
  */
-type Category = "draw" | "passage" | "sol" | "mathpix" | "luna";
-const CATEGORY_ORDER: Category[] = ["draw", "passage", "sol", "mathpix", "luna"];
+type Category = "draw" | "passage" | "sol" | "mathpix" | "haiku" | "luna";
+const CATEGORY_ORDER: Category[] = ["draw", "passage", "sol", "mathpix", "haiku", "luna"];
+/** 범주마다 일하는 모델(로고). Mathpix 는 로고가 없어 글자만. */
+const CATEGORY_MODEL: Partial<Record<Category, ModelKey>> = { draw: "sunburst", passage: "sol", sol: "sol", haiku: "haiku", luna: "luna" };
 const CATEGORY_LABEL: Record<Category, string> = {
   draw: "AI 그리기",
   passage: "지문 글자로 옮기기",
   sol: "sol 작업 (조판·대화·지문)",
   mathpix: "Mathpix 글자 인식",
-  luna: "luna 빠른 작업 (자르기·자리 찾기·채점·제목)",
+  haiku: "지면 자르기 (문제 자리 찾기)",
+  luna: "빠른 작업 (자르기·채점·제목·번호)",
 };
-const LUNA_TASKS = new Set(["crop", "figures", "numberBox", "detect", "title", "grade", "answerKey"]);
+const LUNA_TASKS = new Set(["crop", "figures", "numberBox", "title", "grade", "answerKey"]);
 function categoryOf(j: FigureJob): Category {
   if (j.mode === "passage") return "passage";
   if (j.mode !== "task") return "draw";
   const t = j.stage ?? "";
   if (t === "ocr") return "mathpix";
+  if (t === "detect") return "haiku";
   if (LUNA_TASKS.has(t)) return "luna";
   return "sol";
 }
@@ -37,7 +42,7 @@ const LOCAL_RUNNING: Record<string, string> = {
   crop: "luna 가 문제 자리를 자르는 중",
   figures: "luna 가 그림 자리를 찾는 중",
   numberBox: "luna 가 문제 번호 자리를 찾는 중",
-  detect: "luna 가 문제·지문 자리를 찾는 중",
+  detect: "haiku 가 문제 자리를 찾는 중",
   title: "luna 가 지문 제목을 짓는 중",
   grade: "luna 가 채점하는 중",
   answerKey: "luna 가 답지를 읽는 중",
@@ -60,7 +65,7 @@ const STATUS_TEXT = {
  */
 const TASK_RUNNING: Record<string, string> = {
   ocr: "Mathpix 가 글자를 읽는 중",
-  detect: "luna 가 문제·지문 자리를 찾는 중",
+  detect: "haiku 가 문제 자리를 찾는 중",
   crop: "luna 가 문제 자리를 자르는 중",
   figures: "luna 가 그림 자리를 찾는 중",
   numberBox: "luna 가 문제 번호 자리를 찾는 중",
@@ -406,7 +411,7 @@ export default function FigureJobsPanel() {
           <ul className="max-h-80 overflow-auto border-t border-slate-200">
             {CATEGORY_ORDER.map((cat) => {
               const list = jobs.filter((j) => categoryOf(j) === cat);
-              const locals = cat === "luna" ? localTasks : [];
+              const locals = localTasks.filter((t) => (t.task === "detect" ? "haiku" : "luna") === cat);
               const n = list.length + locals.length;
               if (n === 0) return null;
               const running =
@@ -435,8 +440,9 @@ export default function FigureJobsPanel() {
                     ) : (
                       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                     )}
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-600">
-                      {CATEGORY_LABEL[cat]}
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-[11px] font-semibold text-slate-600">
+                      {CATEGORY_MODEL[cat] && <ModelBadge model={CATEGORY_MODEL[cat]!} />}
+                      <span className="truncate">{CATEGORY_LABEL[cat]}</span>
                     </span>
                     <span className="shrink-0 text-[10px] text-slate-400">
                       {running > 0 ? `${running}개 진행 · ` : ""}
@@ -464,7 +470,7 @@ export default function FigureJobsPanel() {
                               : "text-slate-500"
                         } ${j.status === "running" ? "animate-soft-pulse" : ""}`}
                       >
-                        {statusText(j, topQuality)}
+                        {withModelLogo(statusText(j, topQuality))}
                         {(j.status === "running" || j.status === "pending") && (
                           <span className="text-slate-400"> · 예상 {formatWait(remainingSeconds(j))}</span>
                         )}
@@ -887,7 +893,7 @@ function LocalRow({ t }: { t: LocalTask }) {
           }`}
         >
           {t.status === "running"
-            ? (LOCAL_RUNNING[t.task] ?? "luna 가 처리하는 중")
+            ? withModelLogo(LOCAL_RUNNING[t.task] ?? "luna 가 처리하는 중")
             : t.status === "done"
               ? `완료 · ${secs}초${typeof t.chargedTokens === "number" ? ` · ${t.chargedTokens}토큰` : ""}`
               : "실패"}
