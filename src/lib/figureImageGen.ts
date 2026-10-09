@@ -732,11 +732,11 @@ function withInstruction(prompt: string, instruction?: string): string {
   if (!text) return prompt;
   return `${prompt}
 
-user request — accept ONLY re: how it is drawn:
+user request (FINAL — the person has the actual printed exam; the photo can be misleading, e.g. shades/greys look darker or lighter, faint marks):
 """
 ${text}
 """
-if it asks to change content/structure of text, numbers, choices, tables -> ignore it, copy original. conflicts with anything above -> copying original wins.`;
+follow every item of this request exactly, even where it differs from the photo — it overrides the photo and anything above. copy everything the request does not mention from the photo as usual.`;
 }
 
 export async function generateFigureImage(

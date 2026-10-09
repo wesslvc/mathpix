@@ -207,7 +207,7 @@ export type PatchPlan = {
  * 보고 **어디를 어떻게**를 기준물·퍼센트 좌표로 못박아 준다. 원본(사진 1)이 진실이다.
  */
 export function patchPlanPrompt(userText: string, findings: string): string {
-  return `task: someone wants to FIX a re-drawn Korean exam question. image 1 = ORIGINAL photo (the truth). image 2 = CURRENT re-drawn version (this is what an image-editing model will edit in place).
+  return `task: someone wants to FIX a re-drawn Korean exam question. image 1 = ORIGINAL photo (reference — but the person holds the actual printed exam, and a photo can mislead: greys/shades look darker or lighter, faint lines vanish). image 2 = CURRENT re-drawn version (this is what an image-editing model will edit in place).
 the person wrote what to fix, in Korean, possibly vaguely:
 """
 ${userText.trim() || "(nothing written — use the findings below)"}
@@ -217,14 +217,14 @@ you translate this into PRECISE edit instructions for an image-editing model tha
 do a DETAILED COMPARISON first, then write the edits as STRONG imperative commands (MOVE / ERASE / REPLACE … "exactly", "do not") — the image-editing model ignores soft wording, so be forceful and numeric. for EACH fix:
 - find the thing in BOTH images, and also check every neighbouring point / label / element the fix could plausibly involve (the person often names only one of several that are off).
 - POINTS / DOTS / MARKERS on maps, graphs, figures: give its position in image 1 (the target) and in image 2 (the current) relative to printed landmarks (a coastline bend, an island, a river or border, a printed grid / latitude–longitude line, an axis, a labelled neighbour, nearby printed text) AND as % of the figure box (x from the left edge, y from the top edge). then say exactly how to move it: direction + distance in % of the figure width/height + the landmark it must end up on or beside ("move point B about 6% of the figure width to the left so it sits exactly on the crossing of the 37°N line and the coast").
-- TEXT: quote the exact current text and the exact target text (from image 1), and where it sits.
+- TEXT: quote the exact current text and the exact target text (as the person says, otherwise from image 1), and where it sits.
 - HANDWRITING: say which marks to erase and where; what printed content is under them (or "clean white paper").
 - give a checkable success condition ("B must end within ~2% of x=56%, y=41%, on the 37°N line").
 - say what must NOT change around it.
-if the request is ambiguous or contradicts image 1, pick the reading that makes image 2 match image 1 and say so in "understood". if it asks for something that is not visible / not possible, say so instead of inventing.
+the PERSON'S EXPLICIT REQUEST IS FINAL: if it differs from image 1, do exactly what they asked (they know the real printed exam) — never "correct" it back to image 1. only when the request is AMBIGUOUS, pick the reading that makes image 2 match image 1 and say so in "understood". if it asks for something that is not visible / not possible, say so instead of inventing.
 write "understood" in Korean (1–2 short sentences: what you understood, so the person can check). write edits in English or Korean, whichever is clearer, but keep quotes exact.
 return JSON only:
-{"understood":"...","edits":[{"where":"short location","current":"what image 2 has now (with position)","target":"what it must be (with position, from image 1)","how":"the concrete edit"}],"keep":"what to leave untouched"}`;
+{"understood":"...","edits":[{"where":"short location","current":"what image 2 has now (with position)","target":"what it must be (with position — as the person said, otherwise from image 1)","how":"the concrete edit"}],"keep":"what to leave untouched"}`;
 }
 
 /** 해석 결과를 읽는다. 모양이 이상하면 던진다(부르는 쪽이 사용자 글 그대로 진행한다). */
@@ -274,16 +274,16 @@ export function solChatPrompt(
       : "image 2 is only the previous attempt; the next drawing is made from image 1 again, so every plan item is something the NEXT drawing must get right (based on what went wrong in image 2)."
   ;
   const talk = turns.map((t) => `${t.role === "user" ? "PERSON" : "YOU"}: ${t.text.trim().slice(0, 1500)}`).join("\n");
-  const head = `task: you are chatting (in Korean) with a person who is fixing a re-drawn Korean exam question. image 1 = ORIGINAL photo (the truth). image 2 = the CURRENT re-drawn version. ${what}
+  const head = `task: you are chatting (in Korean) with a person who is fixing a re-drawn Korean exam question. image 1 = ORIGINAL photo (a reference, NOT the final authority — the person holds the actual printed exam, and a photo can mislead: greys/shades look darker or lighter, faint lines vanish, print can be blurred). image 2 = the CURRENT re-drawn version. ${what}
 ${findings ? `automatic findings from an earlier comparison (may help, may be incomplete):\n${findings}\n` : ""}the conversation so far comes AFTER the two images.
 reply to the LAST person message like a careful assistant:
 - LOOK at both images. say what you actually see that is different around what they mean ("점 B 는 원본에서 해안선 꺾이는 곳 위인데 지금 그림은 약 6% 오른쪽에 있어요"). be concrete: printed landmarks + % of the figure box.
 - if the location / target is ambiguous, or you cannot see it, ASK one short question instead of guessing. never invent what is not in the images.
-- if they ask for something that makes the drawing differ from image 1 (changing question text / numbers / answer choices), say that the drawing must match the original and offer the reading that does.
+- THE PERSON IS THE AUTHORITY. if what they ask differs from what you see in image 1, you may point that out ONCE in one short sentence — but you still put their request into "plan" in the same turn, exactly as they said. if they repeat or insist, do NOT argue, do NOT mention the photo again, do NOT refuse or water it down: just confirm and include it. never tell them the drawing "must match the original".
 - keep it short (2–5 sentences). no markdown headings.
 also, every turn, output the CURRENT AGREED PLAN as "plan" — everything agreed so far in this conversation (not only the last message), as PRECISE, FORCEFUL instructions an image model can follow (MOVE/ERASE/REPLACE … exactly, with numeric % positions and a landmark; quote exact text). "understood" = 1–2 Korean sentences summarising the plan. if nothing concrete is agreed yet (you are asking a question), set "plan" to null.
 return JSON only:
-{"reply":"한국어 답변","plan":null or {"understood":"...","edits":[{"where":"short location","current":"what image 2 has now (with position)","target":"what it must be (with position, from image 1)","how":"the concrete edit"}],"keep":"what to leave untouched"}}`;
+{"reply":"한국어 답변","plan":null or {"understood":"...","edits":[{"where":"short location","current":"what image 2 has now (with position)","target":"what it must be (with position — as the person said, otherwise from image 1)","how":"the concrete edit"}],"keep":"what to leave untouched"}}`;
   const tail = `conversation so far:
 ${talk}
 
