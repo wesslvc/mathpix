@@ -25,7 +25,8 @@ import type { ProblemBox } from "./problemBoxes";
  * 이어지는 경우가 흔하다. 그런 문제는 조각을 따로 잘라 세로로 이어 붙여야
  * 한 문제가 된다.
  */
-export type DetectedProblem = { boxes: ProblemBox[] };
+/** `no`: luna 가 읽은 문제 번호(숫자만, 못 읽었으면 없음) — 지면 통째로 넣기가 번호를 Mathpix 로 다시 읽지 않고 이걸 쓴다. */
+export type DetectedProblem = { boxes: ProblemBox[]; no?: string };
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -196,7 +197,7 @@ function group(boxes: (ProblemBox & { no: string })[]): DetectedProblem[] {
       prev.boxes.push(box);
       continue;
     }
-    const made: DetectedProblem = { boxes: [box] };
+    const made: DetectedProblem = no ? { boxes: [box], no } : { boxes: [box] };
     if (no) byNo.set(no, made);
     out.push(made);
   }
@@ -214,7 +215,7 @@ function group(boxes: (ProblemBox & { no: string })[]): DetectedProblem[] {
  * (모델이 한 문제를 발문/자료/선지처럼 여러 조각으로 나눠 주는 일이 잦다.)
  */
 function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
-  return { boxes: unionByColumn(problem.boxes) };
+  return { ...problem, boxes: unionByColumn(problem.boxes) };
 }
 
 /** 모델이 돌려준 글에서 배열을 꺼내 묶는다. 두 갈래가 똑같이 쓴다. */

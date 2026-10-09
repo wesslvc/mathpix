@@ -84,6 +84,8 @@ type Piece = {
   boxes: Region[];
   /** 자를 때 준 여유. 손으로 그린 것은 0, 자동으로 찾은 것은 PAD. */
   pad: number;
+  /** luna 가 영역을 찾으며 읽은 문제 번호. 손으로 그린 조각에는 없다(그때만 Mathpix 로 읽는다). */
+  no?: number;
 };
 
 type Props = {
@@ -431,6 +433,7 @@ export default function BatchSplitPanel({
         parts: prob.boxes.length,
         boxes: prob.boxes,
         pad: PAD,
+        no: prob.no && Number(prob.no) > 0 ? Number(prob.no) : undefined,
       })),
     );
     return { pieces, snapped: snappedCount };
@@ -589,6 +592,8 @@ export default function BatchSplitPanel({
         parts: merged.length,
         boxes: merged,
         pad,
+        // 합친 것은 가장 앞 조각의 번호를 쓴다(합친 것이 곧 그 문제다).
+        no: chosen.find((p) => p.no != null)?.no,
       };
       setPieces((prev) => {
         const rest = prev.filter((p) => !picked.has(p.id));
@@ -647,8 +652,8 @@ export default function BatchSplitPanel({
     for (let i = 0; i < batch.length; i++) {
       const piece = batch[i];
       try {
-        // 번호는 원본 크롭에서 곧바로 읽기 시작한다 — 저장·다시 그리기를 기다릴 이유가 없다.
-        const numberP = readNumberWithMathpix(piece.crop);
+        // 번호는 luna 가 영역을 찾으며 이미 읽었다. 손으로 그린 조각처럼 그게 없을 때만 Mathpix 로 읽는다.
+        const numberP = piece.no != null ? Promise.resolve(piece.no) : readNumberWithMathpix(piece.crop);
         const card = await wholeProblemCard(piece.id, piece.crop);
         const problemId = await onSave({
           pngDataUrl: card.pngDataUrl,

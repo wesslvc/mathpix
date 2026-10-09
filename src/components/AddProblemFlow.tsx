@@ -174,6 +174,8 @@ export default function AddProblemFlow({
    */
   const [aiCrops, setAiCrops] = useState<Record<string, Region | null>>({});
   const cropPromisesRef = useRef(new Map<string, Promise<Region | null>>());
+  /** luna 가 자르며 읽은 문제 번호(사진 id 별). 넣을 때 Mathpix 로 다시 읽지 않고 이걸 쓴다. */
+  const lunaNumbersRef = useRef(new Map<string, number | null>());
   /**
    * **luna 자동 자르기는 사진 수만큼 동시에 돈다**(사용자 — "luna 는 rpm 이 높기 때문에 동시 작업을 최대로"). luna 호출은 대기열을
    * 안 타고(`/api/ai-direct`) 서버 쪽 상한도 없다. 브라우저에서 사진을 줄이는 일만 `CROP_PREP_LANES` 장까지 겹쳐 돈다 — 한 장이
@@ -202,12 +204,21 @@ export default function AddProblemFlow({
           const image = await enhanceContrast(await photoForModel(p, 2048));
           let queued = () => {};
           const inLine = new Promise<void>((r) => (queued = r));
-          void runAiTask<{ box: Region | null }>("crop", {
+          void runAiTask<{ box: Region | null; number?: string | null }>("crop", {
             label: `자동 자르기 · ${p.name}`.slice(0, 100),
             images: [image],
             onQueued: () => queued(),
           })
-            .then(({ result }) => resolve(result?.box ?? null), () => resolve(null))
+            .then(
+              ({ result }) => {
+                // luna 는 찍힌 그대로("17." · "03" · "[17]")를 준다 — 숫자만 뽑는다(네 자리 이상은 번호가 아니다).
+                const m = /\d{1,3}/.exec(String(result?.number ?? ""));
+                const n = m && !/\d{4}/.test(String(result?.number ?? "")) && Number(m[0]) > 0 ? Number(m[0]) : null;
+                lunaNumbersRef.current.set(p.id, n);
+                resolve(result?.box ?? null);
+              },
+              () => resolve(null),
+            )
             .finally(() => queued());
           await inLine;
         } catch {
@@ -626,6 +637,7 @@ export default function AddProblemFlow({
   ) {
     const key = crypto.randomUUID();
     const nth = ++quickCountRef.current;
+    const photoId = opts.photo?.id ?? activeRef.current?.id;
     const patch = (next: Partial<QuickItem>) =>
       setQuick((prev) => prev.map((q) => (q.key === key ? { ...q, ...next } : q)));
     setQuick((prev) => [{ key, crop, status: "saving" as const }, ...prev].slice(0, 30));
@@ -637,7 +649,7 @@ export default function AddProblemFlow({
       if (opts.advance !== false) advanceQueue();
     }
 
-    const number = readNumberWithMathpix(crop);
+    const number = numberFor(photoId, crop);
     const saved = saveChainRef.current.then(async () => {
       const card = await wholeProblemCard(key, crop);
       const problemId = await handleSaveToCategory({
@@ -693,6 +705,20 @@ export default function AddProblemFlow({
       .catch((err) =>
         patch({ status: "error", error: err instanceof Error ? err.message : "저장에 실패했습니다." }),
       );
+  }
+
+  /**
+   * 문제 번호 — **luna 가 자르며 읽은 것**을 쓴다(2026-10-09, 사용자 — "mathpix 로 번호 찾지 말고 luna 로 찾고 자르고 다").
+   * luna 가 번호를 못 봤거나 자르기가 실패했을 때만 Mathpix 로 읽는다(그때만 1토큰).
+   */
+  async function numberFor(photoId: string | undefined, crop: string): Promise<number | null> {
+    const pending = photoId ? cropPromisesRef.current.get(photoId) : undefined;
+    if (pending) {
+      await pending;
+      const n = lunaNumbersRef.current.get(photoId!);
+      if (n != null) return n;
+    }
+    return readNumberWithMathpix(crop);
   }
 
   /** 크롭 화면에서 사진을 못 열었다 — 그 사진만 빼고 다음으로 간다. */
