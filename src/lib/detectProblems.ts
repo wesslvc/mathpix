@@ -866,6 +866,85 @@ const PAGE_OPENROUTER_EFFORT = (() => {
   return v === "" || v === "default" ? undefined : v;
 })();
 
+/**
+ * 하이쿠를 두 번 동시에 불러 문제 번호로 맞춘 뒤 **변마다 평균**을 낸다. 두 번이 한 변이라도 `OUTLIER_GAP`(2%p) 넘게 어긋난 문제가
+ * 있으면 이상치(가끔 박스가 통째로 작거나 밀려 나온다)이므로 세 번째를 더 불러 **변마다 중앙값**으로 합친다. 평소엔 호출 2번,
+ * 이상치가 있을 때만 3번. 한 번 부르던 것(`PAGE_OPENROUTER_SAMPLES=1`)으로 되돌릴 수 있다. 번호가 없거나 박스가 여럿인 문제는 첫 결과 그대로.
+ */
+const PAGE_SAMPLES = Math.max(1, Math.min(3, Number(process.env.PAGE_OPENROUTER_SAMPLES ?? 3) || 3));
+const OUTLIER_GAP = 0.02;
+
+type PageRun = { problems: DetectedProblem[]; model: string; usage?: DetectUsage };
+
+function mergeSamples(runs: PageRun[]): DetectedProblem[] {
+  const base = runs[0].problems;
+  const byNo = (r: PageRun) => {
+    const m = new Map<string, DetectedProblem>();
+    for (const p of r.problems) if (p.no && p.boxes.length === 1 && !m.has(p.no)) m.set(p.no, p);
+    return m;
+  };
+  const maps = runs.map(byNo);
+  const med = (v: number[]) => {
+    const s = [...v].sort((a, b) => a - b);
+    return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+  };
+  return base.map((p) => {
+    if (!p.no || p.boxes.length !== 1) return p;
+    const group = maps.map((m) => m.get(p.no!)).filter((x): x is DetectedProblem => !!x);
+    if (group.length < 2) return p;
+    const edges = group.map((g) => {
+      const b = g.boxes[0];
+      return [b.x, b.y, b.x + b.w, b.y + b.h];
+    });
+    const [x0, y0, x1, y1] = [0, 1, 2, 3].map((i) => med(edges.map((e) => e[i])));
+    return { ...p, boxes: [{ ...p.boxes[0], x: x0, y: y0, w: x1 - x0, h: y1 - y0 }] };
+  });
+}
+
+function hasOutlier(a: PageRun, b: PageRun): boolean {
+  const m = new Map<string, DetectedProblem>();
+  for (const p of b.problems) if (p.no && p.boxes.length === 1) m.set(p.no, p);
+  for (const p of a.problems) {
+    const q = p.no ? m.get(p.no) : undefined;
+    if (!q || p.boxes.length !== 1) continue;
+    const u = p.boxes[0], v = q.boxes[0];
+    const d = [u.x - v.x, u.y - v.y, u.x + u.w - v.x - v.w, u.y + u.h - v.y - v.h];
+    if (d.some((x) => Math.abs(x) > OUTLIER_GAP)) return true;
+  }
+  // 한쪽만 찾은 문제가 있어도 의심.
+  return a.problems.length !== b.problems.length;
+}
+
+async function sampledOpenRouter(dataUrl: string, model: string, effort?: string): Promise<PageRun> {
+  if (PAGE_SAMPLES <= 1) return withPageOpenRouter(dataUrl, model, effort);
+  const settled = await Promise.allSettled(Array.from({ length: 2 }, () => withPageOpenRouter(dataUrl, model, effort)));
+  const ok = settled.flatMap((s) => (s.status === "fulfilled" && s.value.problems.length > 0 ? [s.value] : []));
+  if (ok.length === 0) {
+    const bad = settled.find((s) => s.status === "rejected") as PromiseRejectedResult | undefined;
+    throw bad?.reason ?? new Error("문제를 하나도 못 찾음");
+  }
+  if (ok.length === 1) return ok[0];
+  let runs = ok;
+  if (PAGE_SAMPLES >= 3 && hasOutlier(ok[0], ok[1])) {
+    try {
+      const third = await withPageOpenRouter(dataUrl, model, effort);
+      if (third.problems.length > 0) runs = [...ok, third];
+    } catch {
+      /* 두 번 결과만으로 간다 */
+    }
+  }
+  const sumUsage = runs.reduce<DetectUsage | undefined>((acc, r) => {
+    if (!r.usage) return acc;
+    if (!acc) return { ...r.usage };
+    const o = acc as Record<string, number | undefined>;
+    for (const [k, val] of Object.entries(r.usage as Record<string, number | undefined>)) {
+      if (typeof val === "number") o[k] = (o[k] ?? 0) + val;
+    }
+    return acc;
+  }, undefined);
+  return { problems: mergeSamples(runs), model: `${ok[0].model} ×${runs.length}`, usage: sumUsage };
+}
+
 export async function detectProblems(
   dataUrl: string,
   /** 비교 화면용: 이 모델 하나로만(실패해도 안 넘어간다). */
@@ -879,7 +958,7 @@ export async function detectProblems(
   if (DETECT_PROVIDER !== "openai") return withGemini(dataUrl);
   if (PAGE_OPENROUTER_MODEL) {
     try {
-      const r = await withPageOpenRouter(dataUrl, PAGE_OPENROUTER_MODEL, PAGE_OPENROUTER_EFFORT);
+      const r = await sampledOpenRouter(dataUrl, PAGE_OPENROUTER_MODEL, PAGE_OPENROUTER_EFFORT);
       if (r.problems.length > 0) return r;
       console.warn(`[detect] ${PAGE_OPENROUTER_MODEL} 가 문제를 하나도 못 찾음 → 다음`);
     } catch (err) {
