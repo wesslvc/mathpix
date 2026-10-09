@@ -1,5 +1,6 @@
 "use client";
 
+import { announceProblemsChanged } from "@/lib/problemsChanged";
 import { r2DirectReady } from "@/lib/r2Direct";
 import {
   createContext,
@@ -324,6 +325,8 @@ export default function FigureJobsProvider({
   const handlingRef = useRef<Set<string>>(new Set());
   /** 문제 행을 서버에 알려 준 작업. */
   const toldProblemRef = useRef<Set<string>>(new Set());
+  /** 작업마다 지난번에 본 상태(`status|stage`). 문제 행이 서버에서 바뀌었는지 알아내는 데 쓴다. */
+  const seenStateRef = useRef<Map<string, string>>(new Map());
   /** 로그인 안 한 화면에서는 서버를 계속 두드리지 않는다. */
   const signedOutRef = useRef(false);
   const [tick, setTick] = useState(0);
@@ -509,6 +512,7 @@ export default function FigureJobsProvider({
           if (applied && job.resultPath.includes("/_jobs/")) {
             await removeBlobs([job.resultPath]);
           }
+          if (applied) announceProblemsChanged([job.serverProblemId ?? job.problemId ?? ""]);
         } catch (err) {
           console.error("[figureJobs] 저장본 갱신 실패:", err);
           await fetch("/api/figure-jobs", {
@@ -660,6 +664,19 @@ export default function FigureJobsProvider({
       next = next.filter((j) => !j.serverId || alive.has(j.serverId) || j.svg);
       return next;
     });
+
+    // **문제 행이 서버에서 바뀌었으면 화면에 알린다**(`PROBLEMS_CHANGED_EVENT`). 문제 통째로 그리기·지문 인식은 서버 일꾼이
+    // 그 행에 직접 저장하는데, 열려 있는 목록은 그걸 몰라서 새로고침하기 전까지 옛 그림을 보여 줬다("이미지가 바로 안 붙는다").
+    // 처음 본 작업은 알리지 않는다(앱을 열 때마다 목록을 괜히 다시 받는다).
+    const changed = new Set<string>();
+    for (const row of rows) {
+      const key = `${row.status}|${row.stage ?? ""}|${row.applied_at ?? ""}`;
+      const before = seenStateRef.current.get(row.id);
+      seenStateRef.current.set(row.id, key);
+      if (before === undefined || before === key || !row.problem_id) continue;
+      if (row.status === "done" || row.stage === "max-offer") changed.add(row.problem_id);
+    }
+    if (changed.size) announceProblemsChanged([...changed]);
 
     // 저장 전이던 문제 행이 생겼으면 서버에 알려 준다(문제 전체 모드는 그걸
     // 알아야 결과를 그 행에 바로 저장한다).

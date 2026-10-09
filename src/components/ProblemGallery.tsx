@@ -68,6 +68,8 @@ import {
 import { keepOrigin } from "@/lib/figureOrigin";
 import { thumbPathFor } from "@/lib/cardThumb";
 import { putBlob, removeBlobs } from "@/lib/blobClient";
+import { cardUrl } from "@/lib/cardUrl";
+import { PROBLEMS_CHANGED_EVENT } from "@/lib/problemsChanged";
 import { persistFigureBlobs } from "@/lib/figureBlob";
 import { defaultOverlay } from "@/lib/cardHtml";
 import {
@@ -155,8 +157,10 @@ async function captureNode(node: HTMLElement): Promise<Blob> {
   await waitForImages(node);
 
   let dataUrl = "";
-  // Safari 첫 렌더가 비는 문제 대비로 몇 번 반복(마지막 결과 사용).
-  for (let i = 0; i < 3; i++) {
+  // Safari(WebKit) 첫 렌더가 비는 문제 대비로 한 번 더 찍는다(마지막 결과 사용). 다른 브라우저는 한 번이면 된다 —
+  // 예전엔 늘 세 번 찍어 저장 버튼이 눈에 띄게 느렸다(찍을 때마다 글꼴·그림을 다시 심는다).
+  const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Android/.test(navigator.userAgent);
+  for (let i = 0; i < (webkit ? 2 : 1); i++) {
     dataUrl = await toPng(node, CARD_CAPTURE_OPTIONS);
   }
   return await (await fetch(dataUrl)).blob();
@@ -233,6 +237,25 @@ function passagePlainText(blocks: RichBlock[]): string {
 export default function ProblemGallery({ problems, unlimited = false }: Props) {
   const router = useRouter();
   const [raw, setList] = useState<GalleryProblem[]>(problems);
+  /**
+   * **서버가 새 목록을 주면 그대로 따른다.** 예전에는 처음 받은 목록만 들고 있어서, 문제를 넣거나(사진 빠른 넣기·
+   * 지면 통째로) 수정해 저장한 뒤 `router.refresh()` 가 새 목록을 내려 줘도 화면은 옛 것 그대로였다 — 새 문제가 안 보이고,
+   * 수정한 문제는 지워진 옛 카드 파일을 가리켜 그림이 깨졌다("이미지가 바로 안 붙는다").
+   */
+  useEffect(() => setList(problems), [problems]);
+  // 서버 일꾼·대기열이 문제를 저장하면 목록을 다시 받는다(잇따라 오면 한 번으로 묶는다).
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const on = () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => router.refresh(), 400);
+    };
+    window.addEventListener(PROBLEMS_CHANGED_EVENT, on);
+    return () => {
+      window.removeEventListener(PROBLEMS_CHANGED_EVENT, on);
+      if (t) clearTimeout(t);
+    };
+  }, [router]);
   /**
    * **번호 차례로 늘어놓는다**(`problemOrder.ts`). 내보내기도 같은 함수를
    * 쓰므로 화면에서 본 차례와 인쇄된 차례가 어긋나지 않는다.
@@ -876,7 +899,9 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   }
 
   function openEdit(problem: GalleryProblem) {
+    editingRef.current = problem;
     setEditing(problem);
+    setBaseline(null);
     setEditText(problem.text);
     setEditAnswer(problem.answer);
     setEditAnswerType(problem.answerType);
@@ -898,16 +923,34 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     void loadFigures(problem.id);
   }
 
+  /**
+   * 그림이 든 box_range 를 미리 받아 둔다. "수정" 위에 손가락·마우스가 올라가는 순간 시작해서, 창이 열릴 때는 대개
+   * 이미 와 있다 — 예전에는 창을 연 뒤에야 받기 시작해 한동안 그림 없는 미리보기가 떴다("이미지가 바로 안 붙는다").
+   */
+  const boxFetchRef = useRef<Map<string, Promise<{ box_range: unknown } | null>>>(new Map());
+  function prefetchBox(problemId: string) {
+    if (boxFetchRef.current.has(problemId)) return boxFetchRef.current.get(problemId)!;
+    const p = (async () => {
+      const { data } = await createClient()
+        .from("problems")
+        .select("box_range")
+        .eq("id", problemId)
+        .maybeSingle<{ box_range: unknown }>();
+      return data ?? null;
+    })();
+    boxFetchRef.current.set(problemId, p);
+    // 한 번 쓰고 버린다 — 저장하면 내용이 바뀌므로 다음에 열 때는 새로 받는다. 실패도 다음에 다시.
+    void p.finally(() => setTimeout(() => boxFetchRef.current.delete(problemId), 30_000)).catch(() => undefined);
+    return p;
+  }
+
   /** 이 문제에 저장된 그림을 가져온다(목록 조회에서는 일부러 뺐다). */
   async function loadFigures(problemId: string) {
     setFiguresLoading(true);
     try {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("problems")
-        .select("box_range")
-        .eq("id", problemId)
-        .maybeSingle();
+      const data = await prefetchBox(problemId);
+      boxFetchRef.current.delete(problemId); // 연 다음에는 새로 받는다(그사이 AI 가 저장했을 수 있다)
+      if (editingRef.current?.id !== problemId) return;
       setEditFigures(readStoredFigures(data?.box_range));
       setPreTypeset(readPreTypeset(data?.box_range));
       // figures 키 자체가 없으면 그림을 저장하기 전에 만들어진 문제다.
@@ -924,8 +967,64 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     }
   }
 
-  async function saveEdit() {
+  /**
+   * **고친 게 있는지.** 예전에는 바깥을 한 번 잘못 누르면 고친 것이 말없이 다 날아갔다. 그림을 다 받은 뒤의 상태를
+   * 기준으로 삼고, 지금 상태와 다르면 닫기 전에 묻는다.
+   */
+  // 그림 마크업은 MB 단위일 수 있어 그림이 바뀔 때만 다시 센다(글자를 칠 때마다 직렬화하지 않게).
+  const figuresSignature = useMemo(() => JSON.stringify([editFigures, editKoreanBlocks ?? null]), [editFigures, editKoreanBlocks]);
+  const editSignature = JSON.stringify([
+    figuresSignature.length,
+    editText,
+    editAnswer,
+    editAnswerType,
+    editBox ?? null,
+    editFontPt,
+    editNumber,
+    editPoints,
+    dropPreTypeset,
+  ]) + figuresSignature;
+  const [baseline, setBaseline] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editing) setBaseline(null);
+    else if (!figuresLoading && baseline === null) setBaseline(editSignature);
+  }, [editing, figuresLoading, baseline, editSignature]);
+  const editDirty = baseline !== null && baseline !== editSignature;
+  function closeEdit() {
+    if (isSaving) return;
+    if (editDirty && !window.confirm("고친 내용이 저장되지 않았어요. 닫을까요?")) return;
+    setEditing(null);
+  }
+  // Esc 로 닫기, Ctrl/⌘+S·Ctrl/⌘+Enter 로 저장. 오려내기 창이 떠 있으면 그 창에 맡긴다.
+  const editKeysRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  editKeysRef.current = (e) => {
+    if (!editing || cropTarget) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeEdit();
+    } else if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "Enter")) {
+      e.preventDefault();
+      if (!isSaving && !figuresLoading) void saveEdit();
+    }
+  };
+  useEffect(() => {
     if (!editing) return;
+    const on = (e: KeyboardEvent) => editKeysRef.current(e);
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, [editing]);
+
+  /** 목록 차례로 다음 문제(잠긴 것은 건너뛴다). 수정 창에서 하나씩 넘겨 가며 고칠 때 쓴다. */
+  function nextOf(id: string): GalleryProblem | null {
+    const i = list.findIndex((p) => p.id === id);
+    if (i === -1) return null;
+    return list.slice(i + 1).find((p) => !p.debt) ?? null;
+  }
+
+  async function saveEdit(goNext = false) {
+    if (!editing) return;
+    // 그림을 아직 못 받았는데 저장하면 그림 없는 카드로 덮인다(그림이 사라진다).
+    if (figuresLoading) return;
     setIsSaving(true);
     setEditError(null);
     try {
@@ -1011,7 +1110,30 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         await removeBlobs([editing.imagePath, thumbPathFor(editing.imagePath)]);
       }
 
-      setEditing(null);
+      // 목록을 곧바로 고친다 — 새로고침 왕복을 기다리지 않고 새 카드가 바로 보이게.
+      const saved = editing;
+      setList((cur) =>
+        cur.map((p) =>
+          p.id === saved.id
+            ? {
+                ...p,
+                imagePath: newPath,
+                imageUrl: cardUrl(newPath),
+                text: editText,
+                answer: editAnswer.trim(),
+                answerType: editAnswerType,
+                boxRange: editBox ?? null,
+                fontPt: editFontPt,
+                number: editNumber.trim() === "" ? null : Number(editNumber),
+                points: editPoints.trim() === "" ? null : Number(editPoints),
+              }
+            : p,
+        ),
+      );
+      boxFetchRef.current.delete(saved.id);
+      const next = goNext ? nextOf(saved.id) : null;
+      if (next) openEdit(next);
+      else setEditing(null);
       router.refresh();
     } catch (err) {
       setEditError(
@@ -1154,6 +1276,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       <Button
         type="button"
         onClick={() => openEdit(problem)}
+        onPointerEnter={() => void prefetchBox(problem.id).catch(() => undefined)}
+        onFocus={() => void prefetchBox(problem.id).catch(() => undefined)}
         variant="outline" size="sm"
       >
         수정
@@ -1173,7 +1297,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     <>
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs text-slate-400">
-          {list.length}개 · 번호 칸에 자리를 직접 적으면 그 자리로 보냅니다
+          {list.length}개 · 번호 칸을 고치면 그 번호 차례로 자리가 옮겨져요
         </p>
         {/* `shrink-0` 이 없으면 좁은 화면에서 옆 설명 문단에 밀려 버튼이
             찌그러지고 "카드" 가 두 줄로 쪼개진다(카/드). */}
@@ -1302,7 +1426,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
       {editing && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => !isSaving && setEditing(null)}
+          onClick={closeEdit}
         >
           <div
             className="flex max-h-[90vh] w-full max-w-6xl flex-col gap-4 overflow-auto rounded-2xl bg-white p-6 shadow-xl"
@@ -1393,6 +1517,26 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                       </button>
                     ))}
                   </div>
+                  {editAnswerType === "choice" && (
+                    <div className="flex items-center gap-1">
+                      <span className="w-[2.6rem] shrink-0 text-xs font-medium text-slate-500" />
+                      {["1", "2", "3", "4", "5"].map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setEditAnswer((cur) => (cur.trim() === n ? "" : n))}
+                          className={`h-8 w-8 rounded-full border text-sm ${
+                            editAnswer.trim() === n
+                              ? "border-blue-600 bg-blue-600 text-white"
+                              : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                          }`}
+                          aria-label={`정답 ${n}번`}
+                        >
+                          {formatAnswer(n, "choice")}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <label className="flex items-center gap-2 text-sm text-slate-700">
                     <span className="shrink-0 text-xs font-medium text-slate-500">
                       정답
@@ -1813,22 +1957,44 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
 
             {editError && <p className="text-sm text-red-600">{editError}</p>}
 
-            <div className="flex justify-end gap-2">
+            {/* 저장 버튼은 창 아래에 붙여 둔다 — 그림 조절까지 내려가면 버튼이 화면 밖으로 밀려 매번 끝까지 스크롤해야 했다. */}
+            <div className="sticky -bottom-6 -mx-6 -mb-6 flex items-center justify-end gap-2 border-t border-slate-200 bg-white/95 px-6 py-3 backdrop-blur">
+              <span className="mr-auto hidden text-[11px] text-slate-400 sm:inline">
+                {editDirty ? "고친 내용이 있어요 · " : ""}Ctrl/⌘+S 저장 · Esc 닫기
+              </span>
               <Button
                 type="button"
-                onClick={() => setEditing(null)}
+                onClick={closeEdit}
                 disabled={isSaving}
                 variant="outline"
               >
                 취소
               </Button>
+              {editing && nextOf(editing.id) && (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    // 고친 게 없으면 저장(캡처·업로드)하지 않고 바로 넘긴다.
+                    if (editDirty) void saveEdit(true);
+                    else if (editing) {
+                      const n = nextOf(editing.id);
+                      if (n) openEdit(n);
+                    }
+                  }}
+                  disabled={isSaving || figuresLoading}
+                  variant="outline"
+                  title="저장하고 다음 문제를 바로 열어요"
+                >
+                  {editDirty ? "저장하고 다음 →" : "다음 문제 →"}
+                </Button>
+              )}
               <Button
                 type="button"
-                onClick={saveEdit}
-                disabled={isSaving}
+                onClick={() => void saveEdit()}
+                disabled={isSaving || figuresLoading}
                 variant="primary"
  >
-                {isSaving ? "저장 중..." : "저장"}
+                {isSaving ? "저장 중..." : figuresLoading ? "그림 불러오는 중…" : "저장"}
               </Button>
             </div>
           </div>

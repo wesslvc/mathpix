@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactCrop, { type Crop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import { cropImageToDataUrl, fileToDataUrl } from "@/lib/cropImage";
@@ -74,6 +74,33 @@ export default function DiagramCropModal({
 
   const activeSrc = newPhoto ?? imageSrc;
 
+  // Esc 로 닫기 · 붙여넣기(Ctrl/⌘+V)로 그림 넣기 — 캡처한 그림을 파일로 저장했다 고르는 수고를 던다.
+  const cancelRef = useRef(onCancel);
+  cancelRef.current = onCancel;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelRef.current();
+      }
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+      if (!file) return;
+      e.preventDefault();
+      void handlePicked(file);
+    };
+    // 수정 창의 Esc(닫기)보다 먼저 받도록 capture 로 건다.
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("paste", onPaste);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handlePicked(file: File | undefined) {
     if (!file) return;
     setIsLoading(true);
@@ -110,6 +137,12 @@ export default function DiagramCropModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onCancel}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const file = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/"));
+        if (file) void handlePicked(file);
+      }}
  >
       <div
         className="flex max-h-[90vh] w-full max-w-6xl flex-col gap-4 overflow-auto rounded-2xl bg-white p-6 shadow-xl"
@@ -160,6 +193,7 @@ export default function DiagramCropModal({
           {newPhoto !== null && (
             <span className="text-[11px] text-slate-400">새로 찍은 사진 사용 중</span>
           )}
+          <span className="text-[11px] text-slate-400">· 그림을 끌어다 놓거나 Ctrl/⌘+V 로 붙여 넣어도 돼요</span>
         </div>
 
         {/* capture 속성이 있으면 모바일에서 갤러리 대신 카메라가 바로 열린다.
@@ -213,6 +247,10 @@ export default function DiagramCropModal({
                 // 사진이 바뀌면 <img>를 새로 만들어 이전 이미지의 naturalWidth가
                 // 남아 크롭 좌표가 어긋나는 일이 없게 한다.
                 key={activeSrc}
+                // 저장된 그림은 R2 로 넘어가 다른 출처에서 온다 — 캔버스로 자르려면 CORS 로 받아야 한다(안 그러면 오염돼 못 자른다).
+                crossOrigin={activeSrc.startsWith("data:") ? undefined : "anonymous"}
+                // 처음엔 사진 전체를 잡아 둔다 — 이미 잘린 그림이면 끌 것 없이 바로 확인하면 된다.
+                onLoad={() => setCrop((c) => c ?? { unit: "%", x: 0, y: 0, width: 100, height: 100 })}
                 src={activeSrc}
                 alt="도형을 오려낼 사진"
                 className="max-h-[65vh] w-auto"
