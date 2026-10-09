@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { putBlob, removeBlobs } from "@/lib/blobClient";
 import { cropImageToDataUrl, loadDrawableFromFile, loadImage, NO_CROP_LIMIT, openPageSource, type PageSource } from "@/lib/cropImage";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { DETECT_INPUT_DIM, MAX_UPLOAD_CHARS, stitchVertically } from "@/lib/figureImage";
@@ -164,6 +166,117 @@ export default function ComparePageCropPage() {
   const cands = [...PRESETS, ...custom].filter((c) => !removed.has(c.key));
   const chosen = cands.filter((c) => on.has(c.key));
 
+  async function attachPages(out: Page[]) {
+    setPages((p) => [...p, ...out]);
+    for (const pg of out) {
+      const k = KNOWN_TRUTH[pg.name];
+      if (!k) continue;
+      setTruthStart((m) => ({ ...m, [pg.id]: k.start }));
+      setTruth((m) => ({
+        ...m,
+        [pg.id]: k.boxes.map(([x, y, w, h], i) => ({ id: `k${pg.id}${i}`, group: `k${i}`, x, y, w, h })),
+      }));
+    }
+  }
+
+  // ── 샘플 보관함(R2): 비교용 지면을 한 번 올려 두면 다음에 열 때 저절로 불러온다(최대 4장). 경로 `<내 id>/_compare/…`, 목록은 index.json.
+  type Sample = { name: string; path: string; type: string };
+  const [samples, setSamples] = useState<Sample[]>([]);
+  const [vaultMsg, setVaultMsg] = useState("");
+  const vaultInit = useRef(false);
+
+  async function vaultPaths() {
+    const { data } = await createClient().auth.getUser();
+    const uid = data.user?.id;
+    if (!uid) throw new Error("로그인이 필요해요.");
+    return { uid, index: `${uid}/_compare/index.json` };
+  }
+  async function readIndex(): Promise<Sample[]> {
+    const { index } = await vaultPaths();
+    try {
+      const res = await fetch(`/api/card/${index}`, { cache: "no-store" });
+      if (!res.ok) return [];
+      const j = JSON.parse(await res.text()) as unknown;
+      return Array.isArray(j)
+        ? j.filter((x): x is Sample => !!x && typeof x.name === "string" && typeof x.path === "string").slice(0, 4)
+        : [];
+    } catch {
+      return [];
+    }
+  }
+  async function writeIndex(list: Sample[]) {
+    const { index } = await vaultPaths();
+    const r = await putBlob(createClient(), index, new Blob([JSON.stringify(list)], { type: "application/json" }), "application/json");
+    if (!r.ok) throw new Error(r.error);
+    setSamples(list);
+  }
+  async function loadSamples(list: Sample[], skipNames: Set<string>) {
+    const out: Page[] = [];
+    for (const sm of list) {
+      if (skipNames.has(sm.name)) continue;
+      try {
+        const res = await fetch(`/api/card/${sm.path}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        out.push(await prepare(new File([blob], sm.name, { type: sm.type || blob.type || "image/jpeg" })));
+      } catch (err) {
+        setVaultMsg(`${sm.name}: ${err instanceof Error ? err.message : "불러오지 못함"}`);
+      }
+    }
+    if (out.length) await attachPages(out);
+  }
+  async function saveToVault() {
+    setVaultMsg("보관함에 올리는 중…");
+    try {
+      const { uid } = await vaultPaths();
+      const cur = await readIndex();
+      const next = [...cur];
+      for (const p of pages) {
+        if (next.some((x) => x.name === p.name)) continue;
+        if (next.length >= 4) {
+          setVaultMsg("보관함은 4장까지예요. 하나를 지우고 다시 저장해 주세요.");
+          break;
+        }
+        const path = `${uid}/_compare/${Date.now()}-${next.length}.jpg`;
+        const type = p.file.type || "image/jpeg";
+        const r = await putBlob(createClient(), path, p.file, type);
+        if (!r.ok) throw new Error(r.error);
+        next.push({ name: p.name, path, type });
+      }
+      await writeIndex(next);
+      setVaultMsg(`보관함 ${next.length}장 — 다음에 열 때 자동으로 불러와요.`);
+    } catch (err) {
+      setVaultMsg(`저장 실패: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  async function removeSample(sm: Sample) {
+    try {
+      await writeIndex(samples.filter((x) => x.path !== sm.path));
+      await removeBlobs([sm.path]);
+      setVaultMsg(`${sm.name} 을(를) 보관함에서 지웠어요.`);
+    } catch (err) {
+      setVaultMsg(`지우기 실패: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  useEffect(() => {
+    if (vaultInit.current) return;
+    vaultInit.current = true;
+    void (async () => {
+      try {
+        const list = await readIndex();
+        setSamples(list);
+        if (list.length) {
+          setVaultMsg(`보관함 ${list.length}장을 불러오는 중…`);
+          await loadSamples(list, new Set());
+          setVaultMsg(`보관함 ${list.length}장을 불러왔어요.`);
+        }
+      } catch {
+        /* 로그인 안 됐거나 보관함 없음 */
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function pick(files: FileList | null) {
     const list = Array.from(files ?? []);
     if (!list.length) return;
@@ -176,16 +289,7 @@ export default function ComparePageCropPage() {
         alert(`${f.name}: ${err instanceof Error ? err.message : "열지 못함"}`);
       }
     }
-    setPages((p) => [...p, ...out]);
-    for (const pg of out) {
-      const k = KNOWN_TRUTH[pg.name];
-      if (!k) continue;
-      setTruthStart((m) => ({ ...m, [pg.id]: k.start }));
-      setTruth((m) => ({
-        ...m,
-        [pg.id]: k.boxes.map(([x, y, w, h], i) => ({ id: `k${pg.id}${i}`, group: `k${i}`, x, y, w, h })),
-      }));
-    }
+    await attachPages(out);
     setBusy(null);
   }
 
@@ -413,6 +517,21 @@ export default function ComparePageCropPage() {
               지면 비우기 ({pages.length}장)
             </Button>
           )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          <span className="font-medium text-slate-700">샘플 보관함 {samples.length}/4</span>
+          <Button type="button" variant="outline" size="xs" disabled={pages.length === 0} onClick={() => void saveToVault()}>
+            지금 지면을 보관함에 저장
+          </Button>
+          {samples.map((sm) => (
+            <span key={sm.path} className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-2 py-0.5">
+              {sm.name}
+              <button type="button" title="보관함에서 지우기" className="text-slate-400 hover:text-red-600" onClick={() => void removeSample(sm)}>
+                ×
+              </button>
+            </span>
+          ))}
+          {vaultMsg && <span className="text-slate-500">{vaultMsg}</span>}
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
           {cands.map((c) => (
