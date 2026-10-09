@@ -754,7 +754,26 @@ export default function BatchSplitPanel({
     typeof figureCost === "number" ? figureCost * pieces.length : null;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div
+      className="flex flex-col gap-3"
+      // 지면 사진 여러 장을 끌어다 놓아도 된다 — 지금 지면이 있으면 대기열 끝에 붙는다.
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/") || isHeicFile(f));
+        if (files.length === 0) return;
+        e.preventDefault();
+        const dt = new DataTransfer();
+        files.forEach((f) => dt.items.add(f));
+        void (pageImage ? addMore(dt.files) : pick(dt.files));
+      }}
+    >
+      {!pageImage && (
+        <p className="text-xs text-slate-500">
+          지면 사진을 <b>여러 장 한꺼번에</b> 고르거나 끌어다 놓으세요 — 한 장씩 차례로 열리고, 넣는 동안 다음 지면은 미리 잘라 둡니다.
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <input
           ref={fileRef}
