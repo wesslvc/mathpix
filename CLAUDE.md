@@ -3633,7 +3633,16 @@ low 스타트해서 최대한 비용 절감을 노리자. luna medium 이 AI 생
 사용자 — "Z Ai 키미k3만 빼고는 제대로 안 돼". 'This operation was aborted' 는 지면 한 장 전체를 보냈을 때 모델이 제한 시간(120초) 안에 못 답해 우리가 끊은 것이다
 (느린 모델: glm·gemma-4·muse·deepseek). llama 계열은 박스를 0~1 로 줘서 틀렸다 → `toBoxes` 가 모든 숫자가 0~1 이면 ×1000 으로 맞춘다.
 일꾼 `nvidia-scan` 에 `prompt:"page"`(지면 프롬프트 그대로, 150초, 파싱 결과 `parsed`)를 더했다 — 후보를 실제 지면 프롬프트로 재서 못 쓰는 것은 비교 후보에서 뺄 것.
-오픈라우터(`OPENROUTER_KEY`, Vercel 에 넣음)를 붙이는 중이다 — 모델 이름은 목록 프로브로 확인한 뒤 정한다.
+
+#### NVIDIA 를 걷어내고 OpenRouter 를 붙였다 (2026-10-09)
+
+사용자 — "엔비디아는 갖다 버리고 오픈라우터들의 무료 모델들 우선 진행". `nvidiaVision.ts` 를 지우고 `src/lib/openrouterVision.ts`(키 `OPENROUTER_KEY`,
+OpenAI 호환 `/chat/completions`, 429·5xx 는 2초·5초 뒤 재시도)로 갈아 끼웠다. 일꾼 프로브 이름은 `openrouter-models`(이미지 입력을 받는 모델 + 단가)·
+`openrouter-scan`·`openrouter-vision`. 비교 화면(`/admin/compare-crop`)은 엔진 `openrouter`, 그리고 **"오픈라우터 이미지 모델 불러오기"** 버튼이
+브라우저에서 공개 `/models` 를 읽어 이미지 입력 모델을 칩으로 늘어놓는다(초록 = 무료, 눌러서 비교 후보에 추가). `:free` 모델은 카드 없이 쓸 수 있다
+(분당 20회, 크레딧 $10 미만이면 하루 50회 — 제3자 안내라 실제 한도는 대시보드로 볼 것). 기본 후보 둘(`google/gemma-4-31b-it:free`,
+`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`)은 검색에서 본 이름이라 없으면 404 로 그대로 나온다. **무엇이 지면을 잘 자르는지는 아직 못 쟀다.**
+"덜 자르거나 더 자르거나"하는 오차는 비교 화면의 점선(모델 자리) vs 실선(최종)으로 모델별로 볼 것.
 
 #### 지면 여러 장도 사진 넣기처럼 한눈에 · 자동 자르기 빠르게 · 글씨 안 잘리게 (2026-10-09)
 

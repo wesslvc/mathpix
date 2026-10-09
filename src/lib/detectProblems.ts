@@ -16,7 +16,7 @@
 
 import { columnOf, mergeWithinColumn as unionByColumn } from "./problemBoxes";
 export type { ProblemBox } from "./problemBoxes";
-import { callNvidiaVision } from "./nvidiaVision";
+import { callOpenRouterVision } from "./openrouterVision";
 import type { ProblemBox } from "./problemBoxes";
 
 /**
@@ -753,8 +753,8 @@ async function withPageGemini(
   return { problems: parse(text), model, usage };
 }
 
-/** NVIDIA 모델 하나로 지면 영역 찾기(비교 화면용 — 2026-10-09). 느린 모델이 있어 120초까지 기다린다. */
-async function withPageNvidia(
+/** OpenRouter 모델 하나로 지면 영역 찾기(비교 화면용 — 2026-10-09). 느린 무료 모델이 있어 120초까지 기다린다. */
+async function withPageOpenRouter(
   dataUrl: string,
   model: string,
 ): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
@@ -762,7 +762,7 @@ async function withPageNvidia(
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 120_000);
   try {
-    const text = await callNvidiaVision(dataUrl, PROMPT, model, (u) => (usage = u), 4096, ac.signal);
+    const text = await callOpenRouterVision(dataUrl, PROMPT, model, (u) => (usage = u), 4096, ac.signal);
     return { problems: parse(text), model, usage };
   } finally {
     clearTimeout(timer);
@@ -799,11 +799,11 @@ export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "gemini" ? "gemin
 export async function detectProblems(
   dataUrl: string,
   /** 비교 화면용: 이 모델 하나로만(실패해도 안 넘어간다). */
-  only?: { engine: "gemini" | "openai" | "nvidia"; model: string; effort?: string },
+  only?: { engine: "gemini" | "openai" | "openrouter"; model: string; effort?: string },
 ): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
   if (only) {
     if (only.engine === "gemini") return withPageGemini(dataUrl, only.model);
-    if (only.engine === "nvidia") return withPageNvidia(dataUrl, only.model);
+    if (only.engine === "openrouter") return withPageOpenRouter(dataUrl, only.model);
     return withOpenAI(dataUrl, only.effort);
   }
   if (DETECT_PROVIDER !== "openai") return withGemini(dataUrl);

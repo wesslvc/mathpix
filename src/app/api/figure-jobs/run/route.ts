@@ -15,7 +15,7 @@ import {
 import { logAiCost } from "@/lib/costLog";
 import { GLOBAL_CONCURRENCY, UNLIMITED_CONCURRENCY, kickWorker, workerToken } from "@/lib/figureJobsServer";
 import { PAGE_PROMPT_FOR_PROBE, callOpenAIVision, parsePageForProbe } from "@/lib/detectProblems";
-import { callNvidiaVision, listNvidiaModels } from "@/lib/nvidiaVision";
+import { callOpenRouterVision, listOpenRouterVisionModels } from "@/lib/openrouterVision";
 import {
   OPENAI_TEXT_MODEL,
   deleteVisionResponse,
@@ -125,19 +125,19 @@ export async function POST(req: NextRequest) {
     // 본문이 없어도 된다(pg_cron 은 빈 객체를 보낸다).
   }
 
-  // **NVIDIA 모델 확인용**(2026-10-09). 목록(무료)과, 모델 하나에 사진 + JSON 요청을 실제로 보내 본 결과(시간·글). `path` 를 주면 저장소의
+  // **OpenRouter 모델 확인용**(2026-10-09). 목록(무료)과, 모델 하나에 사진 + JSON 요청을 실제로 보내 본 결과(시간·글). `path` 를 주면 저장소의
   // 그 그림(예: 문제 카드)으로, 없으면 64×64 그림으로 보낸다. 키는 내보내지 않는다.
-  if (probe === "nvidia-models") {
+  if (probe === "openrouter-models") {
     try {
-      return NextResponse.json({ models: await listNvidiaModels() });
+      return NextResponse.json({ models: await listOpenRouterVisionModels() });
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
     }
   }
   // 여러 모델을 **동시에** 한 번에 시험한다(모델마다 40초에서 끊는다). `models` 는 본문 배열.
-  if (probe === "nvidia-scan") {
+  if (probe === "openrouter-scan") {
     const pageMode = probePrompt === "page";
-    const models = (probeModels ?? []).filter((m) => /^[\w./-]{3,100}$/.test(m)).slice(0, 20);
+    const models = (probeModels ?? []).filter((m) => /^[\w./:-]{3,100}$/.test(m)).slice(0, 20);
     let image = `data:image/png;base64,${PROBE_PNG}`;
     if (probeId) {
       const got = await loadAsDataUrl(createAdminClient(), probeId);
@@ -156,7 +156,7 @@ export async function POST(req: NextRequest) {
         const timer = setTimeout(() => ac.abort(), limitMs);
         let usage: unknown = null;
         try {
-          const text = await callNvidiaVision(image, prompt, model, (u) => (usage = u), pageMode ? 4096 : 1024, ac.signal);
+          const text = await callOpenRouterVision(image, prompt, model, (u) => (usage = u), pageMode ? 4096 : 1024, ac.signal);
           let parsed: unknown = undefined;
           if (pageMode) {
             try {
@@ -176,9 +176,9 @@ export async function POST(req: NextRequest) {
     );
     return NextResponse.json({ results });
   }
-  if (probe === "nvidia-vision") {
+  if (probe === "openrouter-vision") {
     const model = probeModel;
-    if (!/^[\w./-]{3,100}$/.test(model)) return NextResponse.json({ error: "model 이 필요합니다." }, { status: 400 });
+    if (!/^[\w./:-]{3,100}$/.test(model)) return NextResponse.json({ error: "model 이 필요합니다." }, { status: 400 });
     let image = `data:image/png;base64,${PROBE_PNG}`;
     if (probeId) {
       const got = await loadAsDataUrl(createAdminClient(), probeId);
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
     const t0 = Date.now();
     let usage: unknown = null;
     try {
-      const text = await callNvidiaVision(
+      const text = await callOpenRouterVision(
         image,
         probeId
           ? 'This is one exam problem. Find the printed problem number and the box enclosing the whole problem. Reply ONLY with JSON: {"box_2d":[ymin,xmin,ymax,xmax],"number":"17."} with coordinates normalised 0-1000.'

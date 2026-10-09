@@ -25,10 +25,10 @@ export async function POST(req: NextRequest) {
   } | null;
   const image = typeof body?.image === "string" ? body.image : "";
   const engine =
-    body?.engine === "gemini" ? "gemini" : body?.engine === "openai" ? "openai" : body?.engine === "nvidia" ? "nvidia" : null;
+    body?.engine === "gemini" ? "gemini" : body?.engine === "openai" ? "openai" : body?.engine === "openrouter" ? "openrouter" : null;
   const model = typeof body?.model === "string" ? body.model.trim() : "";
   const effort = typeof body?.effort === "string" && /^[a-z]{1,16}$/.test(body.effort) ? body.effort : undefined;
-  if (!image.startsWith("data:image/") || !engine || !/^[\w./-]{1,100}$/.test(model)) {
+  if (!image.startsWith("data:image/") || !engine || !/^[\w./:-]{1,100}$/.test(model)) {
     return NextResponse.json({ error: "image·engine·model 이 필요합니다." }, { status: 400 });
   }
   if (engine === "openai" && model !== OPENAI_DETECT_MODEL) {

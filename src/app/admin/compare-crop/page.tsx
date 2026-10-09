@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
  * 맨 위 표: 모델마다 평균 찾기 시간·다시 맞추기 시간·찾은 문제 수·합친 문제 수·실패·원가.
  */
 
-type Cand = { key: string; engine: "gemini" | "openai" | "nvidia"; model: string; effort?: string };
+type Cand = { key: string; engine: "gemini" | "openai" | "openrouter"; model: string; effort?: string };
 
 const LUNA = "gpt-6-luna";
 const PRESETS: Cand[] = [
@@ -36,15 +36,9 @@ const PRESETS: Cand[] = [
   { key: "lunaL", engine: "openai", model: LUNA, effort: "low" },
   { key: "lunaM", engine: "openai", model: LUNA, effort: "medium" },
   { key: "lunaH", engine: "openai", model: LUNA, effort: "high" },
-  // NVIDIA(build.nvidia.com) — 이 계정에서 실제로 비전 요청이 통하는 것(2026-10-09 `probe: "nvidia-scan"` 으로 확인). 느린 것은 120초까지 기다린다.
-  { key: "nLl11", engine: "nvidia", model: "meta/llama-3.2-11b-vision-instruct" },
-  { key: "nLl90", engine: "nvidia", model: "meta/llama-3.2-90b-vision-instruct" },
-  { key: "nNano", engine: "nvidia", model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning" },
-  { key: "nKimi", engine: "nvidia", model: "moonshotai/kimi-k3" },
-  { key: "nGem", engine: "nvidia", model: "google/gemma-4-31b-it" },
-  { key: "nGlm", engine: "nvidia", model: "z-ai/glm-5.3-flash" },
-  { key: "nMuse", engine: "nvidia", model: "meta/muse-glimmer-30b" },
-  { key: "nDs", engine: "nvidia", model: "deepseek-ai/deepseek-v4.1-flash" },
+  // OpenRouter 무료 — 이름은 제3자 안내에서 본 것이라 없으면 404 로 그대로 나온다. 아래 "오픈라우터 이미지 모델 불러오기"로 실제 목록을 본다.
+  { key: "orGem", engine: "openrouter", model: "google/gemma-4-31b-it:free" },
+  { key: "orNano", engine: "openrouter", model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" },
 ];
 const DEFAULT_ON = new Set(["gfll", "lunaM"]);
 const PAD = 0.008;
@@ -91,6 +85,8 @@ export default function ComparePageCropPage() {
   const [on, setOn] = useState<Set<string>>(new Set(DEFAULT_ON));
   const [custom, setCustom] = useState<Cand[]>([]);
   const [customText, setCustomText] = useState("");
+  const [orList, setOrList] = useState<{ id: string; free: boolean; p: number; c: number }[] | null>(null);
+  const [orBusy, setOrBusy] = useState(false);
   const [refine, setRefine] = useState(true);
   const [results, setResults] = useState<Record<string, Res>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -115,11 +111,40 @@ export default function ComparePageCropPage() {
     setBusy(null);
   }
 
+  async function loadOpenRouter() {
+    setOrBusy(true);
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/models");
+      const j = (await res.json()) as {
+        data?: { id?: string; architecture?: { input_modalities?: string[] }; pricing?: { prompt?: string; completion?: string } }[];
+      };
+      const list = (j.data ?? [])
+        .filter((m) => m.id && m.architecture?.input_modalities?.includes("image"))
+        .map((m) => {
+          const p = Number(m.pricing?.prompt ?? 0) * 1e6;
+          const c = Number(m.pricing?.completion ?? 0) * 1e6;
+          return { id: m.id as string, free: (m.id as string).endsWith(":free") || (p === 0 && c === 0), p, c };
+        })
+        .sort((a, b) => Number(b.free) - Number(a.free) || a.id.localeCompare(b.id));
+      setOrList(list);
+    } catch (err) {
+      alert(`목록을 못 불러왔어요: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setOrBusy(false);
+    }
+  }
+
+  function addOr(id: string) {
+    const key = `or:${id}`;
+    setCustom((c) => (c.some((x) => x.key === key) ? c : [...c, { key, engine: "openrouter", model: id }]));
+    setOn((s) => new Set(s).add(key));
+  }
+
   function addCustom() {
     const t = customText.trim();
     if (!t) return;
     const [model, effort] = t.split(/\s+/);
-    const engine: Cand["engine"] = model.startsWith("gemini") ? "gemini" : model.includes("/") ? "nvidia" : "openai";
+    const engine: Cand["engine"] = model.startsWith("gemini") ? "gemini" : model.includes("/") ? "openrouter" : "openai";
     const key = `c${Date.now()}`;
     setCustom((c) => [...c, { key, engine, model, ...(effort && engine === "openai" ? { effort } : {}) }]);
     setOn((s) => new Set(s).add(key));
@@ -240,12 +265,36 @@ export default function ComparePageCropPage() {
             value={customText}
             onChange={(e) => setCustomText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addCustom()}
-            placeholder="다른 모델: gemini-3.6-flash · gpt-6-luna xhigh · NVIDIA 는 meta/… 처럼 슬래시 이름"
+            placeholder="다른 모델: gemini-3.6-flash · gpt-6-luna xhigh · 오픈라우터는 google/…:free 처럼 슬래시 이름"
             className="min-w-0 flex-1"
           />
           <Button type="button" variant="outline" size="sm" onClick={addCustom}>
             추가
           </Button>
+        </div>
+        <div className="flex flex-col gap-2">
+          <div>
+            <Button type="button" variant="outline" size="sm" disabled={orBusy} onClick={() => void loadOpenRouter()}>
+              {orBusy ? "불러오는 중…" : "오픈라우터 이미지 모델 불러오기"}
+            </Button>
+          </div>
+          {orList && (
+            <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
+              {orList.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => addOr(m.id)}
+                  title={m.free ? "무료" : `입력 $${m.p.toFixed(2)} · 출력 $${m.c.toFixed(2)} / 100만 토큰`}
+                  className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                    m.free ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-600"
+                  } hover:border-blue-400`}
+                >
+                  {m.id}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={refine} onChange={(e) => setRefine(e.target.checked)} className="h-4 w-4 accent-blue-600" />
