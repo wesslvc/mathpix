@@ -104,6 +104,7 @@ export async function POST(req: NextRequest) {
   let probeModel = "";
   let probeEffort = "";
   let probeId = "";
+  let probeModels: string[] | null = null;
   try {
     const body = (await req.json()) as {
       preferUser?: unknown;
@@ -116,6 +117,8 @@ export async function POST(req: NextRequest) {
     if (typeof body.preferUser === "string") preferUser = body.preferUser;
     if (typeof body.probe === "string") probe = body.probe;
     if (typeof body.model === "string") probeModel = body.model;
+    const ms = (body as { models?: unknown }).models;
+    if (Array.isArray(ms)) probeModels = ms.filter((x): x is string => typeof x === "string");
   } catch {
     // 본문이 없어도 된다(pg_cron 은 빈 객체를 보낸다).
   }
@@ -128,6 +131,35 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
     }
+  }
+  // 여러 모델을 **동시에** 한 번에 시험한다(모델마다 40초에서 끊는다). `models` 는 본문 배열.
+  if (probe === "nvidia-scan") {
+    const models = (probeModels ?? []).filter((m) => /^[\w./-]{3,100}$/.test(m)).slice(0, 20);
+    let image = `data:image/png;base64,${PROBE_PNG}`;
+    if (probeId) {
+      const got = await loadAsDataUrl(createAdminClient(), probeId);
+      if (got) image = got;
+    }
+    const prompt = probeId
+      ? 'This is one exam problem. Find the printed problem number and the box enclosing the whole problem. Reply ONLY with JSON: {"box_2d":[ymin,xmin,ymax,xmax],"number":"17."} with coordinates normalised 0-1000.'
+      : 'Reply ONLY with a JSON object: {"ok": true, "shape": "<what you see>"}';
+    const results = await Promise.all(
+      models.map(async (model) => {
+        const t0 = Date.now();
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 40_000);
+        let usage: unknown = null;
+        try {
+          const text = await callNvidiaVision(image, prompt, model, (u) => (usage = u), 1024, ac.signal);
+          return { model, ok: true, ms: Date.now() - t0, usage, text: text.slice(0, 300) };
+        } catch (err) {
+          return { model, ok: false, ms: Date.now() - t0, error: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
+        } finally {
+          clearTimeout(timer);
+        }
+      }),
+    );
+    return NextResponse.json({ results });
   }
   if (probe === "nvidia-vision") {
     const model = probeModel;

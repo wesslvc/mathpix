@@ -29,6 +29,7 @@ export async function callNvidiaVision(
   model: string,
   onUsage?: (u: DetectUsage) => void,
   maxTokens = 4096,
+  signal?: AbortSignal,
 ): Promise<string> {
   const key = nvidiaKey();
   if (!key) throw new Error("NVIDIA 키가 없습니다.");
@@ -54,6 +55,7 @@ export async function callNvidiaVision(
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "application/json" },
       body,
+      signal,
     });
     const text = await res.text();
     if (!res.ok) {
