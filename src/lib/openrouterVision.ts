@@ -30,7 +30,7 @@ export async function listOpenRouterVisionModels(): Promise<OpenRouterModel[]> {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** 사진 한 장 + 지시 → 글. 429·5xx 는 2초·5초 뒤 두 번 더(무료 모델은 자주 막힌다). */
+/** 사진 한 장 + 지시 → 글. 429·5xx 는 3·8·15초 뒤 세 번 더(제공사가 잠깐 막는 일이 흔하다 — 같은 모델에 지면 여러 장이 동시에 가면 더). */
 export async function callOpenRouterVision(
   dataUrl: string,
   prompt: string,
@@ -58,8 +58,8 @@ export async function callOpenRouterVision(
     usage: { include: true }, // 응답에 실제 청구액(usage.cost, USD)을 실어 준다
   });
   let last = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) await new Promise((r) => setTimeout(r, attempt === 1 ? 2000 : 5000));
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, [0, 3000, 8000, 15000][attempt]));
     const res = await fetch(`${BASE}/chat/completions`, {
       method: "POST",
       headers: {
