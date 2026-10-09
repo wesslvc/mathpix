@@ -26,6 +26,7 @@ import { enhanceContrast } from "@/lib/autoContrast";
 import { attachNumberAndAnswer, readNumberWithMathpix, wholeProblemCard } from "@/lib/quickProblem";
 import { runAiTask } from "@/lib/aiTask";
 import { inkMapFromImage, snapBoxes } from "@/lib/snapBoxes";
+import { cutRefineWindows, refineProblems } from "@/lib/pageRefine";
 import type { AnswerByNumber } from "@/lib/answerMap";
 import { useFigureJobs } from "./FigureJobsProvider";
 import { Button } from "@/components/ui/button";
@@ -74,7 +75,8 @@ const PAD = 0.004;
  * 티가 난다 — 자리를 알고 있으면 아우르는 네모 하나로 다시 자를 수 있다.
  */
 /** luna 가 찾은 지면 자리. */
-type Found = { problems: DetectedProblem[]; model: string | null };
+/** `refined` = 문제마다 확대해 다시 맞춘 수(`pageRefine.ts`). */
+type Found = { problems: DetectedProblem[]; model: string | null; refined?: number };
 
 type Piece = {
   id: string;
@@ -151,6 +153,8 @@ export default function BatchSplitPanel({
   const [usedModel, setUsedModel] = useState<string | null>(null);
   /** 테두리를 사진의 글자에 맞춰 다듬은 네모 수(`snapBoxes.ts`). */
   const [snapped, setSnapped] = useState(0);
+  /** 문제마다 확대해 luna 가 다시 맞춘 수. */
+  const [refinedCount, setRefinedCount] = useState(0);
   const { enqueue } = useFigureJobs();
   /** 지금 자르는 재료의 크기와, 원본을 못 열어 축소본으로 내려갔는지. */
   const [sourceInfo, setSourceInfo] = useState<{ w: number; h: number; degraded: boolean } | null>(null);
@@ -385,6 +389,7 @@ export default function BatchSplitPanel({
           let queued = () => {};
           const inLine = new Promise<void>((r) => (queued = r));
           void askDetect(image, `지면 자리 찾기 · ${file.name}`, () => queued())
+            .then((got) => refineWithFile(file, got))
             .then(resolve, reject)
             .finally(() => queued());
           await inLine;
@@ -397,6 +402,33 @@ export default function BatchSplitPanel({
     promise.catch(() => undefined);
     prefetchRef.current.set(file, promise);
     return promise;
+  }
+
+  /**
+   * 찾은 자리를 **문제마다 확대해 다시 맞춘다**(`pageRefine.ts`). 창을 오리려면 원본을 다시 열어야 해서 여는 일만 한 장씩
+   * 잇고(메모리), luna 호출은 문제마다 동시에 돈다. 못 하면 찾은 자리 그대로.
+   */
+  async function refineWithFile(file: File, got: Found): Promise<Found> {
+    if (got.problems.length === 0) return got;
+    let windows: ReturnType<typeof cutRefineWindows> = [];
+    const cut = async () => {
+      const d = await loadDrawableFromFile(file);
+      try {
+        windows = cutRefineWindows(d.src as CanvasImageSource, d.width, d.height, got.problems);
+      } finally {
+        d.close();
+      }
+    };
+    const step = prefetchChainRef.current.then(cut, cut);
+    prefetchChainRef.current = step.catch(() => undefined);
+    try {
+      await step;
+    } catch {
+      return got;
+    }
+    if (windows.length === 0) return got;
+    const r = await refineProblems(got.problems, windows, `지면 · ${file.name}`);
+    return { ...got, problems: r.problems, refined: r.refined };
   }
 
   async function askDetect(image: string, label: string, onQueued?: () => void): Promise<Found> {
@@ -423,7 +455,9 @@ export default function BatchSplitPanel({
       const res = snapBoxes(map, found.flatMap((p) => p.boxes));
       snappedCount = res.changed;
       let k = 0;
-      found = found.map((p) => ({ ...p, boxes: p.boxes.map(() => res.boxes[k++]) }));
+      // 확대해 다시 맞출 때 luna 가 짚은 번호·선지(`keep`)는 글자에 맞춰 다듬은 뒤에도 반드시 품는다(자동 자르기와 같은 규칙) —
+      // 다듬기가 끝 선지 줄을 "이웃 것"으로 보고 잘라 내는 일이 있었다.
+      found = found.map((p) => ({ ...p, boxes: p.boxes.map((orig) => withKeep(res.boxes[k++], orig)) }));
     }
     const img = source.img;
     const pieces: Piece[] = await Promise.all(
@@ -463,7 +497,16 @@ export default function BatchSplitPanel({
         const pre = pageFile ? prefetchRef.current.get(pageFile) : undefined;
         let got: Found | null = null;
         if (pre) got = await pre.catch(() => null);
-        if (!got) got = await askDetect(await detectImage(source), "지면에서 문제 자리 찾기");
+        if (!got) {
+          got = await askDetect(await detectImage(source), "지면에서 문제 자리 찾기");
+          if (got.problems.length > 0) {
+            setBusy("luna 가 문제마다 확대해 테두리를 다시 맞추는 중...");
+            const windows = cutRefineWindows(source.img, source.width, source.height, got.problems);
+            const r = await refineProblems(got.problems, windows, "지면");
+            got = { ...got, problems: r.problems, refined: r.refined };
+          }
+        }
+        setRefinedCount(got.refined ?? 0);
         found = got.problems;
         setUsedModel(got.model);
       } catch (err) {
@@ -886,6 +929,7 @@ export default function BatchSplitPanel({
       {!busy && usedModel && pieces.length > 0 && (
         <p className="text-[11px] text-slate-400">
           {usedModel} 로 {pieces.length}개를 잡았습니다
+          {refinedCount > 0 && ` · 문제마다 확대해 ${refinedCount}곳을 다시 맞췄어요`}
           {snapped > 0 && ` · 테두리 ${snapped}곳을 글자에 맞춰 다듬었어요`}
         </p>
       )}
@@ -1001,4 +1045,24 @@ export default function BatchSplitPanel({
       )}
     </div>
   );
+}
+
+/**
+ * 번호·선지 둘레 여유(지면 대비). 사진 한 장 자르기(`KEEP_PAD` 1.2%)보다 좁다 — 지면에서는 바로 아래가 다음 문제라 넓게
+ * 두르면 그 첫 줄이 딸려 온다.
+ */
+const PAGE_KEEP_PAD = 0.005;
+
+/** 다듬은 자리가 luna 가 짚은 번호·선지(`keep`)를 다 품게 넓힌다. keep 이 없으면 그대로. */
+function withKeep(b: ProblemBox, orig: ProblemBox): ProblemBox {
+  const keep = (orig as ProblemBox & { keep?: ProblemBox[] }).keep;
+  if (!Array.isArray(keep) || keep.length === 0) return b;
+  let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
+  for (const k of keep) {
+    x0 = Math.max(0, Math.min(x0, k.x - PAGE_KEEP_PAD));
+    y0 = Math.max(0, Math.min(y0, k.y - PAGE_KEEP_PAD));
+    x1 = Math.min(1, Math.max(x1, k.x + k.w + PAGE_KEEP_PAD));
+    y1 = Math.min(1, Math.max(y1, k.y + k.h + PAGE_KEEP_PAD));
+  }
+  return { ...b, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }

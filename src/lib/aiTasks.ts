@@ -171,6 +171,18 @@ function money(ctx: TaskCtx, usage: object | undefined, estKrw: number | undefin
   return (ctx.unlimited || ctx.byok) && usage ? { ...usage, estKrw } : undefined;
 }
 
+/** 자동 자르기의 표적(지면 정밀 자르기): 그림 안 어림 자리(0~1) + 번호. 모양이 이상하면 없는 것으로. */
+function readTarget(v: unknown): { box: { x: number; y: number; w: number; h: number }; number?: string } | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as { box?: { x?: unknown; y?: unknown; w?: unknown; h?: unknown }; number?: unknown };
+  const b = o.box;
+  if (!b) return undefined;
+  const [x, y, w, h] = [b.x, b.y, b.w, b.h].map(Number);
+  if (![x, y, w, h].every((n) => Number.isFinite(n) && n >= 0 && n <= 1) || w <= 0 || h <= 0) return undefined;
+  const number = typeof o.number === "string" ? o.number.trim().slice(0, 12) : undefined;
+  return { box: { x, y, w, h }, ...(number ? { number } : {}) };
+}
+
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof GradeError || err instanceof DetectError) return err.message;
   return err instanceof Error ? err.message : fallback;
@@ -249,7 +261,10 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     name: "자동 자르기",
     async run(ctx) {
       try {
-        const { box, model, usage, number, choices, retried, rotate, advice, adviceReason } = await cropOneProblem(ctx.images[0]);
+        const { box, model, usage, number, choices, retried, rotate, advice, adviceReason } = await cropOneProblem(
+          ctx.images[0],
+          readTarget(ctx.params.target),
+        );
         const estKrw = usage ? gradingEstKrw(lunaUsage(usage), OPENAI_DETECT_MODEL) : undefined;
         if (estKrw && usage) {
           await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 자동 자르기", krw: estKrw, tokens: usage });

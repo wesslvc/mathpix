@@ -66,6 +66,8 @@ export type PassageState = {
    * "지문생성도 돈드는걸로 취급해").
    */
   costKrw?: number;
+  /** 그림을 읽기와 **함께** 다시 그렸다(2026-10-09) — 서식 검수 뒤에 그림 단계를 따로 돌지 않는다. */
+  figuresDone?: boolean;
 };
 
 export type PassageJob = {
@@ -171,7 +173,7 @@ async function loadAll(admin: SupabaseClient, paths: string[]): Promise<string[]
 
 /** 다음 단계 이름. 그림이 없으면 검수 뒤에 끝난다. */
 function afterMarks(state: PassageState): { stage: string } | null {
-  return (state.figures?.length ?? 0) > 0 ? { stage: "figure:0" } : null;
+  return !state.figuresDone && (state.figures?.length ?? 0) > 0 ? { stage: "figure:0" } : null;
 }
 
 export async function runPassageStage(
@@ -192,12 +194,33 @@ export async function runPassageStage(
       const image = await loadAsDataUrl(admin, job.input_path);
       const small = await loadAll(admin, payload.figuresSmall);
       if (!image || !small) return { kind: "fail", error: "올려 둔 지문 사진을 찾지 못했어요. 다시 넣어주세요." };
-      const { blocks: raw, model, usage: readUsage } = await readKoreanRichText(
-        image,
-        deadline.signal,
-        ctx.byokApiKey,
-        small,
-      );
+      // **그림 다시 그리기를 읽기와 동시에 건다**(2026-10-09, 사용자 — "분할한 다음에 여러 개 돌리는 게 더 빠른 거 아님?").
+      // 그림은 글자 읽기 결과가 필요 없다 — 예전에는 읽기 → 서식 검수 → 그림 1 → 그림 2 … 를 한 줄로 기다렸다. 이제 그림이
+      // 모두 읽기(2분 남짓) 뒤에 숨는다. 실패한 그림은 원본을 붙인다(예전과 같다).
+      const redraws = payload.figures.map(async (f, i) => {
+        const data = await loadAsDataUrl(admin, f.path);
+        if (!data) return { data: null, outcome: null };
+        const outcome = await runFigureGeneration({
+          image: data,
+          mode: "figure",
+          korean: true,
+          inputSize: f.width && f.height ? { width: f.width, height: f.height } : undefined,
+          modelIds: ctx.modelIds,
+          byokApiKey: ctx.byokApiKey,
+          deadlineMs: ctx.deadlineMs,
+          tag: `${ctx.tag} 그림${i + 1}`,
+        }).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
+        return { data, outcome };
+      });
+      let read: Awaited<ReturnType<typeof readKoreanRichText>>;
+      try {
+        read = await readKoreanRichText(image, deadline.signal, ctx.byokApiKey, small);
+      } catch (err) {
+        // 읽기가 실패해도 이미 건 그림 호출은 끝까지 기다린다(뒤에서 떠돌지 않게). 다시 시도하면 읽기부터 다시 한다.
+        await Promise.allSettled(redraws);
+        throw err;
+      }
+      const { blocks: raw, model, usage: readUsage } = read;
       const readKrw = readUsage ? gradingEstKrw(readUsage, model) : undefined;
       if (readKrw && !ctx.byokApiKey) {
         await logAiCost(admin, { userId: job.user_id, jobId: job.id, kind: "passage", what: "지문 읽기", krw: readKrw, tokens: solTokens(readUsage) });
@@ -208,30 +231,66 @@ export async function runPassageStage(
 
       // 그림은 우선 **원본**을 영구 자리에 옮겨 붙인다 — 다시 그리기가 끝나기 전에
       // 뽑아도(또는 그 단계가 죽어도) 빈 자리가 아니다.
+      const drawn = await Promise.all(redraws);
       const figures: FigureSlot[] = [];
-      for (const f of payload.figures) {
-        const data = await loadAsDataUrl(admin, f.path);
-        const kept = data ? await keepFigure(admin, job.user_id, data) : null;
+      let redrawnCount = 0;
+      let figureKrw = 0;
+      for (let i = 0; i < payload.figures.length; i++) {
+        const f = payload.figures[i];
+        const { data, outcome } = drawn[i];
+        let kept: { path: string; src: string } | null = null;
+        let redrawn = false;
+        if (outcome?.ok) {
+          figureKrw += outcome.usage?.estKrw ?? 0;
+          if (outcome.usage && !ctx.byokApiKey) {
+            await logAiCost(admin, {
+              userId: job.user_id,
+              jobId: job.id,
+              kind: "passage",
+              what: "지문 그림",
+              krw: outcome.usage.estKrw,
+              usd: outcome.usage.estUsd,
+              tokens: imageTokens(outcome.usage),
+            });
+          }
+          kept = await keepFigure(admin, job.user_id, outcome.dataUrl);
+          redrawn = !!kept;
+        } else if (outcome) {
+          console.warn(`[${ctx.tag}] 그림${i + 1} 다시 그리기 실패: ${outcome.error}`);
+        }
+        if (!kept && data) kept = await keepFigure(admin, job.user_id, data);
         // 하나라도 빠뜨리면 뒤의 그림들이 한 칸씩 밀려 엉뚱한 자리에 붙는다(f1, f2… 는 차례다).
         if (!kept) return { kind: "fail", error: "지문 안 그림을 옮기지 못했어요. 다시 시도해주세요." };
+        if (redrawn) redrawnCount++;
         figures.push({
           src: kept.src,
           path: kept.path,
           scale: f.scale,
           ratio: f.width && f.height ? f.height / f.width : 1,
+          ...(redrawn ? { redrawn: true } : {}),
         });
       }
+      const figureCharge = FIGURE_TOKEN_DEPOSIT * redrawnCount;
+      const figureRefund = FIGURE_TOKEN_DEPOSIT * (payload.figures.length - redrawnCount);
       const next: PassageState = {
         ...state,
         blocks,
         figures,
         notes: { read: model, readMarks: describeMarks(stats) || undefined },
-        spent: spent0 + PASSAGE_READ_TOKENS,
-        costKrw: (state.costKrw ?? 0) + (readKrw ?? 0),
+        spent: spent0 + PASSAGE_READ_TOKENS + figureCharge,
+        costKrw: (state.costKrw ?? 0) + (readKrw ?? 0) + figureKrw,
+        figuresDone: true,
       };
       next.notes!.figures = figureNote(figures, placePassageFigures(blocks, figures).missing) || undefined;
       await publish(admin, job, next);
-      return { kind: "next", stage: "marks", state: next, note: joinNotes(next), refund: 0, spent: PASSAGE_READ_TOKENS };
+      return {
+        kind: "next",
+        stage: "marks",
+        state: next,
+        note: joinNotes(next),
+        refund: figureRefund,
+        spent: PASSAGE_READ_TOKENS + figureCharge,
+      };
     }
 
     // ── marks ────────────────────────────────────────────────────────

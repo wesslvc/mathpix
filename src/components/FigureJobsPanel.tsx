@@ -115,7 +115,7 @@ function statusText(j: FigureJob, top: string): string {
   const fig = /^figure:(\d+)$/.exec(stage);
   const what =
     stage === "read"
-      ? "지문을 글자로 옮기는 중"
+      ? "지문을 글자로 옮기는 중 (지문 안 그림도 함께 그려요)"
       : stage === "marks"
         ? "서식(원문자·밑줄·네모·굵게) 검수 중"
         : fig
@@ -147,7 +147,8 @@ function remainingSeconds(j: FigureJob): number {
   }
   if (j.mode === "passage") {
     const stage = j.stage ?? "read";
-    return stage === "read" ? 150 : stage === "marks" ? 90 : 60;
+    // 그림은 읽기와 함께 그려지므로(2026-10-09) 읽기 뒤에는 서식 검수만 남는다.
+    return stage === "read" ? 150 + 90 : stage === "marks" ? 90 : 60;
   }
   return 45; // 그림 하나
 }

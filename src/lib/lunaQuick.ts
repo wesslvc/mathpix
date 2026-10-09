@@ -80,6 +80,7 @@ export interface CropFinding {
 /** 사진 한 장에서 문제 하나의 자리(0~1). 못 찾으면 box 가 null. */
 export async function cropOneProblem(
   dataUrl: string,
+  target?: { box: ProblemBox; number?: string },
 ): Promise<CropFinding & { model: string; usage?: DetectUsage; retried: boolean }> {
   const total: DetectUsage = { input: 0, cached: 0, output: 0 };
   const add = (u: DetectUsage) => {
@@ -87,7 +88,8 @@ export async function cropOneProblem(
     total.cached += u.cached;
     total.output += u.output;
   };
-  let first = parseCrop(await callOpenAIVision(dataUrl, CROP_PROMPT, OPENAI_DETECT_MODEL, CROP_EFFORT, add));
+  const prompt = target ? `${CROP_PROMPT}${targetNote(target)}` : CROP_PROMPT;
+  let first = parseCrop(await callOpenAIVision(dataUrl, prompt, OPENAI_DETECT_MODEL, CROP_EFFORT, add));
   let retried = false;
   // 선지를 일부만 찾았으면(1~4개) 한 번 더 — 대개 맨 아래·오른쪽 선지를 놓친 경우다.
   if (first.box && first.choices > 0 && first.choices < 5) {
@@ -95,7 +97,7 @@ export async function cropOneProblem(
     const again = parseCrop(
       await callOpenAIVision(
         dataUrl,
-        `${CROP_PROMPT}\n\nA previous look found only ${first.choices} of the five choices (${first.choices} boxes). The missing ones are almost always below or to the right of the found ones — find all five this time and make the main box contain them.`,
+        `${prompt}\n\nA previous look found only ${first.choices} of the five choices (${first.choices} boxes). The missing ones are almost always below or to the right of the found ones — find all five this time and make the main box contain them.`,
         OPENAI_DETECT_MODEL,
         CROP_EFFORT,
         add,
@@ -104,6 +106,23 @@ export async function cropOneProblem(
     if (again.box && again.choices >= first.choices) first = again;
   }
   return { ...first, model: OPENAI_DETECT_MODEL, usage: total.input || total.output ? total : undefined, retried };
+}
+
+/**
+ * 지면 정밀 자르기(`BatchSplitPanel`)가 쓰는 지시: 이 그림은 지면의 **확대한 일부**이고 이웃 문제가 걸쳐 있다 — 그중 이 번호·이
+ * 어림 자리의 문제 하나만. 어림 자리는 지면 전체를 보고 짚은 것이라 1~2% 어긋나므로, 번호·선지가 그 밖으로 나가면 따라간다.
+ */
+function targetNote(t: { box: ProblemBox; number?: string }): string {
+  const k = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 1000);
+  const b = t.box;
+  return `
+
+THIS IMAGE IS A ZOOMED-IN PART OF A FULL EXAM PAGE (not a photo of one problem). Parts of neighbouring problems are visible
+above/below/beside it — they are NOT the target. The target is ${t.number ? `problem number ${t.number}` : "the problem"} whose
+rough position is [${k(b.y)},${k(b.x)},${k(b.y + b.h)},${k(b.x + b.w)}] in this image. That rough position came from looking at the
+whole page and is often off by a line or two: start from it, then follow the real edges of THIS problem — include its number and
+ALL its lines/choices even where they extend past the rough position, and cut away any line that belongs to a neighbour
+(a neighbour begins with its own printed number). Ignore "pick the one closest to the centre" — the target is the one described here.`;
 }
 
 function toBox(b: unknown): ProblemBox | null {
