@@ -58,12 +58,13 @@ question region must contain everything belonging to it:
 - ALL choices: multiple choice has FIVE (①②③④⑤). They may be on one line, in two or three rows, in two columns of a grid, or far right/bottom on their own line — find all five. short-answer questions have no choices: then the last line of the stem/figure is the bottom.
 
 edges — TIGHT but never clipping:
-- fit each edge CLOSE to the content: top edge just above the number's line, bottom edge just below the last choice line (or last figure line), left/right just outside the outermost text of this question. leave roughly half a text line of margin, NOT more — do not pad with the blank gap up to the neighbouring question, the gutter or the page margin
+- fit each edge CLOSE to the content: top edge just above the number's line, bottom edge just below the last choice line (or last figure line), left/right just outside the outermost text of this question. leave about ONE text line of margin on every side (≈1.5% of the image) — measured errors show boxes are usually 1-3% too TIGHT, cutting the top/left/right of the question, so err outward; but do not pad all the way to the neighbouring question, the gutter or the page margin
 - the edge must sit in blank space, never cut through a line of text; a cut-off last choice, a cut-off number or a sliced formula/figure is the worst mistake, but a box that swallows the blank gap or a neighbour's line is also wrong
 - the neighbouring question's first line (starting with its own number) is NOT part of this one; the previous question's last choice line is NOT part of this one
+- the left edge must include anything hanging into the left margin (question number, ㉠ markers, figures, tables, boxes): look at the leftmost ink of THIS question, not at the column's usual margin. same for the right: wide figures, tables and long choice lines can extend past the usual right edge
 - tall figures/tables belonging to the question stay inside even if there is a lot of blank around them
 - in a 2-column page keep each region inside its own column (do not extend across the gutter)
-- COLUMN CONSISTENCY: questions in the same column share the same left and right edge. left edge = just left of the printed question numbers of that column (numbers sit at the column's left margin); right edge = just right of the column's longest line. use the SAME xmin and xmax for every question of a column unless one question has a figure/table that sticks out further. do not let a box start in the middle of the column or stop before the right end of the longest text line
+- COLUMN CONSISTENCY: questions in the same column usually share the same left and right edge (but a question whose content sticks out further wins — see above). left edge = just left of the printed question numbers of that column (numbers sit at the column's left margin); right edge = just right of the column's longest line. use the SAME xmin and xmax for every question of a column unless one question has a figure/table that sticks out further. do not let a box start in the middle of the column or stop before the right end of the longest text line
 - vertical edges: ymin = just above the top of the number's line (do NOT include blank space above it); ymax = just below the last line. consecutive questions in a column should nearly touch (gap between box bottom and next box top = only the blank gap between them, split roughly in half)
 - 1 region per question, non-overlapping
 - CHECK each region before answering: (1) its printed number is inside; (2) count the choices inside — ALL five ①~⑤ for multiple choice; if you see fewer than five, look again below and to the right; (3) the last line of the stem and any figure/table are inside; (4) no line of the next question is inside; (5) top < bottom and left < right, and the region does not overlap another
@@ -821,14 +822,14 @@ export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "gemini" ? "gemin
 /**
  * **지면 자르기는 하이쿠(오픈라우터)가 먼저 찾는다**(2026-10-09, 사용자 — "하이쿠로 확정하고 추론강도를 올려보자"). 비교 화면에서 1위였다.
  * 실패하면 Gemini → luna 로 넘어간다. 끄려면 재배포 없이 `PAGE_OPENROUTER_MODEL=off`, 다른 모델은 이름을 넣는다.
- * 추론 강도는 `PAGE_OPENROUTER_EFFORT`(low|medium|high|xhigh, 기본 medium; `default` 면 안 보냄).
+ * 추론 강도는 `PAGE_OPENROUTER_EFFORT`(low|medium|high|xhigh, 기본 default = 안 보냄).
  */
 export const PAGE_OPENROUTER_MODEL = (() => {
   const v = (process.env.PAGE_OPENROUTER_MODEL ?? "anthropic/claude-haiku-5.5").trim();
   return v === "" || v === "off" || !(process.env.OPENROUTER_KEY || process.env.OPENROUTER_API_KEY) ? null : v;
 })();
 const PAGE_OPENROUTER_EFFORT = (() => {
-  const v = (process.env.PAGE_OPENROUTER_EFFORT ?? "medium").trim();
+  const v = (process.env.PAGE_OPENROUTER_EFFORT ?? "default").trim();
   return v === "" || v === "default" ? undefined : v;
 })();
 

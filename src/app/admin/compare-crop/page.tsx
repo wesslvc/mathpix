@@ -237,21 +237,27 @@ export default function ComparePageCropPage() {
         const t = truth[p.id];
         if (t?.length) {
           const st = truthStart[p.id] ?? 1;
-          const errs: number[] = [];
-          t.forEach((tb, i) => {
-            const no = String(st + i);
-            const pr = (r.raw ?? []).find((q) => q.no === no) ?? (r.raw ?? [])[i];
-            const mb = pr?.boxes[0];
-            if (!mb) {
-              out.push(`  - Δ ${no}번: 모델이 못 찾음`);
-              return;
-            }
-            // 모델 − 정답, %p. 위·아래·왼쪽·오른쪽 변 각각(+면 모델이 더 오른쪽/아래).
-            const d = [mb.y - tb.y, mb.y + mb.h - (tb.y + tb.h), mb.x - tb.x, mb.x + mb.w - (tb.x + tb.w)].map((v) => v * 100);
-            errs.push(...d.map(Math.abs));
-            out.push(`  - Δ ${no}번 (위,아래,왼,오른 %p): ${d.map((v) => (v > 0 ? "+" : "") + v.toFixed(1)).join(", ")}`);
-          });
-          if (errs.length) out.push(`  - 변 평균 절대 오차 ${(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(2)}%p · 최대 ${Math.max(...errs).toFixed(1)}%p`);
+          // 모델 − 정답, %p. 위·아래·왼쪽·오른쪽 변 각각(+면 모델이 더 아래/오른쪽 = 위·왼쪽은 안쪽으로 잘림, 아래·오른쪽은 바깥으로 넉넉).
+          const delta = (list: DetectedProblem[] | undefined, label: string) => {
+            const errs: number[] = [];
+            t.forEach((tb, i) => {
+              const no = String(st + i);
+              const pr = (list ?? []).find((q) => q.no === no) ?? (list ?? [])[i];
+              const bs = pr?.boxes ?? [];
+              if (!bs.length) {
+                out.push(`  - ${label} Δ ${no}번: 못 찾음`);
+                return;
+              }
+              const x0 = Math.min(...bs.map((b) => b.x)), y0 = Math.min(...bs.map((b) => b.y));
+              const x1 = Math.max(...bs.map((b) => b.x + b.w)), y1 = Math.max(...bs.map((b) => b.y + b.h));
+              const d = [y0 - tb.y, y1 - (tb.y + tb.h), x0 - tb.x, x1 - (tb.x + tb.w)].map((v) => v * 100);
+              errs.push(...d.map(Math.abs));
+              out.push(`  - ${label} Δ ${no}번 (위,아래,왼,오른 %p): ${d.map((v) => (v > 0 ? "+" : "") + v.toFixed(1)).join(", ")}`);
+            });
+            if (errs.length) out.push(`  - ${label} 변 평균 절대 오차 ${(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(2)}%p · 최대 ${Math.max(...errs).toFixed(1)}%p`);
+          };
+          delta(r.raw, "모델");
+          if (r.final && r.final !== r.raw) delta(r.final, "최종(다듬은 뒤)");
         }
         out.push("");
       }
