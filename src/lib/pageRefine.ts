@@ -18,7 +18,7 @@ import { enhanceContrast } from "./autoContrast";
 import { runAiTask } from "./aiTask";
 import type { DetectedProblem } from "./detectProblems";
 import type { ProblemBox } from "./problemBoxes";
-import { inkMapFromImage, snapBoxes } from "./snapBoxes";
+import { inkMapFromImage, snapBoxes, type InkMap } from "./snapBoxes";
 
 /** 확대 창: 문제 둘레로 지면 대비 이만큼 더 오린다(이웃 줄이 걸쳐야 어디서 끊을지 보인다). */
 const WIN_MX = 0.03;
@@ -74,28 +74,14 @@ function toPage(r: ProblemBox, win: ProblemBox): ProblemBox {
   return { x: win.x + r.x * win.w, y: win.y + r.y * win.h, w: r.w * win.w, h: r.h * win.h };
 }
 
-/**
- * 다시 본 자리의 **아래 변은 원래 자리보다 이만큼(지면 대비)보다 더 위로 올라올 수 없다**(2026-10-09, 사용자 — "다시 맞추기 할 때 밑부분을 갑자기
- * 날려 먹는 경우가 생겨, 전 모델 공통"). 받는 조건이 "겹침 55% 이상·넓이 0.4배 이상"뿐이라, 다시 본 모델이 발문까지만 짚고 선지를 빼도
- * (박스가 위쪽 60% 만 남아도) 통과해 아랫부분이 통째로 사라졌다. 이웃 문제의 첫 줄이 딸려 온 건 뒤의 `snapBoxes` 가 빈 띠로 줄이지만, 잘려
- * 나간 선지는 아무도 되살리지 못한다 — 줄이는 쪽은 느슨하게, 자르는 쪽은 엄격하게.
- */
-const BOTTOM_SHRINK_TOL = 0.006;
-
-/** 아래 변이 원래보다 너무 올라왔으면 허용치까지만 올라오게 내린다(위·옆 변의 개선은 그대로 산다). */
-export function guardBottom(orig: ProblemBox, next: ProblemBox): ProblemBox {
-  const origBottom = orig.y + orig.h;
-  const floor = origBottom - BOTTOM_SHRINK_TOL;
-  const nextBottom = next.y + next.h;
-  if (nextBottom >= floor) return next;
-  return { ...next, h: floor - next.y };
-}
-
 /** 다시 본 자리를 받을지. 이웃 문제를 짚었거나 터무니없이 커지면 원래대로 둔다. */
 export function acceptRefined(orig: ProblemBox, next: ProblemBox): boolean {
   const a = area(orig);
   if (a <= 0) return false;
-  return overlap(orig, next) / a >= 0.55 && area(next) <= a * 2.2 && area(next) >= a * 0.4;
+  // 겹침은 **둘 중 작은 쪽** 기준이다 — 넉넉하게 잡는 모델(원래 자리가 진짜의 2배)은 알맞게 줄인 자리가 원래의 55% 에도 못 미쳐, 예전처럼
+  // 원래 자리 기준이면 좋은 다시 보기가 통째로 버려졌다. 줄어든 아랫부분은 `restoreBottom` 이 잉크로 되살린다.
+  const an = area(next);
+  return an > 0 && overlap(orig, next) / Math.min(a, an) >= 0.7 && an <= a * 2.2 && an >= a * 0.3;
 }
 
 /** 창마다 luna 에게 동시에 묻고, 받을 만한 것만 갈아 끼운다. 하나가 실패해도 나머지는 그대로 간다. */
@@ -124,7 +110,7 @@ export async function refineProblems(
         const orig = problems[w.index].boxes[0];
         const placed = toPage(r, w.win);
         if (!acceptRefined(orig, placed)) return;
-        const box: KeepBox & { refined?: boolean } = { ...guardBottom(orig, placed), refined: true };
+        const box: KeepBox & { refined?: boolean; was?: ProblemBox } = { ...placed, refined: true, was: orig };
         if (Array.isArray(r.keep)) box.keep = r.keep.map((k) => toPage(k, w.win));
         next[w.index].boxes[0] = box;
         if (!next[w.index].no && result.number) {
@@ -155,9 +141,54 @@ export function snapPageProblems(
   const res = snapBoxes(map, problems.flatMap((p) => p.boxes));
   let k = 0;
   return {
-    problems: problems.map((p) => ({ ...p, boxes: p.boxes.map((orig) => withKeep(res.boxes[k++], orig)) })),
+    problems: problems.map((p) => ({
+      ...p,
+      boxes: p.boxes.map((orig) => {
+        const kept = withKeep(res.boxes[k++], orig);
+        const was = (orig as ProblemBox & { was?: ProblemBox }).was;
+        return was ? restoreBottom(map, kept, was) : kept;
+      }),
+    })),
     snapped: res.changed,
   };
+}
+
+/** 되살릴 때 글자 덩어리를 같은 것으로 보는 가장 큰 흰 간격(지면 높이 대비) — 선지 줄 사이는 이보다 좁고, 다음 문제는 멀다. */
+const RESTORE_GAP = 0.025;
+
+/**
+ * **다시 본 자리가 원래 자리보다 위에서 끝났을 때, 그 사이에 글자가 있으면 되살린다**(2026-10-09, 사용자 — "다시 맞추기 할 때 밑부분을 갑자기 날려 먹는
+ * 경우가 생겨"). 처음에는 아래 변이 원래보다 올라오는 것을 무조건 막았는데(`guardBottom`), 그러면 **넉넉하게 잡는 모델은 아래 흰 여백이 그대로
+ * 남는다**(다듬기는 다시 본 자리를 줄이지 못한다 — `withKeep`; 사용자 — "하이쿠가 넉넉하게 잡는 성향이 있네"). 그래서 잉크로 가른다:
+ * 다시 본 아래 변과 원래 아래 변 사이를 훑어 **글자가 있으면** 그 덩어리의 마지막 줄까지 되살리고(흰 간격이 `RESTORE_GAP` 을 넘으면 거기서 끝 —
+ * 멀리 떨어진 글자는 이웃 문제 것이다), **흰 여백뿐이면 그대로 둔다**(줄인 채).
+ */
+export function restoreBottom(map: InkMap, cur: ProblemBox, was: ProblemBox): ProblemBox {
+  const { ink, w: W, h: H } = map;
+  const clampPx = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+  const x0 = clampPx(Math.round(cur.x * W), W - 1);
+  const x1 = clampPx(Math.round((cur.x + cur.w) * W) - 1, W - 1);
+  const yStart = clampPx(Math.round((cur.y + cur.h) * H), H - 1);
+  const yEnd = clampPx(Math.round((was.y + was.h) * H) - 1, H - 1);
+  if (yEnd <= yStart || x1 <= x0) return cur;
+  const tol = Math.max(3, Math.round((x1 - x0 + 1) * 0.008));
+  const maxGap = Math.round(H * RESTORE_GAP);
+  let last = -1;
+  let gap = 0;
+  for (let y = yStart; y <= yEnd; y++) {
+    let n = 0;
+    const base = y * W;
+    for (let x = x0; x <= x1; x++) n += ink[base + x];
+    if (n > tol) {
+      last = y;
+      gap = 0;
+    } else if (++gap > maxGap) {
+      break;
+    }
+  }
+  if (last < 0) return cur;
+  const bottom = (last + 1) / H;
+  return bottom > cur.y + cur.h ? { ...cur, h: bottom - cur.y } : cur;
 }
 
 /**
