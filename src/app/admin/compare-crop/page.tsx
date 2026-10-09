@@ -144,6 +144,53 @@ export default function ComparePageCropPage() {
     setOn((s) => new Set(s).add(key));
   }
 
+  /** 결과 전부(모델·지면별 상태·시간·오류·토큰·원가·찾은 박스)를 글 한 덩어리로 — 복사하거나 파일로 받는다. */
+  function buildReport(): string {
+    const f1 = (n: number) => (Math.round(n * 1000) / 10).toFixed(1);
+    const out: string[] = [`# 지면 자르기 비교 ${new Date().toLocaleString("ko-KR")}`, `다시 맞추기: ${refine ? "켬" : "끔"}`, ""];
+    for (const p of pages) {
+      out.push(`## 지면: ${p.name} (${p.w}×${p.h})`);
+      for (const c of chosen) {
+        const r = results[`${p.id}|${c.key}`];
+        if (!r) continue;
+        const head = `### ${nameOf(c)} [${c.engine}]`;
+        if (r.state === "error") {
+          out.push(head, `- 실패: ${r.error ?? "?"}`, "");
+          continue;
+        }
+        out.push(
+          head,
+          `- 상태: ${r.state} · 찾기 ${r.ms != null ? (r.ms / 1000).toFixed(1) : "?"}s${r.refineMs != null ? ` · 다시 맞추기 ${(r.refineMs / 1000).toFixed(1)}s(${r.refined ?? 0}곳)` : ""}`,
+          `- 토큰: 입력 ${r.usage?.input ?? "?"} · 출력 ${r.usage?.output ?? "?"} · 원가 ${r.estKrw != null ? `${r.estKrw.toFixed(2)}원` : "단가 모름"}`,
+          `- 찾은 문제 ${r.raw?.length ?? 0}개 (모델 자리, 지면 대비 % — x,y,w,h):`,
+        );
+        for (const q of r.raw ?? []) {
+          out.push(`  - ${q.no ?? "번호?"}번: ${q.boxes.map((b) => `[${f1(b.x)},${f1(b.y)},${f1(b.w)},${f1(b.h)}]`).join(" + ")}`);
+        }
+        out.push("");
+      }
+    }
+    return out.join("\n");
+  }
+
+  async function copyReport() {
+    try {
+      await navigator.clipboard.writeText(buildReport());
+      alert("결과를 복사했어요.");
+    } catch {
+      alert("복사하지 못했어요 — '파일로 받기'를 쓰세요.");
+    }
+  }
+
+  function downloadReport() {
+    const url = URL.createObjectURL(new Blob([buildReport()], { type: "text/markdown;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `crop-compare-${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function addCustom() {
     const t = customText.trim();
     if (!t) return;
@@ -281,6 +328,20 @@ export default function ComparePageCropPage() {
             <Button type="button" variant="outline" size="sm" disabled={orBusy} onClick={() => void loadOpenRouter()}>
               {orBusy ? "불러오는 중…" : "오픈라우터 이미지 모델 불러오기"}
             </Button>
+            {orList && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ml-2"
+                onClick={() => {
+                  const t = orList.map((m) => `${m.id}\t${m.free ? "무료" : `$${m.p.toFixed(3)}/$${m.c.toFixed(3)}`}`).join("\n");
+                  void navigator.clipboard.writeText(`모델\t입력/출력 $/100만토큰\n${t}`).then(() => alert(`${orList.length}개 모델 목록을 복사했어요.`));
+                }}
+              >
+                목록 복사
+              </Button>
+            )}
           </div>
           {orList && (
             <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
@@ -310,6 +371,12 @@ export default function ComparePageCropPage() {
             {pages.length}장 × {chosen.length}개 모델 자르기
           </Button>
           {busy && <span className="text-xs text-slate-500">{busy}</span>}
+          <Button type="button" variant="outline" size="sm" disabled={Object.keys(results).length === 0} onClick={() => void copyReport()}>
+            결과 복사
+          </Button>
+          <Button type="button" variant="outline" size="sm" disabled={Object.keys(results).length === 0} onClick={downloadReport}>
+            파일로 받기
+          </Button>
         </div>
       </section>
 
