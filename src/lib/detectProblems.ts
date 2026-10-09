@@ -63,6 +63,8 @@ edges — TIGHT but never clipping:
 - the neighbouring question's first line (starting with its own number) is NOT part of this one; the previous question's last choice line is NOT part of this one
 - tall figures/tables belonging to the question stay inside even if there is a lot of blank around them
 - in a 2-column page keep each region inside its own column (do not extend across the gutter)
+- COLUMN CONSISTENCY: questions in the same column share the same left and right edge. left edge = just left of the printed question numbers of that column (numbers sit at the column's left margin); right edge = just right of the column's longest line. use the SAME xmin and xmax for every question of a column unless one question has a figure/table that sticks out further. do not let a box start in the middle of the column or stop before the right end of the longest text line
+- vertical edges: ymin = just above the top of the number's line (do NOT include blank space above it); ymax = just below the last line. consecutive questions in a column should nearly touch (gap between box bottom and next box top = only the blank gap between them, split roughly in half)
 - 1 region per question, non-overlapping
 - CHECK each region before answering: (1) its printed number is inside; (2) count the choices inside — ALL five ①~⑤ for multiple choice; if you see fewer than five, look again below and to the right; (3) the last line of the stem and any figure/table are inside; (4) no line of the next question is inside; (5) top < bottom and left < right, and the region does not overlap another
 - NEVER split 1 question into pieces: stem+condition box+data+choices = parts of 1 question. within single column = ONE region. only cross-column case (below) splits
@@ -78,7 +80,10 @@ don't miss questions continuing across columns (matters most):
 - check every column top: if it does not start with a printed number, it IS a continuation -> "cont": true
 - continuation piece edges follow the same rule (tight, in blank space, never clip) -> pieces must join as if never separated
 
-answer: JSON array only. each item = {"box_2d": [ymin, xmin, ymax, xmax], "no": "12", "cont": false}
+answer: JSON array only. write the fields of each item IN THIS ORDER (the first fields make you look before you measure):
+{"no": "12", "first": "first ~6 chars after the number", "last": "last ~6 chars of the question's final line", "choices": 5, "box_2d": [ymin, xmin, ymax, xmax], "cont": false}
+- first/last = the actual printed text at the top and bottom of THIS question; copy them from the image. the box must start at the line holding "first" and end at the line holding "last" — not above or below.
+- choices = how many of ①~⑤ you counted inside the box (0 if short-answer). if it is 1-4, look again for the missing ones before answering.
 coords are integers normalised 0-1000 of the whole image (0,0 = top-left; y first, then x). \`no\` = question number (digits only), empty if unknown. no explanation, no markdown fences.`;
 
 type GeminiBox = { box_2d?: unknown; no?: unknown; label?: unknown; cont?: unknown };
