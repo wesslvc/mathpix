@@ -50,11 +50,12 @@ question region must contain everything belonging to it:
 - through stem, condition boxes, <보기>, tables/graphs/maps
 - to last line of choices (①②③④⑤)
 
-crop TIGHT:
-- hug outer content edge (top of highest glyph, bottom of lowest, left/right extents). no empty margin
-- leave only enough that no glyph is clipped, don't be generous
-- exclude: blank lines between questions, column gutter, page margin
+edges — NEVER clip, we trim blank space ourselves afterwards:
+- put each edge in the BLANK gap just outside the content (between this question and the next / the gutter / the margin), never on a line of text
+- clipping is the worst mistake (a cut-off last choice or number makes the question useless); a little extra blank space is harmless
+- but do not reach into the neighbouring question: its first line (starting with its own number) is NOT part of this one
 - 1 region per question, non-overlapping
+- CHECK each region before answering: its printed number is inside, and ALL its choices are inside (multiple choice has FIVE, ①~⑤ — the last ones are often at the bottom or far right, on their own line); the last line of the stem and any figure/table are inside
 - NEVER split 1 question into pieces: stem+condition box+data+choices = parts of 1 question. within single column = ONE region. only cross-column case (below) splits
 - 2-column page -> order: left column top-to-bottom first, then right column
 - exclude: running heads, page numbers, ads, solutions
@@ -318,7 +319,7 @@ figure (inside a passage only):
 - none -> "figures":[]
 
 both:
-- hug the outer content edge tightly. exclude empty margin, gutter, running heads, page numbers
+- put edges in the blank gap just outside the content — NEVER clip a line (we trim blank space ourselves). exclude gutter, running heads, page numbers
 - 2-column page -> order: left column top-to-bottom first, then right column
 
 answer JSON only:
@@ -333,7 +334,7 @@ question:
 - an item continuing across columns -> one region per piece, same \`no\`
 
 both:
-- hug the outer content edge tightly. exclude empty margin, gutter, running heads, page numbers
+- put edges in the blank gap just outside the content — NEVER clip a line (we trim blank space ourselves). exclude gutter, running heads, page numbers
 - regions must not overlap
 - 2-column page -> order: left column top-to-bottom first, then right column
 

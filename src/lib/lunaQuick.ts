@@ -122,7 +122,8 @@ above/below/beside it — they are NOT the target. The target is ${t.number ? `p
 rough position is [${k(b.y)},${k(b.x)},${k(b.y + b.h)},${k(b.x + b.w)}] in this image. That rough position came from looking at the
 whole page and is often off by a line or two: start from it, then follow the real edges of THIS problem — include its number and
 ALL its lines/choices even where they extend past the rough position, and cut away any line that belongs to a neighbour
-(a neighbour begins with its own printed number). Ignore "pick the one closest to the centre" — the target is the one described here.`;
+(a neighbour begins with its own printed number). Ignore "pick the one closest to the centre" — the target is the one described here.
+The page is already upright and will not be redrawn from this answer: return "rotate":0 and omit "advice" / "advice_reason".`;
 }
 
 function toBox(b: unknown): ProblemBox | null {
