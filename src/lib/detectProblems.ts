@@ -51,10 +51,10 @@ question region must contain everything belonging to it:
 - through stem, condition boxes, <보기>, tables/graphs/maps
 - to last line of choices (①②③④⑤)
 
-edges — NEVER clip, we trim blank space ourselves afterwards:
-- put each edge in the BLANK gap just outside the content (between this question and the next / the gutter / the margin), never on a line of text
-- clipping is the worst mistake (a cut-off last choice or number makes the question useless); a little extra blank space is harmless
-- but do not reach into the neighbouring question: its first line (starting with its own number) is NOT part of this one
+edges — TIGHT but never clipping:
+- fit each edge CLOSE to the content: top edge just above the number's line, bottom edge just below the last line of the choices (or last figure line), left/right just outside the outermost text. leave roughly half a text line of margin, NOT more — do not pad with the blank gap up to the neighbouring question, the gutter or the page margin
+- the edge must sit in blank space, never cut through a line of text; a cut-off last choice or number is the worst mistake, but a box that swallows the blank gap or a neighbour's line is also wrong
+- the neighbouring question's first line (starting with its own number) is NOT part of this one
 - 1 region per question, non-overlapping
 - CHECK each region before answering: its printed number is inside, and ALL its choices are inside (multiple choice has FIVE, ①~⑤ — the last ones are often at the bottom or far right, on their own line); the last line of the stem and any figure/table are inside
 - NEVER split 1 question into pieces: stem+condition box+data+choices = parts of 1 question. within single column = ONE region. only cross-column case (below) splits
