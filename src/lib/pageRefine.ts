@@ -74,6 +74,23 @@ function toPage(r: ProblemBox, win: ProblemBox): ProblemBox {
   return { x: win.x + r.x * win.w, y: win.y + r.y * win.h, w: r.w * win.w, h: r.h * win.h };
 }
 
+/**
+ * 다시 본 자리의 **아래 변은 원래 자리보다 이만큼(지면 대비)보다 더 위로 올라올 수 없다**(2026-10-09, 사용자 — "다시 맞추기 할 때 밑부분을 갑자기
+ * 날려 먹는 경우가 생겨, 전 모델 공통"). 받는 조건이 "겹침 55% 이상·넓이 0.4배 이상"뿐이라, 다시 본 모델이 발문까지만 짚고 선지를 빼도
+ * (박스가 위쪽 60% 만 남아도) 통과해 아랫부분이 통째로 사라졌다. 이웃 문제의 첫 줄이 딸려 온 건 뒤의 `snapBoxes` 가 빈 띠로 줄이지만, 잘려
+ * 나간 선지는 아무도 되살리지 못한다 — 줄이는 쪽은 느슨하게, 자르는 쪽은 엄격하게.
+ */
+const BOTTOM_SHRINK_TOL = 0.006;
+
+/** 아래 변이 원래보다 너무 올라왔으면 허용치까지만 올라오게 내린다(위·옆 변의 개선은 그대로 산다). */
+export function guardBottom(orig: ProblemBox, next: ProblemBox): ProblemBox {
+  const origBottom = orig.y + orig.h;
+  const floor = origBottom - BOTTOM_SHRINK_TOL;
+  const nextBottom = next.y + next.h;
+  if (nextBottom >= floor) return next;
+  return { ...next, h: floor - next.y };
+}
+
 /** 다시 본 자리를 받을지. 이웃 문제를 짚었거나 터무니없이 커지면 원래대로 둔다. */
 export function acceptRefined(orig: ProblemBox, next: ProblemBox): boolean {
   const a = area(orig);
@@ -100,10 +117,11 @@ export async function refineProblems(
         });
         const r = result.box;
         if (!r) return;
-        const box: KeepBox & { refined?: boolean } = { ...toPage(r, w.win), refined: true };
-        if (Array.isArray(r.keep)) box.keep = r.keep.map((k) => toPage(k, w.win));
         const orig = problems[w.index].boxes[0];
-        if (!acceptRefined(orig, box)) return;
+        const placed = toPage(r, w.win);
+        if (!acceptRefined(orig, placed)) return;
+        const box: KeepBox & { refined?: boolean } = { ...guardBottom(orig, placed), refined: true };
+        if (Array.isArray(r.keep)) box.keep = r.keep.map((k) => toPage(k, w.win));
         next[w.index].boxes[0] = box;
         if (!next[w.index].no && result.number) {
           const n = /(\d{1,3})/.exec(result.number)?.[1];

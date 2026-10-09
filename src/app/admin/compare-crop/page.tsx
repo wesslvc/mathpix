@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { cropImageToDataUrl, loadDrawableFromFile, loadImage } from "@/lib/cropImage";
+import { cropImageToDataUrl, loadDrawableFromFile, loadImage, NO_CROP_LIMIT, openPageSource, type PageSource } from "@/lib/cropImage";
 import { enhanceContrast } from "@/lib/autoContrast";
 import { DETECT_INPUT_DIM, MAX_UPLOAD_CHARS, stitchVertically } from "@/lib/figureImage";
 import { cropRegionToDataUrl } from "@/lib/polygon";
@@ -67,7 +67,11 @@ type Res = {
   estKrw?: number | null;
 };
 
-type Page = { id: string; name: string; image: string; w: number; h: number };
+/**
+ * `image` = 모델에 보내는 줄인 그림(영역 찾기 전용), `file`·`view` = **고해상도 원본**(2026-10-09, 사용자 — "고해상도 원본을 보여 주고 여기서
+ * 바로 크롭하는 구조로"). 화면에 보이는 것도, 확대해 다시 맞추는 창도, 잘리는 조각도 전부 이 원본에서 나온다 — 운영 지면 자르기와 같다.
+ */
+type Page = { id: string; name: string; image: string; w: number; h: number; file: File; view: string };
 
 /** 운영 지면 영역 찾기와 같은 그림(`BatchSplitPanel.detectImage`). */
 async function prepare(file: File): Promise<Page> {
@@ -85,7 +89,7 @@ async function prepare(file: File): Promise<Page> {
   const enhanced = await enhanceContrast(last);
   const image = enhanced.length <= MAX_UPLOAD_CHARS ? enhanced : last;
   const img = await loadImage(image);
-  return { id: crypto.randomUUID(), name: file.name, image, w: img.naturalWidth, h: img.naturalHeight };
+  return { id: crypto.randomUUID(), name: file.name, image, w: img.naturalWidth, h: img.naturalHeight, file, view: URL.createObjectURL(file) };
 }
 
 export default function ComparePageCropPage() {
@@ -251,7 +255,7 @@ export default function ComparePageCropPage() {
     setCustomText("");
   }
 
-  async function runOne(p: Page, c: Cand, withRefine: boolean) {
+  async function runOne(p: Page, c: Cand, withRefine: boolean, srcP: Promise<PageSource>) {
     const k = `${p.id}|${c.key}`;
     const set = (r: Res) => setResults((all) => ({ ...all, [k]: r }));
     set({ state: "running" });
@@ -269,22 +273,23 @@ export default function ComparePageCropPage() {
         return;
       }
       const raw = (j.problems ?? []) as DetectedProblem[];
-      const img = await loadImage(p.image);
+      const src = await srcP; // 원본(고해상도) — 지면마다 한 번만 열어 모델끼리 나눠 쓴다(64MP 를 모델 수만큼 열면 탭이 죽는다)
+      const img = src.img;
       let found = raw;
       let refineMs: number | undefined;
       let refined: number | undefined;
       if (withRefine && raw.length) {
         set({ state: "refining", ms, raw, usage: j.usage, estKrw: j.estKrw });
         const t1 = performance.now();
-        const r = await refineProblems(raw, cutRefineWindows(img, img.naturalWidth, img.naturalHeight, raw), `비교 ${nameOf(c)}`);
+        const r = await refineProblems(raw, cutRefineWindows(img, src.width, src.height, raw), `비교 ${nameOf(c)}`);
         refineMs = Math.round(performance.now() - t1);
         refined = r.refined;
         found = r.problems;
       }
-      const final = snapPageProblems(img, img.naturalWidth, img.naturalHeight, found).problems;
+      const final = snapPageProblems(img, src.width, src.height, found).problems;
       const pieces = await Promise.all(
         final.map(async (pr) => ({
-          crop: await stitchVertically(pr.boxes.map((b) => cropRegionToDataUrl(img, b, PAD))),
+          crop: await stitchVertically(pr.boxes.map((b) => cropRegionToDataUrl(img, b, PAD, NO_CROP_LIMIT))),
           parts: pr.boxes.length,
           no: pr.no,
         })),
@@ -299,7 +304,19 @@ export default function ComparePageCropPage() {
     if (!pages.length || !chosen.length) return;
     setRan(chosen);
     setResults({});
-    await Promise.all(pages.flatMap((p) => chosen.map((c) => runOne(p, c, refine))));
+    // 지면마다 원본을 한 번만 연다(열기 자체는 한 장씩 잇는다 — 메모리).
+    const sources = new Map<string, Promise<PageSource>>();
+    let chain: Promise<unknown> = Promise.resolve();
+    for (const p of pages) {
+      const open = chain.then(() => openPageSource(p.file, p.image));
+      sources.set(p.id, open);
+      chain = open.catch(() => undefined);
+    }
+    try {
+      await Promise.all(pages.flatMap((p) => chosen.map((c) => runOne(p, c, refine, sources.get(p.id)!))));
+    } finally {
+      for (const pr of sources.values()) void pr.then((s) => s.revoke()).catch(() => undefined);
+    }
   }
 
   const summary = ran.filter((c) => !removed.has(c.key)).map((c) => {
@@ -526,7 +543,7 @@ export default function ComparePageCropPage() {
                   </div>
                   <div className="relative w-full bg-slate-100" style={{ aspectRatio: `${p.w} / ${p.h}` }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.image} alt="" className="absolute inset-0 h-full w-full" />
+                    <img src={p.view} alt="" className="absolute inset-0 h-full w-full" onError={(e) => { const t = e.currentTarget; if (t.src !== p.image) t.src = p.image; }} />
                     {r?.raw?.map((pr, i) =>
                       pr.boxes.map((b, j) => (
                         <Rect key={`r${i}-${j}`} b={b} style={{ borderColor: COLORS[i % COLORS.length] }} className="border border-dashed opacity-70" />
