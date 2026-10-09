@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireFontAdmin } from "../kice-font/auth";
 import { detectProblems, OPENAI_DETECT_MODEL } from "@/lib/detectProblems";
+import { OPENAI_TEXT_MODEL } from "@/lib/gradeExam";
 import { gradingEstKrw, USD_KRW_RATE } from "@/lib/tokens";
 
 export const runtime = "nodejs";
@@ -31,8 +32,8 @@ export async function POST(req: NextRequest) {
   if (!image.startsWith("data:image/") || !engine || !/^[\w./:-]{1,100}$/.test(model)) {
     return NextResponse.json({ error: "image·engine·model 이 필요합니다." }, { status: 400 });
   }
-  if (engine === "openai" && model !== OPENAI_DETECT_MODEL) {
-    return NextResponse.json({ error: `OpenAI 쪽은 ${OPENAI_DETECT_MODEL} 만 됩니다.` }, { status: 400 });
+  if (engine === "openai" && model !== OPENAI_DETECT_MODEL && model !== OPENAI_TEXT_MODEL) {
+    return NextResponse.json({ error: `OpenAI 쪽은 ${OPENAI_DETECT_MODEL}·${OPENAI_TEXT_MODEL} 만 됩니다.` }, { status: 400 });
   }
   const t0 = Date.now();
   try {
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
       : r.usage
       ? gradingEstKrw(
           { inputTokens: r.usage.input, outputTokens: r.usage.output, cachedInputTokens: r.usage.cached },
-          engine === "openai" ? OPENAI_DETECT_MODEL : `${engine}:${model}`,
+          engine === "openai" ? model : `${engine}:${model}`,
         )
       : undefined;
     return NextResponse.json({ ok: true, ms: Date.now() - t0, problems: r.problems, usage: r.usage ?? null, estKrw: estKrw ?? null });

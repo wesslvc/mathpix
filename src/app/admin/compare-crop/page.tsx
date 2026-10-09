@@ -30,8 +30,12 @@ type Cand = { key: string; engine: "gemini" | "openai" | "openrouter"; model: st
 
 const LUNA = "gpt-6-luna";
 // 하이쿠로 확정(2026-10-09) — 다른 후보는 전부 걷어냈다(git 이력에 있다). 다른 모델은 아래 "직접 적기"나 오픈라우터 목록으로 다시 추가할 수 있다.
-const PRESETS: Cand[] = [{ key: "orHaiku", engine: "openrouter", model: "anthropic/claude-haiku-5.5" }];
-const DEFAULT_ON = new Set(["orHaiku"]);
+const SOL = "gpt-6.1-sol"; // 서버 OPENAI_TEXT_MODEL 기본값과 같다(다르면 서버가 거절한다)
+const PRESETS: Cand[] = [
+  { key: "orHaiku", engine: "openrouter", model: "anthropic/claude-haiku-5.5" },
+  { key: "solL", engine: "openai", model: SOL, effort: "low" },
+];
+const DEFAULT_ON = new Set(["orHaiku", "solL"]);
 const PAD = 0.012;
 const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 

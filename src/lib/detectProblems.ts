@@ -822,18 +822,19 @@ async function withPageOpenRouter(
 async function withOpenAI(
   dataUrl: string,
   effort: string | undefined = OPENAI_PAGE_DETECT_EFFORT,
+  model: string = OPENAI_DETECT_MODEL,
 ): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
   let usage: DetectUsage | undefined;
   const text = await callOpenAIVision(
     dataUrl,
     `${PROMPT}\n\nanswer as JSON object: {"problems": [...]}`,
-    OPENAI_DETECT_MODEL,
+    model,
     effort,
     (u) => {
       usage = u;
     },
   );
-  const label = effort ? `${OPENAI_DETECT_MODEL} (${effort})` : OPENAI_DETECT_MODEL;
+  const label = effort ? `${model} (${effort})` : model;
   return { problems: parse(text), model: label, usage };
 }
 
@@ -868,7 +869,7 @@ export async function detectProblems(
   if (only) {
     if (only.engine === "gemini") return withPageGemini(dataUrl, only.model);
     if (only.engine === "openrouter") return withPageOpenRouter(dataUrl, only.model, only.effort);
-    return withOpenAI(dataUrl, only.effort);
+    return withOpenAI(dataUrl, only.effort, only.model);
   }
   if (DETECT_PROVIDER !== "openai") return withGemini(dataUrl);
   if (PAGE_OPENROUTER_MODEL) {
