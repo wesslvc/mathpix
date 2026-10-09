@@ -38,6 +38,8 @@ export async function callOpenRouterVision(
   onUsage?: (u: DetectUsage) => void,
   maxTokens = 4096,
   signal?: AbortSignal,
+  /** 추론 강도(low|medium|high|xhigh) — 오픈라우터 통합 `reasoning.effort`. 생각 토큰도 max_tokens 에 들어가므로 여유를 더한다. */
+  effort?: string,
 ): Promise<string> {
   const key = openrouterKey();
   if (!key) throw new Error("OPENROUTER_KEY 가 없습니다.");
@@ -53,7 +55,8 @@ export async function callOpenRouterVision(
       },
     ],
     temperature: 0,
-    max_tokens: maxTokens,
+    max_tokens: effort ? maxTokens + 12000 : maxTokens,
+    ...(effort ? { reasoning: { effort } } : {}),
     stream: false,
     usage: { include: true }, // 응답에 실제 청구액(usage.cost, USD)을 실어 준다
   });

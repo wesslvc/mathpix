@@ -46,14 +46,17 @@ const PRESETS: Cand[] = [
   { key: "orG26", engine: "openrouter", model: "google/gemma-4-26b-a4b-it" }, // $0.09/$0.30
   { key: "orScout", engine: "openrouter", model: "meta-llama/llama-4-scout" }, // $0.10/$0.30
   { key: "or31l", engine: "openrouter", model: "google/gemini-3.1-flash-lite" }, // $0.25/$1.50
-  { key: "orHaiku", engine: "openrouter", model: "anthropic/claude-haiku-5.5" }, // $0.10/$0.50 — 지금까지 1위
+  { key: "orHaiku", engine: "openrouter", model: "anthropic/claude-haiku-5.5" }, // $0.10/$0.50 — 지금까지 1위 (운영 확정)
+  { key: "orHaikuL", engine: "openrouter", model: "anthropic/claude-haiku-5.5", effort: "low" },
+  { key: "orHaikuM", engine: "openrouter", model: "anthropic/claude-haiku-5.5", effort: "medium" },
+  { key: "orHaikuH", engine: "openrouter", model: "anthropic/claude-haiku-5.5", effort: "high" },
   { key: "orQ36", engine: "openrouter", model: "qwen/qwen3.6-35b-a3b" }, // $0.15/$1.00 — RefCOCO 상위 Qwen3.6 계열 중 가장 쌈
   { key: "orGlmF", engine: "openrouter", model: "z-ai/glm-5.3-flash" }, // $0.15/$0.50 — 오픈라우터 비전 사용량 상위
   { key: "orMimo", engine: "openrouter", model: "xiaomi/mimo-v2.6-flash" }, // $0.14/$0.28
   { key: "orDsV", engine: "openrouter", model: "deepseek/deepseek-v4-flash-vision-exp" }, // $0.216/$0.647
   { key: "orGlm", engine: "openrouter", model: "z-ai/glm-5v-turbo" }, // $1.20/$4.00 — GLM 비전(V) 계열 중 가장 새것
 ];
-const DEFAULT_ON = new Set(["g35l", "lunaM", "orHaiku", "orQ36", "orGlmF", "orMimo", "orDsV"]);
+const DEFAULT_ON = new Set(["orHaiku", "orHaikuM", "orHaikuH", "g35l"]);
 const PAD = 0.008;
 const COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#ca8a04", "#db2777"];
 
@@ -257,7 +260,7 @@ export default function ComparePageCropPage() {
     const [model, effort] = t.split(/\s+/);
     const engine: Cand["engine"] = model.startsWith("gemini") ? "gemini" : model.includes("/") ? "openrouter" : "openai";
     const key = `c${Date.now()}`;
-    setCustom((c) => [...c, { key, engine, model, ...(effort && engine === "openai" ? { effort } : {}) }]);
+    setCustom((c) => [...c, { key, engine, model, ...(effort && engine !== "gemini" ? { effort } : {}) }]);
     setOn((s) => new Set(s).add(key));
     setCustomText("");
   }

@@ -44,22 +44,30 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
  */
 export const DETECT_MODEL = process.env.GEMINI_DETECT_MODEL ?? "gemini-flash-latest";
 
-const PROMPT = `task: page from Korean HS workbook/mock exam. find region of EACH individual question.
+const PROMPT = `task: page from Korean HS workbook/mock exam (수능·모의고사 style, often 2 columns). find the region of EACH individual question as precisely as you can.
+
+procedure — think before answering:
+1. look at the layout: how many columns, where is the gutter between them, where are the running head / page number / footer.
+2. in reading order (left column top-to-bottom, then right column), find every printed question number (e.g. "12.", "13.") — each starts a new question.
+3. for each question find: (a) its top = the line holding its number, (b) its bottom = the last line of its LAST choice (⑤) or its last figure/table/box line, (c) its left/right = the outermost text or figure of that question within its column.
+4. verify before writing the box (see CHECK below).
 
 question region must contain everything belonging to it:
-- from question number (e.g. 12.)
-- through stem, condition boxes, <보기>, tables/graphs/maps
-- to last line of choices (①②③④⑤)
+- the question number (e.g. 12.) itself
+- the whole stem, condition boxes, <보기> (ㄱㄴㄷ items), (가)(나) data, tables, graphs, maps, figures and their captions
+- ALL choices: multiple choice has FIVE (①②③④⑤). They may be on one line, in two or three rows, in two columns of a grid, or far right/bottom on their own line — find all five. short-answer questions have no choices: then the last line of the stem/figure is the bottom.
 
 edges — TIGHT but never clipping:
-- fit each edge CLOSE to the content: top edge just above the number's line, bottom edge just below the last line of the choices (or last figure line), left/right just outside the outermost text. leave roughly half a text line of margin, NOT more — do not pad with the blank gap up to the neighbouring question, the gutter or the page margin
-- the edge must sit in blank space, never cut through a line of text; a cut-off last choice or number is the worst mistake, but a box that swallows the blank gap or a neighbour's line is also wrong
-- the neighbouring question's first line (starting with its own number) is NOT part of this one
+- fit each edge CLOSE to the content: top edge just above the number's line, bottom edge just below the last choice line (or last figure line), left/right just outside the outermost text of this question. leave roughly half a text line of margin, NOT more — do not pad with the blank gap up to the neighbouring question, the gutter or the page margin
+- the edge must sit in blank space, never cut through a line of text; a cut-off last choice, a cut-off number or a sliced formula/figure is the worst mistake, but a box that swallows the blank gap or a neighbour's line is also wrong
+- the neighbouring question's first line (starting with its own number) is NOT part of this one; the previous question's last choice line is NOT part of this one
+- tall figures/tables belonging to the question stay inside even if there is a lot of blank around them
+- in a 2-column page keep each region inside its own column (do not extend across the gutter)
 - 1 region per question, non-overlapping
-- CHECK each region before answering: its printed number is inside, and ALL its choices are inside (multiple choice has FIVE, ①~⑤ — the last ones are often at the bottom or far right, on their own line); the last line of the stem and any figure/table are inside
+- CHECK each region before answering: (1) its printed number is inside; (2) count the choices inside — ALL five ①~⑤ for multiple choice; if you see fewer than five, look again below and to the right; (3) the last line of the stem and any figure/table are inside; (4) no line of the next question is inside; (5) top < bottom and left < right, and the region does not overlap another
 - NEVER split 1 question into pieces: stem+condition box+data+choices = parts of 1 question. within single column = ONE region. only cross-column case (below) splits
 - 2-column page -> order: left column top-to-bottom first, then right column
-- exclude: running heads, page numbers, ads, solutions
+- exclude: running heads, page numbers, ads, solutions, answer keys, section titles that belong to no question (but a shared instruction line like "[1~3] 다음 글을 읽고 물음에 답하시오" that applies to the group is NOT part of any single question)
 
 don't miss questions continuing across columns (matters most):
 - new question ALWAYS starts with question number (e.g. "12.")
@@ -68,10 +76,10 @@ don't miss questions continuing across columns (matters most):
 - in that case: each piece = own region, but SAME question number in \`no\` for both (use leading piece's number even if trailing piece shows none) -> lets us stitch into one question
 - AND mark the trailing piece with "cont": true (it continues the question just before it in reading order). every other region has "cont": false
 - check every column top: if it does not start with a printed number, it IS a continuation -> "cont": true
-- continuation piece edges follow the same rule (blank gap, never clip) -> pieces must join as if never separated
+- continuation piece edges follow the same rule (tight, in blank space, never clip) -> pieces must join as if never separated
 
 answer: JSON array only. each item = {"box_2d": [ymin, xmin, ymax, xmax], "no": "12", "cont": false}
-coords normalised 0-1000. \`no\` = question number (digits only), empty if unknown. no explanation.`;
+coords are integers normalised 0-1000 of the whole image (0,0 = top-left; y first, then x). \`no\` = question number (digits only), empty if unknown. no explanation, no markdown fences.`;
 
 type GeminiBox = { box_2d?: unknown; no?: unknown; label?: unknown; cont?: unknown };
 
@@ -759,14 +767,15 @@ async function withPageGemini(
 async function withPageOpenRouter(
   dataUrl: string,
   model: string,
+  effort?: string,
 ): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
   let usage: DetectUsage | undefined;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 120_000);
   try {
-    const text = await callOpenRouterVision(dataUrl, PROMPT, model, (u) => (usage = u), 4096, ac.signal);
+    const text = await callOpenRouterVision(dataUrl, PROMPT, model, (u) => (usage = u), 4096, ac.signal, effort);
     try {
-      return { problems: parse(text), model, usage };
+      return { problems: parse(text), model: effort ? `${model} (${effort})` : model, usage };
     } catch (err) {
       // 어떤 글을 줬는지 보여야 고칠 수 있다(예전엔 "영역을 읽지 못했습니다"만 나왔다).
       const why = text ? `모델 글: ${text.slice(0, 300).replace(/\s+/g, " ")}` : "모델이 빈 글을 돌려줌";
@@ -804,6 +813,20 @@ async function withOpenAI(
  */
 export const DETECT_PROVIDER = process.env.DETECT_PROVIDER === "gemini" ? "gemini" : "openai";
 
+/**
+ * **지면 자르기는 하이쿠(오픈라우터)가 먼저 찾는다**(2026-10-09, 사용자 — "하이쿠로 확정하고 추론강도를 올려보자"). 비교 화면에서 1위였다.
+ * 실패하면 Gemini → luna 로 넘어간다. 끄려면 재배포 없이 `PAGE_OPENROUTER_MODEL=off`, 다른 모델은 이름을 넣는다.
+ * 추론 강도는 `PAGE_OPENROUTER_EFFORT`(low|medium|high|xhigh, 기본 medium; `default` 면 안 보냄).
+ */
+export const PAGE_OPENROUTER_MODEL = (() => {
+  const v = (process.env.PAGE_OPENROUTER_MODEL ?? "anthropic/claude-haiku-5.5").trim();
+  return v === "" || v === "off" || !(process.env.OPENROUTER_KEY || process.env.OPENROUTER_API_KEY) ? null : v;
+})();
+const PAGE_OPENROUTER_EFFORT = (() => {
+  const v = (process.env.PAGE_OPENROUTER_EFFORT ?? "medium").trim();
+  return v === "" || v === "default" ? undefined : v;
+})();
+
 export async function detectProblems(
   dataUrl: string,
   /** 비교 화면용: 이 모델 하나로만(실패해도 안 넘어간다). */
@@ -811,10 +834,19 @@ export async function detectProblems(
 ): Promise<{ problems: DetectedProblem[]; model: string; usage?: DetectUsage }> {
   if (only) {
     if (only.engine === "gemini") return withPageGemini(dataUrl, only.model);
-    if (only.engine === "openrouter") return withPageOpenRouter(dataUrl, only.model);
+    if (only.engine === "openrouter") return withPageOpenRouter(dataUrl, only.model, only.effort);
     return withOpenAI(dataUrl, only.effort);
   }
   if (DETECT_PROVIDER !== "openai") return withGemini(dataUrl);
+  if (PAGE_OPENROUTER_MODEL) {
+    try {
+      const r = await withPageOpenRouter(dataUrl, PAGE_OPENROUTER_MODEL, PAGE_OPENROUTER_EFFORT);
+      if (r.problems.length > 0) return r;
+      console.warn(`[detect] ${PAGE_OPENROUTER_MODEL} 가 문제를 하나도 못 찾음 → 다음`);
+    } catch (err) {
+      console.warn(`[detect] ${PAGE_OPENROUTER_MODEL} 실패 → 다음:`, err instanceof Error ? err.message : err);
+    }
+  }
   if (PAGE_GEMINI_MODEL) {
     try {
       const r = await withPageGemini(dataUrl, PAGE_GEMINI_MODEL);
