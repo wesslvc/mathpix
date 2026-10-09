@@ -852,10 +852,10 @@ export default function ComparePageCropPage() {
               지운 모델 {removed.size}개 되살리기
             </button>
           )}
-          <Button type="button" variant="outline" size="sm" disabled={Object.keys(results).length === 0} onClick={() => void copyReport()}>
+          <Button type="button" variant="outline" size="sm" disabled={Object.keys(results).length === 0 && Object.keys(ens).length === 0} onClick={() => void copyReport()}>
             결과 복사
           </Button>
-          <Button type="button" variant="outline" size="sm" disabled={Object.keys(results).length === 0} onClick={downloadReport}>
+          <Button type="button" variant="outline" size="sm" disabled={Object.keys(results).length === 0 && Object.keys(ens).length === 0} onClick={downloadReport}>
             파일로 받기
           </Button>
           <Button type="button" variant="outline" size="sm" disabled={!pages.length || ensBusy || busy !== null} onClick={() => void runEnsemble()}>
