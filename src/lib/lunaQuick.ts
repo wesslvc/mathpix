@@ -9,7 +9,8 @@
 //
 // 둘 다 서버 키로 부른다(BYOK 계정도) — 값이 몇 원이고 우리 쪽 판단이라서다. 원가는 부르는 쪽이 장부에 적는다.
 
-import { callGeminiVision, callOpenAIVision, OPENAI_DETECT_MODEL, type DetectUsage } from "./detectProblems";
+import { callGeminiVision, callOpenAIVision, OPENAI_DETECT_MODEL, PAGE_OPENROUTER_MODEL, type DetectUsage } from "./detectProblems";
+import { callOpenRouterVision } from "./openrouterVision";
 import type { ProblemBox } from "./problemBoxes";
 
 /** 자동 자르기의 추론 강도. 재배포 없이 `OPENAI_CROP_EFFORT`(기본 high — 사용자 "luna 가 매우 정확하게", `default` 면 안 보냄). */
@@ -38,6 +39,13 @@ const CROP_GEMINI_MODEL = (() => {
   const v = (process.env.CROP_GEMINI_MODEL ?? "off").trim();
   return v === "" || v === "off" || !process.env.GEMINI_API_KEY ? null : v;
 })();
+
+/**
+ * **사진 한 장 자동 자르기도 하이쿠가 먼저 한다**(2026-10-09, 사용자 — "한 장도 하이쿠로 해주고"). 지면 영역 찾기와 같은 모델(`PAGE_OPENROUTER_MODEL`,
+ * 기본 anthropic/claude-haiku-5.5)을 같은 키로 부르고, 실패하거나 문제를 못 찾으면 luna 로 넘어간다. 끄려면 재배포 없이 `CROP_HAIKU=off`.
+ * 한 장 자르기 프롬프트는 번호·선지·회전·추천까지 받는다 — 하이쿠가 그 필드를 얼마나 잘 채우는지는 아직 못 쟀다(못 채우면 그 필드만 비고 자리는 그대로 쓴다).
+ */
+const CROP_HAIKU = process.env.CROP_HAIKU?.trim() === "off" ? null : PAGE_OPENROUTER_MODEL;
 
 /** 난이도 판단의 추론 강도. 재배포 없이 `OPENAI_ASSESS_EFFORT`(기본 medium, `default` 면 안 보냄). */
 const ASSESS_EFFORT = (() => {
@@ -115,12 +123,28 @@ export async function cropOneProblem(
     total.input += u.input;
     total.cached += u.cached;
     total.output += u.output;
+    if (typeof u.costUsd === "number") total.costUsd = (total.costUsd ?? 0) + u.costUsd;
   };
   const prompt = target ? `${CROP_PROMPT}${targetNote(target)}` : CROP_PROMPT;
   const effort = target ? (refineEffort && /^(low|medium|high)$/.test(refineEffort) ? refineEffort : REFINE_EFFORT) : CROP_EFFORT;
   // 자동 자르기는 Gemini 가 먼저 한다(`CROP_GEMINI_MODEL`). 못 하면(자리 없음·오류) luna 로 — 어느 쪽이 했는지 `model` 로 돌려준다.
   let model = OPENAI_DETECT_MODEL;
   const ask = async (p: string) => {
+    if (!only && CROP_HAIKU) {
+      try {
+        const u: DetectUsage[] = [];
+        const t = await callOpenRouterVision(dataUrl, p, CROP_HAIKU, (x) => u.push(x), 4096);
+        // 문제를 못 찾았다고(box null) 답하면 luna 에게 한 번 더 묻는다 — 쓸 수 있는 답일 때만 haiku 로 친다.
+        u.forEach(add);
+        if (parseCrop(t).box) {
+          model = CROP_HAIKU;
+          return t;
+        }
+        console.warn(`[crop] ${CROP_HAIKU} 가 문제를 못 찾음 → ${OPENAI_DETECT_MODEL}`);
+      } catch (err) {
+        console.warn(`[crop] ${CROP_HAIKU} 실패 → ${OPENAI_DETECT_MODEL} 로 넘어감:`, err instanceof Error ? err.message : err);
+      }
+    }
     if (only) {
       model = only.model;
       return only.engine === "gemini"

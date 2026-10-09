@@ -25,21 +25,21 @@ const CATEGORY_LABEL: Record<Category, string> = {
   passage: "지문 글자로 옮기기",
   sol: "sol 작업 (조판·대화·지문)",
   mathpix: "Mathpix 글자 인식",
-  haiku: "지면 자르기 (문제 자리 찾기)",
-  luna: "빠른 작업 (자르기·채점·제목·번호)",
+  haiku: "자동 자르기 (사진·지면 문제 자리)",
+  luna: "빠른 작업 (그림 자리·채점·제목·번호)",
 };
-const LUNA_TASKS = new Set(["crop", "figures", "numberBox", "title", "grade", "answerKey"]);
+const LUNA_TASKS = new Set(["figures", "numberBox", "title", "grade", "answerKey"]);
 function categoryOf(j: FigureJob): Category {
   if (j.mode === "passage") return "passage";
   if (j.mode !== "task") return "draw";
   const t = j.stage ?? "";
   if (t === "ocr") return "mathpix";
-  if (t === "detect") return "haiku";
+  if (t === "detect" || t === "crop") return "haiku";
   if (LUNA_TASKS.has(t)) return "luna";
   return "sol";
 }
 const LOCAL_RUNNING: Record<string, string> = {
-  crop: "luna 가 문제 자리를 자르는 중",
+  crop: "haiku 가 문제 자리를 자르는 중",
   figures: "luna 가 그림 자리를 찾는 중",
   numberBox: "luna 가 문제 번호 자리를 찾는 중",
   detect: "haiku 가 문제 자리를 찾는 중",
@@ -66,7 +66,7 @@ const STATUS_TEXT = {
 const TASK_RUNNING: Record<string, string> = {
   ocr: "Mathpix 가 글자를 읽는 중",
   detect: "haiku 가 문제 자리를 찾는 중",
-  crop: "luna 가 문제 자리를 자르는 중",
+  crop: "haiku 가 문제 자리를 자르는 중",
   figures: "luna 가 그림 자리를 찾는 중",
   numberBox: "luna 가 문제 번호 자리를 찾는 중",
   title: "luna 가 지문 제목을 짓는 중",
@@ -411,7 +411,7 @@ export default function FigureJobsPanel() {
           <ul className="max-h-80 overflow-auto border-t border-slate-200">
             {CATEGORY_ORDER.map((cat) => {
               const list = jobs.filter((j) => categoryOf(j) === cat);
-              const locals = localTasks.filter((t) => (t.task === "detect" ? "haiku" : "luna") === cat);
+              const locals = localTasks.filter((t) => (t.task === "detect" || t.task === "crop" ? "haiku" : "luna") === cat);
               const n = list.length + locals.length;
               if (n === 0) return null;
               const running =

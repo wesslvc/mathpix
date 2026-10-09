@@ -7,10 +7,10 @@ import type { ReactNode } from "react";
 export type ModelKey = "haiku" | "luna" | "sol" | "sunburst";
 
 const MODELS: Record<ModelKey, { logo: string; name: string; maker: string }> = {
-  haiku: { logo: "/brand/ai/claude.png", name: "Claude Haiku", maker: "Anthropic" },
-  luna: { logo: "/brand/ai/openai.png", name: "luna", maker: "OpenAI" },
-  sol: { logo: "/brand/ai/openai.png", name: "sol", maker: "OpenAI" },
-  sunburst: { logo: "/brand/ai/openai.png", name: "sunburst", maker: "OpenAI" },
+  haiku: { logo: "/brand/ai/claude.png", name: "claude-haiku-5.5", maker: "Anthropic" },
+  luna: { logo: "/brand/ai/openai.png", name: "gpt-6-luna", maker: "OpenAI" },
+  sol: { logo: "/brand/ai/openai.png", name: "gpt-6.1-sol", maker: "OpenAI" },
+  sunburst: { logo: "/brand/ai/openai.png", name: "gpt-image-2.5-sunburst", maker: "OpenAI" },
 };
 
 export function ModelBadge({ model, label = true, className = "" }: { model: ModelKey; label?: boolean; className?: string }) {
@@ -24,14 +24,14 @@ export function ModelBadge({ model, label = true, className = "" }: { model: Mod
   );
 }
 
-/** "luna 가 채점하는 중" 처럼 모델 이름으로 시작하는 문구 앞에 로고를 붙인다(이름은 문구에 그대로 있으니 로고만 앞에). */
+/** "luna 가 채점하는 중" 처럼 모델 이름으로 시작하는 문구 앞에 로고를 붙인다(정식 이름으로 바꿔 로고와 함께). */
 export function withModelLogo(text: string): ReactNode {
   const hit = /^(haiku|luna|sol|sunburst)(?=[\s가이]|$)/i.exec(text);
   if (!hit) return text;
   return (
     <>
-      <ModelBadge model={hit[1].toLowerCase() as ModelKey} label={false} className="mr-1" />
-      {text}
+      <ModelBadge model={hit[1].toLowerCase() as ModelKey} className="mr-0.5" />
+      {text.slice(hit[1].length)}
     </>
   );
 }

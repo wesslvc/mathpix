@@ -5928,3 +5928,9 @@ npm install
 npm run dev     # http://localhost:3000
 npm run build   # 배포 전 항상 확인
 ```
+
+#### 사진 한 장 자동 자르기도 하이쿠 · 패널에 정식 모델 이름 (2026-10-09)
+
+사용자 — "한 장도 하이쿠로 해주고 정식명칭으로". `cropOneProblem`(lunaQuick.ts)이 하이쿠(`PAGE_OPENROUTER_MODEL`)를 먼저 부르고 실패하거나 문제를 못 찾으면 luna 로 넘어간다(`CROP_HAIKU=off` 로 끔).
+**하이쿠가 번호·선지·회전·추천을 luna 만큼 채우는지는 못 쟀다** — 비교는 지면 자르기(자리)만 했다. 원가는 오픈라우터가 준 실제 청구액으로 장부에 `하이쿠 자동 자르기` 로 적는다.
+`ModelBadge` 가 정식 이름을 보인다: `claude-haiku-5.5` · `gpt-6-luna` · `gpt-6.1-sol` · `gpt-image-2.5-sunburst`(로고 포함). 이름은 코드에 하드코딩된 표시용 문자열이라 모델을 바꾸면 `ModelBadge.tsx` 도 같이 고칠 것.

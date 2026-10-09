@@ -38,6 +38,7 @@ import {
   PASSAGE_READ_TOKENS,
   gradingEstKrw,
   SOL_TYPESET_TOKENS,
+  USD_KRW_RATE,
 } from "./tokens";
 import { logAiCost, solTokens } from "./costLog";
 import {
@@ -268,10 +269,14 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           undefined,
           typeof ctx.params.effort === "string" ? ctx.params.effort : undefined,
         );
-        // 단가를 아는 모델(luna)만 원가를 적는다 — Gemini 단가는 아직 표에 없다(지어내지 않는다).
-        const estKrw = usage ? gradingEstKrw(lunaUsage(usage), model) : undefined;
+        // luna 는 공표 단가, 오픈라우터(하이쿠)는 응답이 준 실제 청구액으로 원가를 적는다 — Gemini 단가는 아직 표에 없다(지어내지 않는다).
+        const estKrw = usage
+          ? model.includes("/") && typeof usage.costUsd === "number"
+            ? usage.costUsd * USD_KRW_RATE
+            : gradingEstKrw(lunaUsage(usage), model)
+          : undefined;
         if (estKrw && usage) {
-          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 자동 자르기", krw: estKrw, tokens: usage });
+          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: model.includes("/") ? "하이쿠 자동 자르기" : "luna 자동 자르기", krw: estKrw, tokens: usage });
         }
         const note = !box
           ? `${model} · 문제 자리를 못 찾았어요`
