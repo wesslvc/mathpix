@@ -159,13 +159,15 @@ export function snapPageProblems(
  * **보호 폭 0** = 서버가 넓힌 박스 전체를 못 줄인다(2026-10-09: 1.2%p 안쪽까지 줄이게 두면 하이쿠 최종이 모델 원자리 0.51 보다 나쁜 1.07%p 였다).
  */
 const MODEL_PAD = 0;
+const SNAP_GROW = 0.015;
 function protectModelBox(snapped: ProblemBox, orig: ProblemBox): ProblemBox {
   const px0 = Math.min(1, orig.x + MODEL_PAD);
   const py0 = Math.min(1, orig.y + MODEL_PAD);
   const px1 = Math.max(px0, orig.x + orig.w - MODEL_PAD);
   const py1 = Math.max(py0, orig.y + orig.h - MODEL_PAD);
-  const x0 = Math.min(snapped.x, px0), y0 = Math.min(snapped.y, py0);
-  const x1 = Math.max(snapped.x + snapped.w, px1), y1 = Math.max(snapped.y + snapped.h, py1);
+  // 다듬기가 모델 박스 밖으로 넓힐 수 있는 한계. 이보다 더 번지면 이웃 문제 글자를 삼킨 것이다(sol 14번: 위·아래가 3.8·3.7%p 번져 최종이 모델 원자리 0.49 → 0.95%p).
+  const x0 = Math.max(orig.x - SNAP_GROW, Math.min(snapped.x, px0)), y0 = Math.max(orig.y - SNAP_GROW, Math.min(snapped.y, py0));
+  const x1 = Math.min(orig.x + orig.w + SNAP_GROW, Math.max(snapped.x + snapped.w, px1)), y1 = Math.min(orig.y + orig.h + SNAP_GROW, Math.max(snapped.y + snapped.h, py1));
   return { ...snapped, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
