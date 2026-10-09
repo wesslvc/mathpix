@@ -120,7 +120,7 @@ export default function CompareProblemPage() {
   const [name, setName] = useState("");
   const [prepared, setPrepared] = useState<string | null>(null);
   // 글자·도형을 세부까지 보게 하려고 기본을 high 로 둔다(사용자 — "sol 이 세부적으로 검토").
-  const [effort, setEffort] = useState("high");
+  const [effort, setEffort] = useState("medium");
   const [steps, setSteps] = useState<Step[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [result, setResult] = useState<Result | null>(null);

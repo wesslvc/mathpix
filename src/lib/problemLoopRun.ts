@@ -100,7 +100,7 @@ function assessEnabled(): boolean {
 
 /** sol 검수의 추론 강도. 재배포 없이 `OPENAI_VERIFY_EFFORT` 로 바꾼다(`default` 면 안 보낸다). */
 const VERIFY_EFFORT = (() => {
-  const v = (process.env.OPENAI_VERIFY_EFFORT ?? "high").trim();
+  const v = (process.env.OPENAI_VERIFY_EFFORT ?? "medium").trim();
   return v === "" || v === "default" ? undefined : v;
 })();
 
