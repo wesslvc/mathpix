@@ -10,6 +10,7 @@ import type { DetectedProblem } from "@/lib/detectProblems";
 import type { ProblemBox } from "@/lib/problemBoxes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import BoxEditor, { type EditBox } from "@/components/BoxEditor";
 import { cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -119,6 +120,9 @@ export default function ComparePageCropPage() {
   // 결과를 보고 "패스"(남김 표시) / "실패"(목록에서 지움)를 고른다. 지운 것은 기기에 기억해 다음에도 안 나온다.
   const [marks, setMarks] = useState<Record<string, "pass">>({});
   const [removed, setRemoved] = useState<Set<string>>(new Set());
+  /** 손으로 맞춘 정답 박스(지면별, 읽는 차례 = 그린 차례). 모델과의 오차를 결과 복사에 수치로 싣는다. */
+  const [truth, setTruth] = useState<Record<string, EditBox[]>>({});
+  const [truthStart, setTruthStart] = useState<Record<string, number>>({});
   useEffect(() => {
     try {
       const raw = localStorage.getItem("reprint.cropRemoved");
@@ -230,6 +234,33 @@ export default function ComparePageCropPage() {
         for (const q of r.raw ?? []) {
           out.push(`  - ${q.no ?? "번호?"}번: ${q.boxes.map((b) => `[${f1(b.x)},${f1(b.y)},${f1(b.w)},${f1(b.h)}]`).join(" + ")}`);
         }
+        const t = truth[p.id];
+        if (t?.length) {
+          const st = truthStart[p.id] ?? 1;
+          const errs: number[] = [];
+          t.forEach((tb, i) => {
+            const no = String(st + i);
+            const pr = (r.raw ?? []).find((q) => q.no === no) ?? (r.raw ?? [])[i];
+            const mb = pr?.boxes[0];
+            if (!mb) {
+              out.push(`  - Δ ${no}번: 모델이 못 찾음`);
+              return;
+            }
+            // 모델 − 정답, %p. 위·아래·왼쪽·오른쪽 변 각각(+면 모델이 더 오른쪽/아래).
+            const d = [mb.y - tb.y, mb.y + mb.h - (tb.y + tb.h), mb.x - tb.x, mb.x + mb.w - (tb.x + tb.w)].map((v) => v * 100);
+            errs.push(...d.map(Math.abs));
+            out.push(`  - Δ ${no}번 (위,아래,왼,오른 %p): ${d.map((v) => (v > 0 ? "+" : "") + v.toFixed(1)).join(", ")}`);
+          });
+          if (errs.length) out.push(`  - 변 평균 절대 오차 ${(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(2)}%p · 최대 ${Math.max(...errs).toFixed(1)}%p`);
+        }
+        out.push("");
+      }
+      const t = truth[p.id];
+      if (t?.length) {
+        out.push(`### 손으로 맞춘 정답 (${p.name}, 지면 대비 % — x,y,w,h · 변: 위,아래,왼,오른)`);
+        t.forEach((b, i) => {
+          out.push(`  - ${(truthStart[p.id] ?? 1) + i}번: [${f1(b.x)},${f1(b.y)},${f1(b.w)},${f1(b.h)}] · 변 ${f1(b.y)},${f1(b.y + b.h)},${f1(b.x)},${f1(b.x + b.w)}`);
+        });
         out.push("");
       }
     }
@@ -634,6 +665,64 @@ export default function ComparePageCropPage() {
               );
             })}
           </div>
+          <details className="rounded-lg border border-slate-200 bg-white p-3">
+            <summary className="cursor-pointer text-sm font-medium text-slate-700">
+              손으로 정답 맞추기 {truth[p.id]?.length ? `(${truth[p.id].length}개)` : ""} — 맞춘 수치가 결과 복사에 모델별 오차(Δ)와 함께 실려요
+            </summary>
+            <div className="mt-2 flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                첫 문제 번호
+                <Input
+                  type="number"
+                  value={truthStart[p.id] ?? 1}
+                  onChange={(e) => setTruthStart((m) => ({ ...m, [p.id]: Number(e.target.value) || 1 }))}
+                  className="h-7 w-20 text-xs"
+                />
+                <span>읽는 차례(왼쪽 단 위→아래, 오른쪽 단)대로 번호가 매겨져요.</span>
+                {(ran.length ? ran : chosen)
+                  .filter((c) => !removed.has(c.key) && results[`${p.id}|${c.key}`]?.raw?.length)
+                  .map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      className="rounded-full border border-slate-300 px-2 py-0.5 hover:bg-slate-50"
+                      onClick={() => {
+                        const raw = results[`${p.id}|${c.key}`]?.raw ?? [];
+                        const first = Number(raw[0]?.no);
+                        if (Number.isFinite(first) && first > 0) setTruthStart((m) => ({ ...m, [p.id]: first }));
+                        setTruth((m) => ({
+                          ...m,
+                          [p.id]: raw.flatMap((q, i) => q.boxes.slice(0, 1).map((b, j) => ({ id: `t${Date.now()}${i}${j}`, group: `t${i}`, x: b.x, y: b.y, w: b.w, h: b.h }))),
+                        }));
+                      }}
+                    >
+                      {nameOf(c)} 결과에서 시작
+                    </button>
+                  ))}
+                <button type="button" className="rounded-full border border-slate-300 px-2 py-0.5 hover:bg-slate-50" onClick={() => setTruth((m) => ({ ...m, [p.id]: [] }))}>
+                  비우기
+                </button>
+              </div>
+              <div className="max-w-xl">
+                <BoxEditor
+                  image={p.view}
+                  boxes={truth[p.id] ?? []}
+                  onChange={(b) => setTruth((m) => ({ ...m, [p.id]: b }))}
+                  labelOf={(g) => {
+                    const i = (truth[p.id] ?? []).findIndex((b) => b.group === g);
+                    return i < 0 ? "" : `${(truthStart[p.id] ?? 1) + i}번`;
+                  }}
+                />
+              </div>
+              {(truth[p.id] ?? []).length > 0 && (
+                <pre className="overflow-x-auto rounded bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-700">
+                  {(truth[p.id] ?? [])
+                    .map((b, i) => `${(truthStart[p.id] ?? 1) + i}번: x ${(b.x * 100).toFixed(1)} y ${(b.y * 100).toFixed(1)} w ${(b.w * 100).toFixed(1)} h ${(b.h * 100).toFixed(1)}  (변 위 ${(b.y * 100).toFixed(1)} · 아래 ${((b.y + b.h) * 100).toFixed(1)} · 왼 ${(b.x * 100).toFixed(1)} · 오른 ${((b.x + b.w) * 100).toFixed(1)})`)
+                    .join("\n")}
+                </pre>
+              )}
+            </div>
+          </details>
         </section>
       ))}
     </main>
