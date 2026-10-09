@@ -32,7 +32,7 @@ const PRESETS: Cand[] = [
   { key: "lunaM", engine: "openai", model: "gpt-6-luna", effort: "medium" },
   { key: "lunaH", engine: "openai", model: "gpt-6-luna", effort: "high" },
 ];
-const DEFAULT_ON = new Set(["g35l", "g38", "lunaH"]);
+const DEFAULT_ON = new Set(["gfll", "lunaH"]);
 
 const nameOf = (c: Cand) => (c.effort ? `${c.model} (${c.effort})` : c.model);
 
