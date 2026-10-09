@@ -24,10 +24,11 @@ export async function POST(req: NextRequest) {
     effort?: unknown;
   } | null;
   const image = typeof body?.image === "string" ? body.image : "";
-  const engine = body?.engine === "gemini" ? "gemini" : body?.engine === "openai" ? "openai" : null;
+  const engine =
+    body?.engine === "gemini" ? "gemini" : body?.engine === "openai" ? "openai" : body?.engine === "nvidia" ? "nvidia" : null;
   const model = typeof body?.model === "string" ? body.model.trim() : "";
   const effort = typeof body?.effort === "string" && /^[a-z]{1,16}$/.test(body.effort) ? body.effort : undefined;
-  if (!image.startsWith("data:image/") || !engine || !/^[\w.-]{1,60}$/.test(model)) {
+  if (!image.startsWith("data:image/") || !engine || !/^[\w./-]{1,100}$/.test(model)) {
     return NextResponse.json({ error: "image·engine·model 이 필요합니다." }, { status: 400 });
   }
   if (engine === "openai" && model !== OPENAI_DETECT_MODEL) {
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
     const estKrw = r.usage
       ? gradingEstKrw(
           { inputTokens: r.usage.input, outputTokens: r.usage.output, cachedInputTokens: r.usage.cached },
-          engine === "openai" ? OPENAI_DETECT_MODEL : model,
+          engine === "openai" ? OPENAI_DETECT_MODEL : `${engine}:${model}`,
         )
       : undefined;
     return NextResponse.json({ ok: true, ms: Date.now() - t0, problems: r.problems, usage: r.usage ?? null, estKrw: estKrw ?? null });

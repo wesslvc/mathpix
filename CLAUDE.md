@@ -3606,6 +3606,22 @@ low 스타트해서 최대한 비용 절감을 노리자. luna medium 이 AI 생
   카드: 지면 위 점선 = 모델 자리, 실선 = 실제로 잘리는 자리(문제마다 색, "2+1" = 단 넘어 합침), 잘린 조각들. 표: 찾기·다시 맞추기 평균 시간,
   문제 수, 단 넘어 합친 수, 번호 없음, 실패, 원가. 기본 체크는 flash-lite-latest 와 luna(medium). 가짜 응답으로 화면만 확인했다.
 
+#### NVIDIA 비전 모델을 지면 자르기 비교군에 넣었다 (2026-10-09)
+
+사용자 — "제미나이가 좋긴 한데 RPD 가 꽤 빡세네, 우리 엔비디아 키에 있는 것 중에 비전 괜찮고 빠른 거 찾아봐" → "엔비디아 모델들도 전부 지면 자르기 비교군에 넣어".
+
+- **키는 Vercel 에만 있어** 일꾼 라우트에 프로브를 붙여 DB `http` 확장(Vault 토큰)으로 불렀다: `nvidia-models`(목록, 무료) · `nvidia-vision`(한 모델)
+  · **`nvidia-scan`**(여러 모델을 동시에 한 번에 — 모델마다 40초에서 끊는다, `id` 에 저장소 경로를 주면 그 문제 카드로). 호출은
+  `src/lib/nvidiaVision.ts`(`integrate.api.nvidia.com/v1`, OpenAI 호환; `<think>` 는 뗀다; 키 이름은 `NVIDIA_API_KEY`→오타 둘 순서로).
+- **목록에 있어도 이 계정이 못 쓰는 것이 많다**(404 "Function … Not found for account"): gemma-3-4b/12b, phi-3-vision, cosmos-reason2, kimi-k2.6, vila, neva-22b.
+  glm-5.3 은 400, nemotron-parse 는 글자 지시를 못 받고(plain string 거부), nemotron-parse-2.0 은 "is is is…" 로 망가졌다.
+- **실제로 통한 것**(문제 카드 한 장, 번호·박스 JSON): `meta/llama-3.2-11b-vision-instruct` 1.4초(박스를 0~1 로 줘서 틀림), `meta/llama-3.2-90b-vision-instruct`
+  27초(글이 샘, 번호 오독), `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` 9~12초(번호 맞고 박스 그럴듯), `moonshotai/kimi-k3` 11~18초(번호 맞고 박스 그럴듯).
+  **40초 안에 응답이 없던 것**: gemma-4-31b-it, glm-5.3-flash, muse-glimmer-30b, deepseek-v4.1-flash — 비교 화면에서 120초까지 기다려 다시 본다.
+  카드 한 장 시험이라 정확도를 말할 수 없다 — 비교 화면의 지면 시험이 판단 근거다.
+- **비교 화면(`/admin/compare-crop`)에 위 8개를 후보로 넣었다**(`engine: "nvidia"`, `detectProblems(image, { engine:"nvidia" })` 가 120초 한도로 호출). 직접 적어 넣을 때
+  슬래시가 든 이름은 NVIDIA 로 본다. 원가는 단가를 몰라 "단가 모름". 운영 기본값은 안 바꿨다(Gemini 먼저, 실패 시 luna).
+
 #### 지면 여러 장도 사진 넣기처럼 한눈에 · 자동 자르기 빠르게 · 글씨 안 잘리게 (2026-10-09)
 
 사용자 — "자동 자르기 너무 오래 걸리고, 정확도도 조금 나아지긴 했는데 여전히 글씨가 잘리는 느낌, 이어서 지면 넣기 말고 우리 일반 문제 넣듯이".

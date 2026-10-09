@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
  * 맨 위 표: 모델마다 평균 찾기 시간·다시 맞추기 시간·찾은 문제 수·합친 문제 수·실패·원가.
  */
 
-type Cand = { key: string; engine: "gemini" | "openai"; model: string; effort?: string };
+type Cand = { key: string; engine: "gemini" | "openai" | "nvidia"; model: string; effort?: string };
 
 const LUNA = "gpt-6-luna";
 const PRESETS: Cand[] = [
@@ -36,6 +36,15 @@ const PRESETS: Cand[] = [
   { key: "lunaL", engine: "openai", model: LUNA, effort: "low" },
   { key: "lunaM", engine: "openai", model: LUNA, effort: "medium" },
   { key: "lunaH", engine: "openai", model: LUNA, effort: "high" },
+  // NVIDIA(build.nvidia.com) — 이 계정에서 실제로 비전 요청이 통하는 것(2026-10-09 `probe: "nvidia-scan"` 으로 확인). 느린 것은 120초까지 기다린다.
+  { key: "nLl11", engine: "nvidia", model: "meta/llama-3.2-11b-vision-instruct" },
+  { key: "nLl90", engine: "nvidia", model: "meta/llama-3.2-90b-vision-instruct" },
+  { key: "nNano", engine: "nvidia", model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning" },
+  { key: "nKimi", engine: "nvidia", model: "moonshotai/kimi-k3" },
+  { key: "nGem", engine: "nvidia", model: "google/gemma-4-31b-it" },
+  { key: "nGlm", engine: "nvidia", model: "z-ai/glm-5.3-flash" },
+  { key: "nMuse", engine: "nvidia", model: "meta/muse-glimmer-30b" },
+  { key: "nDs", engine: "nvidia", model: "deepseek-ai/deepseek-v4.1-flash" },
 ];
 const DEFAULT_ON = new Set(["gfll", "lunaM"]);
 const PAD = 0.008;
@@ -110,7 +119,7 @@ export default function ComparePageCropPage() {
     const t = customText.trim();
     if (!t) return;
     const [model, effort] = t.split(/\s+/);
-    const engine: Cand["engine"] = model.startsWith("gemini") ? "gemini" : "openai";
+    const engine: Cand["engine"] = model.startsWith("gemini") ? "gemini" : model.includes("/") ? "nvidia" : "openai";
     const key = `c${Date.now()}`;
     setCustom((c) => [...c, { key, engine, model, ...(effort && engine === "openai" ? { effort } : {}) }]);
     setOn((s) => new Set(s).add(key));
@@ -231,7 +240,7 @@ export default function ComparePageCropPage() {
             value={customText}
             onChange={(e) => setCustomText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addCustom()}
-            placeholder="다른 모델: gemini-3.6-flash 또는 gpt-6-luna xhigh"
+            placeholder="다른 모델: gemini-3.6-flash · gpt-6-luna xhigh · NVIDIA 는 meta/… 처럼 슬래시 이름"
             className="min-w-0 flex-1"
           />
           <Button type="button" variant="outline" size="sm" onClick={addCustom}>
