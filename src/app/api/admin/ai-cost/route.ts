@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
   for (const r of rows) {
     const t = r.t;
     const { krw, usd, key } = r;
-    const m = models.get(key) ?? { total: zero(), period: zero(), comp: {}, items: new Map() };
+    const m = models.get(key) ?? { total: zero(), period: zero(), comp: {} as Partial<Record<Comp, number>>, items: new Map() };
     for (const [ck, cv] of Object.entries((r.comp ?? {}) as Partial<Record<Comp, number>>)) m.comp[ck as Comp] = (m.comp[ck as Comp] ?? 0) + (cv ?? 0);
     models.set(key, m);
     const itemKey = r.itemKey;
