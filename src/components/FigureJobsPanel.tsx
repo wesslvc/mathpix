@@ -2,7 +2,7 @@
 
 import { SolChat } from "@/components/SolChat";
 import { ModelBadge, withModelLogo, type ModelKey } from "@/components/ModelBadge";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useFigureJobs, type FigureJob, type OfferDiffs } from "./FigureJobsProvider";
 import {
   dismissLocalTask,
@@ -222,7 +222,43 @@ export default function FigureJobsPanel() {
   // 범주마다 접기. luna 는 많고 금방 끝나서 처음엔 접어 둔다.
   const [collapsed, setCollapsed] = useState<Set<Category>>(() => new Set<Category>(["luna"]));
 
+  // 끝난 작업은 10분 뒤 저절로 치운다(확인 대기 중인 것은 사용자가 정해야 하므로 남긴다).
+  // 서버가 끝난 시각을 안 내려 주므로, 이 화면이 "끝난 것을 처음 본 때"부터 센다.
+  const doneSeenRef = useRef<Map<string, number>>(new Map());
+  const jobsRef = useRef(jobs);
+  jobsRef.current = jobs;
+  useEffect(() => {
+    const sweep = () => {
+      const now = Date.now();
+      const seen = doneSeenRef.current;
+      const live = new Set<string>();
+      for (const j of jobsRef.current) {
+        if (j.status !== "done" || j.stage === "max-offer") continue;
+        live.add(j.id);
+        const t = seen.get(j.id);
+        if (t === undefined) seen.set(j.id, now);
+        else if (now - t >= 600_000) {
+          seen.delete(j.id);
+          dismiss(j.id);
+        }
+      }
+      for (const id of [...seen.keys()]) if (!live.has(id)) seen.delete(id);
+      for (const t of getLocalTasks()) {
+        if (t.status === "done" && now - (t.finishedAt ?? now) >= 600_000) dismissLocalTask(t.id);
+      }
+    };
+    sweep();
+    const h = window.setInterval(sweep, 30_000);
+    return () => window.clearInterval(h);
+  }, [dismiss]);
+
   if (jobs.length === 0 && localTasks.length === 0) return null;
+  const finishedJobs = jobs.filter((j) => (j.status === "done" && j.stage !== "max-offer") || j.status === "error");
+  const finishedLocals = localTasks.filter((t) => t.status !== "running");
+  function clearAllFinished() {
+    for (const j of finishedJobs) dismiss(j.id);
+    for (const t of finishedLocals) dismissLocalTask(t.id);
+  }
   const localRunning = localTasks.filter((t) => t.status === "running").length;
   const localFailed = localTasks.filter((t) => t.status === "error").length;
 
@@ -406,6 +442,14 @@ export default function FigureJobsPanel() {
           <p className="border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-500">
             서버에서 해요. 창을 닫아도 계속되고, 끝나면 문제에 저장돼요.
           </p>
+        )}
+        {open && finishedJobs.length + finishedLocals.length > 0 && (
+          <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-500">
+            <span>끝난 작업은 10분 뒤 저절로 사라져요</span>
+            <button type="button" onClick={clearAllFinished} className="font-medium text-slate-700 hover:text-red-600">
+              모두 지우기 ({finishedJobs.length + finishedLocals.length})
+            </button>
+          </div>
         )}
         {open && (
           <ul className="max-h-80 overflow-auto border-t border-slate-200">
