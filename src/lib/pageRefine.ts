@@ -18,7 +18,7 @@ import { enhanceContrast } from "./autoContrast";
 import { runAiTask } from "./aiTask";
 import type { DetectedProblem } from "./detectProblems";
 import type { ProblemBox } from "./problemBoxes";
-import { inkMapFromImage, snapBoxes, type InkMap } from "./snapBoxes";
+import { inkMapFromImage, snapBoxes, trimFurniture, type InkMap } from "./snapBoxes";
 
 /** 확대 창: 문제 둘레로 지면 대비 이만큼 더 오린다(이웃 줄이 걸쳐야 어디서 끊을지 보인다). */
 const WIN_MX = 0.03;
@@ -130,6 +130,9 @@ export async function refineProblems(
  * 찾은 자리를 사진의 글자에 맞춰 다듬는다(`snapBoxes`) — 지면 통째로 넣기와 비교 화면(`/admin/compare-crop`)이 **같은 함수**를 쓴다(보이는
  * 것과 잘리는 것이 같아야 한다). luna 가 짚은 번호·선지와 확대해 다시 본 자리는 `withKeep` 이 지킨다.
  */
+/** 자를 때 더하는 여유(BatchSplitPanel·비교 화면의 `PAD` 와 같아야 한다). */
+const TRIM_PAD = 0.012;
+
 export function snapPageProblems(
   img: HTMLImageElement | ImageBitmap,
   width: number,
@@ -146,7 +149,9 @@ export function snapPageProblems(
       boxes: p.boxes.map((orig) => {
         const kept = protectModelBox(withKeep(res.boxes[k++], orig), (orig as ProblemBox & { was?: ProblemBox }).was ?? orig);
         const was = (orig as ProblemBox & { was?: ProblemBox }).was;
-        return was ? restoreBottom(map, kept, was) : kept;
+        const restored = was ? restoreBottom(map, kept, was) : kept;
+        // 쪽 테두리·머리말·옆 탭 같은 장식은 떼어 낸다(자를 때 더해질 여유 `PAD` 만큼 안쪽에 둔다).
+        return trimFurniture(map, restored, TRIM_PAD);
       }),
     })),
     snapped: res.changed,

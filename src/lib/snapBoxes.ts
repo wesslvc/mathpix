@@ -398,3 +398,205 @@ function snapHorizontal(map: InkMap, p: Px, others: Px[]): Px {
   if (right - left < 8) return p;
   return { ...p, x0: left, x1: right };
 }
+
+/**
+ * **쪽 장식 떼기**(2026-10-10, 사용자 캡처 — 조각에 쪽 테두리 세로줄·위 가로줄·머리말·옆 탭이 딸려 와 손으로 다시 잘라야 했다).
+ * 프롬프트로만은 안 잡혔다 — 모델 박스 + 서버 보정 + 자를 때 여유(`PAD`)가 겹쳐 장식까지 번진다. 그래서 사진에서 직접 찾아 떼어 낸다:
+ * - **변 가까이에 박스 폭(높이)을 거의 다 가로지르는 선**(한 문제 안의 상자 테두리는 박스보다 안쪽에 들어와 있어 안 걸린다)이 있으면 그 바깥은 장식이다.
+ *   사진이 기울면 선이 한 줄·한 칸에 안 모이므로 칸으로 나눠 **기운 만큼의 허용 폭 안에서** 이어지는지 본다.
+ * - 오른쪽·왼쪽 끝의 **두껍고 긴 덩어리**(옆 탭 "지구과학 Ⅰ")도 바깥을 뗀다.
+ * 선·덩어리 뒤 빈 간격의 60% 지점까지만 들어가고, **나중에 `pad` 만큼 더 넓혀 잘라도** 장식이 다시 안 들어오게 그만큼 안쪽에 둔다 —
+ * 다만 박스가 글자를 자르지 않도록 첫 글자 앞까지로 제한한다. 원래의 55% 아래로 줄어들면 손대지 않는다.
+ */
+export function trimFurniture(map: InkMap, b: ProblemBox, pad = 0.012): ProblemBox {
+  const { ink, w: W, h: H } = map;
+  let x0 = clamp(Math.round(b.x * W), 0, W - 1);
+  let y0 = clamp(Math.round(b.y * H), 0, H - 1);
+  let x1 = clamp(Math.round((b.x + b.w) * W) - 1, 0, W - 1);
+  let y1 = clamp(Math.round((b.y + b.h) * H) - 1, 0, H - 1);
+  const ow = x1 - x0 + 1;
+  const oh = y1 - y0 + 1;
+  if (ow < 40 || oh < 40) return b;
+  const padX = Math.round(pad * W);
+  const padY = Math.round(pad * H);
+
+  // 가로선(위·아래): 선을 따라 x, 수직으로 y.
+  const hTop = findRule(ink, W, x0, x1, y0, y0 + Math.round(oh * 0.22), "lo", false, oh);
+  if (hTop !== null) y0 = Math.max(y0, inward(ink, W, hTop, y1, x0, x1, false, padY));
+  const hBot = findRule(ink, W, x0, x1, y1 - Math.round(oh * 0.22), y1, "hi", false, oh);
+  if (hBot !== null) y1 = Math.min(y1, inward(ink, W, hBot, y0, x0, x1, false, padY));
+  // 세로선(왼쪽·오른쪽): 선을 따라 y, 수직으로 x.
+  const vL = findRule(ink, W, y0, y1, x0, x0 + Math.round(ow * 0.12), "lo", true, ow);
+  if (vL !== null) x0 = Math.max(x0, inward(ink, W, vL, x1, y0, y1, true, padX));
+  const vR = findRule(ink, W, y0, y1, x1 - Math.round(ow * 0.12), x1, "hi", true, ow);
+  if (vR !== null) x1 = Math.min(x1, inward(ink, W, vR, x0, y0, y1, true, padX));
+  // 옆 탭 같은 두꺼운 덩어리.
+  const tabR = findTab(ink, W, x0, x1, y0, y1, "hi");
+  if (tabR !== null) x1 = Math.min(x1, inward(ink, W, tabR, x0, y0, y1, true, padX));
+  const tabL = findTab(ink, W, x0, x1, y0, y1, "lo");
+  if (tabL !== null) x0 = Math.max(x0, inward(ink, W, tabL, x1, y0, y1, true, padX));
+
+  if (x1 - x0 + 1 < ow * 0.55 || y1 - y0 + 1 < oh * 0.55) return b;
+  return { ...b, x: x0 / W, y: y0 / H, w: (x1 + 1 - x0) / W, h: (y1 + 1 - y0) / H };
+}
+
+/**
+ * 선(또는 덩어리)의 안쪽 끝 `lineEdge`(perp 좌표, "lo" 쪽이면 선의 마지막 줄, "hi" 쪽이면 선의 첫 줄)에서 안쪽으로 가서
+ * 첫 글자까지의 빈 간격을 재고, 새 변 = 선 + 간격의 60% + `pad`(이후에 더해질 여유) — 단 첫 글자를 넘지 않게.
+ */
+function inward(
+  ink: Uint8Array,
+  W: number,
+  lineEdge: number,
+  far: number,
+  a0: number,
+  a1: number,
+  vertical: boolean,
+  pad: number,
+): number {
+  const dir = far >= lineEdge ? 1 : -1; // 안쪽 방향
+  const tol = Math.max(2, Math.round((a1 - a0 + 1) * 0.006));
+  const count = (p: number) => {
+    let n = 0;
+    for (let a = a0; a <= a1; a++) n += vertical ? ink[a * W + p] : ink[p * W + a];
+    return n;
+  };
+  let p = lineEdge + dir;
+  let first = far;
+  for (; dir > 0 ? p <= far : p >= far; p += dir) {
+    if (count(p) > tol) { first = p; break; }
+  }
+  const gap = Math.abs(first - lineEdge) - 1;
+  const target = lineEdge + dir * (1 + Math.round(gap * 0.6) + pad);
+  // 첫 글자 앞(= 박스가 글자를 안 자르는 한계)을 넘지 않는다.
+  return dir > 0 ? Math.min(target, first) : Math.max(target, first);
+}
+
+/**
+ * [p0, p1] 범위(수직 좌표) 안에서 `[a0, a1]`(선을 따라가는 좌표) 전체를 가로지르는 선을 찾는다. 못 찾으면 null.
+ * "lo" 면 **가장 안쪽(큰 쪽)** 선의 마지막 줄을, "hi" 면 **가장 안쪽(작은 쪽)** 선의 첫 줄을 돌려준다.
+ */
+function findRule(
+  ink: Uint8Array,
+  W: number,
+  a0: number,
+  a1: number,
+  p0: number,
+  p1: number,
+  side: "lo" | "hi",
+  vertical: boolean,
+  span: number,
+): number | null {
+  const len = a1 - a0 + 1;
+  const N = 24;
+  const cw = len / N;
+  const tilt = Math.max(8, Math.round(len * 0.05)); // 기운 만큼 선이 수직으로 번지는 폭
+  const need = Math.max(2, Math.round(cw * 0.6));
+  const at = (a: number, p: number) => (vertical ? ink[a * W + p] : ink[p * W + a]);
+  // 칸마다, 수직 좌표 p 에서 칸 길이의 60% 넘게 이어진 잉크가 있는가.
+  const hit: Uint8Array[] = [];
+  for (let c = 0; c < N; c++) {
+    const ca = Math.round(a0 + c * cw);
+    const cb = Math.min(a1, Math.round(a0 + (c + 1) * cw) - 1);
+    const row = new Uint8Array(p1 - p0 + 1);
+    for (let p = p0; p <= p1; p++) {
+      let run = 0;
+      let best = 0;
+      for (let a = ca; a <= cb; a++) {
+        if (at(a, p)) { run++; if (run > best) best = run; } else run = 0;
+      }
+      if (best >= need) row[p - p0] = 1;
+    }
+    hit.push(row);
+  }
+  const nextHit = (c: number, from: number): number => {
+    for (let p = from; p <= Math.min(p1, from + tilt); p++) if (hit[c][p - p0]) return p;
+    return -1;
+  };
+  let found: number | null = null;
+  for (let p = p0; p <= p1; p++) {
+    let ok = 0;
+    let firstCell = false;
+    let lastCell = false;
+    let lo = Infinity;
+    let hi = -1;
+    for (let c = 0; c < N; c++) {
+      const q = nextHit(c, p);
+      if (q < 0) continue;
+      ok++;
+      if (c === 0) firstCell = true;
+      if (c === N - 1) lastCell = true;
+      lo = Math.min(lo, q);
+      hi = Math.max(hi, q);
+    }
+    if (ok >= N * 0.8) {
+      // 닫힌 상자 윗/아랫변이면(양 끝이 박스 안쪽에 있고 둘 다 아래로 이어지는 세로 획이 있으면) 문제의 상자다 — 장식이 아니다.
+      let cf = 0;
+      while (cf < N && nextHit(cf, p) < 0) cf++;
+      let cl = N - 1;
+      while (cl > 0 && nextHit(cl, p) < 0) cl--;
+      const stroke = (c: number, edge: "start" | "end") => {
+        const q = nextHit(c, p);
+        const a = edge === "start" ? Math.round(a0 + c * cw) : Math.min(a1, Math.round(a0 + (c + 1) * cw) - 1);
+        const dir = side === "lo" ? 1 : -1;
+        const want = Math.round(span * 0.06);
+        let best = 0;
+        for (let da = -6; da <= 6; da++) {
+          let run = 0;
+          let gap = 0;
+          for (let k = 1; k <= span * 0.3; k++) {
+            const pp = q + dir * k;
+            const aa = a + da;
+            if (pp < 0 || aa < 0 || aa >= (vertical ? ink.length / W : W)) break;
+            if (at(aa, pp)) { run++; gap = 0; } else if (++gap > 2) break;
+          }
+          if (run > best) best = run;
+        }
+        return best >= want;
+      };
+      const endsInside = cf > 0 && cl < N - 1;
+      const closed = endsInside && stroke(cf, "start") && stroke(cl, "end");
+      if (!closed) {
+        if (side === "lo") found = hi + 6;
+        else if (found === null) found = lo - 6;
+      }
+    }
+  }
+  return found === null ? null : Math.max(p0, Math.min(p1, found));
+}
+
+/** 바깥 12% 안의 **두껍고 긴** 덩어리(옆 탭). 폭 3% 이상 · 높이의 12% 넘게 이어진 잉크 열이 겹쳐 있어야 한다. 돌려주는 값은 덩어리의 안쪽 끝(x). */
+function findTab(ink: Uint8Array, W: number, x0: number, x1: number, y0: number, y1: number, side: "lo" | "hi"): number | null {
+  const ow = x1 - x0 + 1;
+  const oh = y1 - y0 + 1;
+  const zone = Math.round(ow * 0.12);
+  const needRun = Math.round(oh * 0.12);
+  const longCol = (x: number) => {
+    let run = 0;
+    for (let y = y0; y <= y1; y++) {
+      if (ink[y * W + x]) { run++; if (run >= needRun) return true; } else run = 0;
+    }
+    return false;
+  };
+  const minThick = Math.round(ow * 0.03);
+  const xs = side === "hi" ? range(x1, x1 - zone, -1) : range(x0, x0 + zone, 1);
+  let streak: number[] = [];
+  let blob: number[] | null = null;
+  for (const x of xs) {
+    if (longCol(x)) streak.push(x);
+    else {
+      if (streak.length >= minThick) blob = streak; // 안쪽에 가장 가까운 덩어리가 마지막으로 남는다
+      streak = [];
+    }
+  }
+  if (streak.length >= minThick) blob = streak;
+  if (!blob) return null;
+  // 덩어리의 안쪽 끝 = 안쪽으로 가장 멀리 간 열.
+  return side === "hi" ? Math.min(...blob) : Math.max(...blob);
+}
+
+function range(from: number, to: number, step: 1 | -1): number[] {
+  const out: number[] = [];
+  for (let v = from; step > 0 ? v <= to : v >= to; v += step) out.push(v);
+  return out;
+}
