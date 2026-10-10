@@ -13,7 +13,7 @@ import { ModelBadge, type ModelKey } from "@/components/ModelBadge";
  * 장부)를 읽으므로 **실수로 지워도 합계가 줄지 않는다.** 한국 시간 기준, 공표 단가로 계산한
  * 추정치다(최종 청구액은 OpenAI 대시보드).
  */
-type Item = { label: string; periodKrw: number; periodCalls: number; totalKrw: number; totalCalls: number };
+type Item = { label: string; periodKrw: number; periodCalls: number; totalKrw: number; totalUsd: number; totalCalls: number };
 type ModelRow = {
   key: string;
   name: string;
@@ -46,7 +46,6 @@ const colorOf = (name: string) =>
 const logoOf = (name: string): ModelKey | undefined =>
   name.includes("haiku") ? "haiku" : name.includes("luna") ? "luna" : name.includes("sol") ? "sol" : name.includes("image") ? "sunburst" : undefined;
 
-const won = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
 export default function AiCostPanel() {
@@ -95,8 +94,7 @@ export default function AiCostPanel() {
             <div className="text-xs text-slate-500">
               전체 합계{data.since ? ` (${data.since.slice(5).replace("-", "/")}부터)` : ""}
             </div>
-            <div className="text-lg font-semibold text-ink">{won(data.totalKrw)}</div>
-            <div className="text-xs text-slate-400">{usd(data.totalUsd)}</div>
+            <div className="text-lg font-semibold text-ink">{usd(data.totalUsd)}</div>
           </div>
 
           <div className="flex flex-col gap-3">
@@ -106,7 +104,7 @@ export default function AiCostPanel() {
                   {logoOf(g.models[0].key) && <ModelBadge model={logoOf(g.models[0].key)!} label={false} />}
                   {g.maker}
                   <span className="font-normal tabular-nums text-slate-400">
-                    · {won(g.models.reduce((a, m) => a + m.totalKrw, 0))}
+                    · {usd(g.models.reduce((a, m) => a + m.totalUsd, 0))}
                   </span>
                 </div>
                 {g.models.map((m) => (
@@ -115,7 +113,7 @@ export default function AiCostPanel() {
                       <span className={cn("h-2.5 w-2.5 shrink-0 rounded-sm", colorOf(m.key))} />
                       <span className="font-medium text-ink">{m.name}</span>
                       <span className="ml-auto tabular-nums text-ink">
-                        {won(m.totalKrw)} <span className="text-xs text-slate-400">({usd(m.totalUsd)}){m.totalCalls > 0 ? ` · ${m.totalCalls.toLocaleString()}회` : ""}</span>
+                        {usd(m.totalUsd)} <span className="text-xs text-slate-400">{m.totalCalls > 0 ? ` · ${m.totalCalls.toLocaleString()}회` : ""}</span>
                       </span>
                     </summary>
                     <ul className="mt-2 flex flex-col gap-1 border-t border-slate-100 pt-2">
@@ -123,7 +121,7 @@ export default function AiCostPanel() {
                         <li key={r.label} className="flex justify-between gap-2">
                           <span className="text-slate-600">{r.label}</span>
                           <span className="tabular-nums text-ink">
-                            {won(r.totalKrw)} <span className="text-xs text-slate-400">{r.totalCalls > 0 ? `· ${r.totalCalls}회` : ""}</span>
+                            {usd(r.totalUsd)} <span className="text-xs text-slate-400">{r.totalCalls > 0 ? `· ${r.totalCalls}회` : ""}</span>
                           </span>
                         </li>
                       ))}

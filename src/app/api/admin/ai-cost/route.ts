@@ -118,7 +118,7 @@ export async function GET(req: NextRequest) {
       totalUsd: m.total.usd,
       totalCalls: m.total.calls,
       items: [...m.items.entries()]
-        .map(([label, v]) => ({ label, periodKrw: v.period.krw, periodCalls: v.period.calls, totalKrw: v.total.krw, totalCalls: v.total.calls }))
+        .map(([label, v]) => ({ label, periodKrw: v.period.krw, periodCalls: v.period.calls, totalKrw: v.total.krw, totalUsd: v.total.usd, totalCalls: v.total.calls }))
         .sort((a, b) => b.totalKrw - a.totalKrw),
     }))
     .sort((a, b) => b.totalKrw - a.totalKrw);
