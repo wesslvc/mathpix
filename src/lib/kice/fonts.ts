@@ -60,6 +60,13 @@ export function loadKiceFonts(): Promise<Record<string, Uint8Array>> {
         return [name, new Uint8Array(await res.arrayBuffer())] as const;
       }),
     );
+    // 새 번호용 숫자 글꼴(나눔스퀘어 Bold 0~9 만 잘라 둔 2KB, OFL — 저장소에 들어 있다). 못 받으면 본문 글꼴로 내려간다.
+    try {
+      const res = await fetch("/fonts/number-digits.ttf", { cache: "no-cache" });
+      if (res.ok) entries.push(["번호숫자", new Uint8Array(await res.arrayBuffer())] as const);
+    } catch {
+      /* 없어도 된다 */
+    }
     return Object.fromEntries(entries);
   })();
   // 한 번 실패하면 다음에 다시 받아 볼 수 있게 캐시를 비운다.
