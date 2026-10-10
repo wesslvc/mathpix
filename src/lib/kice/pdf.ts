@@ -933,7 +933,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     const { label, unit, inset, roomPt, leadPt } = await coverGeom(it, cover);
     // 정해 둔 크기로도 안 들어가는 것만(아주 좁은 자리) 그 하나를 줄인다.
     // 덮는 네모보다 키 큰 숫자는 그리지 않는다(숫자 높이 ≈ 글자 크기의 0.72) — 위아래 글자에 닿으면 안 된다.
-    const size = Math.min(renumberSize, (roomPt + leadPt) / unit, (b.h * it.h * 1.1) / 0.72);
+    const size = Math.min(renumberSize, (roomPt + leadPt) / unit, (b.h * it.h * 1.2) / 0.72);
     const tw = unit * size;
     const rx = it.x + b.x * it.w;
     const ry = it.y + b.y * it.h;
@@ -942,11 +942,12 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     const shift = Math.min(leadPt, Math.max(0, tw - roomPt));
     const tx = rx + inset - shift;
     const left = Math.min(rx, tx - inset);
-    const right = Math.max(rx + b.w * it.w, Math.min(tx + tw + size * 0.04, rx + inset + roomPt));
+    const right = Math.max(rx + b.w * it.w, Math.min(tx + tw + size * 0.1, rx + inset + roomPt));
     page.drawRectangle({ x: left, y: flip(ry + rh), width: right - left, height: rh, color: rgb(1, 1, 1) });
     const baseY = flip(it.y + b.base * it.h);
-    for (const dx of [0, size * 0.03]) {
-      page.drawText(label.text, { x: tx + dx, y: baseY, size, font: label.font, color: rgb(0, 0, 0) });
+    // 굵게: 가로·세로로 조금씩 어긋나게 여러 번 겹쳐 그린다(굵은 짝 글꼴이 없다).
+    for (const [dx, dy] of [[0, 0], [0.04, 0], [0.08, 0], [0.04, 0.03], [0.04, -0.03]]) {
+      page.drawText(label.text, { x: tx + dx * size, y: baseY + dy * size, size, font: label.font, color: rgb(0, 0, 0) });
     }
   };
 
@@ -1030,14 +1031,18 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       .sort((a, b) => a - b);
     if (heights.length) {
       const mid = heights[Math.floor(heights.length / 2)];
-      let size = Math.min(18, Math.max(9, (mid / 0.72) * NUMBER_GROW));
+      let size = Math.min(24, Math.max(10, (mid / 0.72) * NUMBER_GROW));
       // 그다음 **모든 자리에 들어가는 크기**로 낮춘다(3 → 12 처럼 넓어지는 자리 때문에) — 너무 작아지지는 않게 7pt 까지.
+      // 가장 좁은 자리 하나에 문서 전체를 맞추면 늘 작아진다 — 아래쪽 20% 자리 기준으로 잡고, 더 좁은 자리는 그리는 쪽에서 그 하나만 줄인다.
+      const fits: number[] = [];
       for (const it of pages.flatMap((p) => p.items)) {
         if (!it.cover) continue;
         const { unit, roomPt, leadPt } = await coverGeom(it, it.cover);
-        size = Math.min(size, (roomPt + leadPt) / unit);
+        fits.push((roomPt + leadPt) / unit);
       }
-      renumberSize = Math.max(7, size);
+      fits.sort((a, b) => a - b);
+      if (fits.length) size = Math.min(size, fits[Math.floor(fits.length * 0.2)]);
+      renumberSize = Math.max(9, size);
     }
   }
   const answers = (spec.answers ?? []).filter((a) => a.answer.trim() !== "");
@@ -1172,7 +1177,7 @@ const BODY_FONT = "(한)신중명조";
 /** 새 문제 번호는 본문과 다른 굵은 고딕으로 그려 더 크게 보이게 한다(글꼴에 글자가 없으면 fontForText 가 본문 글꼴로 내려간다). */
 const NUMBER_FONT = "(환)태고딕";
 /** 원래 번호 숫자보다 이만큼 크게 쓴다(덮는 네모 안·뒤 글자 앞까지만 — 문제 내용은 안 가린다). */
-const NUMBER_GROW = 1.25;
+const NUMBER_GROW = 1.6;
 
 /**
  * 조판된 지문을 그린다.
