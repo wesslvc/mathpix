@@ -587,7 +587,7 @@ export default function BatchSplitPanel({
       // 영역 찾기와 자르기를 나눠 둔다. 한 덩어리로 감싸면 자르다 난 오류까지
       // "문제 영역 인식 실패"로 보여서 어디가 잘못됐는지 알 수 없다.
       let found: DetectedProblem[];
-      setBusy("luna 가 문제 영역을 찾는 중...");
+      setBusy("Haiku 가 문제 영역을 찾는 중...");
       try {
         // 고를 때 미리 넣어 둔 것이 있으면 그 결과를 기다린다(대개 이미 끝나 있다). 미리 못 찾았으면 지금 찾는다.
         const pre = pageFile ? prefetchRef.current.get(pageFile) : undefined;
@@ -1066,12 +1066,12 @@ export default function BatchSplitPanel({
             onChange={(e) => setAllRest(e.target.checked)}
             className="h-4 w-4 accent-blue-600"
           />
-          남은 지면 {queue.length}장도 같은 방식으로 한 번에 넣기 (luna 가 찾은 자리대로)
+          남은 지면 {queue.length}장도 같은 방식으로 한 번에 넣기 (Haiku 가 찾은 자리대로)
         </label>
       )}
       {autoPages > 0 && (
         <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
-          남은 지면 {autoPages}장을 luna 가 찾은 자리대로 자르는 중이에요 — 창은 닫지 마세요.
+          남은 지면 {autoPages}장을 Haiku 가 찾은 자리대로 자르는 중이에요 — 창은 닫지 마세요.
         </p>
       )}
       {busy && <p className="text-xs text-slate-500">{busy}</p>}

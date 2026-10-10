@@ -54,7 +54,7 @@ export default function PageReview({
           </h2>
           <p className="text-xs text-slate-500">
             좌우로 넘겨 보고, 잘못 잘린 것만 <b>다시 자르기</b>에 체크하세요(조각을 눌러도 체크돼요).
-            {finding > 0 && ` · luna 가 지면 ${finding}장에서 문제를 찾는 중…`}
+            {finding > 0 && ` · Haiku 가 지면 ${finding}장에서 문제를 찾는 중…`}
           </p>
         </div>
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
@@ -69,7 +69,7 @@ export default function PageReview({
               <div className="flex h-64 w-40 shrink-0 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-2 text-center text-[11px] text-slate-500">
                 <span className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
                 <span className="w-full truncate">지면 {pi + 1} · {pg.name}</span>
-                luna 가 찾는 중
+                Haiku 가 오릴 자리를 찾는 중
               </div>
             )}
             {pg.status === "error" && (
@@ -141,7 +141,7 @@ export default function PageReview({
       <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-2 border-t border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
         <p className="text-xs text-slate-600">
           {finding > 0 ? (
-            <>luna 가 아직 찾는 지면이 있어요 — 다 찾으면 넣을 수 있어요.</>
+            <>Haiku 가 아직 찾는 지면이 있어요 — 다 찾으면 넣을 수 있어요.</>
           ) : (
             <>
               체크 안 한 <b>{rest}개</b>를 아래 방식으로 넣어요

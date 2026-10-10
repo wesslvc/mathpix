@@ -70,7 +70,7 @@ export default function CropReview({
           <h2 className="text-base font-semibold text-ink">자동으로 자른 결과 ({photos.length}장)</h2>
           <p className="text-xs text-slate-500">
             좌우로 넘겨 보고, 잘못 잘린 것만 <b>다시 자르기</b>에 체크하세요. 사진을 누르면 그 사진만 바로 자를 수 있어요.
-            {waiting > 0 && ` · luna 가 ${waiting}장 자르는 중…`}
+            {waiting > 0 && ` · Haiku 가 ${waiting}장 자르는 중…`}
           </p>
         </div>
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
@@ -82,7 +82,7 @@ export default function CropReview({
         {photos.map((p, i) => {
           const pv = previews[p.id];
           const isChecked = checked.has(p.id);
-          const state = !(p.id in aiCrops) ? "luna 가 자르는 중" : pv ? (pv.ai ? "luna 가 자름" : "자동 계산") : "준비 중";
+          const state = !(p.id in aiCrops) ? "Haiku 가 자르는 중" : pv ? (pv.ai ? "Haiku 가 자름" : "자동 계산") : "준비 중";
           return (
             <div
               key={p.id}
@@ -178,7 +178,7 @@ export default function CropReview({
           {rest > 0 && advised.length > 0 && (
             // luna 가 사진마다 고른 대로 — 깨끗한 인쇄는 원본 그대로(공짜), 손글씨·그림자가 있으면 AI로 다시 그리기.
             <Button type="button" variant="primary" onClick={() => onSubmit("advice")} className="col-span-2 flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm">
-              luna 추천대로 넣기
+              Haiku 추천대로 넣기
               <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">
                 원본 {asisCount} · AI {rest - asisCount}
               </span>

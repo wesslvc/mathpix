@@ -1157,7 +1157,7 @@ export default function AddProblemFlow({
 
       {bulkLeft > 0 && (
         <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
-          남은 사진 {bulkLeft}장을 luna 가 자른 자리대로 넣는 중이에요 — 다른 일을 해도 돼요(창은 닫지 마세요).
+          남은 사진 {bulkLeft}장을 Haiku 가 자른 자리대로 넣는 중이에요 — 다른 일을 해도 돼요(창은 닫지 마세요).
         </p>
       )}
       {quick.length > 0 && stage !== "result" && stage !== "loading" && (

@@ -206,9 +206,9 @@ export default function CropStage({
               : shape === "poly"
                 ? "점을 끌어 모양을 맞추세요. 변 가운데 점을 끌면 점이 늘어요."
                 : aiApplied
-                  ? `luna 가 문제 자리를 잘랐어요${turns ? " (사진도 똑바로 돌렸어요)" : ""}. 손잡이를 끌어 범위를 맞추세요.`
+                  ? `Haiku 가 문제 자리를 잘랐어요${turns ? " (사진도 똑바로 돌렸어요)" : ""}. 손잡이를 끌어 범위를 맞추세요.`
                   : aiRegion === undefined && !touched.current
-                    ? "자동으로 잡았어요 · luna 가 더 정확히 자르는 중…"
+                    ? "자동으로 잡았어요 · Haiku 가 더 정확히 자르는 중…"
                     : "자동으로 잡았어요. 손잡이를 끌어 범위를 맞추세요."}
           </p>
         </div>
@@ -307,7 +307,7 @@ export default function CropStage({
             />
             <span>
               남은 {restCount}장도 같은 방식으로 한 번에
-              <span className="block text-[11px] text-slate-400">luna 가 자른 자리대로 넣어요 (글자로 인식 제외)</span>
+              <span className="block text-[11px] text-slate-400">Haiku 가 자른 자리대로 넣어요 (글자로 인식 제외)</span>
             </span>
           </label>
         )}
@@ -320,12 +320,12 @@ export default function CropStage({
             onClick={() => handleConfirm("asis")}
             disabled={!ready}
             variant={aiAdvice === "asis" ? "primary" : "outline"}
-            title={aiAdvice === "asis" ? `luna 추천${aiAdviceReason ? ` — ${aiAdviceReason}` : ""}` : undefined}
+            title={aiAdvice === "asis" ? `Haiku 추천${aiAdviceReason ? ` — ${aiAdviceReason}` : ""}` : undefined}
             className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
           >
             원본 그대로
             {aiAdvice === "asis" && (
-              <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">luna 추천{aiAdviceReason ? ` · ${aiAdviceReason}` : ""}</span>
+              <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">Haiku 추천{aiAdviceReason ? ` · ${aiAdviceReason}` : ""}</span>
             )}
           </Button>
           {/* 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다
@@ -335,11 +335,11 @@ export default function CropStage({
             onClick={() => handleConfirm("problem")}
             disabled={!ready}
             variant={aiAdvice === "redraw" ? "primary" : "soft"}
-            title={aiAdvice === "redraw" ? `luna 추천${aiAdviceReason ? ` — ${aiAdviceReason}` : ""}` : undefined} className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
+            title={aiAdvice === "redraw" ? `Haiku 추천${aiAdviceReason ? ` — ${aiAdviceReason}` : ""}` : undefined} className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
           >
             AI로 다시 그리기
             {aiAdvice === "redraw" && (
-              <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">luna 추천{aiAdviceReason ? ` · ${aiAdviceReason}` : ""}</span>
+              <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">Haiku 추천{aiAdviceReason ? ` · ${aiAdviceReason}` : ""}</span>
             )}
             {typeof problemTokenCost === "number" && !unlimited && !byok && (
               <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{problemTokenCost}토큰</span>
