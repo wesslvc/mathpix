@@ -40,7 +40,7 @@ import {
   SOL_TYPESET_TOKENS,
   USD_KRW_RATE,
 } from "./tokens";
-import { logAiCost, solTokens } from "./costLog";
+import { HAIKU_MODEL, logAiCost, solTokens } from "./costLog";
 import {
   parseSolChat,
   parseTranscription,
@@ -230,7 +230,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           { inputTokens: usage.input, outputTokens: usage.output, ...(usage.cached ? { cachedInputTokens: usage.cached } : {}) },
           OPENAI_DETECT_MODEL,
         );
-        if (krw) await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind, what, krw, tokens: usage });
+        if (krw) await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind, what, krw, model: OPENAI_DETECT_MODEL, tokens: usage });
         return krw;
       };
       try {
@@ -245,8 +245,16 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           return { ok: true, result: { regions, model }, model, estKrw };
         }
         const { problems, model, usage } = await detectProblems(ctx.images[0]);
-        // 단가를 아는 luna 로 찾았을 때만 원가를 적는다(Gemini 단가는 아직 모른다 — 지어내지 않는다).
-        const estKrw = model.startsWith(OPENAI_DETECT_MODEL) ? await cost(usage, "지면 자리 찾기", "problem") : undefined;
+        // 원가는 답한 모델로 적는다: 하이쿠(오픈라우터)는 응답이 준 실제 청구액, luna 는 공표 단가. Gemini 단가는 아직 모른다 — 지어내지 않는다.
+        let estKrw: number | undefined;
+        if (model.includes("/") && usage && typeof usage.costUsd === "number") {
+          estKrw = usage.costUsd * USD_KRW_RATE;
+          if (estKrw > 0) {
+            await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "지면 자리 찾기", krw: estKrw, model: HAIKU_MODEL, tokens: usage });
+          }
+        } else if (model.startsWith(OPENAI_DETECT_MODEL)) {
+          estKrw = await cost(usage, "지면 자리 찾기", "problem");
+        }
         return { ok: true, result: { problems, model }, model, estKrw };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "문제 영역 인식에 실패했습니다.") };
@@ -276,7 +284,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
             : gradingEstKrw(lunaUsage(usage), model)
           : undefined;
         if (estKrw && usage) {
-          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: model.includes("/") ? "하이쿠 자동 자르기" : "luna 자동 자르기", krw: estKrw, tokens: usage });
+          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: model.includes("/") ? "하이쿠 자동 자르기" : "luna 자동 자르기", krw: estKrw, model: model.includes("/") ? HAIKU_MODEL : OPENAI_DETECT_MODEL, tokens: usage });
         }
         const note = !box
           ? `${model} · 문제 자리를 못 찾았어요`

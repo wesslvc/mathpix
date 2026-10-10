@@ -40,29 +40,27 @@ type Data = {
 
 /** 로고별 범주(만든 곳)와 막대 색. 모델 이름은 서버가 정식 명칭으로 준다. */
 const MAKER_ORDER = ["Anthropic", "OpenAI", "기타"];
-const MODEL_COLOR: Record<string, string> = {
-  haiku: "bg-orange-400/80",
-  luna: "bg-sky-400/80",
-  sol: "bg-blue-600/80",
-  sunburst: "bg-emerald-500/80",
-  other: "bg-slate-400/80",
-};
-const LOGO_KEY: Record<string, ModelKey | undefined> = { haiku: "haiku", luna: "luna", sol: "sol", sunburst: "sunburst" };
+// 모델 이름(서버가 장부의 정식 이름을 그대로 준다)으로 색·로고를 고른다.
+const colorOf = (name: string) =>
+  name.includes("haiku") ? "bg-orange-400/80" : name.includes("luna") ? "bg-sky-400/80" : name.includes("sol") ? "bg-blue-600/80" : name.includes("image") ? "bg-emerald-500/80" : "bg-slate-400/80";
+const logoOf = (name: string): ModelKey | undefined =>
+  name.includes("haiku") ? "haiku" : name.includes("luna") ? "luna" : name.includes("sol") ? "sol" : name.includes("image") ? "sunburst" : undefined;
 
 const won = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
 export default function AiCostPanel() {
   const [bucket, setBucket] = useState<"hour" | "day">("day");
+  const [range, setRange] = useState<"default" | "all">("all");
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async (b: "hour" | "day") => {
+  const load = useCallback(async (b: "hour" | "day", r: "default" | "all") => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/ai-cost?bucket=${b}`, { cache: "no-store" });
+      const res = await fetch(`/api/admin/ai-cost?bucket=${b}${r === "all" ? "&days=0" : ""}`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "불러오지 못했어요.");
       setData(json);
@@ -74,8 +72,8 @@ export default function AiCostPanel() {
   }, []);
 
   useEffect(() => {
-    void load(bucket);
-  }, [bucket, load]);
+    void load(bucket, range);
+  }, [bucket, range, load]);
 
   const max = Math.max(1, ...(data?.buckets ?? []).map((b) => b.krw));
   const makers = MAKER_ORDER.map((m) => ({ maker: m, models: (data?.models ?? []).filter((x) => x.maker === m) })).filter((g) => g.models.length > 0);
@@ -98,7 +96,10 @@ export default function AiCostPanel() {
               {b === "hour" ? "시간대별" : "날짜별"}
             </Button>
           ))}
-          <Button size="xs" variant="ghost" disabled={busy} onClick={() => load(bucket)}>
+          <Button size="xs" variant={range === "all" ? "dark" : "outline"} onClick={() => setRange(range === "all" ? "default" : "all")}>
+            {range === "all" ? "전체 기간" : "최근만"}
+          </Button>
+          <Button size="xs" variant="ghost" disabled={busy} onClick={() => load(bucket, range)}>
             새로고침
           </Button>
         </div>
@@ -111,7 +112,7 @@ export default function AiCostPanel() {
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-lg bg-slate-50 px-3 py-2">
               <div className="text-xs text-slate-500">
-                최근 {data.days}일 {data.bucket === "hour" ? "(시간대별 보기)" : ""}
+                {data.days === 0 ? "전체 기간" : `최근 ${data.days}일`} {data.bucket === "hour" ? "(시간대별 보기)" : ""}
               </div>
               <div className="text-lg font-semibold text-ink">{won(data.periodKrw)}</div>
               <div className="text-xs text-slate-400">{usd(data.periodUsd)}</div>
@@ -139,7 +140,7 @@ export default function AiCostPanel() {
                         <span
                           key={m.key}
                           title={`${m.name} ${won(b.byModel[m.key])}`}
-                          className={cn("h-full", MODEL_COLOR[m.key] ?? "bg-slate-400/80")}
+                          className={cn("h-full", colorOf(m.key))}
                           style={{ width: `${(b.byModel[m.key] / max) * 100}%` }}
                         />
                       ))}
@@ -155,16 +156,16 @@ export default function AiCostPanel() {
             {makers.map((g) => (
               <div key={g.maker} className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                  {LOGO_KEY[g.models[0].key] && <ModelBadge model={LOGO_KEY[g.models[0].key]!} label={false} />}
+                  {logoOf(g.models[0].key) && <ModelBadge model={logoOf(g.models[0].key)!} label={false} />}
                   {g.maker}
                   <span className="font-normal tabular-nums text-slate-400">
                     · 기간 {won(g.models.reduce((a, m) => a + m.periodKrw, 0))} · 누적 {won(g.models.reduce((a, m) => a + m.totalKrw, 0))}
                   </span>
                 </div>
                 {g.models.map((m) => (
-                  <details key={m.key} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  <details key={m.key} open className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
                     <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1">
-                      <span className={cn("h-2.5 w-2.5 shrink-0 rounded-sm", MODEL_COLOR[m.key] ?? "bg-slate-400/80")} />
+                      <span className={cn("h-2.5 w-2.5 shrink-0 rounded-sm", colorOf(m.key))} />
                       <span className="font-medium text-ink">{m.name}</span>
                       <span className="ml-auto tabular-nums text-ink">
                         기간 {won(m.periodKrw)} <span className="text-xs text-slate-400">· {m.periodCalls}회</span>

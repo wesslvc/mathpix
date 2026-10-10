@@ -16,6 +16,8 @@ export async function logAiCost(
     krw: number;
     usd?: number;
     krwRate?: number;
+    /** 정식 모델 이름(`claude-haiku-5.5` · `gpt-6-luna` …). 없으면 `what` 으로 짐작한다(`modelFromWhat`). */
+    model?: string;
     /** 토큰 수(입력 전체 · 그중 캐시에서 읽은 것 · 출력). 캐시 적중률을 재려고 남긴다(0033). */
     tokens?: { input: number; cached: number; output: number };
   },
@@ -28,6 +30,7 @@ export async function logAiCost(
       job_id: row.jobId,
       kind: row.kind,
       what: row.what,
+      model: row.model ?? modelFromWhat(row.what),
       est_krw: row.krw,
       est_usd: usd,
       ...(row.tokens
@@ -53,3 +56,21 @@ export function imageTokens(
 ): { input: number; cached: number; output: number } | undefined {
   return u ? { input: u.inputText + u.inputImage, cached: u.cached, output: u.output } : undefined;
 }
+
+/**
+ * 일의 이름으로 정식 모델 이름을 짐작한다 — 호출하는 쪽이 실제로 답한 모델을 아는 곳(자동 자르기·자리 찾기)은 `model` 을 직접 넘긴다.
+ * 이름은 코드의 기본값과 같다(환경변수로 바꿔 쓰면 그 값).
+ */
+export function modelFromWhat(what: string): string | null {
+  if (what.startsWith("하이쿠")) return HAIKU_MODEL;
+  if (what.startsWith("그림")) return (process.env.OPENAI_FIGURE_IMAGE_MODELS?.split(",")[0]?.trim()) || "gpt-image-2.5-sunburst";
+  if (what.startsWith("sol ") || what === "지문 읽기" || what === "서식 검수" || what.startsWith("지문 읽기(") || what.startsWith("서식 검수(")) {
+    return process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-6.1-sol";
+  }
+  if (what.startsWith("luna ") || what === "자동채점" || what === "답지 읽기" || what === "지문 제목 짓기") {
+    return process.env.OPENAI_DETECT_MODEL ?? "gpt-6-luna";
+  }
+  return null;
+}
+
+export const HAIKU_MODEL = "claude-haiku-5.5";
