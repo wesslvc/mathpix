@@ -14,6 +14,7 @@ import { ModelBadge, type ModelKey } from "@/components/ModelBadge";
  * 추정치다(최종 청구액은 OpenAI 대시보드).
  */
 type Item = { label: string; periodKrw: number; periodCalls: number; totalKrw: number; totalUsd: number; totalCalls: number };
+type Tok = Partial<Record<"input" | "cacheRead" | "cacheWrite" | "output", number>>;
 type ModelRow = {
   key: string;
   name: string;
@@ -25,6 +26,10 @@ type ModelRow = {
   totalUsd: number;
   totalCalls: number;
   comp: Partial<Record<"input" | "cacheRead" | "cacheWrite" | "output" | "other", number>>;
+  tok: Tok;
+  todayUsd: number;
+  todayCalls: number;
+  todayTok: Tok;
   items: Item[];
 };
 type Data = {
@@ -34,6 +39,7 @@ type Data = {
   buckets: { label: string; krw: number; calls: number; byModel: Record<string, number> }[];
   periodKrw: number;
   periodUsd: number;
+  todayUsd: number;
   totalKrw: number;
   totalUsd: number;
   since: string | null;
@@ -54,6 +60,8 @@ const COMPS = [
   { k: "output", label: "출력", color: "bg-rose-500" },
   { k: "other", label: "분류 없음", color: "bg-slate-300" },
 ] as const;
+const fmtTok = (n = 0) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : `${n}`);
+const tokLine = (t: Tok) => `입력 ${fmtTok(t.input)} · 캐시 읽기 ${fmtTok(t.cacheRead)} · 캐시 쓰기 ${fmtTok(t.cacheWrite)} · 출력 ${fmtTok(t.output)}`;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
 export default function AiCostPanel() {
@@ -98,6 +106,18 @@ export default function AiCostPanel() {
 
       {data && (
         <>
+          <div className="rounded-lg bg-blue-50 px-3 py-2">
+            <div className="text-xs text-slate-500">오늘 사용량 (한국 시간)</div>
+            <div className="text-lg font-semibold text-ink">{usd(data.todayUsd ?? 0)}</div>
+            {data.models.filter((m) => m.todayUsd > 0 || m.todayCalls > 0).map((m) => (
+              <div key={m.key} className="mt-1 text-xs text-slate-600">
+                <span className="font-medium text-ink">{m.name}</span> {usd(m.todayUsd)}
+                {m.todayCalls > 0 ? ` · ${m.todayCalls}회` : ""}
+                <div className="text-slate-400">{tokLine(m.todayTok ?? {})}</div>
+              </div>
+            ))}
+            {!data.models.some((m) => m.todayUsd > 0 || m.todayCalls > 0) && <div className="text-xs text-slate-400">오늘은 아직 기록이 없어요.</div>}
+          </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2">
             <div className="text-xs text-slate-500">
               전체 합계{data.since ? ` (${data.since.slice(5).replace("-", "/")}부터)` : ""}
@@ -154,6 +174,7 @@ export default function AiCostPanel() {
                         {usd(m.totalUsd)} <span className="text-xs text-slate-400">{m.totalCalls > 0 ? ` · ${m.totalCalls.toLocaleString()}회` : ""}</span>
                       </span>
                     </summary>
+                    <div className="mt-2 text-xs text-slate-500">토큰 {tokLine(m.tok ?? {})}</div>
                     <ul className="mt-2 flex flex-col gap-1 border-t border-slate-100 pt-2">
                       {m.items.map((r) => (
                         <li key={r.label} className="flex justify-between gap-2">

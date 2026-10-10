@@ -41,15 +41,18 @@ export async function GET(req: NextRequest) {
   type Raw = { kind: string; what: string; model: string | null; est_krw: number | string; est_usd: number | string; created_at: string; in_tokens?: number | null; cached_tokens?: number | null; out_tokens?: number | null };
   const kst = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false });
   const sinceMs = Date.parse(since);
+  const todayStr = kst.format(new Date()).slice(0, 10);
 
+  type Comp = "input" | "cacheRead" | "cacheWrite" | "output" | "other";
+  type Tok = Partial<Record<"input" | "cacheRead" | "cacheWrite" | "output", number>>;
   type Acc = { krw: number; usd: number; calls: number };
   const zero = (): Acc => ({ krw: 0, usd: 0, calls: 0 });
-  const models = new Map<string, { total: Acc; period: Acc; comp: Partial<Record<Comp, number>>; items: Map<string, { total: Acc; period: Acc }> }>();
+  const models = new Map<string, { total: Acc; period: Acc; comp: Partial<Record<Comp, number>>; tok: Tok; today: Acc; todayTok: Tok; items: Map<string, { total: Acc; period: Acc }> }>();
   const buckets = new Map<string, { label: string; krw: number; calls: number; byModel: Record<string, number> }>();
   let first: number | null = null;
 
-  type Comp = "input" | "cacheRead" | "cacheWrite" | "output" | "other";
-  type Row = { t: number; key: string; itemKey: string; krw: number; usd: number; calls: number; comp?: Partial<Record<Comp, number>> };
+  type Row = { t: number; key: string; itemKey: string; krw: number; usd: number; calls: number; comp?: Partial<Record<Comp, number>>; tok?: Tok };
+  const addTok = (a: Tok, b: Tok) => { for (const [k, v] of Object.entries(b)) a[k as keyof Tok] = (a[k as keyof Tok] ?? 0) + (v ?? 0); };
   const rows: Row[] = [];
   const csvEnd = Date.parse(OPENAI_CSV_END);
   for (const r of (data ?? []) as Raw[]) {
@@ -68,24 +71,27 @@ export async function GET(req: NextRequest) {
     }
     const known = Object.values(comp).reduce((a, b) => a + (b ?? 0), 0);
     if (usdTotal - known > 1e-9) comp.other = usdTotal - known;
-    rows.push({ t, key, itemKey: `${KIND_LABEL[r.kind] ?? r.kind} · ${r.what}`, krw: Number(r.est_krw) || 0, usd: usdTotal, calls: 1, comp });
+    const cachedT = r.cached_tokens ?? 0;
+    const tok: Tok = { input: Math.max(0, (r.in_tokens ?? 0) - cachedT), cacheRead: cachedT, output: r.out_tokens ?? 0 };
+    rows.push({ t, key, itemKey: `${KIND_LABEL[r.kind] ?? r.kind} · ${r.what}`, krw: Number(r.est_krw) || 0, usd: usdTotal, calls: 1, comp, tok });
   }
   // OpenAI 청구 내역의 토큰 수 × 단가표 (모델·날짜별로 묶는다).
   const { data: usage, error: uErr } = await admin.from("openai_usage_daily").select("day, model, part, kind, tokens").limit(100000);
   if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
-  const daily = new Map<string, { t: number; key: string; usd: number; comp: Partial<Record<Comp, number>> }>();
+  const daily = new Map<string, { t: number; key: string; usd: number; comp: Partial<Record<Comp, number>>; tok: Tok }>();
   for (const u of (usage ?? []) as { day: string; model: string; part: string; kind: string; tokens: number | string }[]) {
     const usd = usageUsd(u.model, u.part, u.kind, Number(u.tokens) || 0);
     if (usd === null) continue;
     const k = `${u.day}|${u.model}`;
-    const cur = daily.get(k) ?? { t: Date.parse(`${u.day}T12:00:00+09:00`), key: u.model, usd: 0, comp: {} };
+    const cur = daily.get(k) ?? { t: Date.parse(`${u.day}T12:00:00+09:00`), key: u.model, usd: 0, comp: {}, tok: {} };
     cur.usd += usd;
     const c: Comp = u.kind === "output" ? "output" : u.kind === "cached input" ? "cacheRead" : u.kind === "cache writes" ? "cacheWrite" : "input";
     cur.comp[c] = (cur.comp[c] ?? 0) + usd;
+    cur.tok[c] = (cur.tok[c] ?? 0) + (Number(u.tokens) || 0);
     daily.set(k, cur);
   }
   for (const d of daily.values()) {
-    rows.push({ t: d.t, key: d.key, itemKey: "청구 내역(토큰 기준)", krw: d.usd * USD_KRW_RATE, usd: d.usd, calls: 0, comp: d.comp });
+    rows.push({ t: d.t, key: d.key, itemKey: "청구 내역(토큰 기준)", krw: d.usd * USD_KRW_RATE, usd: d.usd, calls: 0, comp: d.comp, tok: d.tok });
   }
   // 총액 $0.5 미만인 OpenAI 모델은 "기타"로 합친다.
   const sumUsd = new Map<string, number>();
@@ -97,7 +103,9 @@ export async function GET(req: NextRequest) {
   for (const r of rows) {
     const t = r.t;
     const { krw, usd, key } = r;
-    const m = models.get(key) ?? { total: zero(), period: zero(), comp: {} as Partial<Record<Comp, number>>, items: new Map() };
+    const m = models.get(key) ?? { total: zero(), period: zero(), comp: {} as Partial<Record<Comp, number>>, tok: {} as Tok, today: zero(), todayTok: {} as Tok, items: new Map() };
+    if (r.tok) addTok(m.tok, r.tok);
+    if (kst.format(new Date(t)).slice(0, 10) === todayStr) { m.today.krw += krw; m.today.usd += usd; m.today.calls += r.calls; if (r.tok) addTok(m.todayTok, r.tok); }
     for (const [ck, cv] of Object.entries((r.comp ?? {}) as Partial<Record<Comp, number>>)) m.comp[ck as Comp] = (m.comp[ck as Comp] ?? 0) + (cv ?? 0);
     models.set(key, m);
     const itemKey = r.itemKey;
@@ -133,6 +141,10 @@ export async function GET(req: NextRequest) {
       totalUsd: m.total.usd,
       totalCalls: m.total.calls,
       comp: m.comp,
+      tok: m.tok,
+      todayUsd: m.today.usd,
+      todayCalls: m.today.calls,
+      todayTok: m.todayTok,
       items: [...m.items.entries()]
         .map(([label, v]) => ({ label, periodKrw: v.period.krw, periodCalls: v.period.calls, totalKrw: v.total.krw, totalUsd: v.total.usd, totalCalls: v.total.calls }))
         .sort((a, b) => b.totalKrw - a.totalKrw),
@@ -147,6 +159,7 @@ export async function GET(req: NextRequest) {
     buckets: [...buckets.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([, b]) => b),
     periodKrw: sum((m) => m.periodKrw),
     periodUsd: sum((m) => m.periodUsd),
+    todayUsd: sum((m) => m.todayUsd),
     totalKrw: sum((m) => m.totalKrw),
     totalUsd: sum((m) => m.totalUsd),
     since: first === null ? null : kst.format(new Date(first)).slice(0, 10),
