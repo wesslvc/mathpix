@@ -62,6 +62,7 @@ edges — TIGHT but never clipping:
 - the edge must sit in blank space, never cut through a line of text; a cut-off last choice, a cut-off number or a sliced formula/figure is the worst mistake, but a box that swallows the blank gap or a neighbour's line is also wrong
 - the neighbouring question's first line (starting with its own number) is NOT part of this one; the previous question's last choice line is NOT part of this one
 - the left edge must include anything hanging into the left margin (question number, ㉠ markers, figures, tables, boxes): look at the leftmost ink of THIS question, not at the column's usual margin. same for the right: wide figures, tables and long choice lines can extend past the usual right edge
+- CHOICES ARE SACRED: the bottom edge must lie BELOW the last choice row. check that ①②③④⑤ are ALL inside before answering (they are often a separate row at the very bottom of the question, or the last row of a 2-row grid); if the choices row is near the bottom of the question, extend the bottom edge past it rather than stopping at the stem or figure
 - EXCLUDE page furniture even when it is dark or touches the question: the long vertical/horizontal rules (column divider, page frame line, line under the running head), the running head / section title at the top of the page (e.g. "2 (지구과학 Ⅰ)", "과학탐구 영역"), the side tab or subject label on the page edge (e.g. a dark tab reading "지구과학 Ⅰ"), page numbers, and the cut-off bottom of the previous question or the top of the next one. these are NOT part of the question: put the edge just inside them, between them and the question's own text/box. the question's own frame (<보기> box, 탐구 과정 box, table borders) stays inside
 - tall figures/tables belonging to the question stay inside even if there is a lot of blank around them
 - in a 2-column page keep each region inside its own column (do not extend across the gutter)
@@ -264,7 +265,7 @@ function mergeWithinColumn(problem: DetectedProblem): DetectedProblem {
  * `separateOverlaps` 가 가른다 — 잘린 글자는 못 되살리니 바깥으로 틀리는 편이 낫다. 재배포 없이 `PAGE_BOX_PAD`(0~0.05).
  */
 /** 변마다 따로 넓힌다 [위, 아래, 왼, 오른](지면 대비 비율). 지면 4장·문제 20개를 정답과 견준 평균 치우침(위 +0.7 · 아래 -1.3 · 왼 +1.4 · 오른 -1.2 %p)을 되돌리는 값이다. */
-const DEFAULT_PAD: [number, number, number, number] = [0.007, 0.013, 0.014, 0.012];
+const DEFAULT_PAD: [number, number, number, number] = [0.007, 0.025, 0.014, 0.012];
 const PAGE_BOX_PAD: [number, number, number, number] = (() => {
   const raw = process.env.PAGE_BOX_PAD;
   if (raw === undefined || raw.trim() === "") return DEFAULT_PAD;
