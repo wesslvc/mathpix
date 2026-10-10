@@ -270,7 +270,7 @@ export default function FigureJobsPanel() {
   async function openConfirm(list: FigureJob[]) {
     setMaxError(null);
     setDetails(null);
-    setChoice(list.length === 1 ? "patch" : "redraw");
+    setChoice("patch");
     setPicked(new Set(list.map((j) => j.id)));
     setPatchText("");
     setPatchDiffs(true);
@@ -300,6 +300,22 @@ export default function FigureJobsPanel() {
     setMaxBusy(false);
     if (err) setMaxError(err);
     else setConfirming(null);
+  }
+  /** 여러 문제를 한꺼번에 **수정(일부만)** — 글 없이 sol 이 찾은 남은 차이만 고친다. */
+  async function runPatchMany(list: FigureJob[]) {
+    setMaxBusy(true);
+    setMaxError(null);
+    let ok = true;
+    for (const j of list) {
+      const err = await confirmPatch(j.id, "", true, false);
+      if (err) {
+        setMaxError(err);
+        ok = false;
+        break;
+      }
+    }
+    setMaxBusy(false);
+    if (ok) setConfirming(null);
   }
   async function closeOffers(list: FigureJob[]) {
     setMaxBusy(true);
@@ -770,12 +786,12 @@ export default function FigureJobsPanel() {
                 })
               )}
             </div>
-            {confirming.length === 1 && (
+            {confirming.length >= 1 && (
               <div className="border-t border-slate-200 px-4 py-2">
                 <div className="grid grid-cols-2 gap-1.5">
                   {(
                     [
-                      ["patch", "수정 (일부만)", `${patchTokens.toLocaleString()}토큰 · 화질 지정 없음`],
+                      ["patch", "수정 (일부만)", confirming.length > 1 ? `문제당 ${patchTokens.toLocaleString()}토큰 · 남은 차이만 고침` : `${patchTokens.toLocaleString()}토큰 · 화질 지정 없음`],
                       ["redraw", `${targetOf(confirming[0]).quality} 로 다시 그리기`, `${tokenText(targetOf(confirming[0]).tokens)} · 처음부터`],
                     ] as const
                   ).map(([k, title, sub]) => (
@@ -793,7 +809,7 @@ export default function FigureJobsPanel() {
                     </button>
                   ))}
                 </div>
-                {choice === "patch" && patchMode === "chat" && (
+                {confirming.length === 1 && choice === "patch" && patchMode === "chat" && (
                   <div className="mt-2">
                     <p className="mb-1 text-[11px] text-slate-500">
                       지금 저장된 그림을 <b>다시 그리지 않고</b> 고쳐요. sol 과 대화로 고칠 곳을 정하고 <b>확정</b>하면 그대로 그림 모델에 가요. 마음에 안 들면 또
@@ -816,7 +832,7 @@ export default function FigureJobsPanel() {
                     </button>
                   </div>
                 )}
-                {choice === "patch" && patchMode === "text" && (
+                {confirming.length === 1 && choice === "patch" && patchMode === "text" && (
                   <div className="mt-2">
                     <p className="mb-1 text-[11px] text-slate-500">
                       지금 저장된 그림을 <b>다시 그리지 않고</b> 적은 곳만 고쳐요(sol 도움 없이 적은 글 그대로).
@@ -875,7 +891,9 @@ export default function FigureJobsPanel() {
               <span className="text-[11px] text-slate-500">
                 {confirming.length === 1 && choice === "patch"
                   ? `${patchTokens.toLocaleString()}토큰${patchMode === "chat" ? " · 대화는 쓴 만큼 따로" : ""}`
-                  : confirming.length > 1
+                  : confirming.length > 1 && choice === "patch"
+                    ? `${picked.size}개 선택 · 진행하면 ${(picked.size * patchTokens).toLocaleString()}토큰`
+                    : confirming.length > 1
                     ? `${picked.size}개 선택 · 진행하면 ${tokenText(confirming.filter((j) => picked.has(j.id)).reduce((a, j) => a + targetOf(j).tokens, 0))}`
                     : tokenText(targetOf(confirming[0]).tokens)}
               </span>
@@ -909,7 +927,9 @@ export default function FigureJobsPanel() {
                     (confirming.length > 1 && picked.size === 0)
                   }
                   onClick={() =>
-                    confirming.length === 1 && choice === "patch" ? void runPatch(confirming[0]) : void runMax(confirming.filter((j) => picked.has(j.id)))
+                    choice === "patch"
+                      ? void (confirming.length === 1 ? runPatch(confirming[0]) : runPatchMany(confirming.filter((j) => picked.has(j.id))))
+                      : void runMax(confirming.filter((j) => picked.has(j.id)))
                   }
                   className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
                 >
