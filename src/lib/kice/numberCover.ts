@@ -275,10 +275,12 @@ async function askLuna(dataUrl: string, label: string, effort?: string): Promise
 export async function findNumberBox(
   png: Uint8Array,
   label: string,
+  /** 그림을 열고 줄이는 일(화면 스레드)만 이 문으로 줄 세운다 — luna 를 기다리는 동안은 문을 놓는다. */
+  gate: <T>(fn: () => Promise<T>) => Promise<T> = (fn) => fn(),
 ): Promise<{ box: NumberBox | null; miss?: NumberMiss }> {
   let opened: Awaited<ReturnType<typeof openPng>>;
   try {
-    opened = await openPng(png);
+    opened = await gate(() => openPng(png));
   } catch {
     return { box: null, miss: "error" };
   }

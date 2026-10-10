@@ -222,15 +222,28 @@ export default function KiceExportPanel({ title, items }: Props) {
     let next = 0;
     let done = 0;
     setProgress(`원래 번호 자리 찾는 중 0/${order.length}`);
+    // 그림 열기는 8개씩만(화면 스레드), luna 호출은 그 뒤 동시에 — 열어 둔 그림이 메모리를 쓰니 한 번에 최대 32개까지만 진행 중으로 둔다.
+    let opening = 0;
+    const waiters: (() => void)[] = [];
+    const gate = async <T,>(fn: () => Promise<T>): Promise<T> => {
+      while (opening >= 8) await new Promise<void>((r) => waiters.push(r));
+      opening++;
+      try {
+        return await fn();
+      } finally {
+        opening--;
+        waiters.shift()?.();
+      }
+    };
     const lane = async () => {
       while (next < order.length) {
         const k = next++;
         const i = order[k];
-        found[k] = await findNumberBox(pngs[i], items[i].label || `${newNo.get(i)}번`);
+        found[k] = await findNumberBox(pngs[i], items[i].label || `${newNo.get(i)}번`, gate);
         setProgress(`원래 번호 자리 찾는 중 ${++done}/${order.length}`);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(8, order.length) }, lane));
+    await Promise.all(Array.from({ length: Math.min(32, order.length) }, lane));
     const missed: Record<NumberMiss, number[]> = { none: [], unsafe: [], error: [] };
     order.forEach((i, k) => {
       const { box, miss } = found[k];
