@@ -132,6 +132,7 @@ export async function refineProblems(
  */
 /** 자를 때 더하는 여유(BatchSplitPanel·비교 화면의 `PAD` 와 같아야 한다). */
 const TRIM_PAD = 0.012;
+const TRIM_FURNITURE = false;
 
 export function snapPageProblems(
   img: HTMLImageElement | ImageBitmap,
@@ -150,8 +151,8 @@ export function snapPageProblems(
         const kept = protectModelBox(withKeep(res.boxes[k++], orig), (orig as ProblemBox & { was?: ProblemBox }).was ?? orig);
         const was = (orig as ProblemBox & { was?: ProblemBox }).was;
         const restored = was ? restoreBottom(map, kept, was) : kept;
-        // 쪽 테두리·머리말·옆 탭 같은 장식은 떼어 낸다(자를 때 더해질 여유 `PAD` 만큼 안쪽에 둔다).
-        return trimFurniture(map, restored, TRIM_PAD);
+        // 쪽 장식 떼기(`trimFurniture`)는 문제가 잘려서 껐다(2026-10-10, 사용자). 되살리려면 TRIM_FURNITURE = true.
+        return TRIM_FURNITURE ? trimFurniture(map, restored, TRIM_PAD) : restored;
       }),
     })),
     snapped: res.changed,
