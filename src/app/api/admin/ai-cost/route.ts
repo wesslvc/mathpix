@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
   type Tok = Partial<Record<"input" | "cacheRead" | "cacheWrite" | "output", number>>;
   type Acc = { krw: number; usd: number; calls: number };
   const zero = (): Acc => ({ krw: 0, usd: 0, calls: 0 });
-  const models = new Map<string, { total: Acc; period: Acc; comp: Partial<Record<Comp, number>>; tok: Tok; today: Acc; todayTok: Tok; items: Map<string, { total: Acc; period: Acc }> }>();
+  const models = new Map<string, { total: Acc; period: Acc; comp: Partial<Record<Comp, number>>; tok: Tok; todayComp: Partial<Record<Comp, number>>; today: Acc; todayTok: Tok; items: Map<string, { total: Acc; period: Acc }> }>();
   const buckets = new Map<string, { label: string; krw: number; calls: number; byModel: Record<string, number> }>();
   let first: number | null = null;
 
@@ -103,9 +103,9 @@ export async function GET(req: NextRequest) {
   for (const r of rows) {
     const t = r.t;
     const { krw, usd, key } = r;
-    const m = models.get(key) ?? { total: zero(), period: zero(), comp: {} as Partial<Record<Comp, number>>, tok: {} as Tok, today: zero(), todayTok: {} as Tok, items: new Map() };
+    const m = models.get(key) ?? { total: zero(), period: zero(), comp: {} as Partial<Record<Comp, number>>, tok: {} as Tok, todayComp: {} as Partial<Record<Comp, number>>, today: zero(), todayTok: {} as Tok, items: new Map() };
     if (r.tok) addTok(m.tok, r.tok);
-    if (kst.format(new Date(t)).slice(0, 10) === todayStr) { m.today.krw += krw; m.today.usd += usd; m.today.calls += r.calls; if (r.tok) addTok(m.todayTok, r.tok); }
+    if (kst.format(new Date(t)).slice(0, 10) === todayStr) { m.today.krw += krw; m.today.usd += usd; m.today.calls += r.calls; for (const [ck, cv] of Object.entries((r.comp ?? {}) as Partial<Record<Comp, number>>)) m.todayComp[ck as Comp] = (m.todayComp[ck as Comp] ?? 0) + (cv ?? 0); if (r.tok) addTok(m.todayTok, r.tok); }
     for (const [ck, cv] of Object.entries((r.comp ?? {}) as Partial<Record<Comp, number>>)) m.comp[ck as Comp] = (m.comp[ck as Comp] ?? 0) + (cv ?? 0);
     models.set(key, m);
     const itemKey = r.itemKey;
@@ -142,6 +142,7 @@ export async function GET(req: NextRequest) {
       totalCalls: m.total.calls,
       comp: m.comp,
       tok: m.tok,
+      todayComp: m.todayComp,
       todayUsd: m.today.usd,
       todayCalls: m.today.calls,
       todayTok: m.todayTok,

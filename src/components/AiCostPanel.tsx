@@ -27,6 +27,7 @@ type ModelRow = {
   totalCalls: number;
   comp: Partial<Record<"input" | "cacheRead" | "cacheWrite" | "output" | "other", number>>;
   tok: Tok;
+  todayComp: ModelRow["comp"];
   todayUsd: number;
   todayCalls: number;
   todayTok: Tok;
@@ -66,6 +67,8 @@ const usd = (n: number) => `$${n.toFixed(2)}`;
 
 export default function AiCostPanel() {
   const [data, setData] = useState<Data | null>(null);
+  const [gMetric, setGMetric] = useState<"usd" | "tok">("usd");
+  const [gRange, setGRange] = useState<"all" | "today">("all");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -125,35 +128,57 @@ export default function AiCostPanel() {
             <div className="text-lg font-semibold text-ink">{usd(data.totalUsd)}</div>
           </div>
 
-          {data.models.length > 0 && (
-            <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                {COMPS.map((c) => (
-                  <span key={c.k} className="flex items-center gap-1">
-                    <span className={cn("h-2.5 w-2.5 rounded-sm", c.color)} />
-                    {c.label}
-                  </span>
-                ))}
-              </div>
-              {data.models.map((m) => {
-                const max = Math.max(0.0001, ...data.models.map((x) => x.totalUsd));
-                return (
-                  <div key={m.key} className="flex flex-col gap-0.5">
-                    <div className="flex justify-between text-xs">
-                      <span className="truncate text-ink">{m.name}</span>
-                      <span className="tabular-nums text-slate-500">{usd(m.totalUsd)}</span>
-                    </div>
-                    <div className="flex h-4 overflow-hidden rounded bg-slate-100" style={{ width: `${(m.totalUsd / max) * 100}%`, minWidth: "4px" }}>
-                      {COMPS.map((c) => {
-                        const v = m.comp?.[c.k] ?? 0;
-                        return v > 0 ? <span key={c.k} title={`${c.label} ${usd(v)}`} className={cn("h-full", c.color)} style={{ width: `${(v / m.totalUsd) * 100}%` }} /> : null;
-                      })}
-                    </div>
+          {data.models.length > 0 && (() => {
+            const parts = (m: ModelRow): Record<string, number> => {
+              if (gMetric === "usd") return (gRange === "all" ? m.comp : m.todayComp) ?? {};
+              return ((gRange === "all" ? m.tok : m.todayTok) ?? {}) as Record<string, number>;
+            };
+            const sumOf = (m: ModelRow) => Object.values(parts(m)).reduce((a, b) => a + (b ?? 0), 0);
+            const max = Math.max(1e-9, ...data.models.map(sumOf));
+            const fmt = (v: number) => (gMetric === "usd" ? usd(v) : fmtTok(v));
+            return (
+              <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex gap-1">
+                    {([["usd", "금액"], ["tok", "토큰 수"]] as const).map(([k, l]) => (
+                      <Button key={k} size="xs" variant={gMetric === k ? "dark" : "outline"} onClick={() => setGMetric(k)}>{l}</Button>
+                    ))}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  <div className="flex gap-1">
+                    {([["all", "전체"], ["today", "오늘"]] as const).map(([k, l]) => (
+                      <Button key={k} size="xs" variant={gRange === k ? "dark" : "outline"} onClick={() => setGRange(k)}>{l}</Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                  {COMPS.filter((c) => gMetric === "usd" || c.k !== "other").map((c) => (
+                    <span key={c.k} className="flex items-center gap-1">
+                      <span className={cn("h-2.5 w-2.5 rounded-sm", c.color)} />
+                      {c.label}
+                    </span>
+                  ))}
+                </div>
+                {data.models.map((m) => {
+                  const p = parts(m);
+                  const total = sumOf(m);
+                  return (
+                    <div key={m.key} className="flex flex-col gap-0.5">
+                      <div className="flex justify-between text-xs">
+                        <span className="truncate text-ink">{m.name}</span>
+                        <span className="tabular-nums text-slate-500">{total > 0 ? fmt(total) : "-"}</span>
+                      </div>
+                      <div className="flex h-4 overflow-hidden rounded bg-slate-100" style={{ width: `${(total / max) * 100}%`, minWidth: total > 0 ? "4px" : 0 }}>
+                        {COMPS.map((c) => {
+                          const v = p[c.k] ?? 0;
+                          return v > 0 ? <span key={c.k} title={`${c.label} ${fmt(v)}`} className={cn("h-full", c.color)} style={{ width: `${(v / total) * 100}%` }} /> : null;
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           <div className="flex flex-col gap-3">
             {makers.map((g) => (
