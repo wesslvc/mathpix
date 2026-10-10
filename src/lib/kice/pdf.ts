@@ -236,8 +236,8 @@ const frameFor = (frames: FrameSet, pageNo: number) =>
   pageNo === 1 ? frames.first : pageNo % 2 === 0 ? frames.even : frames.odd;
 
 /** 문제마다 위에 붙는 출처 표기. 작게 — 문제지 흉내를 방해하면 안 된다. */
-const LABEL_SIZE = 8.5;
-const LABEL_GAP = 3;
+const LABEL_SIZE = 9.5;
+const LABEL_GAP = 3.5;
 const LABEL_FONT = "(한)신중명조";
 
 type Placed = {
@@ -1077,13 +1077,16 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
         // 있다(잘라 둔 글꼴이다). 틀 글자와 같은 길을 태운다.
         const label = await fontForText(LABEL_FONT, it.label);
         if (label.text.trim()) {
-          page.drawText(label.text, {
-            x: it.x,
-            y: flip(it.y - LABEL_GAP),
-            size: LABEL_SIZE,
-            font: label.font,
-            color: rgb(0.35, 0.35, 0.35),
-          });
+          // 인쇄하면 옅은 회색은 흐려진다 — 거의 검정에 가까운 짙은 회색으로, 아주 살짝 어긋나게 두 번 그려 획을 굵힌다.
+          for (const dx of [0, 0.25]) {
+            page.drawText(label.text, {
+              x: it.x + dx,
+              y: flip(it.y - LABEL_GAP),
+              size: LABEL_SIZE,
+              font: label.font,
+              color: rgb(0.14, 0.14, 0.14),
+            });
+          }
         }
       }
       // 자를 자리가 있으면 그 네모 안만 보이게 한다(지문 두 단 흘리기).
