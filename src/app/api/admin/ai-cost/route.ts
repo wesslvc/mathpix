@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
   const sumUsd = new Map<string, number>();
   for (const r of rows) sumUsd.set(r.key, (sumUsd.get(r.key) ?? 0) + r.usd);
   for (const r of rows) {
-    if (r.key.startsWith("gpt") && (sumUsd.get(r.key) ?? 0) < MIN_MODEL_USD) r.key = "gpt-etc";
+    if (r.key.startsWith("gpt") && !r.key.includes("luna") && (sumUsd.get(r.key) ?? 0) < MIN_MODEL_USD) r.key = "gpt-etc";
   }
 
   for (const r of rows) {
