@@ -50,17 +50,15 @@ const won = (n: number) => `${Math.round(n).toLocaleString("ko-KR")}원`;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
 export default function AiCostPanel() {
-  const [bucket, setBucket] = useState<"hour" | "day">("day");
-  const [range, setRange] = useState<"default" | "all">("all");
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async (b: "hour" | "day", r: "default" | "all") => {
+  const load = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/ai-cost?bucket=${b}${r === "all" ? "&days=0" : ""}`, { cache: "no-store" });
+      const res = await fetch("/api/admin/ai-cost?days=0", { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "불러오지 못했어요.");
       setData(json);
@@ -72,10 +70,9 @@ export default function AiCostPanel() {
   }, []);
 
   useEffect(() => {
-    void load(bucket, range);
-  }, [bucket, range, load]);
+    void load();
+  }, [load]);
 
-  const max = Math.max(1, ...(data?.buckets ?? []).map((b) => b.krw));
   const makers = MAKER_ORDER.map((m) => ({ maker: m, models: (data?.models ?? []).filter((x) => x.maker === m) })).filter((g) => g.models.length > 0);
 
   return (
@@ -83,74 +80,24 @@ export default function AiCostPanel() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold text-ink">AI 비용 누적</h2>
-          <p className="text-xs text-slate-500">무제한 계정에만 보여요 · 모델별 · 작업을 지워도 줄지 않아요</p>
+          <p className="text-xs text-slate-500">무제한 계정에만 보여요 · 모델별 합계 · 작업을 지워도 줄지 않아요</p>
         </div>
-        <div className="flex items-center gap-1">
-          {(["hour", "day"] as const).map((b) => (
-            <Button
-              key={b}
-              size="xs"
-              variant={bucket === b ? "dark" : "outline"}
-              onClick={() => setBucket(b)}
-            >
-              {b === "hour" ? "시간대별" : "날짜별"}
-            </Button>
-          ))}
-          <Button size="xs" variant={range === "all" ? "dark" : "outline"} onClick={() => setRange(range === "all" ? "default" : "all")}>
-            {range === "all" ? "전체 기간" : "최근만"}
-          </Button>
-          <Button size="xs" variant="ghost" disabled={busy} onClick={() => load(bucket, range)}>
-            새로고침
-          </Button>
-        </div>
+        <Button size="xs" variant="ghost" disabled={busy} onClick={() => load()}>
+          새로고침
+        </Button>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-lg bg-slate-50 px-3 py-2">
-              <div className="text-xs text-slate-500">
-                {data.days === 0 ? "전체 기간" : `최근 ${data.days}일`} {data.bucket === "hour" ? "(시간대별 보기)" : ""}
-              </div>
-              <div className="text-lg font-semibold text-ink">{won(data.periodKrw)}</div>
-              <div className="text-xs text-slate-400">{usd(data.periodUsd)}</div>
+          <div className="rounded-lg bg-slate-50 px-3 py-2">
+            <div className="text-xs text-slate-500">
+              전체 합계{data.since ? ` (${data.since.slice(5).replace("-", "/")}부터)` : ""}
             </div>
-            <div className="rounded-lg bg-slate-50 px-3 py-2">
-              <div className="text-xs text-slate-500">
-                전체 누적{data.since ? ` (${data.since.slice(5).replace("-", "/")}부터)` : ""}
-              </div>
-              <div className="text-lg font-semibold text-ink">{won(data.totalKrw)}</div>
-              <div className="text-xs text-slate-400">{usd(data.totalUsd)}</div>
-            </div>
+            <div className="text-lg font-semibold text-ink">{won(data.totalKrw)}</div>
+            <div className="text-xs text-slate-400">{usd(data.totalUsd)}</div>
           </div>
-
-          {data.buckets.length === 0 ? (
-            <p className="py-3 text-center text-sm text-slate-400">이 기간에는 기록이 없어요.</p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {data.buckets.map((b) => (
-                <li key={b.label} className="flex items-center gap-2 text-sm">
-                  <span className="w-16 shrink-0 tabular-nums text-slate-500">{b.label}</span>
-                  <span className="flex h-4 flex-1 overflow-hidden rounded bg-slate-100">
-                    {data.models
-                      .filter((m) => b.byModel[m.key])
-                      .map((m) => (
-                        <span
-                          key={m.key}
-                          title={`${m.name} ${won(b.byModel[m.key])}`}
-                          className={cn("h-full", colorOf(m.key))}
-                          style={{ width: `${(b.byModel[m.key] / max) * 100}%` }}
-                        />
-                      ))}
-                  </span>
-                  <span className="w-20 shrink-0 text-right tabular-nums text-ink">{won(b.krw)}</span>
-                  <span className="hidden w-12 shrink-0 text-right text-xs text-slate-400 sm:inline">{b.calls}회</span>
-                </li>
-              ))}
-            </ul>
-          )}
 
           <div className="flex flex-col gap-3">
             {makers.map((g) => (
@@ -159,7 +106,7 @@ export default function AiCostPanel() {
                   {logoOf(g.models[0].key) && <ModelBadge model={logoOf(g.models[0].key)!} label={false} />}
                   {g.maker}
                   <span className="font-normal tabular-nums text-slate-400">
-                    · 기간 {won(g.models.reduce((a, m) => a + m.periodKrw, 0))} · 누적 {won(g.models.reduce((a, m) => a + m.totalKrw, 0))}
+                    · {won(g.models.reduce((a, m) => a + m.totalKrw, 0))}
                   </span>
                 </div>
                 {g.models.map((m) => (
@@ -168,10 +115,7 @@ export default function AiCostPanel() {
                       <span className={cn("h-2.5 w-2.5 shrink-0 rounded-sm", colorOf(m.key))} />
                       <span className="font-medium text-ink">{m.name}</span>
                       <span className="ml-auto tabular-nums text-ink">
-                        기간 {won(m.periodKrw)} {m.periodCalls > 0 && <span className="text-xs text-slate-400">· {m.periodCalls}회</span>}
-                      </span>
-                      <span className="w-full text-right text-xs tabular-nums text-slate-500 sm:w-auto">
-                        누적 {won(m.totalKrw)} ({usd(m.totalUsd)}) {m.totalCalls > 0 ? `· ${m.totalCalls.toLocaleString()}회` : ""}
+                        {won(m.totalKrw)} <span className="text-xs text-slate-400">({usd(m.totalUsd)}){m.totalCalls > 0 ? ` · ${m.totalCalls.toLocaleString()}회` : ""}</span>
                       </span>
                     </summary>
                     <ul className="mt-2 flex flex-col gap-1 border-t border-slate-100 pt-2">
@@ -179,7 +123,7 @@ export default function AiCostPanel() {
                         <li key={r.label} className="flex justify-between gap-2">
                           <span className="text-slate-600">{r.label}</span>
                           <span className="tabular-nums text-ink">
-                            {won(r.periodKrw)} <span className="text-xs text-slate-400">· 누적 {won(r.totalKrw)} {r.totalCalls > 0 ? `· ${r.totalCalls}회` : ""}</span>
+                            {won(r.totalKrw)} <span className="text-xs text-slate-400">{r.totalCalls > 0 ? `· ${r.totalCalls}회` : ""}</span>
                           </span>
                         </li>
                       ))}
