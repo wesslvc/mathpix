@@ -168,10 +168,10 @@ export default function AiCostPanel() {
                       <span className={cn("h-2.5 w-2.5 shrink-0 rounded-sm", colorOf(m.key))} />
                       <span className="font-medium text-ink">{m.name}</span>
                       <span className="ml-auto tabular-nums text-ink">
-                        기간 {won(m.periodKrw)} <span className="text-xs text-slate-400">· {m.periodCalls}회</span>
+                        기간 {won(m.periodKrw)} {m.periodCalls > 0 && <span className="text-xs text-slate-400">· {m.periodCalls}회</span>}
                       </span>
                       <span className="w-full text-right text-xs tabular-nums text-slate-500 sm:w-auto">
-                        누적 {won(m.totalKrw)} ({usd(m.totalUsd)}) · {m.totalCalls.toLocaleString()}회
+                        누적 {won(m.totalKrw)} ({usd(m.totalUsd)}) {m.totalCalls > 0 ? `· ${m.totalCalls.toLocaleString()}회` : ""}
                       </span>
                     </summary>
                     <ul className="mt-2 flex flex-col gap-1 border-t border-slate-100 pt-2">
@@ -179,7 +179,7 @@ export default function AiCostPanel() {
                         <li key={r.label} className="flex justify-between gap-2">
                           <span className="text-slate-600">{r.label}</span>
                           <span className="tabular-nums text-ink">
-                            {won(r.periodKrw)} <span className="text-xs text-slate-400">· 누적 {won(r.totalKrw)} · {r.totalCalls}회</span>
+                            {won(r.periodKrw)} <span className="text-xs text-slate-400">· 누적 {won(r.totalKrw)} {r.totalCalls > 0 ? `· ${r.totalCalls}회` : ""}</span>
                           </span>
                         </li>
                       ))}

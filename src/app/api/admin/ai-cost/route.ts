@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireFontAdmin } from "../kice-font/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { modelFromWhat } from "@/lib/costLog";
+import { MIN_MODEL_USD, OPENAI_CSV_END, usageUsd } from "@/lib/openaiPrices";
+import { USD_KRW_RATE } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,22 +48,52 @@ export async function GET(req: NextRequest) {
   const buckets = new Map<string, { label: string; krw: number; calls: number; byModel: Record<string, number> }>();
   let first: number | null = null;
 
+  type Row = { t: number; key: string; itemKey: string; krw: number; usd: number; calls: number };
+  const rows: Row[] = [];
+  const csvEnd = Date.parse(OPENAI_CSV_END);
   for (const r of (data ?? []) as Raw[]) {
     const t = Date.parse(r.created_at);
-    const krw = Number(r.est_krw) || 0;
-    const usd = Number(r.est_usd) || 0;
     const key = r.model ?? modelFromWhat(r.what) ?? "other";
+    // OpenAI 의 CSV 기간 이전 장부 줄은 오차가 있어 버리고 아래 토큰 기준 값을 쓴다.
+    if (key.startsWith("gpt") && t < csvEnd) continue;
+    rows.push({ t, key, itemKey: `${KIND_LABEL[r.kind] ?? r.kind} · ${r.what}`, krw: Number(r.est_krw) || 0, usd: Number(r.est_usd) || 0, calls: 1 });
+  }
+  // OpenAI 청구 내역의 토큰 수 × 단가표 (모델·날짜별로 묶는다).
+  const { data: usage, error: uErr } = await admin.from("openai_usage_daily").select("day, model, part, kind, tokens").limit(100000);
+  if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
+  const daily = new Map<string, { t: number; key: string; usd: number }>();
+  for (const u of (usage ?? []) as { day: string; model: string; part: string; kind: string; tokens: number | string }[]) {
+    const usd = usageUsd(u.model, u.part, u.kind, Number(u.tokens) || 0);
+    if (usd === null) continue;
+    const k = `${u.day}|${u.model}`;
+    const cur = daily.get(k) ?? { t: Date.parse(`${u.day}T12:00:00+09:00`), key: u.model, usd: 0 };
+    cur.usd += usd;
+    daily.set(k, cur);
+  }
+  for (const d of daily.values()) {
+    rows.push({ t: d.t, key: d.key, itemKey: "청구 내역(토큰 기준)", krw: d.usd * USD_KRW_RATE, usd: d.usd, calls: 0 });
+  }
+  // 총액 $0.5 미만인 OpenAI 모델은 "기타"로 합친다.
+  const sumUsd = new Map<string, number>();
+  for (const r of rows) sumUsd.set(r.key, (sumUsd.get(r.key) ?? 0) + r.usd);
+  for (const r of rows) {
+    if (r.key.startsWith("gpt") && (sumUsd.get(r.key) ?? 0) < MIN_MODEL_USD) r.key = "gpt-etc";
+  }
+
+  for (const r of rows) {
+    const t = r.t;
+    const { krw, usd, key } = r;
     const m = models.get(key) ?? { total: zero(), period: zero(), items: new Map() };
     models.set(key, m);
-    const itemKey = `${KIND_LABEL[r.kind] ?? r.kind} · ${r.what}`;
+    const itemKey = r.itemKey;
     const it = m.items.get(itemKey) ?? { total: zero(), period: zero() };
     m.items.set(itemKey, it);
-    m.total.krw += krw; m.total.usd += usd; m.total.calls++;
-    it.total.krw += krw; it.total.usd += usd; it.total.calls++;
+    m.total.krw += krw; m.total.usd += usd; m.total.calls += r.calls;
+    it.total.krw += krw; it.total.usd += usd; it.total.calls += r.calls;
     if (first === null || t < first) first = t;
     if (t >= sinceMs) {
-      m.period.krw += krw; m.period.usd += usd; m.period.calls++;
-      it.period.krw += krw; it.period.usd += usd; it.period.calls++;
+      m.period.krw += krw; m.period.usd += usd; m.period.calls += r.calls;
+      it.period.krw += krw; it.period.usd += usd; it.period.calls += r.calls;
       // 한국 시간 구간 — sv-SE 는 "2026-10-10 14" 꼴이다.
       const parts = kst.format(new Date(t)); // "YYYY-MM-DD HH"
       const day = parts.slice(0, 10);
@@ -69,7 +101,7 @@ export async function GET(req: NextRequest) {
       const label = bucket === "hour" ? `${Number(parts.slice(5, 7))}/${Number(parts.slice(8, 10))} ${parts.slice(11, 13)}시` : `${Number(parts.slice(5, 7))}/${Number(parts.slice(8, 10))}`;
       const b = buckets.get(bkey) ?? { label, krw: 0, calls: 0, byModel: {} };
       buckets.set(bkey, b);
-      b.krw += krw; b.calls++;
+      b.krw += krw; b.calls += r.calls;
       b.byModel[key] = (b.byModel[key] ?? 0) + krw;
     }
   }
@@ -77,7 +109,7 @@ export async function GET(req: NextRequest) {
   const modelList = [...models.entries()]
     .map(([key, m]) => ({
       key,
-      name: key === "other" ? "기타(모델 미상)" : key,
+      name: key === "other" ? "기타(모델 미상)" : key === "gpt-etc" ? "기타 OpenAI 모델 ($0.5 미만 합산)" : key,
       maker: key.startsWith("claude") ? "Anthropic" : key.startsWith("gpt") ? "OpenAI" : "기타",
       periodKrw: m.period.krw,
       periodUsd: m.period.usd,
