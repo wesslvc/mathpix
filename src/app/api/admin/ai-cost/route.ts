@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireFontAdmin } from "../kice-font/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { modelFromWhat } from "@/lib/costLog";
-import { MIN_MODEL_USD, OPENAI_CSV_END, usageUsd } from "@/lib/openaiPrices";
+import { MIN_MODEL_USD, OPENAI_CSV_END, OPENAI_TOKEN_PRICES, usageUsd } from "@/lib/openaiPrices";
 import { USD_KRW_RATE } from "@/lib/tokens";
 
 export const runtime = "nodejs";
@@ -33,22 +33,23 @@ export async function GET(req: NextRequest) {
   // 장부는 아직 수천 줄이라 전부 읽어 여기서 묶는다(모델별 · 한국 시간 구간별). 모델 칸이 따로 없는 옛 줄도 `what` 으로 모델을 안다.
   const { data, error } = await admin
     .from("ai_cost_log")
-    .select("kind, what, model, est_krw, est_usd, created_at")
+    .select("kind, what, model, est_krw, est_usd, created_at, in_tokens, cached_tokens, out_tokens")
     .order("created_at", { ascending: false })
     .limit(100000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  type Raw = { kind: string; what: string; model: string | null; est_krw: number | string; est_usd: number | string; created_at: string };
+  type Raw = { kind: string; what: string; model: string | null; est_krw: number | string; est_usd: number | string; created_at: string; in_tokens?: number | null; cached_tokens?: number | null; out_tokens?: number | null };
   const kst = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false });
   const sinceMs = Date.parse(since);
 
   type Acc = { krw: number; usd: number; calls: number };
   const zero = (): Acc => ({ krw: 0, usd: 0, calls: 0 });
-  const models = new Map<string, { total: Acc; period: Acc; items: Map<string, { total: Acc; period: Acc }> }>();
+  const models = new Map<string, { total: Acc; period: Acc; comp: Partial<Record<Comp, number>>; items: Map<string, { total: Acc; period: Acc }> }>();
   const buckets = new Map<string, { label: string; krw: number; calls: number; byModel: Record<string, number> }>();
   let first: number | null = null;
 
-  type Row = { t: number; key: string; itemKey: string; krw: number; usd: number; calls: number };
+  type Comp = "input" | "cacheRead" | "cacheWrite" | "output" | "other";
+  type Row = { t: number; key: string; itemKey: string; krw: number; usd: number; calls: number; comp?: Partial<Record<Comp, number>> };
   const rows: Row[] = [];
   const csvEnd = Date.parse(OPENAI_CSV_END);
   for (const r of (data ?? []) as Raw[]) {
@@ -56,22 +57,35 @@ export async function GET(req: NextRequest) {
     const key = r.model ?? modelFromWhat(r.what) ?? "other";
     // OpenAI 의 CSV 기간 이전 장부 줄은 오차가 있어 버리고 아래 토큰 기준 값을 쓴다.
     if (key.startsWith("gpt") && t < csvEnd) continue;
-    rows.push({ t, key, itemKey: `${KIND_LABEL[r.kind] ?? r.kind} · ${r.what}`, krw: Number(r.est_krw) || 0, usd: Number(r.est_usd) || 0, calls: 1 });
+    const usdTotal = Number(r.est_usd) || 0;
+    const comp: Partial<Record<Comp, number>> = {};
+    const price = OPENAI_TOKEN_PRICES[key];
+    if (price && (r.in_tokens || r.out_tokens)) {
+      const cached = r.cached_tokens ?? 0;
+      comp.input = (Math.max(0, (r.in_tokens ?? 0) - cached) * price.input) / 1e6;
+      comp.cacheRead = (cached * price.cached) / 1e6;
+      comp.output = ((r.out_tokens ?? 0) * price.output) / 1e6;
+    }
+    const known = Object.values(comp).reduce((a, b) => a + (b ?? 0), 0);
+    if (usdTotal - known > 1e-9) comp.other = usdTotal - known;
+    rows.push({ t, key, itemKey: `${KIND_LABEL[r.kind] ?? r.kind} · ${r.what}`, krw: Number(r.est_krw) || 0, usd: usdTotal, calls: 1, comp });
   }
   // OpenAI 청구 내역의 토큰 수 × 단가표 (모델·날짜별로 묶는다).
   const { data: usage, error: uErr } = await admin.from("openai_usage_daily").select("day, model, part, kind, tokens").limit(100000);
   if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
-  const daily = new Map<string, { t: number; key: string; usd: number }>();
+  const daily = new Map<string, { t: number; key: string; usd: number; comp: Partial<Record<Comp, number>> }>();
   for (const u of (usage ?? []) as { day: string; model: string; part: string; kind: string; tokens: number | string }[]) {
     const usd = usageUsd(u.model, u.part, u.kind, Number(u.tokens) || 0);
     if (usd === null) continue;
     const k = `${u.day}|${u.model}`;
-    const cur = daily.get(k) ?? { t: Date.parse(`${u.day}T12:00:00+09:00`), key: u.model, usd: 0 };
+    const cur = daily.get(k) ?? { t: Date.parse(`${u.day}T12:00:00+09:00`), key: u.model, usd: 0, comp: {} };
     cur.usd += usd;
+    const c: Comp = u.kind === "output" ? "output" : u.kind === "cached input" ? "cacheRead" : u.kind === "cache writes" ? "cacheWrite" : "input";
+    cur.comp[c] = (cur.comp[c] ?? 0) + usd;
     daily.set(k, cur);
   }
   for (const d of daily.values()) {
-    rows.push({ t: d.t, key: d.key, itemKey: "청구 내역(토큰 기준)", krw: d.usd * USD_KRW_RATE, usd: d.usd, calls: 0 });
+    rows.push({ t: d.t, key: d.key, itemKey: "청구 내역(토큰 기준)", krw: d.usd * USD_KRW_RATE, usd: d.usd, calls: 0, comp: d.comp });
   }
   // 총액 $0.5 미만인 OpenAI 모델은 "기타"로 합친다.
   const sumUsd = new Map<string, number>();
@@ -83,7 +97,8 @@ export async function GET(req: NextRequest) {
   for (const r of rows) {
     const t = r.t;
     const { krw, usd, key } = r;
-    const m = models.get(key) ?? { total: zero(), period: zero(), items: new Map() };
+    const m = models.get(key) ?? { total: zero(), period: zero(), comp: {}, items: new Map() };
+    for (const [ck, cv] of Object.entries((r.comp ?? {}) as Partial<Record<Comp, number>>)) m.comp[ck as Comp] = (m.comp[ck as Comp] ?? 0) + (cv ?? 0);
     models.set(key, m);
     const itemKey = r.itemKey;
     const it = m.items.get(itemKey) ?? { total: zero(), period: zero() };
@@ -117,6 +132,7 @@ export async function GET(req: NextRequest) {
       totalKrw: m.total.krw,
       totalUsd: m.total.usd,
       totalCalls: m.total.calls,
+      comp: m.comp,
       items: [...m.items.entries()]
         .map(([label, v]) => ({ label, periodKrw: v.period.krw, periodCalls: v.period.calls, totalKrw: v.total.krw, totalUsd: v.total.usd, totalCalls: v.total.calls }))
         .sort((a, b) => b.totalKrw - a.totalKrw),

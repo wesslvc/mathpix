@@ -24,6 +24,7 @@ type ModelRow = {
   totalKrw: number;
   totalUsd: number;
   totalCalls: number;
+  comp: Partial<Record<"input" | "cacheRead" | "cacheWrite" | "output" | "other", number>>;
   items: Item[];
 };
 type Data = {
@@ -46,6 +47,13 @@ const colorOf = (name: string) =>
 const logoOf = (name: string): ModelKey | undefined =>
   name.includes("haiku") ? "haiku" : name.includes("luna") ? "luna" : name.includes("sol") ? "sol" : name.includes("image") ? "sunburst" : undefined;
 
+const COMPS = [
+  { k: "input", label: "입력", color: "bg-sky-500" },
+  { k: "cacheRead", label: "캐시 읽기", color: "bg-emerald-500" },
+  { k: "cacheWrite", label: "캐시 쓰기", color: "bg-amber-500" },
+  { k: "output", label: "출력", color: "bg-rose-500" },
+  { k: "other", label: "분류 없음", color: "bg-slate-300" },
+] as const;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
 export default function AiCostPanel() {
@@ -96,6 +104,36 @@ export default function AiCostPanel() {
             </div>
             <div className="text-lg font-semibold text-ink">{usd(data.totalUsd)}</div>
           </div>
+
+          {data.models.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                {COMPS.map((c) => (
+                  <span key={c.k} className="flex items-center gap-1">
+                    <span className={cn("h-2.5 w-2.5 rounded-sm", c.color)} />
+                    {c.label}
+                  </span>
+                ))}
+              </div>
+              {data.models.map((m) => {
+                const max = Math.max(0.0001, ...data.models.map((x) => x.totalUsd));
+                return (
+                  <div key={m.key} className="flex flex-col gap-0.5">
+                    <div className="flex justify-between text-xs">
+                      <span className="truncate text-ink">{m.name}</span>
+                      <span className="tabular-nums text-slate-500">{usd(m.totalUsd)}</span>
+                    </div>
+                    <div className="flex h-4 overflow-hidden rounded bg-slate-100" style={{ width: `${(m.totalUsd / max) * 100}%`, minWidth: "4px" }}>
+                      {COMPS.map((c) => {
+                        const v = m.comp?.[c.k] ?? 0;
+                        return v > 0 ? <span key={c.k} title={`${c.label} ${usd(v)}`} className={cn("h-full", c.color)} style={{ width: `${(v / m.totalUsd) * 100}%` }} /> : null;
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           <div className="flex flex-col gap-3">
             {makers.map((g) => (
