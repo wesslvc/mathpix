@@ -300,9 +300,7 @@ export default function KiceExportPanel({ title, items }: Props) {
           // 지문에는 "N번" 표기를 붙이지 않는다 — 지문은 문제가 아니다.
           label:
             showSource && items[i].korean?.role !== "passage"
-              ? renum?.newNo.has(i)
-                ? `${items[i].source ?? ""} ${renum.newNo.get(i)}번`.trim()
-                : items[i].label
+              ? items[i].label // 출처 + 원래 번호 — 새 번호로 바꿔도 출처 표기는 원래 번호를 지킨다
               : "",
         })),
         pagePattern:
