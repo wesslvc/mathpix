@@ -921,7 +921,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   let renumberSize = 10.5;
   const coverGeom = async (it: Placed, cover: NumberCover) => {
     const b = cover.box;
-    const label = await fontForText(BODY_FONT, `${cover.no}.`);
+    const label = await fontForText(NUMBER_FONT, `${cover.no}.`);
     const unit = label.font.widthOfTextAtSize(label.text, 1) * 1.03;
     const inset = Math.min(1, b.w * it.w * 0.1);
     const roomPt = Math.max(b.room, b.w) * it.w - inset;
@@ -933,7 +933,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     const { label, unit, inset, roomPt, leadPt } = await coverGeom(it, cover);
     // 정해 둔 크기로도 안 들어가는 것만(아주 좁은 자리) 그 하나를 줄인다.
     // 덮는 네모보다 키 큰 숫자는 그리지 않는다(숫자 높이 ≈ 글자 크기의 0.72) — 위아래 글자에 닿으면 안 된다.
-    const size = Math.min(renumberSize, (roomPt + leadPt) / unit, (b.h * it.h) / 0.72);
+    const size = Math.min(renumberSize, (roomPt + leadPt) / unit, (b.h * it.h * 1.1) / 0.72);
     const tw = unit * size;
     const rx = it.x + b.x * it.w;
     const ry = it.y + b.y * it.h;
@@ -1030,7 +1030,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       .sort((a, b) => a - b);
     if (heights.length) {
       const mid = heights[Math.floor(heights.length / 2)];
-      let size = Math.min(14, Math.max(8, mid / 0.72));
+      let size = Math.min(18, Math.max(9, (mid / 0.72) * NUMBER_GROW));
       // 그다음 **모든 자리에 들어가는 크기**로 낮춘다(3 → 12 처럼 넓어지는 자리 때문에) — 너무 작아지지는 않게 7pt 까지.
       for (const it of pages.flatMap((p) => p.items)) {
         if (!it.cover) continue;
@@ -1169,6 +1169,10 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
 
 /** 본문 글꼴. 실제 수능 문제지의 지문·문항이 이 계열이다. */
 const BODY_FONT = "(한)신중명조";
+/** 새 문제 번호는 본문과 다른 굵은 고딕으로 그려 더 크게 보이게 한다(글꼴에 글자가 없으면 fontForText 가 본문 글꼴로 내려간다). */
+const NUMBER_FONT = "(환)태고딕";
+/** 원래 번호 숫자보다 이만큼 크게 쓴다(덮는 네모 안·뒤 글자 앞까지만 — 문제 내용은 안 가린다). */
+const NUMBER_GROW = 1.25;
 
 /**
  * 조판된 지문을 그린다.
