@@ -25,6 +25,7 @@ const nextConfig = {
   reactStrictMode: true,
   env: { NEXT_PUBLIC_APP_VERSION: buildVersion() },
   experimental: {
+    serverComponentsExternalPackages: ["sharp"],
     /**
      * **뒤로 갈 때마다 다시 불러오던 것을 멈춘다.**
      *

@@ -30,6 +30,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FigureUsage } from "./figureImageGen";
+import { compositePatch } from "./patchComposite";
 import { loadAsDataUrl, removeStored, runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
 import {
   GradeError,
@@ -588,10 +589,25 @@ async function runPatch(
   }
   const usage = addUsage(state.usage, out.usage);
 
+  // 편집 모델이 멋대로 다시 그린 곳을 되돌린다 — 실제로 달라진 칸만 결과에서 가져오고 나머지는 편집 전 그림 픽셀 그대로.
+  let resultUrl = out.dataUrl;
+  let keptNote = "";
+  try {
+    const b = splitDataUrl(image);
+    const e = splitDataUrl(out.dataUrl);
+    const comp = b && e ? await compositePatch(b.bytes, e.bytes) : null;
+    if (comp) {
+      resultUrl = `data:${comp.mime};base64,${comp.bytes.toString("base64")}`;
+      keptNote = ` · 안 바뀐 곳 ${Math.round(comp.keptRatio * 100)}%는 원본 그대로`;
+    }
+  } catch (e) {
+    console.warn(`${ctx.tag} 수정 합성 실패 — 편집 결과를 그대로 씁니다:`, e instanceof Error ? e.message : e);
+  }
+
   // 고친 그림을 새 라운드로 남긴다. 파일 이름은 `-p<k>` — 다시 그리기 라운드(`-r<i>`)와 겹치지 않는다.
   const k = state.rounds.filter((r) => r.quality.startsWith("patch")).length + 1;
   const quality = `patch${k}`;
-  const parts = splitDataUrl(out.dataUrl);
+  const parts = splitDataUrl(resultUrl);
   const path = parts ? `${job.user_id}/_jobs/${job.id}-p${k}.${parts.ext}` : "";
   const stored = parts ? await storeBytes(admin, path, parts.bytes, parts.mime) : false;
   if (!parts || !stored) return { kind: "fail", error: "고친 그림을 저장하지 못했어요.", cleanup: [] };
@@ -602,7 +618,7 @@ async function runPatch(
   // sol 을 고른 경우에만 다시 검수한다(안 골랐으면 sol 을 안 부른다).
   const original = state.patch?.useSol ? await loadAsDataUrl(admin, job.input_path) : null;
   if (original) {
-    const ask = await askSol(VERIFY_PROMPT, [original, out.dataUrl], ctx, "검수", { cacheKey: VERIFY_CACHE_KEY });
+    const ask = await askSol(VERIFY_PROMPT, [original, resultUrl], ctx, "검수", { cacheKey: VERIFY_CACHE_KEY });
     solKrw = ask.krw;
     if (ask.text !== null) {
       try {
@@ -635,10 +651,10 @@ async function runPatch(
   const understood = state.patch?.understood;
   return {
     kind: "done",
-    dataUrl: out.dataUrl,
+    dataUrl: resultUrl,
     modelId: ctx.modelIds[0] ?? "",
     usage: withSol(next),
-    note: `수정 ${k}차 반영 · ${summary}${understood ? ` · 이해한 내용: ${understood}` : ""} · 또 고치거나 다시 그릴 수 있어요`,
+    note: `수정 ${k}차 반영 · ${summary}${keptNote}${understood ? ` · 이해한 내용: ${understood}` : ""} · 또 고치거나 다시 그릴 수 있어요`,
     cleanup: [],
     rounds: rounds.length,
     maxDrawn: false,
