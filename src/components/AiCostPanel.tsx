@@ -51,6 +51,12 @@ const MAKER_ORDER = ["Anthropic", "OpenAI", "기타"];
 // 모델 이름(서버가 장부의 정식 이름을 그대로 준다)으로 색·로고를 고른다.
 const colorOf = (name: string) =>
   name.includes("haiku") ? "bg-orange-400/80" : name.includes("luna") ? "bg-sky-400/80" : name.includes("sol") ? "bg-blue-600/80" : name.includes("image") ? "bg-emerald-500/80" : "bg-slate-400/80";
+const shades = (name: string) =>
+  name.includes("haiku") ? { solid: "bg-orange-500", light: "bg-orange-200" }
+  : name.includes("luna") ? { solid: "bg-sky-500", light: "bg-sky-200" }
+  : name.includes("sol") ? { solid: "bg-blue-600", light: "bg-blue-300" }
+  : name.includes("image") ? { solid: "bg-emerald-500", light: "bg-emerald-200" }
+  : { solid: "bg-slate-500", light: "bg-slate-200" };
 const logoOf = (name: string): ModelKey | undefined =>
   name.includes("haiku") ? "haiku" : name.includes("luna") ? "luna" : name.includes("sol") ? "sol" : name.includes("image") ? "sunburst" : undefined;
 
@@ -151,12 +157,7 @@ export default function AiCostPanel() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                  {COMPS.filter((c) => gMetric === "usd" || c.k !== "other").map((c) => (
-                    <span key={c.k} className="flex items-center gap-1">
-                      <span className={cn("h-2.5 w-2.5 rounded-sm", c.color)} />
-                      {c.label}
-                    </span>
-                  ))}
+                  <span>같은 모델은 같은 색 · 진한 색 = 일반(입력·출력) · 연한 색 = 캐시(읽기·쓰기)</span>
                 </div>
                 {data.models.map((m) => {
                   const p = parts(m);
@@ -167,12 +168,17 @@ export default function AiCostPanel() {
                         <span className="truncate text-ink">{m.name}</span>
                         <span className="tabular-nums text-slate-500">{total > 0 ? fmt(total) : "-"}</span>
                       </div>
-                      <div className="flex h-4 overflow-hidden rounded bg-slate-100" style={{ width: `${(total / max) * 100}%`, minWidth: total > 0 ? "4px" : 0 }}>
-                        {COMPS.map((c) => {
-                          const v = p[c.k] ?? 0;
-                          return v > 0 ? <span key={c.k} title={`${c.label} ${fmt(v)}`} className={cn("h-full", c.color)} style={{ width: `${(v / total) * 100}%` }} /> : null;
-                        })}
-                      </div>
+                      {(() => {
+                        const sh = shades(m.key);
+                        const cache = (p.cacheRead ?? 0) + (p.cacheWrite ?? 0);
+                        const plain = total - cache;
+                        return (
+                          <div className="flex h-4 overflow-hidden rounded bg-slate-100" style={{ width: `${(total / max) * 100}%`, minWidth: total > 0 ? "4px" : 0 }}>
+                            {plain > 0 && <span title={`일반 ${fmt(plain)}`} className={cn("h-full", sh.solid)} style={{ width: `${(plain / total) * 100}%` }} />}
+                            {cache > 0 && <span title={`캐시 ${fmt(cache)}`} className={cn("h-full", sh.light)} style={{ width: `${(cache / total) * 100}%` }} />}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
