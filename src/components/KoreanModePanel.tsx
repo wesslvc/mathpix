@@ -146,13 +146,17 @@ export default function KoreanModePanel({
   const autoIdsRef = useRef<Set<string>>(new Set());
 
   const [pieces, setPieces] = useState<Piece[]>([]);
+  const piecesState = pieces;
   const [title, setTitle] = useState("");
+  const titleState = title;
   const [titleNote, setTitleNote] = useState<string | null>(null);
   /** 제목을 짓는 중인가. 다 되기 전에 저장하면 제목 없이 저장된다. */
   const [titling, setTitling] = useState(false);
   /** 제목을 지을 재료(지문 크롭). 다시 짓기 버튼이 쓴다. */
   const passageCropRef = useRef<string | null>(null);
   const [noPassage, setNoPassage] = useState(false);
+  /** 때려박기에서 사진 한 장을 한 세트로 볼지(여러 세트를 한꺼번에 넣을 때). */
+  const [perPhoto, setPerPhoto] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -237,6 +241,7 @@ export default function KoreanModePanel({
   async function autoFill(
     kind: "passage" | "question",
     passageOverride?: Record<string, EditBox[]>,
+    pgs: Page[] = pages,
   ): Promise<Record<string, EditBox[]> | null> {
     setError(null);
     let failed = 0;
@@ -245,11 +250,11 @@ export default function KoreanModePanel({
       return col(a) - col(b) || a.box.y - b.box.y;
     };
     snappedRef.current = 0;
-    for (const page of pages) {
+    for (const page of pgs) {
       const cached = detectedRef.current[page.id];
       if (kind === "passage" ? cached?.passages : cached?.questions) continue;
       setBusy(
-        `${kind === "passage" ? "지문" : "문제"} 자리를 찾는 중... (${pages.indexOf(page) + 1}/${pages.length})`,
+        `${kind === "passage" ? "지문" : "문제"} 자리를 찾는 중... (${pgs.indexOf(page) + 1}/${pgs.length})`,
       );
       let source: PageSource;
       try {
@@ -299,7 +304,7 @@ export default function KoreanModePanel({
       }
     }
     setBusy(null);
-    if (failed === pages.length) {
+    if (failed === pgs.length) {
       setError("사진을 열지 못했습니다.");
       return null;
     }
@@ -307,7 +312,7 @@ export default function KoreanModePanel({
     const next: Record<string, EditBox[]> = {};
     let any = false;
     let figureCount = 0;
-    for (const page of pages) {
+    for (const page of pgs) {
       const d = detectedRef.current[page.id] ?? {};
       // 읽는 차례로 늘어놓는다 — 모델이 순서를 지키지 않는 경우가 있는데,
       // 잡은 차례가 곧 문제 차례다.
@@ -378,10 +383,13 @@ export default function KoreanModePanel({
   }
 
   /** 문제 단계의 묶음들을 **그린 차례**로 늘어놓는다. */
-  function questionGroups(src: Record<string, EditBox[]> = questionBoxes): { group: string; boxes: { page: Page; box: EditBox }[] }[] {
+  function questionGroups(
+    src: Record<string, EditBox[]> = questionBoxes,
+    pgs: Page[] = pages,
+  ): { group: string; boxes: { page: Page; box: EditBox }[] }[] {
     const order: string[] = [];
     const byGroup = new Map<string, { page: Page; box: EditBox }[]>();
-    for (const page of pages) {
+    for (const page of pgs) {
       for (const box of src[page.id] ?? []) {
         if (!byGroup.has(box.group)) {
           byGroup.set(box.group, []);
@@ -425,14 +433,21 @@ export default function KoreanModePanel({
   }
 
   /** 정해진 자리대로 잘라 미리보기를 만들고 제목을 짓는다. */
-  async function cutAll(over?: { passage?: Record<string, EditBox[]>; question?: Record<string, EditBox[]> }) {
+  async function cutAll(over?: {
+    passage?: Record<string, EditBox[]>;
+    question?: Record<string, EditBox[]>;
+    pages?: Page[];
+    /** 화면 단계를 건드리지 않고 조각만 돌려준다(한꺼번에 넣기). */
+    quiet?: boolean;
+  }): Promise<Piece[] | null> {
     const passageSrc = over?.passage ?? passageBoxes;
+    const pgs = over?.pages ?? pages;
     setError(null);
     setBusy("사진을 여는 중...");
     // 쪽마다 한 번만 열고 다 자를 때까지 들고 있는다(여러 번 열면 느리다).
     const opened: (PageSource & { page: Page })[] = [];
     try {
-      for (const page of pages) {
+      for (const page of pgs) {
         const s = await openSource(page);
         opened.push({ page, ...s });
       }
@@ -440,7 +455,7 @@ export default function KoreanModePanel({
       opened.forEach((o) => o.revoke());
       setError(err instanceof Error ? err.message : "사진을 열지 못했습니다.");
       setBusy(null);
-      return;
+      return null;
     }
 
     try {
@@ -455,7 +470,7 @@ export default function KoreanModePanel({
         // 이어 붙여도 티가 안 난다.
         const parts: string[] = [];
         const figures: PassageFigureInput[] = [];
-        for (const page of pages) {
+        for (const page of pgs) {
           const list = passageSrc[page.id] ?? [];
           const passagesHere = list.filter((b) => b.group === PASSAGE_GROUP);
           for (const b of passagesHere) {
@@ -486,7 +501,7 @@ export default function KoreanModePanel({
         }
       }
 
-      for (const g of questionGroups(over?.question)) {
+      for (const g of questionGroups(over?.question, pgs)) {
         const parts = g.boxes.map(({ page, box }) => cutBox(imgOf.get(page.id)!, box, pad(box)));
         cut.push({
           id: crypto.randomUUID(),
@@ -496,14 +511,17 @@ export default function KoreanModePanel({
         });
       }
 
+      if (over?.quiet) return cut;
       setPieces(cut);
       setStep("review");
       const passage = cut.find((p) => p.kind === "passage");
       if (passage) void makeTitle(passage.crop);
+      return cut;
     } catch (err) {
       setError(
         "사진을 자르지 못했습니다: " + (err instanceof Error ? err.message : "알 수 없는 오류"),
       );
+      return null;
     } finally {
       opened.forEach((o) => o.revoke());
       setBusy(null);
@@ -564,8 +582,13 @@ export default function KoreanModePanel({
    * 인식이 끝나면 일꾼이 `korean.blocks` 를 채운다(`passageRun.ts`) — 그 전에
    * 내보내도 사진으로 나올 뿐 빈 자리가 아니다.
    */
-  async function save(regenerate: boolean) {
-    if (pieces.length === 0) return;
+  async function save(
+    regenerate: boolean,
+    opts?: { pieces: Piece[]; title: string; quiet?: boolean },
+  ): Promise<number> {
+    const pieces = opts?.pieces ?? piecesState;
+    const title = opts?.title ?? titleState;
+    if (pieces.length === 0) return 0;
     setError(null);
     setNote(null);
     // 한 세트는 지문 하나와 그 문항들이다. 지문 없는 문항이면 묶지 않는다.
@@ -641,6 +664,7 @@ export default function KoreanModePanel({
     }
 
     setBusy(null);
+    if (opts?.quiet) return done;
     if (done > 0) {
       setNote(
         regenerate
@@ -649,6 +673,80 @@ export default function KoreanModePanel({
       );
       reset();
       onDone?.();
+    }
+    return done;
+  }
+
+  /** 지문 사진으로 제목을 짓는다(화면 상태를 안 건드린다). 실패하면 빈 제목. */
+  async function fetchTitle(crop: string): Promise<string> {
+    try {
+      const { result: json } = await runAiTask<{ title?: string }>("title", {
+        label: "지문 제목 짓기",
+        images: [await prepareProblemForModel(crop)],
+      });
+      return json?.title?.trim() ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * **때려박기**(2026-10-11, 사용자 — "우리 자동 자르기처럼 걍 때려박으면 되게끔, 알아서 문제랑
+   * 지문 인식해가지고 딱딱"). 고른 사진을 한 세트씩(`perPhoto` 면 사진 한 장이 한 세트) 지문 자리 →
+   * 문제 자리 → 자르기 → 제목 짓기 → 저장(+AI 큐)까지 확인 없이 쭉 돈다. 실패한 세트는 건너뛰고 끝에 알린다.
+   */
+  async function dump(regenerate: boolean) {
+    if (pages.length === 0) return;
+    setError(null);
+    setNote(null);
+    const sets = perPhoto ? pages.map((p) => [p]) : [pages];
+    let ok = 0;
+    let made = 0;
+    const failedSets: number[] = [];
+    for (let i = 0; i < sets.length; i++) {
+      const group = sets[i];
+      setBusy(`세트 ${i + 1}/${sets.length} 처리 중...`);
+      let passage: Record<string, EditBox[]> | undefined;
+      if (!noPassage) {
+        const p = await autoFill("passage", undefined, group);
+        if (!p) {
+          failedSets.push(i + 1);
+          continue;
+        }
+        passage = p;
+      }
+      const q = await autoFill("question", passage, group);
+      if (!q) {
+        failedSets.push(i + 1);
+        continue;
+      }
+      setBusy(`세트 ${i + 1}/${sets.length} 자르는 중...`);
+      const cut = await cutAll({ passage, question: q, pages: group, quiet: true });
+      if (!cut || cut.length === 0) {
+        failedSets.push(i + 1);
+        continue;
+      }
+      const pc = cut.find((c) => c.kind === "passage");
+      const t = pc && !noPassage ? await fetchTitle(pc.crop) : "";
+      const n = await save(regenerate, { pieces: cut, title: t, quiet: true });
+      if (n > 0) {
+        ok += 1;
+        made += n;
+      } else failedSets.push(i + 1);
+    }
+    setBusy(null);
+    if (ok > 0) {
+      setError(null);
+      setNote(
+        `${ok}세트(${made}개)를 ${regenerate ? "넣고 AI 작업을 올렸어요" : "원본 그대로 넣었어요"}.` +
+          (failedSets.length ? ` 못 넣은 세트: ${failedSets.join(", ")}번 — 손으로 다시 해주세요.` : ""),
+      );
+      reset();
+      onDone?.();
+    } else if (!failedSets.length) {
+      /* 아무것도 안 함 */
+    } else {
+      setError("자동으로 못 넣었어요. 아래 단계별로 손으로 해주세요.");
     }
   }
 
@@ -745,14 +843,50 @@ export default function KoreanModePanel({
             다음: {noPassage ? "문제" : "지문"} 자리 잡기
           </Button>
           {unlimited && (
-            <Button
-              type="button"
-              onClick={() => void autoCut()}
-              disabled={pages.length === 0 || busy !== null}
-              variant="primary" className="self-start"
-            >
-              {busy ?? "자동으로 자르기 (지문 → 문제)"}
-            </Button>
+            <div className="flex flex-col gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={perPhoto}
+                  onChange={(e) => setPerPhoto(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                사진 한 장 = 한 세트
+                <span className="text-xs text-slate-400">
+                  여러 지문을 한꺼번에 넣을 때 켜세요(끄면 고른 사진 전부가 한 세트).
+                </span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  onClick={() => void dump(true)}
+                  disabled={pages.length === 0 || busy !== null}
+                  variant="primary"
+                >
+                  {busy ?? "자동으로 넣기 (AI로 다시 그리기)"}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void dump(false)}
+                  disabled={pages.length === 0 || busy !== null}
+                  variant="outline"
+                >
+                  자동으로 넣기 (원본 그대로)
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void autoCut()}
+                  disabled={pages.length === 0 || busy !== null}
+                  variant="outline"
+                >
+                  자동으로 자르고 확인하기
+                </Button>
+              </div>
+              <p className="text-xs text-slate-400">
+                지문과 문제 자리를 알아서 찾아 자르고 제목까지 지어 바로 넣습니다. AI 로 다시 그리면 서버 대기열에서
+                돌아 창을 닫아도 됩니다.
+              </p>
+            </div>
           )}
         </>
       )}
