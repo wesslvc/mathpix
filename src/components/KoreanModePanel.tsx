@@ -234,7 +234,10 @@ export default function KoreanModePanel({
    * 문제 자리만 찾는다. 문제를 찾을 때는 **지문 단계에서 정해진 네모**(사람이
    * 고친 것까지)를 함께 보내 그 자리를 비켜 가게 한다. 쪽마다 단계마다 한 번만 부른다.
    */
-  async function autoFill(kind: "passage" | "question") {
+  async function autoFill(
+    kind: "passage" | "question",
+    passageOverride?: Record<string, EditBox[]>,
+  ): Promise<Record<string, EditBox[]> | null> {
     setError(null);
     let failed = 0;
     const byOrder = (a: { box: ProblemBox }, b: { box: ProblemBox }) => {
@@ -256,7 +259,7 @@ export default function KoreanModePanel({
         continue;
       }
       try {
-        const passagesHere = (passageBoxes[page.id] ?? [])
+        const passagesHere = ((passageOverride ?? passageBoxes)[page.id] ?? [])
           .filter((b) => b.group === PASSAGE_GROUP)
           .map(({ x, y, w, h }) => ({ x, y, w, h }));
         // **서버 대기열에서 찾는다**(`runAiTask` — 대기열 패널에 뜬다).
@@ -290,7 +293,7 @@ export default function KoreanModePanel({
         setError(err instanceof Error ? err.message : "자리 인식에 실패했습니다.");
         setBusy(null);
         source.revoke();
-        return;
+        return null;
       } finally {
         source.revoke();
       }
@@ -298,7 +301,7 @@ export default function KoreanModePanel({
     setBusy(null);
     if (failed === pages.length) {
       setError("사진을 열지 못했습니다.");
-      return;
+      return null;
     }
 
     const next: Record<string, EditBox[]> = {};
@@ -335,7 +338,7 @@ export default function KoreanModePanel({
           ? "지문을 찾지 못했어요. 손으로 네모를 그려주세요."
           : "문제를 찾지 못했어요. 손으로 네모를 그려주세요.",
       );
-      return;
+      return null;
     }
     const snapNote = snappedRef.current > 0 ? `테두리 ${snappedRef.current}곳을 글자에 맞춰 다듬었어요.` : "";
     if (kind === "passage") {
@@ -347,14 +350,39 @@ export default function KoreanModePanel({
       setQuestionBoxes(next);
       if (snapNote) setNote(snapNote);
     }
+    return next;
+  }
+
+  /**
+   * **자동으로 자르기**(2026-10-11, 사용자 — "국어모드도 자동자르기 도입해 지문따로 문제따로 짤라줘").
+   * 지문 자리 → 문제 자리를 차례로(지문 따로, 문제 따로) 찾아 곧바로 자르고 확인 화면까지 간다.
+   * 문제는 방금 찾은 지문 자리를 비켜 간다. 잘못 잘린 것은 확인 화면의 "자리 고치기"로 손본다.
+   */
+  async function autoCut() {
+    if (pages.length === 0) return;
+    let passage: Record<string, EditBox[]> | undefined;
+    if (!noPassage) {
+      const p = await autoFill("passage");
+      if (!p) {
+        setStep("passage");
+        return;
+      }
+      passage = p;
+    }
+    const q = await autoFill("question", passage);
+    if (!q) {
+      setStep("questions");
+      return;
+    }
+    await cutAll({ passage, question: q });
   }
 
   /** 문제 단계의 묶음들을 **그린 차례**로 늘어놓는다. */
-  function questionGroups(): { group: string; boxes: { page: Page; box: EditBox }[] }[] {
+  function questionGroups(src: Record<string, EditBox[]> = questionBoxes): { group: string; boxes: { page: Page; box: EditBox }[] }[] {
     const order: string[] = [];
     const byGroup = new Map<string, { page: Page; box: EditBox }[]>();
     for (const page of pages) {
-      for (const box of questionBoxes[page.id] ?? []) {
+      for (const box of src[page.id] ?? []) {
         if (!byGroup.has(box.group)) {
           byGroup.set(box.group, []);
           order.push(box.group);
@@ -397,7 +425,8 @@ export default function KoreanModePanel({
   }
 
   /** 정해진 자리대로 잘라 미리보기를 만들고 제목을 짓는다. */
-  async function cutAll() {
+  async function cutAll(over?: { passage?: Record<string, EditBox[]>; question?: Record<string, EditBox[]> }) {
+    const passageSrc = over?.passage ?? passageBoxes;
     setError(null);
     setBusy("사진을 여는 중...");
     // 쪽마다 한 번만 열고 다 자를 때까지 들고 있는다(여러 번 열면 느리다).
@@ -427,7 +456,7 @@ export default function KoreanModePanel({
         const parts: string[] = [];
         const figures: PassageFigureInput[] = [];
         for (const page of pages) {
-          const list = passageBoxes[page.id] ?? [];
+          const list = passageSrc[page.id] ?? [];
           const passagesHere = list.filter((b) => b.group === PASSAGE_GROUP);
           for (const b of passagesHere) {
             parts.push(cutBox(imgOf.get(page.id)!, b, pad(b)));
@@ -457,7 +486,7 @@ export default function KoreanModePanel({
         }
       }
 
-      for (const g of questionGroups()) {
+      for (const g of questionGroups(over?.question)) {
         const parts = g.boxes.map(({ page, box }) => cutBox(imgOf.get(page.id)!, box, pad(box)));
         cut.push({
           id: crypto.randomUUID(),
@@ -715,6 +744,16 @@ export default function KoreanModePanel({
           >
             다음: {noPassage ? "문제" : "지문"} 자리 잡기
           </Button>
+          {unlimited && (
+            <Button
+              type="button"
+              onClick={() => void autoCut()}
+              disabled={pages.length === 0 || busy !== null}
+              variant="primary" className="self-start"
+            >
+              {busy ?? "자동으로 자르기 (지문 → 문제)"}
+            </Button>
+          )}
         </>
       )}
 
