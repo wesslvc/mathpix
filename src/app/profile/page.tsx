@@ -64,6 +64,9 @@ export default async function ProfilePage() {
       .from("exam_scores")
       .select("*")
       .order("taken_at", { ascending: true })
+      // 같은 날 같은 시험의 1선택·2선택은 2선택이 더 나중 기록이다.
+      .order("elective_slot", { ascending: true, nullsFirst: true })
+      .order("created_at", { ascending: true })
       .returns<ExamScore[]>(),
     supabase
       .from("grading_prefs")

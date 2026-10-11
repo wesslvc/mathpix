@@ -47,6 +47,8 @@ export type TrendPoint = {
   /** 이 점을 만든 채점 기록(`/grades/[id]` 로 이어진다). */
   id: string;
   takenAt: string;
+  /** 같은 날 1선택·2선택의 선후를 가르는 값(2선택이 더 나중). */
+  slot: number;
   /** 시험 이름(있으면). 그래프 툴팁에 쓴다. */
   examName: string | null;
   /**
@@ -130,6 +132,7 @@ export function buildTrendSeries(
     series.points.push({
       id: row.id,
       takenAt: row.taken_at,
+      slot: row.elective_slot ?? 0,
       examName: row.exam_name?.trim() || null,
       value,
       // 등급은 "배점이 있어 얻은 값"이라는 구분 자체가 없다 — 전부 채운 점.
@@ -153,7 +156,7 @@ export function buildTrendSeries(
   }
 
   for (const series of groups.values()) {
-    series.points.sort((a, b) => a.takenAt.localeCompare(b.takenAt));
+    series.points.sort((a, b) => a.takenAt.localeCompare(b.takenAt) || a.slot - b.slot);
   }
 
   return [...groups.values()].sort(compareSubjectGroups);
