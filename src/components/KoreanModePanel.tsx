@@ -155,8 +155,6 @@ export default function KoreanModePanel({
   /** 제목을 지을 재료(지문 크롭). 다시 짓기 버튼이 쓴다. */
   const passageCropRef = useRef<string | null>(null);
   const [noPassage, setNoPassage] = useState(false);
-  /** 때려박기에서 사진 한 장을 한 세트로 볼지(여러 세트를 한꺼번에 넣을 때). */
-  const [perPhoto, setPerPhoto] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -437,6 +435,8 @@ export default function KoreanModePanel({
     passage?: Record<string, EditBox[]>;
     question?: Record<string, EditBox[]>;
     pages?: Page[];
+    /** 지문 없는 문항 묶음이면 지문을 자르지 않는다. */
+    noPassageOverride?: boolean;
     /** 화면 단계를 건드리지 않고 조각만 돌려준다(한꺼번에 넣기). */
     quiet?: boolean;
   }): Promise<Piece[] | null> {
@@ -465,7 +465,7 @@ export default function KoreanModePanel({
       const pad = (b: EditBox) => (autoIdsRef.current.has(b.id) ? PAD : 0);
       const cut: Piece[] = [];
 
-      if (!noPassage) {
+      if (!noPassage && !over?.noPassageOverride) {
         // 지문은 그린 것 전부가 한 덩어리다. 단을 넘든 쪽을 넘든 어차피 글이라
         // 이어 붙여도 티가 안 난다.
         const parts: string[] = [];
@@ -584,7 +584,7 @@ export default function KoreanModePanel({
    */
   async function save(
     regenerate: boolean,
-    opts?: { pieces: Piece[]; title: string; quiet?: boolean },
+    opts?: { pieces: Piece[]; title: string; quiet?: boolean; loose?: boolean },
   ): Promise<number> {
     const pieces = opts?.pieces ?? piecesState;
     const title = opts?.title ?? titleState;
@@ -602,7 +602,7 @@ export default function KoreanModePanel({
       try {
         const { figure, pngDataUrl } = await toCard(piece);
 
-        const korean = noPassage
+        const korean = noPassage || opts?.loose
           ? undefined
           : piece.kind === "passage"
             ? {
@@ -628,7 +628,7 @@ export default function KoreanModePanel({
         });
 
         // 지문은 **글자로 옮기는** 작업으로 넣는다(이미지 생성이 아니다).
-        if (regenerate && !noPassage && piece.kind === "passage") {
+        if (regenerate && !noPassage && !opts?.loose && piece.kind === "passage") {
           enqueue({
             id: piece.id,
             problemKey: `korean:${problemId}`,
@@ -691,62 +691,217 @@ export default function KoreanModePanel({
   }
 
   /**
-   * **때려박기**(2026-10-11, 사용자 — "우리 자동 자르기처럼 걍 때려박으면 되게끔, 알아서 문제랑
-   * 지문 인식해가지고 딱딱"). 고른 사진을 한 세트씩(`perPhoto` 면 사진 한 장이 한 세트) 지문 자리 →
-   * 문제 자리 → 자르기 → 제목 짓기 → 저장(+AI 큐)까지 확인 없이 쭉 돈다. 실패한 세트는 건너뛰고 끝에 알린다.
+   * **때려박기**(2026-10-11, 사용자 — "우리 자동 자르기처럼 걍 때려박으면 되게끔, 알아서 문제랑 지문
+   * 인식해가지고 딱딱" · "하이쿠가 여러 개 동시에 돌아야 하고, 어디까지가 세트인지는 지문 위 [1~4]
+   * 텍스트를 먼저 뽑아서 묶게끔, 그 전에는 묶지 말고").
+   *
+   * ① 사진마다 **동시에**(하이쿠) 지문 자리(+ 위 `[1~4]` 줄의 범위)와 문제 자리(+ 번호)를 찾는다.
+   * ② 읽는 차례로 훑으며 **범위가 읽힌 지문이 세트를 연다**. 범위 없는 지문 조각(이어진 단·쪽)은 앞 세트에 붙고,
+   *    문제는 **번호가 범위 안에 드는 세트**로 간다. 범위로 묶이지 않는 문제는 묶지 않고 낱개(지문 없는 문항)로 둔다.
+   * ③ 세트마다 자르기 → 제목 → 저장(+AI 큐). 확인 화면은 없다. 실패한 세트는 건너뛰고 끝에 알린다.
    */
   async function dump(regenerate: boolean) {
     if (pages.length === 0) return;
     setError(null);
     setNote(null);
-    const sets = perPhoto ? pages.map((p) => [p]) : [pages];
-    let ok = 0;
-    let made = 0;
-    const failedSets: number[] = [];
-    for (let i = 0; i < sets.length; i++) {
-      const group = sets[i];
-      setBusy(`세트 ${i + 1}/${sets.length} 처리 중...`);
-      let passage: Record<string, EditBox[]> | undefined;
-      if (!noPassage) {
-        const p = await autoFill("passage", undefined, group);
-        if (!p) {
-          failedSets.push(i + 1);
-          continue;
+    const total = pages.length;
+    let finished = 0;
+    setBusy(`자리 찾는 중... (0/${total})`);
+
+    // 그림을 열고 줄이는 일은 화면 스레드라 몇 장씩만 겹친다. 모델 호출은 제한 없이 동시에 간다.
+    let openSlots = 3;
+    const waiters: (() => void)[] = [];
+    const acquire = () =>
+      openSlots > 0
+        ? ((openSlots -= 1), Promise.resolve())
+        : new Promise<void>((r) => waiters.push(r));
+    const release = () => {
+      const w = waiters.shift();
+      if (w) w();
+      else openSlots += 1;
+    };
+    const byOrder = (a: { box: ProblemBox }, b: { box: ProblemBox }) => {
+      const col = (r: { box: ProblemBox }) => (r.box.x + r.box.w / 2 < 0.5 ? 0 : 1);
+      return col(a) - col(b) || a.box.y - b.box.y;
+    };
+
+    type PassageHit = { box: ProblemBox; range: { from: number; to: number } | null };
+    type QuestionHit = { box: ProblemBox; no: number | null };
+    type PageHits = { page: Page; passages: PassageHit[]; figures: ProblemBox[]; questions: QuestionHit[] };
+
+    async function detectPage(page: Page): Promise<PageHits | null> {
+      let detectImg: string;
+      let map: ReturnType<typeof inkMapFromImage> | null = null;
+      await acquire();
+      try {
+        const source = await openSource(page);
+        try {
+          detectImg = await detectImage(source);
+          map = inkMapFromImage(source.img, source.width, source.height);
+        } finally {
+          source.revoke();
         }
-        passage = p;
+      } catch {
+        return null;
+      } finally {
+        release();
       }
-      const q = await autoFill("question", passage, group);
-      if (!q) {
-        failedSets.push(i + 1);
-        continue;
+      const snap = (boxes: ProblemBox[], avoid: ProblemBox[]) => {
+        if (!map || boxes.length === 0) return boxes;
+        const res = snapBoxes(map, boxes, avoid);
+        snappedRef.current += res.changed;
+        return res.boxes;
+      };
+      try {
+        let passages: PassageHit[] = [];
+        let figures: ProblemBox[] = [];
+        if (!noPassage) {
+          const { result } = await runAiTask<{ regions?: DetectedKoreanRegion[]; figures?: ProblemBox[] }>("detect", {
+            label: "지문 자리 찾기",
+            images: [detectImg],
+            params: { mode: "korean-passage" },
+          });
+          const regs = result.regions ?? [];
+          const snapped = snap(regs.map((r) => r.box), []);
+          passages = regs.map((r, i) => ({ box: snapped[i], range: r.range ?? null }));
+          figures = result.figures ?? [];
+        }
+        const avoid = passages.map((p) => p.box).map(({ x, y, w, h }) => ({ x, y, w, h }));
+        const { result: q } = await runAiTask<{ regions?: DetectedKoreanRegion[] }>("detect", {
+          label: "문제 자리 찾기",
+          images: [detectImg],
+          params: { mode: "korean-question", ...(avoid.length ? { passages: avoid } : {}) },
+        });
+        const qr = q.regions ?? [];
+        const qs = snap(qr.map((r) => r.box), avoid);
+        const questions = qr.map((r, i) => ({ box: qs[i], no: r.no ?? null }));
+        return { page, passages, figures, questions };
+      } catch (err) {
+        console.warn("[korean-dump] 자리 찾기 실패:", err instanceof Error ? err.message : err);
+        return null;
+      } finally {
+        finished += 1;
+        setBusy(`자리 찾는 중... (${finished}/${total})`);
       }
-      setBusy(`세트 ${i + 1}/${sets.length} 자르는 중...`);
-      const cut = await cutAll({ passage, question: q, pages: group, quiet: true });
+    }
+
+    snappedRef.current = 0;
+    const hits = await Promise.all(pages.map((p) => detectPage(p)));
+    const failedPages = hits.filter((h) => !h).length;
+    const ok = hits.filter((h): h is PageHits => !!h);
+    if (ok.length === 0) {
+      setBusy(null);
+      setError("자리를 못 찾았어요. 아래 단계별로 손으로 해주세요.");
+      return;
+    }
+
+    // ── 세트로 묶기: 범위가 읽힌 지문만 세트를 연다 ──
+    type SetDraft = {
+      range: { from: number; to: number } | null;
+      firstPage: number;
+      passages: { pageId: string; box: ProblemBox }[];
+      figures: { pageId: string; box: ProblemBox }[];
+      questions: { pageId: string; box: ProblemBox; no: number | null }[];
+    };
+    const sets: SetDraft[] = [];
+    const loose: SetDraft = { range: null, firstPage: 0, passages: [], figures: [], questions: [] };
+    const pageIdx = new Map(ok.map((h, i) => [h.page.id, i] as const));
+    for (const h of ok) {
+      for (const p of [...h.passages].sort(byOrder)) {
+        let cur = sets[sets.length - 1];
+        if (p.range || !cur) {
+          cur = { range: p.range, firstPage: pageIdx.get(h.page.id) ?? 0, passages: [], figures: [], questions: [] };
+          sets.push(cur);
+        }
+        cur.passages.push({ pageId: h.page.id, box: p.box });
+      }
+      for (const f of h.figures) {
+        const cx = f.x + f.w / 2;
+        const cy = f.y + f.h / 2;
+        const host = sets.find((st) =>
+          st.passages.some(
+            (ps) => ps.pageId === h.page.id && cx >= ps.box.x && cx <= ps.box.x + ps.box.w && cy >= ps.box.y && cy <= ps.box.y + ps.box.h,
+          ),
+        );
+        host?.figures.push({ pageId: h.page.id, box: f });
+      }
+    }
+    let lastTarget: SetDraft | null = null;
+    for (const h of ok) {
+      for (const q of [...h.questions].sort(byOrder)) {
+        let target: SetDraft | null = null;
+        if (q.no !== null) {
+          const cands = sets.filter((st) => st.range && q.no! >= st.range.from && q.no! <= st.range.to);
+          const here = pageIdx.get(h.page.id) ?? 0;
+          target =
+            cands.sort((a, b) => Math.abs(a.firstPage - here) - Math.abs(b.firstPage - here))[0] ?? null;
+        } else {
+          target = lastTarget;
+        }
+        lastTarget = target;
+        (target ?? loose).questions.push({ pageId: h.page.id, box: q.box, no: q.no });
+      }
+    }
+    const drafts = [...sets.filter((st) => st.passages.length > 0 || st.questions.length > 0), ...(loose.questions.length ? [loose] : [])];
+
+    // ── 세트마다 자르고 저장 ──
+    let okSets = 0;
+    let made = 0;
+    const failedSets: string[] = [];
+    for (let i = 0; i < drafts.length; i++) {
+      const d = drafts[i];
+      const name = d.range ? `${d.range.from}~${d.range.to}번` : d === loose ? "낱개 문항" : `${i + 1}번째`;
+      setBusy(`세트 ${i + 1}/${drafts.length} (${name}) 자르는 중...`);
+      const passage: Record<string, EditBox[]> = {};
+      const question: Record<string, EditBox[]> = {};
+      const used = new Set<string>();
+      const mk = (box: ProblemBox, group: string): EditBox => {
+        const b = { id: crypto.randomUUID(), ...box, group };
+        autoIdsRef.current.add(b.id);
+        return b;
+      };
+      for (const ps of d.passages) (passage[ps.pageId] ??= []).push(mk(ps.box, PASSAGE_GROUP));
+      for (const f of d.figures) (passage[f.pageId] ??= []).push(mk(f.box, FIGURE_GROUP));
+      const groupOf = new Map<number, string>();
+      for (const q of d.questions) {
+        // 같은 번호가 단·쪽을 넘어 이어진 조각이면 한 문항으로 합친다(세트 안에서만).
+        let g: string;
+        if (q.no !== null && d !== loose) {
+          g = groupOf.get(q.no) ?? crypto.randomUUID();
+          groupOf.set(q.no, g);
+        } else g = crypto.randomUUID();
+        (question[q.pageId] ??= []).push(mk(q.box, g));
+      }
+      for (const id of [...Object.keys(passage), ...Object.keys(question)]) used.add(id);
+      const group = ok.map((h) => h.page).filter((pg) => used.has(pg.id));
+      const cut = await cutAll({ passage, question, pages: group, quiet: true, noPassageOverride: d === loose });
       if (!cut || cut.length === 0) {
-        failedSets.push(i + 1);
+        failedSets.push(name);
         continue;
       }
       const pc = cut.find((c) => c.kind === "passage");
-      const t = pc && !noPassage ? await fetchTitle(pc.crop) : "";
-      const n = await save(regenerate, { pieces: cut, title: t, quiet: true });
+      const t = pc ? await fetchTitle(pc.crop) : "";
+      const n = await save(regenerate, { pieces: cut, title: t, quiet: true, loose: d === loose || noPassage });
       if (n > 0) {
-        ok += 1;
+        okSets += 1;
         made += n;
-      } else failedSets.push(i + 1);
+      } else failedSets.push(name);
     }
     setBusy(null);
-    if (ok > 0) {
+    const notes = [
+      failedPages ? `사진 ${failedPages}장은 자리를 못 찾았어요.` : "",
+      failedSets.length ? `못 넣은 세트: ${failedSets.join(", ")}.` : "",
+    ].filter(Boolean);
+    if (okSets > 0) {
       setError(null);
       setNote(
-        `${ok}세트(${made}개)를 ${regenerate ? "넣고 AI 작업을 올렸어요" : "원본 그대로 넣었어요"}.` +
-          (failedSets.length ? ` 못 넣은 세트: ${failedSets.join(", ")}번 — 손으로 다시 해주세요.` : ""),
+        `${okSets}세트(${made}개)를 ${regenerate ? "넣고 AI 작업을 올렸어요" : "원본 그대로 넣었어요"}.` +
+          (notes.length ? ` ${notes.join(" ")} 빠진 것은 손으로 해주세요.` : ""),
       );
       reset();
       onDone?.();
-    } else if (!failedSets.length) {
-      /* 아무것도 안 함 */
     } else {
-      setError("자동으로 못 넣었어요. 아래 단계별로 손으로 해주세요.");
+      setError(`자동으로 못 넣었어요. ${notes.join(" ")} 아래 단계별로 손으로 해주세요.`);
     }
   }
 
@@ -844,18 +999,6 @@ export default function KoreanModePanel({
           </Button>
           {unlimited && (
             <div className="flex flex-col gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={perPhoto}
-                  onChange={(e) => setPerPhoto(e.target.checked)}
-                  className="h-4 w-4"
-                />
-                사진 한 장 = 한 세트
-                <span className="text-xs text-slate-400">
-                  여러 지문을 한꺼번에 넣을 때 켜세요(끄면 고른 사진 전부가 한 세트).
-                </span>
-              </label>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -883,7 +1026,7 @@ export default function KoreanModePanel({
                 </Button>
               </div>
               <p className="text-xs text-slate-400">
-                지문과 문제 자리를 알아서 찾아 자르고 제목까지 지어 바로 넣습니다. AI 로 다시 그리면 서버 대기열에서
+                사진을 여러 장 골라도 됩니다 — 하이쿠가 사진마다 동시에 지문·문제 자리를 찾고, 지문 위 [1~4] 줄에서 읽은 범위로 세트를 묶어 제목까지 지어 바로 넣습니다(범위가 안 읽힌 문항은 묶지 않고 낱개로). AI 로 다시 그리면 서버 대기열에서
                 돌아 창을 닫아도 됩니다.
               </p>
             </div>

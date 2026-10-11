@@ -454,7 +454,7 @@ export const KOREAN_PASSAGE_PROMPT = `task: page from Korean SAT (수능) 국어
 
 passage:
 - whole text body shared by several questions (non-fiction/literary work, incl. any 보기 material belonging to the passage)
-- lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." -> start FROM that line
+- lead-in line e.g. "[1~3] 다음 글을 읽고 물음에 답하시오." -> start FROM that line, and copy its number range into "range" as printed ("1~3"). A piece that does NOT start with such a lead-in line (continuation in the next column/page) -> "range":null. NEVER guess a range that is not printed.
 - several texts grouped as (가)(나) -> take TOGETHER as one region
 - literature -> include trailing attribution (- 작자, 「작품명」)
 - stop where the first question (its number, e.g. "1.") begins — never include question stems or choices
@@ -471,7 +471,7 @@ both:
 - 2-column page -> order: left column top-to-bottom first, then right column
 
 answer JSON only:
-{"passages":[{"box_2d":[ymin,xmin,ymax,xmax]}],"figures":[{"box_2d":[ymin,xmin,ymax,xmax]}]}
+{"passages":[{"box_2d":[ymin,xmin,ymax,xmax],"range":"1~3"}],"figures":[{"box_2d":[ymin,xmin,ymax,xmax]}]}
 coords normalised 0-1000. no explanation.`;
 
 export const KOREAN_QUESTION_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find ONLY the QUESTION regions (문항). passages (지문) are handled separately — ignore them.
@@ -508,7 +508,18 @@ export type DetectedKoreanRegion = {
   /** 어느 지문에 딸렸는지. 지금은 따로 찾으므로 늘 0 이다(옛 모양을 위해 남긴다). */
   set: number;
   no: number | null;
+  /** 지문 위 "[1~4] 다음 글을 읽고…" 줄에서 읽은 문항 범위. 그 줄로 시작하지 않는 조각(이어진 단·쪽)이면 null. 지문에만 있다. */
+  range?: { from: number; to: number } | null;
 };
+
+/** "1~4" · "[1-4]" · "1∼4" 같은 글에서 범위를 뽑는다. 못 읽으면 null. */
+export function parseNumberRange(raw: unknown): { from: number; to: number } | null {
+  const m = /(\d{1,3})\s*[~∼～\-–—]\s*(\d{1,3})/.exec(String(raw ?? ""));
+  if (!m) return null;
+  const from = Number(m[1]);
+  const to = Number(m[2]);
+  return from > 0 && to >= from && to - from < 60 ? { from, to } : null;
+}
 
 /** 지문 찾기 결과. 그림은 지면 좌표(0~1)다. */
 export type DetectedKoreanPassages = {
@@ -520,6 +531,24 @@ export type DetectedKoreanPassages = {
 export type DetectUsage = { input: number; cached: number; output: number; /** 오픈라우터가 응답에 실어 준 실제 청구액(USD). */ costUsd?: number };
 
 async function callDetect(dataUrl: string, prompt: string): Promise<{ text: string; model: string; usage?: DetectUsage }> {
+  // 국어 지문·문제 자리도 하이쿠(오픈라우터)가 먼저 — 여러 장을 동시에 돌려도 싸고 빠르다(2026-10-11). 실패하면 아래 luna.
+  // 끄려면 재배포 없이 `KOREAN_DETECT_HAIKU=off`.
+  if (PAGE_OPENROUTER_MODEL && (process.env.KOREAN_DETECT_HAIKU ?? "on") !== "off") {
+    try {
+      let u: DetectUsage | undefined;
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 120_000);
+      try {
+        const text = await callOpenRouterVision(dataUrl, prompt, PAGE_OPENROUTER_MODEL, (x) => (u = x), 4096, ac.signal);
+        readJsonObject(text); // 읽을 수 있는 JSON 인지 먼저 본다 — 아니면 luna 로.
+        return { text, model: PAGE_OPENROUTER_MODEL, usage: u };
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (err) {
+      console.warn(`[detect-korean] ${PAGE_OPENROUTER_MODEL} 실패 → luna:`, err instanceof Error ? err.message : err);
+    }
+  }
   if (DETECT_PROVIDER === "gemini") {
     return { text: await callGemini(dataUrl, prompt), model: DETECT_MODEL };
   }
@@ -580,7 +609,15 @@ export function parseKoreanPassages(text: string): DetectedKoreanPassages {
   const passages: DetectedKoreanRegion[] = [];
   for (const row of list) {
     const box = toBox((row as { box_2d?: unknown })?.box_2d);
-    if (box) passages.push({ kind: "passage", box, set: 0, no: null });
+    if (box) {
+      passages.push({
+        kind: "passage",
+        box,
+        set: 0,
+        no: null,
+        range: parseNumberRange((row as { range?: unknown })?.range),
+      });
+    }
   }
   const figures: ProblemBox[] = [];
   for (const row of Array.isArray(o.figures) ? o.figures : []) {

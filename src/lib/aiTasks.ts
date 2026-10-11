@@ -224,8 +224,14 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     async run(ctx) {
       const mode = str(ctx.params.mode, 40);
       // 영역 찾기도 원가가 든다(luna, 추론 강도 high) — 무제한 계정의 원가 장부에 적는다. 토큰은 안 뗀다(deposit 0·flat).
-      const cost = async (usage: DetectUsage | undefined, what: string, kind: "passage" | "problem") => {
+      const cost = async (usage: DetectUsage | undefined, what: string, kind: "passage" | "problem", answered?: string) => {
         if (!usage) return undefined;
+        // 하이쿠(오픈라우터)가 답했으면 응답이 준 실제 청구액으로 적는다.
+        if (answered?.includes("/")) {
+          const hk = typeof usage.costUsd === "number" ? usage.costUsd * USD_KRW_RATE : 0;
+          if (hk > 0) await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind, what, krw: hk, model: HAIKU_MODEL, tokens: usage });
+          return hk > 0 ? hk : undefined;
+        }
         const krw = gradingEstKrw(
           { inputTokens: usage.input, outputTokens: usage.output, ...(usage.cached ? { cachedInputTokens: usage.cached } : {}) },
           OPENAI_DETECT_MODEL,
@@ -236,12 +242,12 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       try {
         if (mode === "korean-passage") {
           const { passages, figures, model, usage } = await detectKoreanPassages(ctx.images[0]);
-          const estKrw = await cost(usage, "지문 자리 찾기", "passage");
+          const estKrw = await cost(usage, "지문 자리 찾기", "passage", model);
           return { ok: true, result: { regions: passages, figures, model }, model, estKrw };
         }
         if (mode === "korean-question") {
           const { regions, model, usage } = await detectKoreanQuestions(ctx.images[0], readBoxes(ctx.params.passages));
-          const estKrw = await cost(usage, "국어 문제 자리 찾기", "passage");
+          const estKrw = await cost(usage, "국어 문제 자리 찾기", "passage", model);
           return { ok: true, result: { regions, model }, model, estKrw };
         }
         const { problems, model, usage } = await detectProblems(ctx.images[0]);
