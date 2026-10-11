@@ -78,6 +78,7 @@ const PASSAGE_GROUP = "passage";
 const FIGURE_GROUP = "figure";
 
 type Step = "pick" | "passage" | "questions" | "review";
+type StagedSet = { name: string; pieces: Piece[]; title: string; loose: boolean };
 
 type Page = { id: string; file: File | null; dataUrl: string };
 
@@ -128,6 +129,8 @@ export default function KoreanModePanel({
   const { enqueue } = useFigureJobs();
 
   const [step, setStep] = useState<Step>("pick");
+  /** 자동으로 자른 세트들 — 사용자가 확인하기 전에는 저장하지 않는다. */
+  const [staged, setStaged] = useState<StagedSet[] | null>(null);
   const [pages, setPages] = useState<Page[]>([]);
   /** 쪽(사진) id → 그 쪽에 그린 네모들. */
   const [passageBoxes, setPassageBoxes] = useState<Record<string, EditBox[]>>({});
@@ -700,7 +703,7 @@ export default function KoreanModePanel({
    *    문제는 **번호가 범위 안에 드는 세트**로 간다. 범위로 묶이지 않는 문제는 묶지 않고 낱개(지문 없는 문항)로 둔다.
    * ③ 세트마다 자르기 → 제목 → 저장(+AI 큐). 확인 화면은 없다. 실패한 세트는 건너뛰고 끝에 알린다.
    */
-  async function dump(regenerate: boolean) {
+  async function dump() {
     if (pages.length === 0) return;
     setError(null);
     setNote(null);
@@ -708,8 +711,8 @@ export default function KoreanModePanel({
     let finished = 0;
     setBusy(`자리 찾는 중... (0/${total})`);
 
-    // 그림을 열고 줄이는 일은 화면 스레드라 몇 장씩만 겹친다. 모델 호출은 제한 없이 동시에 간다.
-    let openSlots = 3;
+    // 그림을 열고 줄이는 일은 화면 스레드라 열 장까지 겹친다. 모델 호출은 제한 없이 동시에 간다.
+    let openSlots = 10;
     const waiters: (() => void)[] = [];
     const acquire = () =>
       openSlots > 0
@@ -844,9 +847,8 @@ export default function KoreanModePanel({
     }
     const drafts = [...sets.filter((st) => st.passages.length > 0 || st.questions.length > 0), ...(loose.questions.length ? [loose] : [])];
 
-    // ── 세트마다 자르고 저장 ──
-    let okSets = 0;
-    let made = 0;
+    // ── 세트마다 자르기만 한다 — 저장은 사용자가 확인한 뒤(`commitStaged`) ──
+    const out: StagedSet[] = [];
     const failedSets: string[] = [];
     for (let i = 0; i < drafts.length; i++) {
       const d = drafts[i];
@@ -864,7 +866,6 @@ export default function KoreanModePanel({
       for (const f of d.figures) (passage[f.pageId] ??= []).push(mk(f.box, FIGURE_GROUP));
       const groupOf = new Map<number, string>();
       for (const q of d.questions) {
-        // 같은 번호가 단·쪽을 넘어 이어진 조각이면 한 문항으로 합친다(세트 안에서만).
         let g: string;
         if (q.no !== null && d !== loose) {
           g = groupOf.get(q.no) ?? crypto.randomUUID();
@@ -881,27 +882,48 @@ export default function KoreanModePanel({
       }
       const pc = cut.find((c) => c.kind === "passage");
       const t = pc ? await fetchTitle(pc.crop) : "";
-      const n = await save(regenerate, { pieces: cut, title: t, quiet: true, loose: d === loose || noPassage });
-      if (n > 0) {
-        okSets += 1;
-        made += n;
-      } else failedSets.push(name);
+      out.push({ name, pieces: cut, title: t, loose: d === loose || noPassage });
     }
     setBusy(null);
     const notes = [
       failedPages ? `사진 ${failedPages}장은 자리를 못 찾았어요.` : "",
-      failedSets.length ? `못 넣은 세트: ${failedSets.join(", ")}.` : "",
+      failedSets.length ? `못 자른 세트: ${failedSets.join(", ")}.` : "",
     ].filter(Boolean);
+    if (out.length > 0) {
+      setStaged(out);
+      setNote(notes.length ? notes.join(" ") : null);
+    } else {
+      setError(`자동으로 못 잘랐어요. ${notes.join(" ")} 아래 단계별로 손으로 해주세요.`);
+    }
+  }
+
+  /** 확인 화면에서 "넣기"를 눌렀을 때만 저장한다. */
+  async function commitStaged(regenerate: boolean) {
+    if (!staged) return;
+    let okSets = 0;
+    let made = 0;
+    const failed: string[] = [];
+    for (let i = 0; i < staged.length; i++) {
+      const d = staged[i];
+      setBusy(`세트 ${i + 1}/${staged.length} (${d.name}) 넣는 중...`);
+      const n = await save(regenerate, { pieces: d.pieces, title: d.title, quiet: true, loose: d.loose });
+      if (n > 0) {
+        okSets += 1;
+        made += n;
+      } else failed.push(d.name);
+    }
+    setBusy(null);
     if (okSets > 0) {
+      setStaged(null);
       setError(null);
       setNote(
         `${okSets}세트(${made}개)를 ${regenerate ? "넣고 AI 작업을 올렸어요" : "원본 그대로 넣었어요"}.` +
-          (notes.length ? ` ${notes.join(" ")} 빠진 것은 손으로 해주세요.` : ""),
+          (failed.length ? ` 못 넣은 세트: ${failed.join(", ")}.` : ""),
       );
       reset();
       onDone?.();
     } else {
-      setError(`자동으로 못 넣었어요. ${notes.join(" ")} 아래 단계별로 손으로 해주세요.`);
+      setError(`넣지 못했어요. ${failed.join(", ")}`);
     }
   }
 
@@ -1002,19 +1024,11 @@ export default function KoreanModePanel({
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  onClick={() => void dump(true)}
+                  onClick={() => void dump()}
                   disabled={pages.length === 0 || busy !== null}
                   variant="primary"
                 >
-                  {busy ?? "자동으로 넣기 (AI로 다시 그리기)"}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => void dump(false)}
-                  disabled={pages.length === 0 || busy !== null}
-                  variant="outline"
-                >
-                  자동으로 넣기 (원본 그대로)
+                  {busy ?? "자동으로 자르기 (세트별로 한꺼번에)"}
                 </Button>
                 <Button
                   type="button"
@@ -1026,8 +1040,7 @@ export default function KoreanModePanel({
                 </Button>
               </div>
               <p className="text-xs text-slate-400">
-                사진을 여러 장 골라도 됩니다 — 하이쿠가 사진마다 동시에 지문·문제 자리를 찾고, 지문 위 [1~4] 줄에서 읽은 범위로 세트를 묶어 제목까지 지어 바로 넣습니다(범위가 안 읽힌 문항은 묶지 않고 낱개로). AI 로 다시 그리면 서버 대기열에서
-                돌아 창을 닫아도 됩니다.
+                사진을 여러 장 골라도 됩니다 — 하이쿠가 사진마다 동시에 지문·문제 자리를 찾고, 지문 위 [1~4] 줄에서 읽은 범위로 세트를 묶어 제목까지 지어 자른 결과를 먼저 보여 드립니다 — 확인하고 넣기를 누르면 저장됩니다(범위가 안 읽힌 문항은 묶지 않고 낱개로).
               </p>
             </div>
           )}
@@ -1288,6 +1301,61 @@ export default function KoreanModePanel({
                     ? PASSAGE_READ_TOKENS + PASSAGE_MARKS_DEPOSIT
                     : 0)
                 }토큰)`}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {staged && (
+        <div className="flex flex-col gap-3 rounded-lg border border-emerald-300 bg-emerald-50/40 p-3">
+          <p className="text-sm font-medium text-slate-700">
+            자동으로 자른 결과 — 확인하고 넣으세요 ({staged.length}세트)
+          </p>
+          {staged.map((d, si) => (
+            <div key={si} className="flex flex-col gap-2 rounded border border-slate-200 bg-white p-2">
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <span className="font-semibold">{d.name}</span>
+                {!d.loose && (
+                  <input
+                    value={d.title}
+                    onChange={(e) =>
+                      setStaged((prev) => prev && prev.map((x, k) => (k === si ? { ...x, title: e.target.value } : x)))
+                    }
+                    placeholder="지문 제목"
+                    className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => setStaged((prev) => (prev ? prev.filter((_, k) => k !== si) : prev))}
+                  className="text-red-600 hover:underline"
+                >
+                  이 세트 빼기
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {d.pieces.map((p, i) => (
+                  <div key={p.id} className={`rounded border p-1 ${p.kind === "passage" ? "border-emerald-400 bg-emerald-50" : "border-slate-200"}`}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.crop} alt="" className="h-32 w-full object-contain" />
+                    <p className="mt-1 text-center text-xs text-slate-500">
+                      {p.kind === "passage" ? "지문" : `${i + (d.pieces[0]?.kind === "passage" ? 0 : 1)}번째 문제`}
+                      {p.parts > 1 && ` · ${p.parts}조각 합침`}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => setStaged(null)} disabled={busy !== null}>
+              취소 (손으로 하기)
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void commitStaged(false)} disabled={busy !== null || staged.length === 0}>
+              {busy ?? "원본 그대로 넣기"}
+            </Button>
+            <Button type="button" variant="primary" onClick={() => void commitStaged(true)} disabled={busy !== null || staged.length === 0}>
+              {busy ?? "모두 AI로 다시 그리기"}
             </Button>
           </div>
         </div>
