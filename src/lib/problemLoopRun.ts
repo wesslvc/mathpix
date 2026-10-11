@@ -272,7 +272,9 @@ export function remainingDiffs(state: unknown): { quality: string; diffs: TextDi
   const best = st.rounds[st.current !== undefined && st.rounds[st.current] ? st.current : bestRound(st.rounds)];
   if (!best) return null;
   const hit = (st.history ?? []).find((h) => h.quality === best.quality);
-  return hit ? { quality: hit.quality, diffs: hit.diffs, path: best.path } : null;
+  // 수정(patch) 라운드는 sol 검수를 안 했거나 실패하면 history 항목이 없다 — 그래도 그림 자리는 알려 줘야
+  // 확인 창이 고친 그림을 보여 준다(차이 목록만 빈다).
+  return { quality: hit?.quality ?? best.quality, diffs: hit?.diffs ?? [], path: best.path };
 }
 
 /** 남은 차이가 가장 적은 라운드(같으면 앞). 검수 못 한 라운드는 뒤로 미룬다. */
