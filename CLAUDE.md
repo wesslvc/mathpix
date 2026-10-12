@@ -6150,3 +6150,8 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 - 지문 줄마다 **"다시 인식"** 버튼(`rereadFromList`)이 생겼다 — 수정 창을 열지 않고 다른 지문을 연달아 눌러 서버 대기열(`mode:"passage"`)에 쌓는다. 수정 창 안의 버튼은 그대로 큐 방식.
 - **"불러오기 실패"의 원인은 확인 못 했다**(운영 DB 에 최근 작업 행이 없었고 Vercel 로그는 이 세션에서 못 읽는다). 가장 유력한 후보 둘을 막았다: ① `/api/card` 주소가 R2 로 바로 넘어가는데(302) 그 요청이 CORS 등으로 막히면 `ensureDataUrl` 이 던졌다 → 실패하면 `?proxy=1`(우리 서버 경유)로 한 번 더 받는다. ② 대기열 패널의 원본/생성 그림 `<img>` 도 오류 시 `?proxy=1` 로 바꿔 다시 받고, 차이 목록을 못 받았으면 "다시 불러오기" 버튼을 둔다. 차이 목록 매칭이 서버 id 로도 되게 했다(`loadOfferDiffs`).
 - 검증: `tsc` 만. **같은 증상이 또 나오면 브라우저 개발자도구 Network 에서 `/api/card/…_jobs/…-p1.jpg` 의 상태 코드와 Vercel 로그의 `[card] 그림 없음` 을 볼 것.**
+
+#### 원본(origin) 만료를 껐다 — R2 에 여유가 있다 (2026-10-12)
+
+사용자 — "r2는 여유가있으니까 원본이미지 버리지마". 2026-09-17 에 걸어 둔 밤마다의 청소(`expire_figure_origins(14)`, pg_cron `expire-figure-origins`)를 **`cron.unschedule` 로 껐다**(운영 DB). 이유가 사라졌다: 지금 `box_range.figures[].origin` 은 인라인 base64 가 아니라 R2 를 가리키는 짧은 주소라 DB 를 거의 안 먹는다(확인: 원본이 있는 그림 197개 중 인라인 0개). 파일은 R2 에 그대로 남는다.
+함수 `expire_figure_origins` 와 `originAt` 기록은 코드에 남겨 뒀다(다시 걸려면 `select cron.schedule('expire-figure-origins','0 18 * * *','select public.expire_figure_origins(14)')`). **이미 14일 지나 지워진 옛 원본은 못 살린다.** 예외: 작업 입력 파일(`_jobs/<id>-in.jpg`)은 작업이 끝나면 여전히 지운다 — 같은 크롭이 `origin` 에 담겨 있어서다(문제 통째로 그리기 기준).
