@@ -602,7 +602,7 @@ export default function KoreanModePanel({
    */
   async function save(
     regenerate: boolean,
-    opts?: { pieces: Piece[]; title: string; quiet?: boolean; loose?: boolean },
+    opts?: { pieces: Piece[]; title: string; quiet?: boolean; loose?: boolean; passageOnly?: boolean },
   ): Promise<number> {
     const pieces = opts?.pieces ?? piecesState;
     const title = opts?.title ?? titleState;
@@ -667,7 +667,7 @@ export default function KoreanModePanel({
           });
           passageQueued = true;
         }
-        if (regenerate && piece.kind === "question") {
+        if (regenerate && piece.kind === "question" && !opts?.passageOnly) {
           enqueue({
             id: piece.id,
             problemKey: `korean:${problemId}`,
@@ -921,8 +921,50 @@ export default function KoreanModePanel({
     }
   }
 
+  /** 확인 상자 편집 — 조각 빼기·같은 세트 안 순서 바꾸기·다른 세트로 옮기기. */
+  function stagedRemove(si: number, pid: string) {
+    setStaged((prev) =>
+      prev
+        ? prev
+            .map((d, k) => (k === si ? { ...d, pieces: d.pieces.filter((p) => p.id !== pid) } : d))
+            .filter((d) => d.pieces.length > 0)
+        : prev,
+    );
+  }
+  function stagedShift(si: number, pid: string, dir: -1 | 1) {
+    setStaged((prev) =>
+      prev
+        ? prev.map((d, k) => {
+            if (k !== si) return d;
+            const i = d.pieces.findIndex((p) => p.id === pid);
+            const j = i + dir;
+            if (i < 0 || j < 0 || j >= d.pieces.length) return d;
+            const next = [...d.pieces];
+            [next[i], next[j]] = [next[j], next[i]];
+            return { ...d, pieces: next };
+          })
+        : prev,
+    );
+  }
+  function stagedMove(si: number, pid: string, to: number) {
+    setStaged((prev) => {
+      if (!prev || to === si || !prev[to]) return prev;
+      const piece = prev[si].pieces.find((p) => p.id === pid);
+      if (!piece || piece.kind === "passage") return prev;
+      return prev
+        .map((d, k) =>
+          k === si
+            ? { ...d, pieces: d.pieces.filter((p) => p.id !== pid) }
+            : k === to
+              ? { ...d, pieces: [...d.pieces, piece] }
+              : d,
+        )
+        .filter((d) => d.pieces.length > 0);
+    });
+  }
+
   /** 확인 화면에서 "넣기"를 눌렀을 때만 저장한다. */
-  async function commitStaged(regenerate: boolean) {
+  async function commitStaged(regenerate: boolean, passageOnly = false) {
     if (!staged) return;
     let okSets = 0;
     let made = 0;
@@ -930,7 +972,7 @@ export default function KoreanModePanel({
     for (let i = 0; i < staged.length; i++) {
       const d = staged[i];
       setBusy(`세트 ${i + 1}/${staged.length} (${d.name}) 넣는 중...`);
-      const n = await save(regenerate, { pieces: d.pieces, title: d.title, quiet: true, loose: d.loose });
+      const n = await save(regenerate, { pieces: d.pieces, title: d.title, quiet: true, loose: d.loose, passageOnly });
       if (n > 0) {
         okSets += 1;
         made += n;
@@ -941,7 +983,7 @@ export default function KoreanModePanel({
       setStaged(null);
       setError(null);
       setNote(
-        `${okSets}세트(${made}개)를 ${regenerate ? "넣고 AI 작업을 올렸어요" : "원본 그대로 넣었어요"}.` +
+        `${okSets}세트(${made}개)를 ${passageOnly ? "넣었어요 — 지문만 조판하고 문항은 원본 그대로예요" : regenerate ? "넣고 AI 작업을 올렸어요" : "원본 그대로 넣었어요"}.` +
           (failed.length ? ` 못 넣은 세트: ${failed.join(", ")}.` : ""),
       );
       reset();
@@ -1309,6 +1351,14 @@ export default function KoreanModePanel({
             </Button>
             <Button
               type="button"
+              onClick={() => void save(true, { pieces, title, passageOnly: true })}
+              disabled={busy !== null}
+              variant="outline"
+            >
+              {busy ?? "문항은 그대로 · 지문만 조판"}
+            </Button>
+            <Button
+              type="button"
               onClick={() => void save(true)}
               disabled={busy !== null}
               variant="primary"
@@ -1363,9 +1413,24 @@ export default function KoreanModePanel({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.crop} alt="" className="h-32 w-full object-contain" />
                     <p className="mt-1 text-center text-xs text-slate-500">
-                      {p.kind === "passage" ? "지문" : `${i + (d.pieces[0]?.kind === "passage" ? 0 : 1)}번째 문제`}
+                      {p.kind === "passage" ? "지문" : `${p.no != null ? `${p.no}번` : `${i + (d.pieces[0]?.kind === "passage" ? 0 : 1)}번째`} 문제`}
                       {p.parts > 1 && ` · ${p.parts}조각 합침`}
                     </p>
+                    <div className="mt-1 flex items-center justify-center gap-1 text-xs">
+                      <button type="button" title="앞으로" onClick={() => stagedShift(si, p.id, -1)} disabled={i === 0} className="rounded border px-1.5 disabled:opacity-30">◀</button>
+                      <button type="button" title="뒤로" onClick={() => stagedShift(si, p.id, 1)} disabled={i === d.pieces.length - 1} className="rounded border px-1.5 disabled:opacity-30">▶</button>
+                      <button type="button" title="빼기" onClick={() => stagedRemove(si, p.id)} className="rounded border px-1.5 text-red-600">×</button>
+                    </div>
+                    {p.kind === "question" && staged.length > 1 && (
+                      <select
+                        value=""
+                        onChange={(e) => e.target.value !== "" && stagedMove(si, p.id, Number(e.target.value))}
+                        className="mt-1 w-full rounded border border-slate-300 text-xs"
+                      >
+                        <option value="">세트 옮기기…</option>
+                        {staged.map((o, oi) => oi !== si && <option key={oi} value={oi}>{o.name}</option>)}
+                      </select>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1377,6 +1442,9 @@ export default function KoreanModePanel({
             </Button>
             <Button type="button" variant="outline" onClick={() => void commitStaged(false)} disabled={busy !== null || staged.length === 0}>
               {busy ?? "원본 그대로 넣기"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void commitStaged(true, true)} disabled={busy !== null || staged.length === 0}>
+              {busy ?? "문항은 그대로 · 지문만 조판"}
             </Button>
             <Button type="button" variant="primary" onClick={() => void commitStaged(true)} disabled={busy !== null || staged.length === 0}>
               {busy ?? "모두 AI로 다시 그리기"}
