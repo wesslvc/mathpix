@@ -6155,3 +6155,7 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 
 사용자 — "r2는 여유가있으니까 원본이미지 버리지마". 2026-09-17 에 걸어 둔 밤마다의 청소(`expire_figure_origins(14)`, pg_cron `expire-figure-origins`)를 **`cron.unschedule` 로 껐다**(운영 DB). 이유가 사라졌다: 지금 `box_range.figures[].origin` 은 인라인 base64 가 아니라 R2 를 가리키는 짧은 주소라 DB 를 거의 안 먹는다(확인: 원본이 있는 그림 197개 중 인라인 0개). 파일은 R2 에 그대로 남는다.
 함수 `expire_figure_origins` 와 `originAt` 기록은 코드에 남겨 뒀다(다시 걸려면 `select cron.schedule('expire-figure-origins','0 18 * * *','select public.expire_figure_origins(14)')`). **이미 14일 지나 지워진 옛 원본은 못 살린다.** 예외: 작업 입력 파일(`_jobs/<id>-in.jpg`)은 작업이 끝나면 여전히 지운다 — 같은 크롭이 `origin` 에 담겨 있어서다(문제 통째로 그리기 기준).
+
+#### AI 비용 패널 "기타(모델 미상)" $0.16 의 정체 (2026-10-12)
+
+사용자 — "기타 모델미상 0.16달러는 뭐야 어디서샌거야". 장부(`ai_cost_log`)에서 모델이 비었거나 낯선 줄을 찾으니 `kind=passage · what="지문 그림"` 3줄($0.1646, 오늘)뿐이었다 — 국어 지문 안 그림을 sunburst 로 다시 그린 원가. `modelFromWhat` 이 "그림"으로 시작하는 것만 알아 "지문 그림"을 못 짚어 `other` 로 떨어졌다(샌 돈이 아니라 라벨 누락). `modelFromWhat` 에 "지문 그림"을 더하고 운영 장부의 그 3줄을 `gpt-image-2.5-sunburst` 로 채웠다. `tsc` 는 아래에서 확인.
