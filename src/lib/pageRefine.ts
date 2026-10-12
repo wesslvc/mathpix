@@ -248,3 +248,17 @@ function withKeep(b: ProblemBox, orig: ProblemBox): ProblemBox {
   }
   return { ...b, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
+
+
+/**
+ * 국어 모드 등이 쓰는 **지면 통째로 넣기와 같은** 다듬기: 글자에 맞춰 넓히되 모델이 짚은 자리 안쪽은 줄이지 않는다(`protectModelBox`).
+ * `avoid` 는 넘지 말아야 할 자리(예: 지문 자리).
+ */
+export function snapRegions(
+  map: NonNullable<ReturnType<typeof inkMapFromImage>>,
+  boxes: ProblemBox[],
+  avoid: ProblemBox[] = [],
+): { boxes: ProblemBox[]; changed: number } {
+  const res = snapBoxes(map, boxes, avoid);
+  return { boxes: res.boxes.map((b, i) => protectModelBox(b, boxes[i])), changed: res.changed };
+}

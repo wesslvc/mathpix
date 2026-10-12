@@ -1005,6 +1005,7 @@ export default function AddProblemFlow({
                 unlimited={tokenStatus?.unlimited ?? false}
                 byok={tokenStatus?.byok ?? false}
                 figureCost={tokenStatus?.figureCost ?? null}
+                answerByNumber={answerByNumber}
  />
             </div>
             <div hidden={mode !== "csv"}>

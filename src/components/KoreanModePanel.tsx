@@ -1,7 +1,10 @@
 "use client";
 
 import { runAiTask } from "@/lib/aiTask";
-import { inkMapFromImage, snapBoxes } from "@/lib/snapBoxes";
+import { inkMapFromImage } from "@/lib/snapBoxes";
+import { snapRegions } from "@/lib/pageRefine";
+import { attachNumberAndAnswer, readNumberWithMathpix } from "@/lib/quickProblem";
+import type { AnswerByNumber } from "@/lib/answerMap";
 import { useRef, useState } from "react";
 import { NO_CROP_LIMIT, cropImageToDataUrl, fileToDataUrl, isHeicFile, loadImage, openPageSource, type PageSource } from "@/lib/cropImage";
 import {
@@ -65,7 +68,7 @@ const WHOLE_PROBLEM_LAYOUT: DiagramLayout = { scale: 100, offsetX: 0, offsetY: 0
  * **손으로 고친 자리에는 주지 않는다** — 사용자가 정한 자리를 우리가 몰래
  * 넓히면 보이는 것과 잘리는 것이 달라진다.
  */
-const PAD = 0.004;
+const PAD = 0.012;
 
 /** 지문 네모는 전부 이 묶음에 들어간다(그린 것이 곧 한 지문이다). */
 const PASSAGE_GROUP = "passage";
@@ -89,6 +92,8 @@ type Piece = {
   parts: number;
   /** 지문 안 그림들(읽는 차례). 지문 조각에만 있다. */
   figures?: PassageFigureInput[];
+  /** luna·하이쿠가 찍힌 그대로 읽은 문제 번호(문제 조각에만). */
+  no?: number | null;
 };
 
 /** 쪽마다 자동으로 찾은 결과. 지문과 문제를 **따로** 부르므로 따로 든다. */
@@ -115,6 +120,8 @@ type Props = {
   byok?: boolean;
   /** 문제 하나를 다시 그리는 데 드는 토큰. 서버가 알려준 값을 그대로 쓴다. */
   figureCost?: number | null;
+  /** 번호 → 정답(연결된 채점·답지). 문제 번호를 읽으면 정답을 함께 붙인다. */
+  answerByNumber?: AnswerByNumber;
   onDone?: () => void;
 };
 
@@ -123,6 +130,7 @@ export default function KoreanModePanel({
   unlimited = false,
   byok = false,
   figureCost,
+  answerByNumber = {},
   onDone,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -147,6 +155,8 @@ export default function KoreanModePanel({
   const [drawKind, setDrawKind] = useState<"passage" | "figure">("passage");
   /** 자동으로 찾은 자리를 사람이 안 건드렸으면 여유(PAD)를 준다. */
   const autoIdsRef = useRef<Set<string>>(new Set());
+  /** 문항 묶음 id → luna 가 읽은 문제 번호. */
+  const noByGroupRef = useRef<Map<string, number>>(new Map());
 
   const [pieces, setPieces] = useState<Piece[]>([]);
   const piecesState = pieces;
@@ -285,7 +295,7 @@ export default function KoreanModePanel({
         let regions = json.regions ?? [];
         const map = regions.length ? inkMapFromImage(source.img, source.width, source.height) : null;
         if (map) {
-          const res = snapBoxes(map, regions.map((r) => r.box), kind === "question" ? passagesHere : []);
+          const res = snapRegions(map, regions.map((r) => r.box), kind === "question" ? passagesHere : []);
           snappedRef.current += res.changed;
           regions = regions.map((r, i) => ({ ...r, box: res.boxes[i] }));
         }
@@ -318,14 +328,18 @@ export default function KoreanModePanel({
       // 읽는 차례로 늘어놓는다 — 모델이 순서를 지키지 않는 경우가 있는데,
       // 잡은 차례가 곧 문제 차례다.
       const found = [...((kind === "passage" ? d.passages : d.questions) ?? [])].sort(byOrder);
-      const boxes: EditBox[] = found.map((r) => ({
+      const boxes: EditBox[] = found.map((r) => {
+        const g = kind === "passage" ? PASSAGE_GROUP : crypto.randomUUID();
+        if (kind === "question" && r.no != null) noByGroupRef.current.set(g, r.no);
+        return {
         id: crypto.randomUUID(),
         ...r.box,
         // 지문은 그린 것이 전부 한 덩어리다. 문제는 조각마다 따로 잡고
         // 이어진 것만 사용자가 묶는다 — 자동으로 묶으면 서로 다른 문항을
         // 하나로 삼켜 문제가 사라진다(지면 분할에서 실제로 겪은 사고다).
-        group: kind === "passage" ? PASSAGE_GROUP : crypto.randomUUID(),
-      }));
+        group: g,
+        };
+      });
       if (kind === "passage") {
         const figs = [...(d.figures ?? [])]
           .map((box) => ({ box }))
@@ -511,6 +525,7 @@ export default function KoreanModePanel({
           kind: "question",
           crop: await stitchVertically(parts),
           parts: parts.length,
+          no: noByGroupRef.current.get(g.group) ?? null,
         });
       }
 
@@ -629,6 +644,14 @@ export default function KoreanModePanel({
             ...(korean ? { korean } : {}),
           },
         });
+
+        // 번호는 luna 가 영역을 찾으며 읽은 것을 쓴다(지면 자르기와 같다). 없을 때만 Mathpix 로 읽는다.
+        if (piece.kind === "question") {
+          void (async () => {
+            const n = piece.no != null ? piece.no : await readNumberWithMathpix(piece.crop);
+            if (n != null) await attachNumberAndAnswer(problemId, n, answerByNumber).catch(() => null);
+          })();
+        }
 
         // 지문은 **글자로 옮기는** 작업으로 넣는다(이미지 생성이 아니다).
         if (regenerate && !noPassage && !opts?.loose && piece.kind === "passage") {
@@ -751,7 +774,7 @@ export default function KoreanModePanel({
       }
       const snap = (boxes: ProblemBox[], avoid: ProblemBox[]) => {
         if (!map || boxes.length === 0) return boxes;
-        const res = snapBoxes(map, boxes, avoid);
+        const res = snapRegions(map, boxes, avoid);
         snappedRef.current += res.changed;
         return res.boxes;
       };
@@ -871,6 +894,7 @@ export default function KoreanModePanel({
           g = groupOf.get(q.no) ?? crypto.randomUUID();
           groupOf.set(q.no, g);
         } else g = crypto.randomUUID();
+        if (q.no !== null) noByGroupRef.current.set(g, q.no);
         (question[q.pageId] ??= []).push(mk(q.box, g));
       }
       for (const id of [...Object.keys(passage), ...Object.keys(question)]) used.add(id);

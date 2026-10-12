@@ -274,6 +274,14 @@ const PAGE_BOX_PAD: [number, number, number, number] = (() => {
   return Number.isFinite(v) && v >= 0 && v <= 0.05 ? [v, v, v, v] : DEFAULT_PAD;
 })();
 
+/** 국어 지문·문제 자리에도 지면 자르기와 같은 사방 보정을 준다. */
+function padKoreanBox(b: ProblemBox): ProblemBox {
+  const [pt, pb, pl, pr] = PAGE_BOX_PAD;
+  const x0 = Math.max(0, b.x - pl), y0 = Math.max(0, b.y - pt);
+  const x1 = Math.min(1, b.x + b.w + pr), y1 = Math.min(1, b.y + b.h + pb);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
 function padBoxes(list: DetectedProblem[]): DetectedProblem[] {
   const [pt, pb, pl, pr] = PAGE_BOX_PAD;
   if (!pt && !pb && !pl && !pr) return list;
@@ -612,7 +620,7 @@ export function parseKoreanPassages(text: string): DetectedKoreanPassages {
     if (box) {
       passages.push({
         kind: "passage",
-        box,
+        box: padKoreanBox(box),
         set: 0,
         no: null,
         range: parseNumberRange((row as { range?: unknown })?.range),
@@ -637,7 +645,7 @@ export function parseKoreanQuestions(text: string): DetectedKoreanRegion[] {
     const box = toBox(r.box_2d);
     if (!box) continue;
     const no = Number(String(r.no ?? "").replace(/[^\d]/g, ""));
-    out.push({ kind: "question", box, set: 0, no: Number.isFinite(no) && no > 0 ? no : null });
+    out.push({ kind: "question", box: padKoreanBox(box), set: 0, no: Number.isFinite(no) && no > 0 ? no : null });
   }
   if (out.length === 0) throw new DetectError("문제를 찾지 못했습니다.", 502);
   return out;
