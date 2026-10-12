@@ -1527,6 +1527,19 @@ export default function KoreanModePanel({
                   />
                 );
               })}
+              {pages.some((pg) => !(pg.id in recut.boxes)) && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (id) setRecut((r) => (r ? { ...r, boxes: { ...r.boxes, [id]: [] } } : r));
+                  }}
+                  className="w-full rounded border border-slate-300 text-sm"
+                >
+                  <option value="">다른 쪽(사진)에서도 가져오기…</option>
+                  {pages.map((pg, i) => !(pg.id in recut.boxes) && <option key={pg.id} value={pg.id}>{i + 1}번째 사진</option>)}
+                </select>
+              )}
               <div className="flex gap-2">
                 <Button type="button" variant="primary" onClick={() => void applyRecut()} disabled={busy !== null}>
                   {busy ?? "이 자리로 다시 자르기"}

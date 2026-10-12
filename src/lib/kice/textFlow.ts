@@ -238,8 +238,10 @@ export function flowBlocks(
   columns: FlowColumn[],
   measure: Measure,
   style: FlowStyle = DEFAULT_FLOW_STYLE,
-): { results: FlowResult[]; rest: RichBlock[] } {
+): { results: FlowResult[]; rest: RichBlock[]; ends: number[] } {
   const results: FlowResult[] = columns.map((_, i) => ({ column: i, items: [] }));
+  /** 단마다 글이 끝난 세로 자리(아무것도 안 놓인 단은 그 단의 top). 지문 아래 남는 자리를 재는 데 쓴다. */
+  const ends: number[] = columns.map((c) => c.top);
   const step = style.size * style.lineHeight;
 
   let col = 0;
@@ -253,6 +255,7 @@ export function flowBlocks(
 
   /** 다음 단으로 넘어간다. 더 없으면 false. */
   const nextColumn = (): boolean => {
+    ends[col] = Math.max(columns[col].top, y - style.paraGap);
     col += 1;
     if (col >= columns.length) return false;
     y = columns[col].top + topPad;
@@ -442,6 +445,7 @@ export function flowBlocks(
     queue.shift();
   }
   if (queue.length > 0 && rest.length === 0) rest.push(...queue);
+  if (col < columns.length) ends[col] = Math.max(columns[col].top, y - style.paraGap);
 
-  return { results, rest };
+  return { results, rest, ends };
 }

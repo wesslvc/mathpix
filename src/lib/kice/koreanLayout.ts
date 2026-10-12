@@ -37,6 +37,11 @@ export type KoreanPage =
   | { kind: "questions"; indexes: number[] }
   /** 한 쪽에 왼쪽 단 지문 · 오른쪽 단 문제. */
   | { kind: "spread"; passage: KoreanPassage; indexes: number[] }
+  /**
+   * 지문을 두 단에 다 싣고, **지문 아래 남는 자리**(`fills[0]` 왼쪽 단 · `fills[1]` 오른쪽 단)에
+   * 문제를 앞에서부터 채운 쪽(2026-10-12, 사용자 요청). 못 들어간 문제는 다음 쪽에 이어진다.
+   */
+  | { kind: "passageFill"; passage: KoreanPassage; fills: [number[], number[]] }
   /** 짝홀을 맞추려고 넣는 빈 쪽(머리말·쪽번호만). */
   | { kind: "blank" };
 
@@ -45,6 +50,13 @@ export type KoreanFit = {
   passageFitsColumn: (passage: KoreanPassage, pageNo: number) => boolean;
   /** 이 문제들이 `pageNo` 쪽의 한 단에 (충분한 크기로) 다 들어가는가. */
   questionsFitColumn: (indexes: number[], pageNo: number) => boolean;
+  /**
+   * 지문을 `pageNo` 쪽 두 단에 싣고 난 뒤 단마다 남는 높이(pt, [왼쪽, 오른쪽]).
+   * 없으면 남는 자리에 문제를 채우지 않는다(예전 동작).
+   */
+  passageRooms?: (passage: KoreanPassage, pageNo: number) => [number, number];
+  /** 이 문제들이 높이 `avail`(pt) 인 한 칸에 (충분한 크기로) 다 들어가는가. */
+  questionsFitHeight?: (indexes: number[], avail: number) => boolean;
 };
 
 /** 지문 한 편을 통째로(두 단에) 싣는 쪽. */
@@ -87,8 +99,24 @@ export function planKoreanPages(
       // 두 쪽짜리 — 지문은 반드시 짝수 쪽(펼친 면의 왼쪽)에.
       if (next % 2 === 1) pages.push({ kind: "blank" });
       from = pages.length + 1;
-      pages.push(passagePage(set.passage!));
-      pages.push({ kind: "questions", indexes: set.questions });
+      // 지문 아래 남는 자리가 있으면 문제를 앞에서부터 거기에 채운다.
+      let rest = set.questions;
+      const fills: [number[], number[]] = [[], []];
+      const rooms = fit.passageRooms && fit.questionsFitHeight ? fit.passageRooms(set.passage!, from) : null;
+      if (rooms && fit.questionsFitHeight) {
+        for (const c of [0, 1] as const) {
+          let k = 0;
+          while (k < rest.length && fit.questionsFitHeight(rest.slice(0, k + 1), rooms[c])) k++;
+          fills[c] = rest.slice(0, k);
+          rest = rest.slice(k);
+        }
+      }
+      if (fills[0].length + fills[1].length > 0) {
+        pages.push({ kind: "passageFill", passage: set.passage!, fills });
+      } else {
+        pages.push(passagePage(set.passage!));
+      }
+      if (rest.length > 0) pages.push({ kind: "questions", indexes: rest });
     }
     toc.push(tocLine(from, pages.length, set.source, set.title || "지문"));
   }

@@ -898,6 +898,29 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     }
   }
 
+  /** 따로 넣은 문제를 국어 지문 세트에 묶는다(setId 가 빈 문자열이면 묶음을 푼다). */
+  async function bindToPassage(problem: GalleryProblem, setId: string) {
+    setBusyId(problem.id);
+    try {
+      const { data, error } = await createClient().rpc("set_problem_korean", {
+        p_id: problem.id,
+        p_set_id: setId || null,
+      });
+      if (error) throw error;
+      if (data === false) throw new Error("이 문제는 묶음을 바꿀 수 없어요.");
+      setList((cur) =>
+        cur.map((p) =>
+          p.id === problem.id ? { ...p, korean: setId ? { setId, role: "question" as const } : null } : p,
+        ),
+      );
+      router.refresh();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "지문에 묶지 못했어요.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   function openEdit(problem: GalleryProblem) {
     editingRef.current = problem;
     setEditing(problem);
@@ -1262,6 +1285,25 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         >
           {busyId === problem.id ? "짓는 중…" : "제목 인식"}
         </Button>
+      )}
+      {/* 따로 넣은 문제를 지문에 묶는다 — 내보낼 때 지문 세트로 함께 조판된다. */}
+      {problem.korean?.role !== "passage" && list.some((p) => p.korean?.role === "passage") && (
+        <select
+          value={problem.korean?.setId ?? ""}
+          disabled={busyId === problem.id}
+          onChange={(e) => void bindToPassage(problem, e.target.value)}
+          className="max-w-[9rem] shrink-0 rounded border border-slate-300 text-xs"
+          title="이 문제가 딸린 지문을 고르세요"
+        >
+          <option value="">지문 없음</option>
+          {list
+            .filter((p) => p.korean?.role === "passage")
+            .map((p) => (
+              <option key={p.id} value={p.korean!.setId}>
+                {p.korean!.title || "제목 없는 지문"}
+              </option>
+            ))}
+        </select>
       )}
       {/* **PDF로 안 묶고 그림 하나만** 받고 싶을 때. `/api/card`가 같은
           출처(same-origin)라 `download` 속성이 그대로 먹는다 — 새 탭으로

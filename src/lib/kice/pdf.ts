@@ -585,6 +585,13 @@ function columnScale(items: Shot[], avail: number): number {
  */
 const MIN_SPREAD_SCALE = 0.9;
 
+/** 이 문제들을 줄이지 않고 한 단에 쌓을 때 필요한 높이(출처 표기·사이 간격 포함). */
+function naturalHeight(items: Shot[]): number {
+  const heads = items.reduce((a, it) => a + (it.label ? LABEL_SIZE + LABEL_GAP : 0), 0);
+  const sum = items.reduce((a, it) => a + it.img.height * Math.min(LAYOUT.columnWidth / it.img.width, 1), 0);
+  return heads + sum + LAYOUT.gap * Math.max(items.length - 1, 0);
+}
+
 /**
  * **한 쪽에 지문과 문제를 나란히** — 왼쪽 단 지문, 오른쪽 단 문제.
  * 글자 지문은 여기서 자리만 비워 두고 그리는 쪽이 왼쪽 단에 흘려 넣는다.
@@ -998,6 +1005,37 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     }));
   };
 
+  /** 지문을 두 단에 싣고 난 뒤 단마다 글이 끝난 세로 자리(절대 좌표). 아무것도 안 놓인 단은 그 단의 맨 위. */
+  const passageEnds = (p: KoreanPassage, pageNo: number): [number, number] => {
+    const cols = columnsOf(pageNo, [0, 1]);
+    if (p.kind === "text") {
+      const f = flowBlocks(framePassage(p.blocks), cols, measure, DEFAULT_FLOW_STYLE);
+      // 다 안 들어가면 남는 자리가 없다.
+      if (f.rest.length > 0) return [cols[0].bottom, cols[1].bottom];
+      return [f.ends[0], f.ends[1]];
+    }
+    const img = images[p.index]?.img;
+    if (!img) return [cols[0].bottom, cols[1].bottom];
+    const colW = LAYOUT.columnWidth;
+    const colH = cols[0].bottom - cols[0].top;
+    if (p.splitAt == null || p.splitAt <= 0 || p.splitAt >= 1) {
+      const k = Math.min(colW / img.width, colH / img.height);
+      return [cols[0].top + img.height * k, cols[1].top];
+    }
+    const k = Math.min(colW / img.width, colH / (img.height * p.splitAt), colH / (img.height * (1 - p.splitAt)));
+    const full = img.height * k;
+    return [cols[0].top + full * p.splitAt, cols[1].top + full * (1 - p.splitAt)];
+  };
+  /** 지문 끝에서 남는 칸에 문제를 놓기 시작할 세로 자리. 비어 있던 단이면 단 맨 위. */
+  const FILL_GAP = LAYOUT.gap * 2;
+  const roomOf = (ends: [number, number], pageNo: number): [number, number] => {
+    const cols = columnsOf(pageNo, [0, 1]);
+    return [0, 1].map((c) => {
+      const empty = ends[c] <= cols[c].top + 0.5;
+      return Math.max(0, cols[c].bottom - (empty ? cols[c].top : ends[c] + FILL_GAP));
+    }) as [number, number];
+  };
+
   const plan: KiceSpec["koreanPlan"] = spec.koreanSets
     ? planKoreanPages(spec.koreanSets.sets, spec.koreanSets.loose, {
         passageFitsColumn: (p, pageNo) => {
@@ -1011,6 +1049,9 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
           // `passageSplitAt` 과 같은 식 — 단 폭에 맞췄을 때의 높이.
           return (img.height * LAYOUT.columnWidth) / img.width <= col.bottom - col.top;
         },
+        passageRooms: (p, pageNo) => roomOf(passageEnds(p, pageNo), pageNo),
+        questionsFitHeight: (indexes, avail) =>
+          avail > 40 && columnScale(indexes.map((i) => images[i]), avail) >= MIN_SPREAD_SCALE,
         questionsFitColumn: (indexes, pageNo) => {
           const col = columnsOf(pageNo, [1])[0];
           return columnScale(indexes.map((i) => images[i]), col.bottom - col.top) >= MIN_SPREAD_SCALE;
@@ -1031,6 +1072,24 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
             return layoutSpread(p.passage, p.indexes.map((i) => images[i]), images, spec.frames, n + 1);
           case "questions":
             return layoutOnePage(p.indexes.map((i) => images[i]), spec.frames, n + 1);
+          case "passageFill": {
+            const pageNo = n + 1;
+            const base =
+              p.passage.kind === "image"
+                ? layoutPassage(images[p.passage.index], spec.frames, pageNo, p.passage.splitAt).items
+                : [];
+            const ends = passageEnds(p.passage, pageNo);
+            const cols = columnsOf(pageNo, [0, 1]);
+            const extra = ([0, 1] as const).flatMap((c) => {
+              if (!p.fills[c].length) return [];
+              const top = ends[c] <= cols[c].top + 0.5 ? cols[c].top : ends[c] + FILL_GAP;
+              const shots = p.fills[c].map((i) => images[i]);
+              // 남는 자리에 문제를 붙여 둔다(단을 꽉 채우려고 사이를 벌리지 않는다).
+              const bottom = Math.min(cols[c].bottom, top + naturalHeight(shots));
+              return fitColumn(shots, cols[c].x, top, bottom);
+            });
+            return { items: [...base, ...extra] };
+          }
         }
       })
     : spec.pagePattern === "auto"
@@ -1126,9 +1185,11 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     const textPassage =
       planned?.kind === "passageText"
         ? { blocks: planned.blocks, cols: [0, 1] }
-        : planned?.kind === "spread" && planned.passage.kind === "text"
-          ? { blocks: planned.passage.blocks, cols: [0] }
-          : null;
+        : planned?.kind === "passageFill" && planned.passage.kind === "text"
+          ? { blocks: planned.passage.blocks, cols: [0, 1] }
+          : planned?.kind === "spread" && planned.passage.kind === "text"
+            ? { blocks: planned.passage.blocks, cols: [0] }
+            : null;
     if (textPassage) {
       // 안내 줄([N~M] …)만 밖에 두고 지문 본문을 상자 하나로 두른다.
       const flowed = flowBlocks(
@@ -1406,7 +1467,7 @@ type OldHangulFont = {
 /** 지문(글자 조판)에 옛한글이 있는지 — 있을 때만 글꼴을 받는다. */
 function specHasOldHangul(spec: KiceSpec): boolean {
   const blocks: unknown[] = [];
-  for (const p of spec.koreanPlan?.pages ?? []) if (p.kind === "passageText" || p.kind === "spread") blocks.push(p);
+  for (const p of spec.koreanPlan?.pages ?? []) if (p.kind === "passageText" || p.kind === "spread" || p.kind === "passageFill") blocks.push(p);
   for (const s of spec.koreanSets?.sets ?? []) blocks.push(s.passage);
   return blocks.length > 0 && hasOldHangul(JSON.stringify(blocks));
 }
