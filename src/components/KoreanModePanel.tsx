@@ -145,7 +145,15 @@ export default function KoreanModePanel({
   /** 자동으로 자른 세트들 — 사용자가 확인하기 전에는 저장하지 않는다. */
   const [staged, setStaged] = useState<StagedSet[] | null>(null);
   /** 다시 자르기 중인 조각 — AI 가 자른 자리를 바탕으로 사람이 고친다. */
-  const [recut, setRecut] = useState<{ si: number; pid: string; kind: "passage" | "question"; boxes: Record<string, EditBox[]> } | null>(null);
+  const [recut, setRecut] = useState<{
+    si: number;
+    /** null 이면 새로 잡는 것(추가로 잡기) — 기존 조각을 바꾸지 않고 세트에 더한다. */
+    pid: string | null;
+    kind: "passage" | "question";
+    boxes: Record<string, EditBox[]>;
+    /** 새로 잡는 문항의 묶음 id(그린 네모가 한 문항으로 이어 붙는다). */
+    group?: string;
+  } | null>(null);
   const [pages, setPages] = useState<Page[]>([]);
   /** 쪽(사진) id → 그 쪽에 그린 네모들. */
   const [passageBoxes, setPassageBoxes] = useState<Record<string, EditBox[]>>({});
@@ -961,8 +969,17 @@ export default function KoreanModePanel({
     setRecut({ si, pid: p.id, kind: p.kind, boxes });
   }
 
+  /** 추가로 잡기 — AI 가 놓친 지문·문항을 모든 쪽을 보며 직접 그려 세트에 더한다. */
+  function startAdd(si: number, kind: "passage" | "question") {
+    setRecut({ si, pid: null, kind, boxes: {}, group: crypto.randomUUID() });
+  }
+
   async function applyRecut() {
     if (!recut) return;
+    if (Object.values(recut.boxes).every((b) => b.length === 0)) {
+      setError("그린 자리가 없어요. 쪽을 골라 네모를 그려 주세요.");
+      return;
+    }
     const pgs = pages.filter((pg) => (recut.boxes[pg.id] ?? []).length > 0);
     const cut = await cutAll(
       recut.kind === "passage"
@@ -976,9 +993,14 @@ export default function KoreanModePanel({
     }
     setStaged((prev) =>
       prev
-        ? prev.map((d, k) =>
-            k === recut.si ? { ...d, pieces: d.pieces.map((p) => (p.id === recut.pid ? np : p)) } : d,
-          )
+        ? prev.map((d, k) => {
+            if (k !== recut.si) return d;
+            if (recut.pid === null) {
+              // 새로 더한다: 지문은 맨 앞, 문항은 맨 뒤.
+              return { ...d, pieces: recut.kind === "passage" ? [np, ...d.pieces] : [...d.pieces, np] };
+            }
+            return { ...d, pieces: d.pieces.map((p) => (p.id === recut.pid ? np : p)) };
+          })
         : prev,
     );
     setRecut(null);
@@ -1469,6 +1491,14 @@ export default function KoreanModePanel({
                 >
                   이 세트 빼기
                 </button>
+                <button type="button" onClick={() => startAdd(si, "question")} className="text-blue-600 hover:underline">
+                  + 문항 추가로 잡기
+                </button>
+                {!d.loose && !d.pieces.some((p) => p.kind === "passage") && (
+                  <button type="button" onClick={() => startAdd(si, "passage")} className="text-emerald-700 hover:underline">
+                    + 지문 추가로 잡기
+                  </button>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {d.pieces.map((p, i) => (
@@ -1507,12 +1537,12 @@ export default function KoreanModePanel({
           {recut && (
             <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-white p-2">
               <p className="text-sm text-slate-600">
-                AI 가 자른 자리예요. 네모를 끌어 옮기거나 모서리로 크기를 고치고, 빈 곳을 끌어 조각을 더 그릴 수 있어요(지문은 그린 것 전부가, 문제는 이 문항의 조각이 이어 붙어요).
+                {recut.pid === null ? "AI 가 놓친 것을 직접 그려 더해요. 아래에서 쪽을 켜고 네모를 그리세요." : "AI 가 자른 자리예요."} 네모를 끌어 옮기거나 모서리로 크기를 고치고, 빈 곳을 끌어 조각을 더 그릴 수 있어요(지문은 그린 것 전부가, 문제는 이 문항의 조각이 이어 붙어요).
               </p>
               {Object.keys(recut.boxes).map((pid) => {
                 const pg = pages.find((x) => x.id === pid);
                 if (!pg) return null;
-                const gid = recut.kind === "question" ? recut.boxes[pid][0]?.group : undefined;
+                const gid = recut.kind === "question" ? recut.group ?? recut.boxes[pid][0]?.group : undefined;
                 return (
                   <BoxEditor
                     key={pid}
@@ -1522,24 +1552,41 @@ export default function KoreanModePanel({
                     onChange={(next) => setRecut((r) => (r ? { ...r, boxes: { ...r.boxes, [pid]: next } } : r))}
                     color={recut.kind === "passage" ? "#059669" : "#2563eb"}
                     colorOf={recut.kind === "passage" ? (g) => (g === FIGURE_GROUP ? "#f97316" : "#059669") : undefined}
-                    newGroup={recut.kind === "passage" ? PASSAGE_GROUP : gid ?? Object.values(recut.boxes).flat()[0]?.group}
+                    newGroup={recut.kind === "passage" ? PASSAGE_GROUP : gid ?? Object.values(recut.boxes).flat()[0]?.group ?? recut.group}
                     labelOf={() => (recut.kind === "passage" ? "지문" : "문항")}
                   />
                 );
               })}
-              {pages.some((pg) => !(pg.id in recut.boxes)) && (
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    if (id) setRecut((r) => (r ? { ...r, boxes: { ...r.boxes, [id]: [] } } : r));
-                  }}
-                  className="w-full rounded border border-slate-300 text-sm"
-                >
-                  <option value="">다른 쪽(사진)에서도 가져오기…</option>
-                  {pages.map((pg, i) => !(pg.id in recut.boxes) && <option key={pg.id} value={pg.id}>{i + 1}번째 사진</option>)}
-                </select>
-              )}
+              <div className="flex flex-col gap-1">
+                <p className="text-xs text-slate-500">
+                  쪽을 눌러 켜면 그 사진에서 직접 자를 수 있어요(여러 쪽 선택 가능). 켠 쪽에 네모를 안 그리면 무시돼요.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {pages.map((pg, i) => {
+                    const on = pg.id in recut.boxes;
+                    return (
+                      <button
+                        key={pg.id}
+                        type="button"
+                        onClick={() =>
+                          setRecut((r) => {
+                            if (!r) return r;
+                            const next = { ...r.boxes };
+                            if (pg.id in next) delete next[pg.id];
+                            else next[pg.id] = [];
+                            return { ...r, boxes: next };
+                          })
+                        }
+                        className={`flex flex-col items-center rounded border p-1 text-xs ${on ? "border-blue-500 bg-blue-50" : "border-slate-300"}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={pg.dataUrl} alt="" className="h-16 w-12 object-contain" />
+                        {i + 1}번째 사진{on && ` · ${recut.boxes[pg.id].length}칸`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="flex gap-2">
                 <Button type="button" variant="primary" onClick={() => void applyRecut()} disabled={busy !== null}>
                   {busy ?? "이 자리로 다시 자르기"}
