@@ -293,7 +293,7 @@ export default async function CategoryPage({
           </div>
         </div>
         <Link href={`/export?ids=${category.id}`} className={buttonVariants({ variant: "primary", className: "shrink-0 self-start" })}>
-          PDF 만들기
+          내보내기 (PDF·ZIP)
         </Link>
       </header>
 

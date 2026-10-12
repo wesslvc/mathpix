@@ -12,7 +12,7 @@ import {
   type KiceArea,
 } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
-import { stripCardBorder } from "@/lib/kice/stripBorder";
+import { loadPng } from "@/lib/kice/loadPng";
 import { KICE_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
 import { groupKoreanSets, type KoreanMeta } from "@/lib/koreanSet";
 import type { KoreanPassage, KoreanSetIn } from "@/lib/kice/koreanLayout";
@@ -96,16 +96,6 @@ type Props = {
   title: string;
   items: KiceItem[];
 };
-
-async function loadPng(url: string): Promise<Uint8Array> {
-  // 카드 주소는 그림을 고칠 때마다 새로 생기므로(내용이 안 바뀐다) 브라우저 캐시를 그대로 쓴다 — 예전엔 no-store 라 PDF 를
-  // 만들 때마다 문제 그림을 전부 다시 받았다.
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`이미지를 불러오지 못했습니다 (HTTP ${res.status}).`);
-  // 예전에 저장된 문제에는 카드 테두리가 구워져 있다. 실제 문제지에는 없는
-  // 네모라서 여기서 지운다.
-  return stripCardBorder(new Uint8Array(await res.arrayBuffer()));
-}
 
 export default function KiceExportPanel({ title, items }: Props) {
   // 국어 세트로 넣은 문제가 있으면 국어로 뽑으려는 것이 분명하다.

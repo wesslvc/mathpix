@@ -348,7 +348,7 @@ export default function CategoryList({
               : "border-slate-300 bg-white text-ink hover:bg-slate-50"
           }`}
         >
-          {picking ? "선택 끝내기" : "선택해서 PDF"}
+          {picking ? "선택 끝내기" : "선택해서 내보내기"}
         </button>
       </div>
 
@@ -358,7 +358,7 @@ export default function CategoryList({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-xs text-blue-800">
               {resolvedIds.size === 0
-                ? "PDF로 묶을 실모를 골라주세요."
+                ? "PDF·ZIP으로 내보낼 실모를 골라주세요."
                 : selectedFolders.size > 0
                   ? `${resolvedIds.size}개 선택됨(폴더 ${selectedFolders.size}개 포함)`
                   : `${resolvedIds.size}개 선택됨`}
@@ -389,7 +389,7 @@ export default function CategoryList({
             disabled={resolvedIds.size === 0}
             variant="primary" size="sm"
  >
-            PDF 만들기
+            내보내기
           </Button>
         </div>
       )}

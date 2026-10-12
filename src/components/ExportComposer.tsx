@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { KoreanMeta } from "@/lib/koreanSet";
+import type { ZipItem } from "@/lib/zipExport";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -19,6 +20,11 @@ import { Card } from "@/components/ui/card";
 const KiceExportPanel = dynamic(() => import("./KiceExportPanel"), {
   ssr: false,
   loading: () => <p className="text-sm text-slate-500">평가원 양식 준비 중...</p>,
+});
+
+const ZipExportPanel = dynamic(() => import("./ZipExportPanel"), {
+  ssr: false,
+  loading: () => <p className="text-sm text-slate-500">ZIP 내보내기 준비 중...</p>,
 });
 
 export type ComposerProblem = {
@@ -304,6 +310,25 @@ export default function ExportComposer({
           정답표에 내가 고른 답도 같이 찍기 (예: ④ (내답 ②))
         </label>
       )}
+
+      <ZipExportPanel
+        title={title}
+        items={order.map((problem, index): ZipItem => {
+          // 정답표와 달리 **원래 번호**를 쓴다(손으로 정한 값 → 본문에서 뽑은 값). 둘 다 없으면 번호 없이 차례만 쓴다.
+          // 틀린 답은 켜고 끄는 체크와 상관없이 CSV 에는 늘 담는다 — 파일로 받는 쪽은 숨길 이유가 없다.
+          const { answer, picked } = answerParts(problem, true);
+          return {
+            id: problem.id,
+            imageUrl: problem.imageUrl,
+            source: problem.source,
+            number: problem.manualNumber ?? problem.origNumber ?? (multi ? null : index + 1),
+            answer,
+            picked,
+            passage: problem.korean?.role === "passage",
+            passageTitle: problem.korean?.title,
+          };
+        })}
+      />
 
       <KiceExportPanel
         title={title}

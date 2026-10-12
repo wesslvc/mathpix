@@ -248,7 +248,7 @@ export default async function ExportPage({
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 pt-6">
       <header>
-        <h1 className="mt-1 text-2xl font-bold text-ink">PDF 만들기</h1>
+        <h1 className="mt-1 text-2xl font-bold text-ink">내보내기 (PDF · ZIP)</h1>
         <p className="text-sm text-slate-500">
           실모 {idList.length}개 · 문제 {composerProblems.length}개
         </p>
