@@ -612,6 +612,31 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   }
 
   /**
+   * **다시 인식하기 — 서버 대기열에 넣고 끝**(2026-10-12, 사용자 — "여러 개 다시 인식하고 싶을 수 있잖아").
+   * 예전에는 이 창에서 기다리며 한 번에 하나만 됐다. 지금은 누를 때마다 작업이 하나씩 쌓이고(문제 행 하나에 쓰는
+   * 작업은 서버가 차례로 돌린다) 끝나면 서버가 그 행의 지문 글자를 직접 갈아 끼운다 — 창을 닫거나 다른 지문을
+   * 열어 또 눌러도 된다. 결과 확인은 대기열 패널·목록에서.
+   */
+  function queuePassageReread(crop: string) {
+    if (!editing) return;
+    setEditError(null);
+    enqueue({
+      id: `reread:${editing.id}:${Date.now().toString(36)}`,
+      problemKey: `korean:${editing.id}`,
+      label: `지문 다시 인식${editing.korean?.title ? ` · ${editing.korean.title}` : ""}`,
+      crop,
+      mode: "passage",
+      passageFigures: existingPassageFigures(editKoreanBlocks ?? editing.korean?.blocks),
+      korean: true,
+      problemId: editing.id,
+    });
+    setPassageStatus({
+      state: "done",
+      marksNote: "대기열에 넣었어요 — 끝나면 저절로 이 지문에 반영돼요. 또 눌러도 됩니다.",
+    });
+  }
+
+  /**
    * **sol 이 문제 한 장을 글자로 옮겨 적고, 우리가 조판한다**(수정 창 전용, 서버 대기열 task `typeset`).
    *
    * 이미지 생성은 글자를 틀리고 틀린 글자를 고칠 길이 없다. 옮겨 적은 글은 우리 인식 경로(`renderMathText` · KaTeX ·
@@ -1795,8 +1820,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                             <div className="flex flex-wrap items-center gap-1.5">
                               <Button
                                 type="button"
-                                onClick={() => reReadPassage(f.origin ?? raster)}
-                                disabled={passageBusy}
+                                onClick={() => queuePassageReread(f.origin ?? raster)}
                                 variant="outline" size="xs"
                               >
                                 다시 인식하기
