@@ -967,10 +967,24 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   // 한다** — 어긋나면 "한 단에 들어간다"고 판단한 지문이 넘쳐 잘린다.
   const body = await fontForText(BODY_FONT, "");
   const oldHangul = await loadOldHangul(spec);
+  let bodyCover: Set<number> | null = null;
   const measure = (t: string, size: number, bold: boolean) => {
     let w = 0;
     for (const run of oldHangul ? oldHangulRuns(t) : [{ t, old: false }]) {
-      w += run.old ? oldHangul!.width(run.t, size) : body.font.widthOfTextAtSize(run.t, size);
+      if (run.old) {
+        w += oldHangul!.width(run.t, size);
+        continue;
+      }
+      if (CIRCLED_LATIN.test(run.t)) {
+        const cover = bodyCover ?? (bodyCover = new Set(body.font.getCharacterSet()));
+        for (const ch of run.t) {
+          w += CIRCLED_LATIN.test(ch) && !cover.has(ch.codePointAt(0)!)
+            ? size * CIRCLED_ADVANCE
+            : body.font.widthOfTextAtSize(ch, size);
+        }
+        continue;
+      }
+      w += body.font.widthOfTextAtSize(run.t, size);
     }
     return w * (bold ? 1.02 : 1);
   };
@@ -1194,6 +1208,37 @@ const NUMBER_GROW = 1.6;
  * **밑줄은 직접 긋는다.** `밑줄 친 ㉠` 처럼 문제가 가리키는 자리라 빠지면
  * 문제가 성립하지 않는다.
  */
+/** 원문자 라틴(Ⓐ~Ⓩ ⓐ~ⓩ). 글꼴에 없으면 동그라미 + 글자로 직접 그린다. */
+const CIRCLED_LATIN = /[\u24b6-\u24e9]/;
+const circledLatinInner = (ch: string) => {
+  const c = ch.codePointAt(0)!;
+  return c <= 0x24cf ? String.fromCodePoint(0x41 + c - 0x24b6) : String.fromCodePoint(0x61 + c - 0x24d0);
+};
+/** 직접 그린 원문자의 폭(글자 크기 배). */
+const CIRCLED_ADVANCE = 1.0;
+
+/** 동그라미 안에 라틴 글자 하나. 글꼴에 원문자가 없을 때만 쓴다. */
+function drawCircledLatin(
+  page: PDFPage,
+  ch: string,
+  x: number,
+  baseline: number,
+  size: number,
+  font: PDFFont,
+  bold: boolean,
+) {
+  const inner = circledLatinInner(ch);
+  const d = size * 0.86;
+  const cx = x + (size * CIRCLED_ADVANCE) / 2;
+  const cy = baseline + size * 0.32;
+  page.drawCircle({ x: cx, y: cy, size: d / 2, borderWidth: 0.6, borderColor: rgb(0, 0, 0) });
+  const fs = size * 0.58;
+  const w = font.widthOfTextAtSize(inner, fs);
+  for (const dx of bold ? [0, size * 0.03] : [0]) {
+    page.drawText(inner, { x: cx - w / 2 + dx, y: cy - fs * 0.34, size: fs, font, color: rgb(0, 0, 0) });
+  }
+}
+
 async function drawFlow(
   page: PDFPage,
   items: FlowItem[],
@@ -1243,6 +1288,28 @@ async function drawFlow(
           // 굵게 흉내 — 아주 조금 어긋나게 한 번 더.
           if (piece.b) oldHangul!.draw(page, run.t, rx + it.size * 0.035, baseline, it.size);
           rx += w * (piece.b ? 1.02 : 1);
+          continue;
+        }
+        // 글꼴에 없는 원문자 라틴은 직접 그린다.
+        if (CIRCLED_LATIN.test(run.t)) {
+          const bodyFont = (await fontForText(BODY_FONT, "")).font;
+          const cover = new Set(bodyFont.getCharacterSet());
+          for (const part of run.t.split(/([\u24b6-\u24e9])/)) {
+            if (!part) continue;
+            if (CIRCLED_LATIN.test(part) && !cover.has(part.codePointAt(0)!)) {
+              drawCircledLatin(page, part, rx, baseline, it.size, bodyFont, !!piece.b);
+              rx += it.size * CIRCLED_ADVANCE;
+              continue;
+            }
+            const pk = await fontForText(BODY_FONT, part);
+            if (pk.text.trim()) {
+              page.drawText(pk.text, { x: rx, y: baseline, size: it.size, font: pk.font, color: rgb(0, 0, 0) });
+              if (piece.b) {
+                page.drawText(pk.text, { x: rx + it.size * 0.035, y: baseline, size: it.size, font: pk.font, color: rgb(0, 0, 0) });
+              }
+            }
+            rx += pk.font.widthOfTextAtSize(part, it.size) * (piece.b ? 1.02 : 1);
+          }
           continue;
         }
         const picked = await fontForText(BODY_FONT, run.t);
