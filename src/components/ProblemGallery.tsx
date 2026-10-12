@@ -724,7 +724,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     const markup = await rasterToSvg(crop);
     if (target?.mode === "recrop") {
       // 다시 오려낸 것은 **원본 픽셀**이므로 AI 표시를 떼어 다시 그릴 수 있게 한다.
-      updateFigure(target.id, { markup, ai: false });
+      updateFigure(target.id, { markup, ai: false, ...(isPassage ? { origin: undefined, originAt: undefined } : {}) });
     } else if (cardFigures.some((f) => !f.overlay)) {
       // 붙일 그림이 이미 있으면 **어떻게 붙일지** 먼저 묻는다(따로 · 나란히 · 위에 덧붙이기).
       const first = cardFigures.find((f) => !f.overlay && f.kind !== "table") ?? cardFigures.find((f) => !f.overlay);
@@ -1759,11 +1759,19 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                               >
                                 다시 인식하기
                               </Button>
+                              <Button
+                                type="button"
+                                onClick={() => setCropTarget({ mode: "recrop", id: f.id, src: raster })}
+                                disabled={passageBusy || busy}
+                                variant="outline" size="xs"
+                              >
+                                다시 오려내기
+                              </Button>
                               {!passageStatus && (
                                 <span className="text-[11px] text-slate-400">
                                   {editKoreanBlocks
                                     ? "다시 인식했습니다 — 저장을 눌러야 반영됩니다."
-                                    : "사진에서 글자를 다시 읽어 조판을 새로 만듭니다."}
+                                    : "사진에서 글자를 다시 읽어 조판을 새로 만듭니다. 사진이 잘렸으면 다시 오려낸 뒤 다시 인식하세요."}
                                 </span>
                               )}
                             </div>
