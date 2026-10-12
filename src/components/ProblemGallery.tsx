@@ -923,6 +923,20 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     }
   }
 
+  /** 목록에서 바로 지문을 다시 인식한다 — 창을 열지 않고 다른 지문도 연달아 누를 수 있다(서버 대기열). */
+  function rereadFromList(problem: GalleryProblem) {
+    enqueue({
+      id: `reread:${problem.id}:${Date.now().toString(36)}`,
+      problemKey: `korean:${problem.id}`,
+      label: `지문 다시 인식${problem.korean?.title ? ` · ${problem.korean.title}` : ""}`,
+      crop: problem.imageUrl,
+      mode: "passage",
+      passageFigures: existingPassageFigures(problem.korean?.blocks),
+      korean: true,
+      problemId: problem.id,
+    });
+  }
+
   /** 따로 넣은 문제를 국어 지문 세트에 묶는다(setId 가 빈 문자열이면 묶음을 푼다). */
   async function bindToPassage(problem: GalleryProblem, setId: string) {
     setBusyId(problem.id);
@@ -1309,6 +1323,16 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
           title="지문 제목을 다시 지어요(1토큰)"
         >
           {busyId === problem.id ? "짓는 중…" : "제목 인식"}
+        </Button>
+      )}
+      {problem.korean?.role === "passage" && (
+        <Button
+          type="button"
+          onClick={() => rereadFromList(problem)}
+          variant="soft" size="sm"
+          title="지문 글자를 서버 대기열에서 다시 읽어요 — 다른 지문도 연달아 눌러도 돼요"
+        >
+          다시 인식
         </Button>
       )}
       {/* 따로 넣은 문제를 지문에 묶는다 — 내보낼 때 지문 세트로 함께 조판된다. */}

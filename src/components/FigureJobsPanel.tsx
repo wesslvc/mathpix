@@ -741,6 +741,11 @@ export default function FigureJobsPanel() {
                                   <img
                                     src={url}
                                     alt={cap}
+                                    onError={(e) => {
+                                      // R2 로 바로 넘긴 주소가 막혔을 때 한 번 우리 서버를 거쳐 다시 받는다.
+                                      const img = e.currentTarget;
+                                      if (!img.src.includes("proxy=1")) img.src = `${url}${url.includes("?") ? "&" : "?"}proxy=1`;
+                                    }}
                                     className="max-h-64 w-full rounded border border-slate-200 bg-white object-contain"
                                   />
                                 </a>
@@ -756,6 +761,15 @@ export default function FigureJobsPanel() {
                       {!d || d.diffs.length === 0 ? (
                         <p className="mt-0.5 text-[11px] text-slate-400">
                           {d ? "차이 목록이 남아 있지 않아요." : "차이 목록을 불러오지 못했어요."}
+                          {!d && (
+                            <button
+                              type="button"
+                              onClick={async () => setDetails(await loadOfferDiffs())}
+                              className="ml-1.5 rounded border border-slate-300 px-1.5 text-[10px] text-slate-600 hover:bg-slate-100"
+                            >
+                              다시 불러오기
+                            </button>
+                          )}
                         </p>
                       ) : (
                         <ul className="mt-1 flex flex-col gap-1">

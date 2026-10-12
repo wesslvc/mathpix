@@ -974,7 +974,8 @@ export default function FigureJobsProvider({
       const out: Record<string, OfferDiffs> = {};
       for (const o of json.offers ?? []) {
         const local = jobsRef.current.find((j) => j.serverId === o.id);
-        if (local) out[local.id] = {
+        const key = local?.id ?? o.id;
+        out[key] = {
           quality: o.quality,
           target: o.target,
           tokens: o.tokens,

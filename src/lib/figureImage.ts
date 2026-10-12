@@ -31,7 +31,17 @@ import { enhanceContrast } from "./autoContrast";
  */
 export async function ensureDataUrl(src: string): Promise<string> {
   if (src.startsWith("data:")) return src;
-  const res = await fetch(src);
+  let res: Response;
+  try {
+    res = await fetch(src);
+  } catch (err) {
+    // R2 로 바로 넘어간 주소가 CORS 등으로 막히면 우리 서버를 거쳐 한 번 더 받는다(`/api/card` 만).
+    if (!src.startsWith("/api/card/")) throw err;
+    res = await fetch(`${src}${src.includes("?") ? "&" : "?"}proxy=1`);
+  }
+  if (!res.ok && src.startsWith("/api/card/") && !src.includes("proxy=1")) {
+    res = await fetch(`${src}${src.includes("?") ? "&" : "?"}proxy=1`);
+  }
   // 주소가 죽었거나(404) 로그인이 풀렸을 때(401)는 그림이 아니라 오류 글이 온다 — 그걸 그대로 그림으로 읽으면 뒤에서
   // "이미지를 불러오지 못했습니다"라는 뜻 없는 오류가 난다. 여기서 원인을 알려 준다.
   if (!res.ok) {
