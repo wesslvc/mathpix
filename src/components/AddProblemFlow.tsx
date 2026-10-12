@@ -98,7 +98,7 @@ type QuickItem = {
 
 const byOrder = (a: QueuedPhoto, b: QueuedPhoto) => a.order - b.order;
 /** 자동 자르기를 위해 사진을 동시에 줄이는 장 수(luna 호출 자체는 제한 없이 동시에 돈다). */
-const CROP_PREP_LANES = 4;
+const CROP_PREP_LANES = 30;
 
 export default function AddProblemFlow({
   categoryId,

@@ -63,6 +63,9 @@ import { Button } from "@/components/ui/button";
  * 넓히면 보이는 것과 잘리는 것이 달라진다.
  */
 const PAD = 0.012;
+
+/** 영역 찾기 준비를 겹쳐 돌리는 장 수(메모리 때문에 무한정은 아니다). */
+const DETECT_PREP_LANES = 6;
 /** 문제마다 확대해 luna 로 다시 맞추기. 정답과 견주니 하이쿠 원자리(0.70~0.97%p)보다 나빠져(최종 1.3~1.6%p) 껐다(2026-10-09). 되살리려면 true. */
 const PAGE_REFINE = false;
 
@@ -170,6 +173,20 @@ export default function BatchSplitPanel({
    */
   const prefetchRef = useRef(new Map<File, Promise<Found>>());
   const prefetchChainRef = useRef<Promise<void>>(Promise.resolve());
+  /** 영역 찾기 준비(사진 열기·줄이기) 동시 수 — luna 호출 자체는 제한이 없다. */
+  const detectGateRef = useRef({ active: 0, waiting: [] as (() => void)[] });
+  const detectGate = {
+    acquire: async () => {
+      const g = detectGateRef.current;
+      if (g.active >= DETECT_PREP_LANES) await new Promise<void>((r) => g.waiting.push(r));
+      g.active++;
+    },
+    release: () => {
+      const g = detectGateRef.current;
+      g.active--;
+      g.waiting.shift()?.();
+    },
+  };
   /** 열자마자 자동으로 찾은 지면(같은 지면을 두 번 찾지 않게). */
   const autoDetectedRef = useRef<string | null>(null);
   /** 남은 지면도 같은 방식으로 한 번에 넣는다. */
@@ -485,12 +502,18 @@ export default function BatchSplitPanel({
     const promise = new Promise<Found>((resolve, reject) => {
       const run = async () => {
         try {
-          const d = await loadDrawableFromFile(file);
+          // 사진을 열고 줄이는 일은 DETECT_PREP_LANES 장까지 겹친다(예전엔 한 장씩 이어서 luna 호출이 한 장씩 출발하는 것처럼 보였다).
+          await detectGate.acquire();
           let image: string;
           try {
-            image = await detectImage({ img: d.src as HTMLImageElement | ImageBitmap, width: d.width, height: d.height, degraded: false, revoke: d.close });
+            const d = await loadDrawableFromFile(file);
+            try {
+              image = await detectImage({ img: d.src as HTMLImageElement | ImageBitmap, width: d.width, height: d.height, degraded: false, revoke: d.close });
+            } finally {
+              d.close();
+            }
           } finally {
-            d.close();
+            detectGate.release();
           }
           let queued = () => {};
           const inLine = new Promise<void>((r) => (queued = r));
@@ -503,7 +526,7 @@ export default function BatchSplitPanel({
           reject(err);
         }
       };
-      prefetchChainRef.current = prefetchChainRef.current.then(run, run);
+      void run();
     });
     promise.catch(() => undefined);
     prefetchRef.current.set(file, promise);

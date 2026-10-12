@@ -746,7 +746,7 @@ export default function KoreanModePanel({
     setBusy(`자리 찾는 중... (0/${total})`);
 
     // 그림을 열고 줄이는 일은 화면 스레드라 열 장까지 겹친다. 모델 호출은 제한 없이 동시에 간다.
-    let openSlots = 10;
+    let openSlots = 30;
     const waiters: (() => void)[] = [];
     const acquire = () =>
       openSlots > 0

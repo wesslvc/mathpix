@@ -243,7 +243,7 @@ export default function KiceExportPanel({ title, items }: Props) {
         setProgress(`원래 번호 자리 찾는 중 ${++done}/${order.length}`);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(32, order.length) }, lane));
+    await Promise.all(Array.from({ length: Math.min(30, order.length) }, lane));
     const missed: Record<NumberMiss, number[]> = { none: [], unsafe: [], error: [] };
     order.forEach((i, k) => {
       const { box, miss } = found[k];
