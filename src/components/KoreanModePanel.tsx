@@ -94,6 +94,8 @@ type Piece = {
   figures?: PassageFigureInput[];
   /** luna·하이쿠가 찍힌 그대로 읽은 문제 번호(문제 조각에만). */
   no?: number | null;
+  /** 이 조각을 자른 자리(다시 자르기에서 사람이 고친다). */
+  boxes?: { pageId: string; box: EditBox }[];
 };
 
 /** 쪽마다 자동으로 찾은 결과. 지문과 문제를 **따로** 부르므로 따로 든다. */
@@ -139,6 +141,8 @@ export default function KoreanModePanel({
   const [step, setStep] = useState<Step>("pick");
   /** 자동으로 자른 세트들 — 사용자가 확인하기 전에는 저장하지 않는다. */
   const [staged, setStaged] = useState<StagedSet[] | null>(null);
+  /** 다시 자르기 중인 조각 — AI 가 자른 자리를 바탕으로 사람이 고친다. */
+  const [recut, setRecut] = useState<{ si: number; pid: string; kind: "passage" | "question"; boxes: Record<string, EditBox[]> } | null>(null);
   const [pages, setPages] = useState<Page[]>([]);
   /** 쪽(사진) id → 그 쪽에 그린 네모들. */
   const [passageBoxes, setPassageBoxes] = useState<Record<string, EditBox[]>>({});
@@ -487,8 +491,10 @@ export default function KoreanModePanel({
         // 이어 붙여도 티가 안 난다.
         const parts: string[] = [];
         const figures: PassageFigureInput[] = [];
+        const srcBoxes: { pageId: string; box: EditBox }[] = [];
         for (const page of pgs) {
           const list = passageSrc[page.id] ?? [];
+          for (const b of list) srcBoxes.push({ pageId: page.id, box: b });
           const passagesHere = list.filter((b) => b.group === PASSAGE_GROUP);
           for (const b of passagesHere) {
             parts.push(cutBox(imgOf.get(page.id)!, b, pad(b)));
@@ -514,6 +520,7 @@ export default function KoreanModePanel({
             crop: await stitchVertically(parts),
             parts: parts.length,
             figures,
+            boxes: srcBoxes,
           });
         }
       }
@@ -526,6 +533,7 @@ export default function KoreanModePanel({
           crop: await stitchVertically(parts),
           parts: parts.length,
           no: noByGroupRef.current.get(g.group) ?? null,
+          boxes: g.boxes.map(({ page, box }) => ({ pageId: page.id, box })),
         });
       }
 
@@ -919,6 +927,37 @@ export default function KoreanModePanel({
     } else {
       setError(`자동으로 못 잘랐어요. ${notes.join(" ")} 아래 단계별로 손으로 해주세요.`);
     }
+  }
+
+  /** 조각의 AI 자리를 바탕으로 다시 자르기를 연다(새 id 로 복사 — 사람이 고친 자리는 여유를 안 준다). */
+  function startRecut(si: number, p: Piece) {
+    if (!p.boxes?.length) return;
+    const boxes: Record<string, EditBox[]> = {};
+    for (const { pageId, box } of p.boxes) (boxes[pageId] ??= []).push({ ...box, id: crypto.randomUUID() });
+    setRecut({ si, pid: p.id, kind: p.kind, boxes });
+  }
+
+  async function applyRecut() {
+    if (!recut) return;
+    const pgs = pages.filter((pg) => (recut.boxes[pg.id] ?? []).length > 0);
+    const cut = await cutAll(
+      recut.kind === "passage"
+        ? { passage: recut.boxes, question: {}, pages: pgs, quiet: true, noPassageOverride: false }
+        : { passage: {}, question: recut.boxes, pages: pgs, quiet: true },
+    );
+    const np = cut?.find((c) => c.kind === recut.kind);
+    if (!np) {
+      setError("다시 자르지 못했어요.");
+      return;
+    }
+    setStaged((prev) =>
+      prev
+        ? prev.map((d, k) =>
+            k === recut.si ? { ...d, pieces: d.pieces.map((p) => (p.id === recut.pid ? np : p)) } : d,
+          )
+        : prev,
+    );
+    setRecut(null);
   }
 
   /** 확인 상자 편집 — 조각 빼기·같은 세트 안 순서 바꾸기·다른 세트로 옮기기. */
@@ -1421,6 +1460,11 @@ export default function KoreanModePanel({
                       <button type="button" title="뒤로" onClick={() => stagedShift(si, p.id, 1)} disabled={i === d.pieces.length - 1} className="rounded border px-1.5 disabled:opacity-30">▶</button>
                       <button type="button" title="빼기" onClick={() => stagedRemove(si, p.id)} className="rounded border px-1.5 text-red-600">×</button>
                     </div>
+                    {p.boxes?.length ? (
+                      <button type="button" onClick={() => startRecut(si, p)} className="mt-1 w-full rounded border border-amber-400 bg-amber-50 px-1 text-xs text-amber-800">
+                        다시 자르기
+                      </button>
+                    ) : null}
                     {p.kind === "question" && staged.length > 1 && (
                       <select
                         value=""
@@ -1436,6 +1480,39 @@ export default function KoreanModePanel({
               </div>
             </div>
           ))}
+          {recut && (
+            <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-white p-2">
+              <p className="text-sm text-slate-600">
+                AI 가 자른 자리예요. 네모를 끌어 옮기거나 모서리로 크기를 고치고, 빈 곳을 끌어 조각을 더 그릴 수 있어요(지문은 그린 것 전부가, 문제는 이 문항의 조각이 이어 붙어요).
+              </p>
+              {Object.keys(recut.boxes).map((pid) => {
+                const pg = pages.find((x) => x.id === pid);
+                if (!pg) return null;
+                const gid = recut.kind === "question" ? recut.boxes[pid][0]?.group : undefined;
+                return (
+                  <BoxEditor
+                    key={pid}
+                    image={pg.dataUrl}
+                    shape={shape}
+                    boxes={recut.boxes[pid] ?? []}
+                    onChange={(next) => setRecut((r) => (r ? { ...r, boxes: { ...r.boxes, [pid]: next } } : r))}
+                    color={recut.kind === "passage" ? "#059669" : "#2563eb"}
+                    colorOf={recut.kind === "passage" ? (g) => (g === FIGURE_GROUP ? "#f97316" : "#059669") : undefined}
+                    newGroup={recut.kind === "passage" ? PASSAGE_GROUP : gid ?? Object.values(recut.boxes).flat()[0]?.group}
+                    labelOf={() => (recut.kind === "passage" ? "지문" : "문항")}
+                  />
+                );
+              })}
+              <div className="flex gap-2">
+                <Button type="button" variant="primary" onClick={() => void applyRecut()} disabled={busy !== null}>
+                  {busy ?? "이 자리로 다시 자르기"}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setRecut(null)} disabled={busy !== null}>
+                  취소
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" onClick={() => setStaged(null)} disabled={busy !== null}>
               취소 (손으로 하기)
