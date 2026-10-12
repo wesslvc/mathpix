@@ -746,7 +746,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     }
     for (const other of Object.keys(spec.fonts)) {
       if (other === name || !(await covers(other))) continue;
-      swappedFont.add(text);
+      if (other !== CIRCLED_LATIN_FONT) swappedFont.add(text);
       return { font: await fontFor(other), text };
     }
     const set = await coverageOf(name);
@@ -975,6 +975,9 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   const body = await fontForText(BODY_FONT, "");
   const oldHangul = await loadOldHangul(spec);
   let bodyCover: Set<number> | null = null;
+  // 영어 원문자를 그릴 별도 글꼴(있으면 동그라미를 직접 그리지 않고 이 글자를 쓴다).
+  const circFont = spec.fonts[CIRCLED_LATIN_FONT] ? await fontFor(CIRCLED_LATIN_FONT) : null;
+  const circCover = circFont ? new Set(circFont.getCharacterSet()) : null;
   const measure = (t: string, size: number, bold: boolean) => {
     let w = 0;
     for (const run of oldHangul ? oldHangulRuns(t) : [{ t, old: false }]) {
@@ -986,7 +989,9 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
         const cover = bodyCover ?? (bodyCover = new Set(body.font.getCharacterSet()));
         for (const ch of run.t) {
           w += CIRCLED_LATIN.test(ch) && !cover.has(ch.codePointAt(0)!)
-            ? size * CIRCLED_ADVANCE
+            ? circFont && circCover!.has(ch.codePointAt(0)!)
+              ? circFont.widthOfTextAtSize(ch, size)
+              : size * CIRCLED_ADVANCE
             : body.font.widthOfTextAtSize(ch, size);
         }
         continue;
@@ -1270,6 +1275,7 @@ const NUMBER_GROW = 1.6;
  * 문제가 성립하지 않는다.
  */
 /** 원문자 라틴(Ⓐ~Ⓩ ⓐ~ⓩ). 글꼴에 없으면 동그라미 + 글자로 직접 그린다. */
+const CIRCLED_LATIN_FONT = "원문자라틴";
 const CIRCLED_LATIN = /[\u24b6-\u24e9]/;
 const circledLatinInner = (ch: string) => {
   const c = ch.codePointAt(0)!;
@@ -1381,6 +1387,14 @@ async function drawFlow(
           for (const part of run.t.split(/([\u24b6-\u24e9])/)) {
             if (!part) continue;
             if (CIRCLED_LATIN.test(part) && !cover.has(part.codePointAt(0)!)) {
+              const cf = await fontForText(CIRCLED_LATIN_FONT, part);
+              if (cf.text.trim() && cf.font.getCharacterSet().includes(part.codePointAt(0)!)) {
+                for (const dx of piece.b ? [0, it.size * 0.035] : [0]) {
+                  page.drawText(part, { x: rx + dx, y: baseline, size: it.size, font: cf.font, color: rgb(0, 0, 0) });
+                }
+                rx += cf.font.widthOfTextAtSize(part, it.size) * (piece.b ? 1.02 : 1);
+                continue;
+              }
               drawCircledLatin(page, part, rx, baseline, it.size, bodyFont, !!piece.b);
               rx += it.size * CIRCLED_ADVANCE;
               continue;

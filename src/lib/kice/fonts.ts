@@ -67,6 +67,13 @@ export function loadKiceFonts(): Promise<Record<string, Uint8Array>> {
     } catch {
       /* 없어도 된다 */
     }
+    // 영어 원문자(ⓐ~ⓩ Ⓐ~Ⓩ) — 본문 글꼴에 없어서 나눔명조(OFL)에서 그 구간만 잘라 둔 16KB. 없으면 직접 그려 넣는다.
+    try {
+      const res = await fetch("/fonts/circled-latin.ttf", { cache: "no-cache" });
+      if (res.ok) entries.push(["원문자라틴", new Uint8Array(await res.arrayBuffer())] as const);
+    } catch {
+      /* 없어도 된다 */
+    }
     return Object.fromEntries(entries);
   })();
   // 한 번 실패하면 다음에 다시 받아 볼 수 있게 캐시를 비운다.
