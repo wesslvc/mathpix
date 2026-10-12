@@ -1247,6 +1247,7 @@ async function drawFlow(
   figures: Map<string, PDFImage>,
   oldHangul: OldHangulFont | null = null,
 ) {
+  const flowLabelFont = (await fontForText(BODY_FONT, "[]AB")).font;
   for (const it of items) {
     if (it.kind === "boxEdge") {
       const x0 = it.x;
@@ -1260,6 +1261,28 @@ async function drawFlow(
           thickness: 0.7,
           color: rgb(0, 0, 0),
         });
+      if (it.bracket !== undefined) {
+        // 문단 묶음: 왼쪽 `[` (위·아래에 짧은 꼭지) + 가운데 이름표 `[A]`.
+        const bx = x0 + 19;
+        const tick = 7;
+        line(bx, y0, bx, y1);
+        if (it.top) line(bx, y0, bx + tick, y0);
+        if (it.bottom) line(bx, y1, bx + tick, y1);
+        const f = flowLabelFont;
+        if (f) {
+          const label = `[${it.bracket}]`;
+          const size = 11;
+          const lw = f.widthOfTextAtSize(label, size);
+          page.drawText(label, {
+            x: Math.max(x0, bx - 4 - lw),
+            y: flip((y0 + y1) / 2) - size * 0.35,
+            size,
+            font: f,
+            color: rgb(0, 0, 0),
+          });
+        }
+        continue;
+      }
       // 단을 넘어간 도막은 그쪽 테두리를 긋지 않는다 — 잘린 것처럼 보여야 한다.
       if (it.top) line(x0, y0, x1, y0);
       if (it.bottom) line(x0, y1, x1, y1);

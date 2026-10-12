@@ -915,6 +915,7 @@ block = one of:
   - a candidate box holding most of the passage is wrong — emit those paragraphs as top-level para blocks.
   - a real box is small (a few lines), sits apart from the body, all four ruled sides visible. the column rule / page frame is NOT a box.
   - unsure -> no box. a missed box costs a border; an invented box swallows the whole passage.
+- {"kind":"box","bracket":"A","blocks":[ ... ]} — a PARAGRAPH-GROUP BRACKET: a tall "[" line drawn in the left margin beside several consecutive paragraphs, with a label such as [A] / [B] printed next to it (the question later refers to "[A]"). NOT a frame. bracket = the label letter only ("A"). blocks = exactly the paragraphs the bracket spans; the label "[A]" itself is NOT part of the text — do not copy it into a paragraph.
 - {"kind":"figure","id":"f1"} — the place where a picture sits. ONLY as told in the "pictures" section at the end.
 
 characters:

@@ -57,13 +57,26 @@ export type FlowPiece = { t: string; dx: number; w: number; b?: boolean; u?: boo
  */
 export const SQ_PAD = 0.18;
 
+/** 문단 묶음 대괄호·이름표가 차지하는 왼쪽 폭(pt). */
+export const BRACKET_GUTTER = 30;
+
 export type FlowItem =
   | { kind: "line"; x: number; y: number; size: number; pieces: FlowPiece[] }
   /**
    * 상자 테두리 한 도막. 단을 넘어가면 이어지는 쪽은 `top: false`,
    * 앞쪽은 `bottom: false` 라 **잘린 것처럼** 그려진다.
    */
-  | { kind: "boxEdge"; x: number; y: number; w: number; h: number; top: boolean; bottom: boolean }
+  | {
+      kind: "boxEdge";
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      top: boolean;
+      bottom: boolean;
+      /** 있으면 네모가 아니라 왼쪽 대괄호 + 이 이름표(`[A]`)로 그린다(문단 묶음 표시). */
+      bracket?: string;
+    }
   | { kind: "figure"; id: string; x: number; y: number; w: number; h: number };
 
 /** 글자를 흘려 넣을 자리 하나(단 하나). */
@@ -339,7 +352,10 @@ export function flowBlocks(
     // ── 상자 ──────────────────────────────────────────────────────
     // **단을 넘어가면 잘린다.** 앞쪽은 아래 테두리를 그리지 않고, 이어지는
     // 쪽은 위 테두리를 그리지 않는다 — 그래야 한 상자가 이어진 것으로 보인다.
-    const innerWidth = width - style.boxPad * 2;
+    // 문단 묶음(`bracket`)은 왼쪽에 대괄호·이름표 자리를 두고 오른쪽은 안 띄운다.
+    const hasBracket = block.bracket !== undefined;
+    const gutter = hasBracket ? BRACKET_GUTTER : style.boxPad;
+    const innerWidth = hasBracket ? width - gutter : width - style.boxPad * 2;
     let startY = y;
     let startCol = col;
     let openedTop = true;
@@ -354,6 +370,7 @@ export function flowBlocks(
         h: (bottom ? y + style.boxPad : columns[startCol].bottom) - startY,
         top: openedTop,
         bottom,
+        ...(hasBracket ? { bracket: block.bracket } : {}),
       });
     };
 
@@ -368,7 +385,7 @@ export function flowBlocks(
         const before = col;
         // 안쪽 왼쪽 자리도 **매번 지금 단 기준으로** 다시 잰다 — 안 그러면
         // 상자 속 문단이 단을 넘을 때 같은 버그가 상자 안에서도 재현된다.
-        const curLeft = columns[col].x + inset + style.boxPad;
+        const curLeft = columns[col].x + inset + gutter;
         const leftover = run(remaining[0], curLeft, innerWidth);
         if (col !== before) {
           // 단이 바뀌었다 — 여기까지를 한 도막으로 닫고 새 도막을 연다.
@@ -392,7 +409,7 @@ export function flowBlocks(
             const restBlocks = leftover
               ? [leftover, ...remaining.slice(1)]
               : remaining.slice(1);
-            return restBlocks.length > 0 ? { kind: "box", blocks: restBlocks } : null;
+            return restBlocks.length > 0 ? { ...block, blocks: restBlocks } : null;
           }
           startCol = col;
           startY = columns[col].top;
@@ -401,7 +418,7 @@ export function flowBlocks(
         if (leftover) {
           // 자리가 아예 없어 못 넣었다. 남은 것을 상자째 돌려준다.
           closeSegment(false);
-          return { kind: "box", blocks: [leftover, ...remaining.slice(1)] };
+          return { ...block, blocks: [leftover, ...remaining.slice(1)] };
         }
         remaining.shift();
       }

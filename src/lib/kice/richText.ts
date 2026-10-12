@@ -42,7 +42,15 @@ export type RichBlock =
       right?: boolean;
     }
   /** 네모 상자(조건 박스·<보기>). 단을 넘어가면 잘리고 다음 단에서 이어진다. */
-  | { kind: "box"; blocks: RichBlock[] }
+  | {
+      kind: "box";
+      blocks: RichBlock[];
+      /**
+       * 있으면 네모 대신 **왼쪽 대괄호 `[` + 이름표**(`[A]`)로 묶는다 — 여러 문단을 한 덩어리로
+       * 가리키는 인쇄 표시(문제에서 "[A]" 로 지시한다). 값은 이름표 글자(`A`).
+       */
+      bracket?: string;
+    }
   /**
    * 그림. 지문 안에 그림이 있으면 sol 이 그 자리를 짚고(`id`), 우리가 잘라 낸
    * 그림(sunburst 로 다시 그린 것, 안 되면 원본)을 `src` 로 붙인다.
@@ -289,7 +297,8 @@ export function readRichBlocks(raw: unknown, depth = 0, stats?: MarkStats): Rich
       const blocks = readRichBlocks(o.blocks, depth + 1, stats);
       // 빈 상자는 그리지 않는다 — 테두리만 남은 네모는 상자가 아니다
       // (조건 박스 감지에서 이미 겪은 규칙과 같다).
-      if (blocks.length > 0) out.push({ kind: "box", blocks });
+      const br = typeof o.bracket === "string" ? o.bracket.replace(/[\[\]\s]/g, "").slice(0, 3) : "";
+      if (blocks.length > 0) out.push({ kind: "box", blocks, ...(br ? { bracket: br } : {}) });
       continue;
     }
     if (kind === "figure") {
@@ -349,7 +358,7 @@ export function framePassage(blocks: RichBlock[]): RichBlock[] {
   const head = hasLeadIn ? [first] : [];
   const body = hasLeadIn ? blocks.slice(1) : blocks;
   if (body.length === 0) return blocks;
-  if (body.length === 1 && body[0].kind === "box") return blocks;
+  if (body.length === 1 && body[0].kind === "box" && body[0].bracket === undefined) return blocks;
   return [...head, { kind: "box", blocks: body }];
 }
 
