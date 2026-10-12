@@ -241,14 +241,14 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       };
       try {
         if (mode === "korean-passage") {
-          const { passages, figures, model, usage } = await detectKoreanPassages(ctx.images[0]);
+          const { passages, figures, pageNo, model, usage } = await detectKoreanPassages(ctx.images[0]);
           const estKrw = await cost(usage, "지문 자리 찾기", "passage", model);
-          return { ok: true, result: { regions: passages, figures, model }, model, estKrw };
+          return { ok: true, result: { regions: passages, figures, pageNo, model }, model, estKrw };
         }
         if (mode === "korean-question") {
-          const { regions, model, usage } = await detectKoreanQuestions(ctx.images[0], readBoxes(ctx.params.passages));
+          const { regions, pageNo, model, usage } = await detectKoreanQuestions(ctx.images[0], readBoxes(ctx.params.passages));
           const estKrw = await cost(usage, "국어 문제 자리 찾기", "passage", model);
-          return { ok: true, result: { regions, model }, model, estKrw };
+          return { ok: true, result: { regions, pageNo, model }, model, estKrw };
         }
         const { problems, model, usage } = await detectProblems(ctx.images[0]);
         // 원가는 답한 모델로 적는다: 하이쿠(오픈라우터)는 응답이 준 실제 청구액, luna 는 공표 단가. Gemini 단가는 아직 모른다 — 지어내지 않는다.

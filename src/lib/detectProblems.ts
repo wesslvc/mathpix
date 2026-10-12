@@ -475,11 +475,14 @@ figure (inside a passage only):
 - none -> "figures":[]
 
 both:
-- put edges in the blank gap just outside the content — NEVER clip a line (we trim blank space ourselves). exclude gutter, running heads, page numbers
+- edges must hug the content EXACTLY — the box is used as-is, nothing corrects it afterwards, so do not add padding and never clip a line (include the item number, every choice line down to the last, the lead-in line). exclude gutter, running heads, page numbers
 - 2-column page -> order: left column top-to-bottom first, then right column
 
+
+page_no: the page number printed in the diagonal-split box at the bottom centre of the page (the number in the upper-left triangle; the lower-right number is the total page count, ignore it). integer, or null if no such box is visible.
+
 answer JSON only:
-{"passages":[{"box_2d":[ymin,xmin,ymax,xmax],"range":"1~3"}],"figures":[{"box_2d":[ymin,xmin,ymax,xmax]}]}
+{"page_no":3,"passages":[{"box_2d":[ymin,xmin,ymax,xmax],"range":"1~3"}],"figures":[{"box_2d":[ymin,xmin,ymax,xmax]}]}
 coords normalised 0-1000. no explanation.`;
 
 export const KOREAN_QUESTION_PROMPT = `task: page from Korean SAT (수능) 국어 영역 paper. find ONLY the QUESTION regions (문항). passages (지문) are handled separately — ignore them.
@@ -490,12 +493,15 @@ question:
 - an item continuing across columns -> one region per piece, same \`no\`
 
 both:
-- put edges in the blank gap just outside the content — NEVER clip a line (we trim blank space ourselves). exclude gutter, running heads, page numbers
+- edges must hug the content EXACTLY — the box is used as-is, nothing corrects it afterwards, so do not add padding and never clip a line (include the item number, every choice line down to the last, the lead-in line). exclude gutter, running heads, page numbers
 - regions must not overlap
 - 2-column page -> order: left column top-to-bottom first, then right column
 
+
+page_no: the page number printed in the diagonal-split box at the bottom centre of the page (the number in the upper-left triangle; the lower-right number is the total page count, ignore it). integer, or null if no such box is visible.
+
 answer JSON only:
-{"questions":[{"box_2d":[ymin,xmin,ymax,xmax],"no":"12"}]}
+{"page_no":3,"questions":[{"box_2d":[ymin,xmin,ymax,xmax],"no":"12"}]}
 coords normalised 0-1000. \`no\` = item number (digits only). no explanation.`;
 
 /** 문제 찾기 프롬프트 — 앞서 찾은 지문 자리를 알려 주어 비켜 가게 한다. */
@@ -533,7 +539,19 @@ export function parseNumberRange(raw: unknown): { from: number; to: number } | n
 export type DetectedKoreanPassages = {
   passages: DetectedKoreanRegion[];
   figures: ProblemBox[];
+  /** 쪽 아래 가운데 사선 상자에서 읽은 쪽 번호(위쪽 왼쪽 숫자). 못 읽으면 null. */
+  pageNo: number | null;
 };
+
+/** 응답에서 쪽 번호만 뽑는다. */
+export function parseKoreanPageNo(text: string): number | null {
+  try {
+    const n = Number(String(readJsonObject(text).page_no ?? "").replace(/[^\d]/g, ""));
+    return Number.isFinite(n) && n > 0 && n < 1000 ? n : null;
+  } catch {
+    return null;
+  }
+}
 
 /** 영역 찾기 한 번에 쓴 토큰(입력 전체 · 그중 캐시 · 출력). luna 갈래에서만 온다 — 원가 장부에 적는다. */
 export type DetectUsage = { input: number; cached: number; output: number; /** 오픈라우터가 응답에 실어 준 실제 청구액(USD). */ costUsd?: number };
@@ -577,9 +595,9 @@ export async function detectKoreanPassages(
 export async function detectKoreanQuestions(
   dataUrl: string,
   passages: ProblemBox[] = [],
-): Promise<{ regions: DetectedKoreanRegion[]; model: string; usage?: DetectUsage }> {
+): Promise<{ regions: DetectedKoreanRegion[]; pageNo: number | null; model: string; usage?: DetectUsage }> {
   const { text, model, usage } = await callDetect(dataUrl, koreanQuestionPrompt(passages));
-  return { regions: parseKoreanQuestions(text), model, usage };
+  return { regions: parseKoreanQuestions(text), pageNo: parseKoreanPageNo(text), model, usage };
 }
 
 function readJsonObject(text: string): Record<string, unknown> {
@@ -620,7 +638,7 @@ export function parseKoreanPassages(text: string): DetectedKoreanPassages {
     if (box) {
       passages.push({
         kind: "passage",
-        box: padKoreanBox(box),
+        box,
         set: 0,
         no: null,
         range: parseNumberRange((row as { range?: unknown })?.range),
@@ -633,7 +651,7 @@ export function parseKoreanPassages(text: string): DetectedKoreanPassages {
     if (box) figures.push(box);
   }
   if (passages.length === 0) throw new DetectError("지문을 찾지 못했습니다.", 502);
-  return { passages, figures };
+  return { passages, figures, pageNo: parseKoreanPageNo(text) };
 }
 
 export function parseKoreanQuestions(text: string): DetectedKoreanRegion[] {
@@ -645,7 +663,7 @@ export function parseKoreanQuestions(text: string): DetectedKoreanRegion[] {
     const box = toBox(r.box_2d);
     if (!box) continue;
     const no = Number(String(r.no ?? "").replace(/[^\d]/g, ""));
-    out.push({ kind: "question", box: padKoreanBox(box), set: 0, no: Number.isFinite(no) && no > 0 ? no : null });
+    out.push({ kind: "question", box, set: 0, no: Number.isFinite(no) && no > 0 ? no : null });
   }
   if (out.length === 0) throw new DetectError("문제를 찾지 못했습니다.", 502);
   return out;

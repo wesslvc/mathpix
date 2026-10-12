@@ -68,7 +68,10 @@ const WHOLE_PROBLEM_LAYOUT: DiagramLayout = { scale: 100, offsetX: 0, offsetY: 0
  * **손으로 고친 자리에는 주지 않는다** — 사용자가 정한 자리를 우리가 몰래
  * 넓히면 보이는 것과 잘리는 것이 달라진다.
  */
-const PAD = 0.012;
+const PAD = 0;
+
+/** 하이쿠가 잡은 자리를 보정하지 않는다(2026-10-12, 사용자 — "보정하지 말고 쟤가 알아서"). 되살리려면 true. */
+const KOREAN_SNAP = false;
 
 /** 지문 네모는 전부 이 묶음에 들어간다(그린 것이 곧 한 지문이다). */
 const PASSAGE_GROUP = "passage";
@@ -297,7 +300,7 @@ export default function KoreanModePanel({
         // **테두리는 사진이 정한다**(`snapBoxes.ts`, 지면 통째로 넣기와 같다). 문제는 지문 자리를 넘지 않게 한다.
         // 지문 안 그림은 다듬지 않는다 — 그림 바로 옆 지문 줄을 같은 덩어리로 품을 수 있고, 어차피 다시 그린다.
         let regions = json.regions ?? [];
-        const map = regions.length ? inkMapFromImage(source.img, source.width, source.height) : null;
+        const map = KOREAN_SNAP && regions.length ? inkMapFromImage(source.img, source.width, source.height) : null;
         if (map) {
           const res = snapRegions(map, regions.map((r) => r.box), kind === "question" ? passagesHere : []);
           snappedRef.current += res.changed;
@@ -761,7 +764,7 @@ export default function KoreanModePanel({
 
     type PassageHit = { box: ProblemBox; range: { from: number; to: number } | null };
     type QuestionHit = { box: ProblemBox; no: number | null };
-    type PageHits = { page: Page; passages: PassageHit[]; figures: ProblemBox[]; questions: QuestionHit[] };
+    type PageHits = { page: Page; pageNo: number | null; passages: PassageHit[]; figures: ProblemBox[]; questions: QuestionHit[] };
 
     async function detectPage(page: Page): Promise<PageHits | null> {
       let detectImg: string;
@@ -781,7 +784,7 @@ export default function KoreanModePanel({
         release();
       }
       const snap = (boxes: ProblemBox[], avoid: ProblemBox[]) => {
-        if (!map || boxes.length === 0) return boxes;
+        if (!KOREAN_SNAP || !map || boxes.length === 0) return boxes;
         const res = snapRegions(map, boxes, avoid);
         snappedRef.current += res.changed;
         return res.boxes;
@@ -789,8 +792,9 @@ export default function KoreanModePanel({
       try {
         let passages: PassageHit[] = [];
         let figures: ProblemBox[] = [];
+        let pageNo: number | null = null;
         if (!noPassage) {
-          const { result } = await runAiTask<{ regions?: DetectedKoreanRegion[]; figures?: ProblemBox[] }>("detect", {
+          const { result } = await runAiTask<{ regions?: DetectedKoreanRegion[]; figures?: ProblemBox[]; pageNo?: number | null }>("detect", {
             label: "지문 자리 찾기",
             images: [detectImg],
             params: { mode: "korean-passage" },
@@ -799,9 +803,10 @@ export default function KoreanModePanel({
           const snapped = snap(regs.map((r) => r.box), []);
           passages = regs.map((r, i) => ({ box: snapped[i], range: r.range ?? null }));
           figures = result.figures ?? [];
+          pageNo = result.pageNo ?? null;
         }
         const avoid = passages.map((p) => p.box).map(({ x, y, w, h }) => ({ x, y, w, h }));
-        const { result: q } = await runAiTask<{ regions?: DetectedKoreanRegion[] }>("detect", {
+        const { result: q } = await runAiTask<{ regions?: DetectedKoreanRegion[]; pageNo?: number | null }>("detect", {
           label: "문제 자리 찾기",
           images: [detectImg],
           params: { mode: "korean-question", ...(avoid.length ? { passages: avoid } : {}) },
@@ -809,7 +814,7 @@ export default function KoreanModePanel({
         const qr = q.regions ?? [];
         const qs = snap(qr.map((r) => r.box), avoid);
         const questions = qr.map((r, i) => ({ box: qs[i], no: r.no ?? null }));
-        return { page, passages, figures, questions };
+        return { page, pageNo: pageNo ?? q.pageNo ?? null, passages, figures, questions };
       } catch (err) {
         console.warn("[korean-dump] 자리 찾기 실패:", err instanceof Error ? err.message : err);
         return null;
@@ -820,9 +825,27 @@ export default function KoreanModePanel({
     }
 
     snappedRef.current = 0;
+    let pageOrderNote = "";
     const hits = await Promise.all(pages.map((p) => detectPage(p)));
     const failedPages = hits.filter((h) => !h).length;
     const ok = hits.filter((h): h is PageHits => !!h);
+    // 쪽 번호(아래 가운데 사선 상자)를 읽은 쪽끼리는 번호 순으로 다시 세운다 — 사진 순서가 뒤섞여 있어도 지문·문항이 이어지게.
+    // 번호를 못 읽은 쪽은 제 자리를 지킨다.
+    const numbered = ok.map((h, i) => ({ h, i })).filter((x) => x.h.pageNo != null);
+    let reordered = false;
+    if (numbered.length > 1) {
+      const sorted = [...numbered].sort((a, b) => a.h.pageNo! - b.h.pageNo!);
+      const slots = numbered.map((x) => x.i);
+      sorted.forEach((x, n) => {
+        if (ok[slots[n]] !== x.h) reordered = true;
+      });
+      sorted.forEach((x, n) => {
+        ok[slots[n]] = x.h;
+      });
+    }
+    pageOrderNote = numbered.length
+      ? `쪽 번호로 순서를 맞췄어요: ${ok.map((h) => h.pageNo ?? "?").join(" → ")}${reordered ? " (사진 순서가 달랐어요)" : ""}.`
+      : "";
     if (ok.length === 0) {
       setBusy(null);
       setError("자리를 못 찾았어요. 아래 단계별로 손으로 해주세요.");
@@ -918,6 +941,7 @@ export default function KoreanModePanel({
     }
     setBusy(null);
     const notes = [
+      pageOrderNote,
       failedPages ? `사진 ${failedPages}장은 자리를 못 찾았어요.` : "",
       failedSets.length ? `못 자른 세트: ${failedSets.join(", ")}.` : "",
     ].filter(Boolean);
