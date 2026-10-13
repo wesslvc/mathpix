@@ -37,11 +37,6 @@ function fmtDate(iso: string): string {
   return `${Number(m)}.${Number(d)}`;
 }
 
-/** 등급이 좋을수록(1등급) 진하게, 나쁠수록 연하게 — 0.28~1 사이 진하기. */
-function gradeStrength(g: number): number {
-  return Math.max(0.28, 1 - (Math.min(9, Math.max(1, g)) - 1) * 0.09);
-}
-
 function valueText(metric: TrendMetric, p: TrendPoint): string {
   if (metric === "grade") return `${p.value}등급`;
   return p.hasScore ? `${p.value}점` : `${p.value}%`;
@@ -177,11 +172,7 @@ function SummaryCard({
         <Delta metric={metric} points={s.points} />
         {both && last.grade != null && (
           <span
-            className="rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
-            style={{
-              backgroundColor: `color-mix(in srgb, ${s.color} ${Math.round(gradeStrength(last.grade) * 100)}%, white)`,
-              color: gradeStrength(last.grade) > 0.5 ? "#ffffff" : "#334155",
-            }}
+            className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-amber-800"
           >
             {last.grade}등급
           </span>
@@ -253,11 +244,13 @@ function TrendChart({
   if (dates.length === 0) return null;
 
   const narrow = width < 520;
-  const height = narrow ? 230 : 290;
+  const height = (narrow ? 230 : 290) + (both && mode === "single" && series.length === 1 ? 84 : 0);
   const padL = 40;
   const padR = 18;
   const padT = 30;
-  const padB = 30;
+  // "함께" 보기에서는 점수 그래프 아래에 등급 줄(위쪽일수록 좋은 등급)을 하나 더 둔다.
+  const stripH = both && mode === "single" && series.length === 1 ? 84 : 0;
+  const padB = 30 + stripH;
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
 
@@ -407,7 +400,6 @@ function TrendChart({
                       cy={q.y}
                       r={on ? 6 : official ? 5.5 : 4}
                       fill={q.p.hasScore ? s.color : "#ffffff"}
-                      fillOpacity={(both || isGrade) && q.p.grade != null && q.p.hasScore ? gradeStrength(q.p.grade) : 1}
                       stroke={official ? "#ffffff" : s.color}
                       strokeWidth={official ? 2 : 2}
  />
@@ -435,6 +427,38 @@ function TrendChart({
             </g>
           );
         })}
+
+        {/* 등급 줄: 점수 그래프 아래, 1등급이 위 */}
+        {stripH > 0 && one && (() => {
+          const gp = one.points.filter((p) => p.grade != null);
+          if (gp.length === 0) return null;
+          const y0 = height - padB + 34;
+          const y1 = height - 40;
+          const gHi = Math.max(4, ...gp.map((p) => p.grade as number));
+          const gy = (g: number) => y0 + ((g - 1) / (gHi - 1)) * (y1 - y0);
+          const gl = gp.map((p, i) => `${i === 0 ? "M" : "L"}${xOf(dateIndex.get(p.takenAt)!)},${gy(p.grade as number)}`).join(" ");
+          return (
+            <g>
+              <line x1={padL} x2={width - padR} y1={height - padB + 14} y2={height - padB + 14} stroke="#e2e8f0" />
+              <text x={padL} y={height - padB + 28} fontSize={10.5} fontWeight={700} fill="#64748b">
+                등급 · 위로 갈수록 좋아요 ▲
+              </text>
+              <path d={gl} fill="none" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 3" strokeLinejoin="round" />
+              {gp.map((p) => {
+                const x = xOf(dateIndex.get(p.takenAt)!);
+                const y = gy(p.grade as number);
+                return (
+                  <g key={`g-${p.id}`}>
+                    <circle cx={x} cy={y} r={4} fill="#ffffff" stroke="#f59e0b" strokeWidth={2} />
+                    <text x={x} y={y + 15} fontSize={10.5} fontWeight={700} fill="#b45309" textAnchor="middle" className="tabular-nums">
+                      {p.grade}등급
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })()}
 
         {/* 날짜 */}
         {dates.map((d, i) => {
