@@ -130,11 +130,14 @@ function Sparkline({ points, color, metric }: { points: TrendPoint[]; color: str
 function SummaryCard({
   s,
   metric,
+  both = false,
   selected,
   onSelect,
 }: {
   s: Colored;
   metric: TrendMetric;
+  /** 점수 옆에 최근 등급을 같이 적는다. */
+  both?: boolean;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -167,6 +170,11 @@ function SummaryCard({
           {metric === "grade" ? "등급" : last.hasScore ? `/ ${s.max}` : "%"}
         </span>
         <Delta metric={metric} points={s.points} />
+        {both && last.grade != null && (
+          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-slate-600">
+            {last.grade}등급
+          </span>
+        )}
       </span>
       <Sparkline points={s.points} color={s.color} metric={metric} />
       <span className="text-[11px] text-slate-400">
@@ -209,10 +217,13 @@ function niceStep(span: number, target: number): number {
 function TrendChart({
   series,
   metric,
+  both = false,
   mode,
 }: {
   series: Colored[];
   metric: TrendMetric;
+  /** 점 위 값에 등급도 함께 적는다(점수 보기에서만). */
+  both?: boolean;
   /** single: 한 과목(눈금을 그 과목 점수로) · all: 겹쳐 보기(만점 대비 %). */
   mode: "single" | "all";
 }) {
@@ -278,7 +289,7 @@ function TrendChart({
   const every = Math.max(1, Math.ceil(dates.length / Math.max(2, Math.floor(innerW / 44))));
 
   // 점마다 값을 적을지 — 점이 너무 빽빽하면 마지막·최고만.
-  const labelAll = mode === "single" && dates.length <= Math.floor(innerW / 38);
+  const labelAll = mode === "single" && dates.length <= Math.floor(innerW / (both ? 70 : 38));
 
   function pick(clientX: number) {
     const el = wrapRef.current;
@@ -403,6 +414,7 @@ function TrendChart({
                         strokeWidth={3}
                       >
                         {isGrade || q.p.hasScore ? q.p.value : `${q.p.value}%`}
+                        {both && q.p.grade != null ? ` · ${q.p.grade}등급` : ""}
                       </text>
                     )}
                   </g>
@@ -527,9 +539,11 @@ export default function ScoreTrendChart({
   const hasGrade = gradeSeries.length > 0;
   const hasScore = series.length > 0;
   // 등급만 적어 둔 기록뿐이면 처음부터 등급으로 본다(점수 보기는 비어 있다).
-  const [metric, setMetric] = useState<TrendMetric>(hasScore ? "score" : "grade");
+  const [metric, setMetric] = useState<"score" | "grade" | "both">(hasScore ? "score" : "grade");
   const isGrade = (metric === "grade" && hasGrade) || !hasScore;
   const shownMetric: TrendMetric = isGrade ? "grade" : "score";
+  // "함께" — 점수 그래프에 등급을 같이 적는다(점수·등급이 둘 다 있을 때만).
+  const both = metric === "both" && hasScore && hasGrade && !isGrade;
 
   // 색은 점수 목록 기준으로 과목마다 정해 두고 등급 보기에서도 같은 색을 쓴다
   // — 보기를 바꿀 때 과목 색이 바뀌면 헷갈린다.
@@ -627,6 +641,7 @@ export default function ScoreTrendChart({
             key={s.key}
             s={s}
             metric={shownMetric}
+            both={both}
             selected={selection === s.key}
             onSelect={() => setPicked(s.key)}
           />
@@ -665,6 +680,7 @@ export default function ScoreTrendChart({
                   [
                     { v: "score", label: "점수" },
                     { v: "grade", label: "등급" },
+                    { v: "both", label: "함께" },
                   ] as const
                 ).map((opt) => (
                   <button
@@ -683,7 +699,7 @@ export default function ScoreTrendChart({
           </div>
         </div>
 
-        <TrendChart series={chartSeries} metric={shownMetric} mode={selection === "all" ? "all" : "single"} />
+        <TrendChart series={chartSeries} metric={shownMetric} both={both} mode={selection === "all" ? "all" : "single"} />
 
         {selection === "all" && (
           <div className="flex flex-wrap gap-x-3 gap-y-1.5 text-xs text-slate-500">
