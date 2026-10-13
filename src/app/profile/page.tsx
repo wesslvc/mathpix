@@ -27,7 +27,11 @@ function asSubject(v: unknown): Subject | null {
     : null;
 }
 
-export default async function ProfilePage() {
+export default async function ProfilePage({
+  searchParams,
+}: {
+  searchParams?: { tab?: string };
+}) {
   if (!isSupabaseConfigured()) {
     return (
       <main className="mx-auto flex max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
@@ -85,6 +89,7 @@ export default async function ProfilePage() {
     elective2Label: prefs?.elective2_label ?? "",
   };
 
+  const costTab = access.unlimited && searchParams?.tab === "cost";
   const series = buildTrendSeries(scores ?? []);
   // 등급 추세는 등급을 적어 둔 시험만 모인다 — 하나도 없으면 화면이 토글
   // 자체를 감춘다. 순수 함수라 여기서 두 벌 만들어 내려보내면 된다.
@@ -109,9 +114,31 @@ export default async function ProfilePage() {
         byokCheckoutReady={isByokCheckoutReady()}
  />
 
-      {/* 무제한 계정에게만 — 서버(/api/admin/ai-cost)도 같은 조건으로 막는다. */}
-      {access.unlimited && <AiCostPanel />}
+      {/* 비용은 무제한 계정에게만 — 서버(/api/admin/ai-cost)도 같은 조건으로 막는다.
+          프로필 설정과 섞이면 길어져서 따로 탭으로 뺐다(?tab=cost). */}
+      {access.unlimited && (
+        <nav className="flex gap-1 text-sm" aria-label="프로필 탭">
+          <Link
+            href="/profile"
+            aria-current={!costTab ? "page" : undefined}
+            className={cn(buttonVariants({ variant: costTab ? "ghost" : "soft", size: "sm" }))}
+          >
+            프로필 · 성적
+          </Link>
+          <Link
+            href="/profile?tab=cost"
+            aria-current={costTab ? "page" : undefined}
+            className={cn(buttonVariants({ variant: costTab ? "soft" : "ghost", size: "sm" }))}
+          >
+            AI 비용
+          </Link>
+        </nav>
+      )}
 
+      {costTab ? (
+        <AiCostPanel />
+      ) : (
+        <>
       <LinkedAccounts initialIdentities={user.identities ?? []} />
 
       {/* BYOK 패스를 산 사람에게만 보인다 — 안 산 사람에게 키 입력칸을
@@ -152,6 +179,8 @@ export default async function ProfilePage() {
         <h2 className="text-base font-semibold text-ink">채점 기록</h2>
         <GradeHistoryList rows={historyRows} />
       </section>
+        </>
+      )}
     </main>
   );
 }
