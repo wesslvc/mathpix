@@ -37,6 +37,11 @@ function fmtDate(iso: string): string {
   return `${Number(m)}.${Number(d)}`;
 }
 
+/** 등급이 좋을수록(1등급) 진하게, 나쁠수록 연하게 — 0.28~1 사이 진하기. */
+function gradeStrength(g: number): number {
+  return Math.max(0.28, 1 - (Math.min(9, Math.max(1, g)) - 1) * 0.09);
+}
+
 function valueText(metric: TrendMetric, p: TrendPoint): string {
   if (metric === "grade") return `${p.value}등급`;
   return p.hasScore ? `${p.value}점` : `${p.value}%`;
@@ -171,7 +176,13 @@ function SummaryCard({
         </span>
         <Delta metric={metric} points={s.points} />
         {both && last.grade != null && (
-          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-slate-600">
+          <span
+            className="rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
+            style={{
+              backgroundColor: `color-mix(in srgb, ${s.color} ${Math.round(gradeStrength(last.grade) * 100)}%, white)`,
+              color: gradeStrength(last.grade) > 0.5 ? "#ffffff" : "#334155",
+            }}
+          >
             {last.grade}등급
           </span>
         )}
@@ -396,6 +407,7 @@ function TrendChart({
                       cy={q.y}
                       r={on ? 6 : official ? 5.5 : 4}
                       fill={q.p.hasScore ? s.color : "#ffffff"}
+                      fillOpacity={(both || isGrade) && q.p.grade != null && q.p.hasScore ? gradeStrength(q.p.grade) : 1}
                       stroke={official ? "#ffffff" : s.color}
                       strokeWidth={official ? 2 : 2}
  />
