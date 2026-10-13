@@ -161,3 +161,37 @@ export function buildTrendSeries(
 
   return [...groups.values()].sort(compareSubjectGroups);
 }
+
+export type GradeAverage = {
+  /** 등급을 적어 둔 시험 수. */
+  count: number;
+  /** 전체(보이는 기간) 평균 등급. */
+  overall: number;
+  /** 최근 3개 평균 등급. */
+  recent: number;
+  /** 최근 평균에 쓴 시험 수(3 미만일 수 있다). */
+  recentCount: number;
+  /** 등급은 숫자가 작을수록 좋다 — improving 은 최근 평균이 전체 평균보다 낮을 때. */
+  verdict: "improving" | "declining" | "steady";
+};
+
+/**
+ * 평균 등급. 등급을 안 적은 시험은 뺀다(보기와 상관없이 점마다 든 `grade` 를 쓴다).
+ * 시험이 2개 미만이면 견줄 것이 없어 null. 0.05 등급 안쪽 차이는 "비슷"으로 본다.
+ */
+export function averageGrades(points: TrendPoint[]): GradeAverage | null {
+  const g = points.filter((p) => p.grade != null).map((p) => p.grade as number);
+  if (g.length < 2) return null;
+  const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
+  const recentArr = g.slice(-3);
+  const overall = mean(g);
+  const recent = mean(recentArr);
+  const diff = overall - recent;
+  return {
+    count: g.length,
+    overall: Math.round(overall * 100) / 100,
+    recent: Math.round(recent * 100) / 100,
+    recentCount: recentArr.length,
+    verdict: diff > 0.05 ? "improving" : diff < -0.05 ? "declining" : "steady",
+  };
+}

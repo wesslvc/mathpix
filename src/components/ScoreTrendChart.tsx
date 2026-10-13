@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { TrendMetric, TrendPoint, TrendSeries } from "@/lib/scoreTrend";
+import { averageGrades, type TrendMetric, type TrendPoint, type TrendSeries } from "@/lib/scoreTrend";
 import { officialExamOn } from "@/lib/officialExams";
 import { Card, cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -139,6 +139,7 @@ function SummaryCard({
   onSelect: () => void;
 }) {
   const last = s.points[s.points.length - 1];
+  const avg = averageGrades(s.points);
   const best = s.points.reduce((a, p) =>
     metric === "grade" ? (p.value < a.value ? p : a) : p.pct > a.pct ? p : a,
   );
@@ -171,6 +172,29 @@ function SummaryCard({
       <span className="text-[11px] text-slate-400">
         {s.points.length}회 · 최고 {valueText(metric, best)}
       </span>
+      {avg && (
+        <span className="mt-0.5 flex flex-col gap-0.5 border-t border-slate-100 pt-1.5 text-[11px] tabular-nums text-slate-500">
+          <span>
+            최근 {avg.recentCount}개 평균 <b className="text-ink">{avg.recent}등급</b> · 전체 평균{" "}
+            <b className="text-ink">{avg.overall}등급</b>
+          </span>
+          <span
+            className={`font-semibold ${
+              avg.verdict === "improving"
+                ? "text-emerald-700"
+                : avg.verdict === "declining"
+                  ? "text-red-600"
+                  : "text-slate-500"
+            }`}
+          >
+            {avg.verdict === "improving"
+              ? "▲ 평균등급을 올리고 있어요"
+              : avg.verdict === "declining"
+                ? "▼ 평균등급이 하락하고 있어요"
+                : "평균등급이 비슷해요"}
+          </span>
+        </span>
+      )}
     </button>
   );
 }
