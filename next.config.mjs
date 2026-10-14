@@ -46,6 +46,8 @@ const nextConfig = {
   // 서버 전용 라우트에서만 쓰이므로 브라우저 번들에는 영향이 없다.
   webpack: (config) => {
     config.experiments = { ...config.experiments, asyncWebAssembly: true };
+    // pdfjs-dist 가 Node 용으로 불러 보는 선택 의존성 — 브라우저 번들에는 필요 없다.
+    config.resolve.alias = { ...config.resolve.alias, canvas: false };
     return config;
   },
 };

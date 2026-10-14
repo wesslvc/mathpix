@@ -127,6 +127,6 @@ export const config = {
     // (`google<토큰>.html`)이 `public/` 에 놓이는데, 이게 막히면 구글이
     // 파일을 못 읽어 **소유 확인이 통째로 실패한다** — robots.txt 가 막혀
     // 있던 것과 똑같은 사고다. `public/` 에 두는 파일은 원래 공개다.
-    "/((?!_next/static|_next/image|favicon.ico|robots\\.txt|sitemap\\.xml|fonts/|.*\\.(?:html|svg|png|jpg|jpeg|gif|webp|woff|woff2)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|robots\\.txt|sitemap\\.xml|fonts/|pdf\\.worker\\.min\\.js|.*\\.(?:html|svg|png|jpg|jpeg|gif|webp|woff|woff2)$).*)",
   ],
 };

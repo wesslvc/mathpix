@@ -29,6 +29,7 @@ import BoxEditor, { type EditBox } from "./BoxEditor";
 import CropShapeToggle from "./CropShapeToggle";
 import { useCropShape } from "@/lib/cropShape";
 import { cropRegionToDataUrl, type Region } from "@/lib/polygon";
+import { isPdfFile, pdfToImageFiles } from "@/lib/pdfPages";
 import { Button } from "@/components/ui/button";
 import WrongOnlyToggle, { parseNumberList } from "@/components/WrongOnlyToggle";
 import { Card } from "@/components/ui/card";
@@ -213,6 +214,27 @@ export default function KoreanModePanel({
     setError(null);
     setNote(null);
     if (files.length === 0) return;
+    // PDF 는 쪽마다 사진으로 풀어 같은 흐름에 태운다(쪽 차례 = 읽는 차례).
+    if (files.some(isPdfFile)) {
+      try {
+        const expanded: File[] = [];
+        for (const f of files) {
+          if (!isPdfFile(f)) {
+            expanded.push(f);
+            continue;
+          }
+          setBusy(`PDF 를 쪽 사진으로 바꾸는 중... (${f.name})`);
+          expanded.push(...(await pdfToImageFiles(f, (d, t) => setBusy(`PDF 를 쪽 사진으로 바꾸는 중... ${d}/${t}쪽`))));
+        }
+        files = expanded;
+        setNote(`PDF 를 ${files.length}쪽 사진으로 열었어요 — 지문 쪽만 남기려면 아래 사진 줄에서 ×로 빼세요.`);
+      } catch (err) {
+        setError(err instanceof Error ? `PDF 를 열지 못했어요: ${err.message}` : "PDF 를 열지 못했어요.");
+        return;
+      } finally {
+        setBusy(null);
+      }
+    }
     const bad = files.find(isHeicFile);
     if (bad) {
       setError("HEIC 사진은 아직 읽지 못합니다. JPG/PNG로 저장해 다시 올려주세요.");
@@ -1147,7 +1169,7 @@ export default function KoreanModePanel({
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf,.pdf"
             multiple
             onChange={(e) => void pickFiles(Array.from(e.target.files ?? []))}
             className="text-sm"
