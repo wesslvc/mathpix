@@ -33,7 +33,7 @@ function categoryOf(j: FigureJob): Category {
   if (j.mode === "passage") return "passage";
   if (j.mode !== "task") return "draw";
   const t = j.stage ?? "";
-  if (t === "ocr") return "mathpix";
+  if (t === "ocr" || (t === "typeset" && /Mathpix/.test(j.label ?? ""))) return "mathpix";
   if (t === "detect" || t === "crop") return "haiku";
   if (LUNA_TASKS.has(t)) return "luna";
   return "sol";
@@ -96,7 +96,7 @@ function statusText(j: FigureJob, top: string): string {
   if (j.status === "done" && j.stage === "max-offer") return "완료 · 글자·도형 차이가 남았어요";
   if (j.status !== "running" && j.status !== "pending") return STATUS_TEXT[j.status];
   if (j.mode === "task") {
-    return j.status === "pending" ? "차례 기다리는 중" : (TASK_RUNNING[j.stage ?? ""] ?? "AI 가 처리하는 중");
+    return j.status === "pending" ? "차례 기다리는 중" : (j.stage === "typeset" && /Mathpix/.test(j.label ?? "") ? "Mathpix 가 문제를 글자로 읽는 중" : (TASK_RUNNING[j.stage ?? ""] ?? "AI 가 처리하는 중"));
   }
   // 문제 통째로 그리기는 그리기 → sol 검수 → 고쳐 그리기를 단계로 돈다(`gen:N` / `verify:N`).
   if (j.mode !== "passage" && j.stage) {

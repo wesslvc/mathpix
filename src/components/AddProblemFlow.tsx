@@ -182,9 +182,9 @@ export default function AddProblemFlow({
   /**
    * luna 가 자르며 함께 본 것들(사진 id 별, 2026-10-09 — "luna 를 써서 편해질 수 있으면 다 때려박자"):
    * 사진을 몇 번 돌려야 똑바로 서는지(`turns` — 자르기 화면이 저절로 돌린다), 선지가 없는 주관식인지(`short` — 정답 유형을
-   * 저절로 맞춘다), 원본 그대로 넣어도 되는지 다시 그려야 하는지(`advice` — 버튼에 "luna 추천" 표시, 한눈에 보기의 "추천대로 넣기").
+   * 저절로 맞춘다), 문제 종류(`kind` — 수학이면 Mathpix, 국어면 sol, 표·그림이 섞이면 AI·원본 그대로만 보여 준다).
    */
-  type LunaInfo = { turns: number; short: boolean; advice?: "asis" | "redraw"; reason?: string };
+  type LunaInfo = { turns: number; short: boolean; kind?: "math" | "korean" | "other" };
   const [lunaInfo, setLunaInfo] = useState<Record<string, LunaInfo>>({});
   const lunaInfoRef = useRef(new Map<string, LunaInfo>());
   /**
@@ -220,8 +220,7 @@ export default function AddProblemFlow({
             number?: string | null;
             choices?: number;
             rotate?: number;
-            advice?: "asis" | "redraw";
-            adviceReason?: string;
+            kind?: "math" | "korean" | "other";
           }>("crop", {
             label: `자동 자르기 · ${p.name}`.slice(0, 100),
             images: [image],
@@ -237,8 +236,7 @@ export default function AddProblemFlow({
                   const info: LunaInfo = {
                     turns: Math.max(0, Math.min(3, Math.round(Number(result.rotate) || 0))),
                     short: result.choices === 0,
-                    advice: result.advice,
-                    reason: result.adviceReason,
+                    kind: result.kind,
                   };
                   lunaInfoRef.current.set(p.id, info);
                   setLunaInfo((prev) => ({ ...prev, [p.id]: info }));
@@ -283,12 +281,13 @@ export default function AddProblemFlow({
    * luna 결과를 기다린다. 브라우저 저장소에서는 넣은 사진만 지운다(탭이 죽으면 남은 것이 되살아난다). 못 연 사진은 대기열로 되돌린다.
    */
   const [bulkLeft, setBulkLeft] = useState(0);
-  /** luna 추천대로 넣을 방식(추천이 없으면 AI로 다시 그리기 — 손이 안 가는 쪽). */
-  function adviceMode(photoId: string): "problem" | "asis" {
-    return lunaInfoRef.current.get(photoId)?.advice === "asis" ? "asis" : "problem";
+  /** 종류별 기본 방식: 수학 → Mathpix, 국어 → sol, 그 밖·모르면 AI로 다시 그리기. */
+  function kindMode(photoId: string): "problem" | "sol" | "mathpix" {
+    const k = lunaInfoRef.current.get(photoId)?.kind;
+    return k === "math" ? "mathpix" : k === "korean" ? "sol" : "problem";
   }
 
-  async function addPhotosInBackground(photos: QueuedPhoto[], addMode: "problem" | "asis" | "sol" | "advice") {
+  async function addPhotosInBackground(photos: QueuedPhoto[], addMode: "problem" | "asis" | "sol" | "mathpix" | "advice") {
     if (photos.length === 0) return;
     setBulkLeft((n) => n + photos.length);
     for (const p of photos) {
@@ -300,7 +299,7 @@ export default function AddProblemFlow({
           // luna 가 사진이 누웠다고 봤으면 자른 뒤 똑바로 세운다(자리는 돌리기 전 사진 기준이다).
           const turns = lunaInfoRef.current.get(p.id)?.turns ?? 0;
           const crop = await rotateImageDataUrl(cropRegionToDataUrl(img, region), turns);
-          quickAdd(crop, addMode === "advice" ? adviceMode(p.id) : addMode, { photo: p });
+          quickAdd(crop, addMode === "advice" ? kindMode(p.id) : addMode, { photo: p });
         } finally {
           URL.revokeObjectURL(url);
         }
@@ -313,7 +312,7 @@ export default function AddProblemFlow({
   }
 
   /** 자르기 화면의 "남은 N장도 같은 방식으로 한 번에": 지금 사진은 고른 자리로, 남은 것은 luna 자리로. */
-  function addAllRemaining(crop: string, addMode: "problem" | "asis" | "sol") {
+  function addAllRemaining(crop: string, addMode: "problem" | "asis" | "sol" | "mathpix") {
     const rest = pending;
     quickAdd(crop, addMode, { advance: false });
     setPending([]);
@@ -330,7 +329,7 @@ export default function AddProblemFlow({
   }
 
   /** 한눈에 보기: 체크 안 한 것은 한꺼번에 넣고, 체크한 것은 하나씩 자르기 화면으로. */
-  function submitReview(addMode: "problem" | "asis" | "sol" | "advice") {
+  function submitReview(addMode: "problem" | "asis" | "sol" | "mathpix" | "advice") {
     const go = pending.filter((p) => !recrop.has(p.id));
     const keep = pending.filter((p) => recrop.has(p.id));
     setRecrop(new Set());
@@ -632,8 +631,8 @@ export default function AddProblemFlow({
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  async function handleCropConfirm(croppedDataUrl: string, cropMode: "ocr" | "problem" | "asis" | "sol") {
-    if (cropMode === "problem" || cropMode === "asis" || cropMode === "sol") {
+  async function handleCropConfirm(croppedDataUrl: string, cropMode: "ocr" | "problem" | "asis" | "sol" | "mathpix") {
+    if (cropMode === "problem" || cropMode === "asis" || cropMode === "sol" || cropMode === "mathpix") {
       quickAdd(croppedDataUrl, cropMode);
       return;
     }
@@ -670,7 +669,7 @@ export default function AddProblemFlow({
    */
   function quickAdd(
     crop: string,
-    addMode: "problem" | "asis" | "sol",
+    addMode: "problem" | "asis" | "sol" | "mathpix",
     /** `photo`: 지금 사진이 아니라 이 사진을 넣는다(한 번에 넣기). `advance: false`: 다음 사진으로 넘기지 않는다. */
     opts: { photo?: QueuedPhoto; advance?: boolean } = {},
   ) {
@@ -708,18 +707,18 @@ export default function AddProblemFlow({
           problemId,
         });
       }
-      if (addMode === "sol") {
+      if (addMode === "sol" || addMode === "mathpix") {
         // **sol 인식 후 조판**(서버 대기열 task `typeset`). 우선 원본 그대로 저장해 두고(빈 자리가 아니다), sol 이 옮겨
         // 적으면 FigureJobsProvider 가 그 문제를 글자 본문으로 바꿔 저장한다(`typesetApply.ts`) — 화면을 떠나도 된다.
         void (async () => {
           try {
             await runAiTask("typeset", {
-              label: `${nth}번째 사진 · sol 인식`,
+              label: `${nth}번째 사진 · ${addMode === "mathpix" ? "Mathpix" : "sol"} 인식`,
               images: [await prepareProblemForModel(await enhanceContrast(crop))],
-              params: { problemId },
+              params: addMode === "mathpix" ? { problemId, engine: "mathpix" } : { problemId },
             });
           } catch (err) {
-            setError(`sol 인식에 실패했어요(원본 그대로 저장돼 있어요). ${err instanceof Error ? err.message : ""}`);
+            setError(`${addMode === "mathpix" ? "Mathpix" : "sol"} 인식에 실패했어요(원본 그대로 저장돼 있어요). ${err instanceof Error ? err.message : ""}`);
           }
         })();
       }
@@ -1052,7 +1051,7 @@ export default function AddProblemFlow({
                 photos={pending}
                 previews={previews}
                 aiCrops={aiCrops}
-                advice={lunaInfo}
+                kinds={lunaInfo}
                 checked={recrop}
                 preparing={preparing}
                 onToggle={(id) =>
@@ -1116,8 +1115,7 @@ export default function AddProblemFlow({
                 imageSrc={activeUrl}
                 aiRegion={active ? (active.id in aiCrops ? aiCrops[active.id] : undefined) : null}
                 aiTurns={active ? lunaInfo[active.id]?.turns : undefined}
-                aiAdvice={active ? lunaInfo[active.id]?.advice : undefined}
-                aiAdviceReason={active ? lunaInfo[active.id]?.reason : undefined}
+                aiKind={active ? lunaInfo[active.id]?.kind : undefined}
                 restCount={pending.length}
                 onConfirmRest={(crop, m) => void addAllRemaining(crop, m)}
                 onConfirm={handleCropConfirm}

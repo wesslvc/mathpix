@@ -40,7 +40,7 @@ import {
   type ProblemLoopState,
 } from "@/lib/problemLoopRun";
 import type { FigureUsage } from "@/lib/figureImageGen";
-import { TASKS, TASK_KINDS, type TaskKind } from "@/lib/aiTasks";
+import { TASKS, TASK_KINDS, taskNeedsOpenAI, type TaskKind } from "@/lib/aiTasks";
 import { USD_KRW_RATE, gradingTokenCharge } from "@/lib/tokens";
 
 /** 확인용 64×64 PNG(청크 CRC 까지 검사한 것 — `/api/figure/models` 와 같은 파일). */
@@ -810,7 +810,7 @@ async function runTaskJob(admin: Admin, job: ClaimedJob) {
     return;
   }
   const billing = await getBillingContext(admin, job.user_id);
-  if (def.needsOpenAI && billing.byok && !billing.byokApiKey) {
+  if (taskNeedsOpenAI(def, params) && billing.byok && !billing.byokApiKey) {
     await fail(admin, job, "BYOK 패스 계정인데 아직 OpenAI 키를 등록하지 않았어요. /profile 에서 먼저 등록해주세요.");
     await cleanup();
     return;

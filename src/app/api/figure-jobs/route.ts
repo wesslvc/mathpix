@@ -15,7 +15,7 @@ import {
   type ProblemLoopState,
 } from "@/lib/problemLoopRun";
 import { cardUrl } from "@/lib/cardUrl";
-import { MAX_TASK_PARAMS_CHARS, TASKS, TASK_KINDS, type TaskKind } from "@/lib/aiTasks";
+import { MAX_TASK_PARAMS_CHARS, TASKS, TASK_KINDS, taskNeedsOpenAI, type TaskKind } from "@/lib/aiTasks";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -880,7 +880,7 @@ async function enqueueTask(
     await cleanup();
     return NextResponse.json({ error: "이 기능은 무제한 계정에서만 쓸 수 있습니다." }, { status: 403 });
   }
-  if (def.needsOpenAI) {
+  if (taskNeedsOpenAI(def, params)) {
     if (billing.byok && !billing.byokApiKey) {
       await cleanup();
       return NextResponse.json(

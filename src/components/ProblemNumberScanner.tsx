@@ -97,6 +97,7 @@ export default function ProblemNumberScanner({
             const { result } = await runAiTask<{ text?: string; latex?: string }>("ocr", {
               label: `번호 읽기 ${i + 1}/${needScan.length}`,
               images: [await enhanceContrast(dataUrl)],
+              params: { free: true },
             });
             read = result?.text || result?.latex || "";
           } catch (err) {

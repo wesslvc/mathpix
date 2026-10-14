@@ -58,6 +58,7 @@ export async function readNumberWithMathpix(crop: string, label = "문제 번호
     const { result } = await runAiTask<{ text?: string; latex?: string }>("ocr", {
       label,
       images: [await prepareProblemForModel(crop)],
+      params: { free: true },
     });
     return parseProblemNumber(result?.text || result?.latex || "");
   } catch {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { SOL_TYPESET_TOKENS } from "@/lib/tokens";
+import { OCR_TOKEN_COST, SOL_TYPESET_TOKENS } from "@/lib/tokens";
 import ReactCrop, { type Crop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import { detectContentRegion } from "@/lib/autoDetectRegion";
@@ -19,7 +19,7 @@ type Props = {
    * mode가 "problem"이면 인식(Mathpix) 대신 문제 전체를 이미지로 다시 그린다.
    * 탐구처럼 표·지도·그림이 뒤섞인 문제는 그 편이 원본에 가깝다.
    */
-  onConfirm: (croppedDataUrl: string, mode: "ocr" | "problem" | "asis" | "sol") => void;
+  onConfirm: (croppedDataUrl: string, mode: "ocr" | "problem" | "asis" | "sol" | "mathpix") => void;
   /** 문제 전체 다시 그리기에 드는 토큰. 못 불러왔으면 표시하지 않는다. */
   problemTokenCost?: number | null;
   /** 무제한 계정인가. 토큰 비용 표시를 감춘다. */
@@ -40,13 +40,15 @@ type Props = {
   aiRegion?: Region | null;
   /** luna 가 본 "똑바로 서려면 시계 방향으로 몇 번 돌려야 하는지"(0~3). 손대기 전이면 저절로 돌린다. */
   aiTurns?: number;
-  /** luna 추천 — 원본 그대로(asis) / 다시 그리기(redraw). 그 버튼에 표시가 붙는다. */
-  aiAdvice?: "asis" | "redraw";
-  aiAdviceReason?: string;
+  /**
+   * Haiku 가 본 문제 종류. 수학 → Mathpix·AI·원본 그대로, 국어 → sol·AI·원본 그대로,
+   * 그 밖(표·지도·그림이 섞임) → AI·원본 그대로만. 모르면(undefined) 전부 보여 준다.
+   */
+  aiKind?: "math" | "korean" | "other";
   /** 이 사진 뒤에 남은 사진 수. 있으면 "남은 사진도 같은 방식으로 한 번에" 고르기가 뜬다. */
   restCount?: number;
   /** 지금 사진과 남은 사진을 모두 같은 방식으로 넣는다(남은 것은 luna 가 자른 자리대로). */
-  onConfirmRest?: (croppedDataUrl: string, mode: "problem" | "asis" | "sol") => void;
+  onConfirmRest?: (croppedDataUrl: string, mode: "problem" | "asis" | "sol" | "mathpix") => void;
 };
 
 
@@ -64,8 +66,7 @@ export default function CropStage({
   byok = false,
   aiRegion,
   aiTurns = 0,
-  aiAdvice,
-  aiAdviceReason,
+  aiKind,
   restCount = 0,
   onConfirmRest,
 }: Props) {
@@ -179,7 +180,7 @@ export default function CropStage({
 
   const ready = !!region && region.w > 0 && region.h > 0;
 
-  function handleConfirm(mode: "ocr" | "problem" | "asis" | "sol") {
+  function handleConfirm(mode: "ocr" | "problem" | "asis" | "sol" | "mathpix") {
     const img = imgRef.current;
     if (!img || !region || !ready) return;
     const crop = cropRegionToDataUrl(img, region);
@@ -313,61 +314,72 @@ export default function CropStage({
         )}
         {/* 휴대폰에서는 두 칸씩 두 줄 — 한 손으로 연달아 누르는 자리다. */}
         <div className="grid grid-cols-2 gap-2 sm:flex">
-          {/* 이미 깨끗한 인쇄물이면 다시 그릴 이유가 없다. 인식도 생성도 하지 않으므로
-              여기서 드는 것은 번호를 읽는 비용뿐이다. */}
-          <Button
-            type="button"
-            onClick={() => handleConfirm("asis")}
-            disabled={!ready}
-            variant={aiAdvice === "asis" ? "primary" : "outline"}
-            title={aiAdvice === "asis" ? `Haiku 추천${aiAdviceReason ? ` — ${aiAdviceReason}` : ""}` : undefined}
-            className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
-          >
-            원본 그대로
-            {aiAdvice === "asis" && (
-              <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">Haiku 추천{aiAdviceReason ? ` · ${aiAdviceReason}` : ""}</span>
-            )}
-          </Button>
-          {/* 탐구처럼 표·지도·그림이 뒤섞인 문제는 글자로 옮겨 재구성하는 것보다
-              통째로 다시 그리는 편이 원본에 가깝다. */}
+          {/* 수학이면 Mathpix, 국어면 sol 을 기본으로 앞세운다(Haiku 가 본 종류). 표·지도·그림이 섞인 문제는 글자로 옮기면
+              정보를 잃으므로 AI·원본 그대로만 보인다. 종류를 못 알아낸 사진은 전부 보인다. */}
+          {aiKind !== "other" && aiKind !== "korean" && (
+            <Button
+              type="button"
+              onClick={() => handleConfirm("mathpix")}
+              disabled={!ready}
+              variant={aiKind === "math" ? "primary" : "soft"}
+              className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
+            >
+              Mathpix로 인식
+              {!unlimited && !byok && (
+                <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{OCR_TOKEN_COST}토큰</span>
+              )}
+            </Button>
+          )}
+          {aiKind !== "other" && aiKind !== "math" && (
+            <Button
+              type="button"
+              onClick={() => handleConfirm("sol")}
+              disabled={!ready}
+              variant={aiKind === "korean" ? "primary" : "soft"}
+              className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
+            >
+              sol로 인식
+              {!unlimited && !byok && (
+                <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{SOL_TYPESET_TOKENS}토큰</span>
+              )}
+              {byok && <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">본인 키</span>}
+            </Button>
+          )}
           <Button
             type="button"
             onClick={() => handleConfirm("problem")}
             disabled={!ready}
-            variant={aiAdvice === "redraw" ? "primary" : "soft"}
-            title={aiAdvice === "redraw" ? `Haiku 추천${aiAdviceReason ? ` — ${aiAdviceReason}` : ""}` : undefined} className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
+            variant={aiKind === "other" ? "primary" : "soft"}
+            className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
           >
             AI로 다시 그리기
-            {aiAdvice === "redraw" && (
-              <span className="text-[10px] font-medium opacity-80 sm:text-[11px]">Haiku 추천{aiAdviceReason ? ` · ${aiAdviceReason}` : ""}</span>
-            )}
             {typeof problemTokenCost === "number" && !unlimited && !byok && (
               <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{problemTokenCost}토큰</span>
             )}
             {byok && <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">본인 키</span>}
           </Button>
-          {/* sol 이 글자로 옮겨 적고 우리가 조판한다(수정 창의 "sol 인식 후 조판"과 같은 작업). 글자가 정확하고
-              본문을 고칠 수 있다 — 그래프·지도 같은 그림은 원본에서 오려 붙인다. 넣자마자 다음 사진으로 넘어간다. */}
           <Button
             type="button"
-            onClick={() => handleConfirm("sol")}
+            onClick={() => handleConfirm("asis")}
             disabled={!ready}
-            variant="soft" className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
+            variant="outline"
+            className="flex-col gap-0 whitespace-normal px-2 text-[13px] leading-tight sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm"
           >
-            sol로 인식
-            {!unlimited && !byok && (
-              <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">{SOL_TYPESET_TOKENS}토큰</span>
-            )}
-            {byok && <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">본인 키</span>}
+            원본 그대로
+            <span className="text-[10px] font-medium opacity-70 sm:text-[11px]">무료</span>
           </Button>
-          <Button
-            type="button"
-            onClick={() => handleConfirm("ocr")}
-            disabled={!ready}
-            variant="primary" className="whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm"
-          >
-            글자로 인식
-          </Button>
+          {aiKind !== "other" && aiKind !== "korean" && (
+            <Button
+              type="button"
+              onClick={() => handleConfirm("ocr")}
+              disabled={!ready}
+              variant="ghost"
+              title="인식 결과를 보며 고치고 그림을 오려 붙인다"
+              className="whitespace-normal px-2 text-[13px] leading-tight sm:px-4 sm:text-sm"
+            >
+              결과 화면에서 확인하며 인식
+            </Button>
+          )}
         </div>
       </div>
     </div>

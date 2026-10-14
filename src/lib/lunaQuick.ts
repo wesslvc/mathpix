@@ -79,15 +79,16 @@ ALSO TELL US (the student will not have to do these by hand):
 - "rotate": how many quarter turns CLOCKWISE (0, 1, 2 or 3) the photo must be turned so the printed text reads upright.
   0 if it is already upright. Photos taken sideways are common (text running top-to-bottom → 1 or 3; upside down → 2).
   Box coordinates always refer to the photo AS GIVEN (not rotated).
-- "advice": what to do with this problem image —
-  "asis"   = the printed problem is already clean enough to print as it is: flat, sharp, good contrast, little or no handwriting
-             or pen marks over the problem area, no strong shadow.
-  "redraw" = it should be redrawn cleanly: handwriting / pen or pencil marks / circled answers over the problem, strong shadow
-             or uneven lighting, blur, curled or skewed paper, low contrast, or stains.
-  "advice_reason": one short Korean phrase for the student (e.g. "깨끗한 인쇄", "손글씨가 많음", "그림자·기울어짐").
+- "kind": what sort of problem this is, so the app can offer the right recognizer —
+  "math"   = a mathematics problem: formulas / equations / symbols are the main content (graphs or figures are fine).
+  "korean" = the problem is almost pure running text (Korean language / literature / English prose, plain questions and choices)
+             with no table, map, chart, photo or drawing that would be lost when typed out.
+  "other"  = anything else: tables, maps, charts, photographs, diagrams, apparatus drawings, mixed material
+             (typical of social-studies / science problems) — typing it out would lose information.
+  When unsure between "math"/"korean" and "other", answer "other".
 
 answer as JSON object only:
-{"box_2d":[ymin,xmin,ymax,xmax],"number":{"text":"17.","box_2d":[...]},"choices":[{"label":"①","box_2d":[...]},...],"rotate":0,"advice":"asis","advice_reason":"깨끗한 인쇄"}
+{"box_2d":[ymin,xmin,ymax,xmax],"number":{"text":"17.","box_2d":[...]},"choices":[{"label":"①","box_2d":[...]},...],"rotate":0,"kind":"math"}
 — "number" is null if no printed number is visible; {"box_2d":null} if no problem is visible.`;
 
 /** luna 가 짚은 "꼭 들어가야 할 것"(번호·선지)과 함께 돌려주는 자리. `keep` 은 화면이 글자에 맞춰 다듬은 뒤에도 꼭 품는다. */
@@ -101,9 +102,8 @@ export interface CropFinding {
   choices: number;
   /** 글자가 똑바로 서려면 시계 방향으로 몇 번(90°) 돌려야 하는지(0~3). */
   rotate?: number;
-  /** luna 의 추천 — 원본 그대로(asis) / 깨끗하게 다시 그리기(redraw). */
-  advice?: "asis" | "redraw";
-  adviceReason?: string;
+  /** 문제 종류 — 수학(Mathpix 기본) / 국어(sol 기본) / 그 밖(표·지도·그림이 섞임 → AI·원본 그대로만). */
+  kind?: "math" | "korean" | "other";
 }
 
 /** 사진 한 장에서 문제 하나의 자리(0~1). 못 찾으면 box 가 null. */
@@ -193,7 +193,7 @@ rough position is [${k(b.y)},${k(b.x)},${k(b.y + b.h)},${k(b.x + b.w)}] in this 
 whole page and is often off by a line or two: start from it, then follow the real edges of THIS problem — include its number and
 ALL its lines/choices even where they extend past the rough position, and cut away any line that belongs to a neighbour
 (a neighbour begins with its own printed number). Ignore "pick the one closest to the centre" — the target is the one described here.
-The page is already upright and will not be redrawn from this answer: return "rotate":0 and omit "advice" / "advice_reason".`;
+The page is already upright and will not be redrawn from this answer: return "rotate":0 and omit "kind".`;
 }
 
 function toBox(b: unknown): ProblemBox | null {
@@ -247,18 +247,16 @@ export function parseCrop(text: string): CropFinding {
     y1 = Math.max(y1, k.y + k.h);
   }
   const number = o.number && typeof o.number.text === "string" ? o.number.text.trim().slice(0, 12) : undefined;
-  const extra = raw as { rotate?: unknown; advice?: unknown; advice_reason?: unknown };
+  const extra = raw as { rotate?: unknown; kind?: unknown };
   const r = Math.round(Number(extra.rotate));
   const rotate = Number.isFinite(r) && r >= 0 && r <= 3 ? r : 0;
-  const advice = extra.advice === "asis" || extra.advice === "redraw" ? extra.advice : undefined;
-  const adviceReason = typeof extra.advice_reason === "string" ? extra.advice_reason.trim().slice(0, 40) : undefined;
+  const kind = extra.kind === "math" || extra.kind === "korean" || extra.kind === "other" ? extra.kind : undefined;
   return {
     box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0, ...(keep.length ? { keep } : {}) },
     number: number || undefined,
     choices,
     rotate,
-    ...(advice ? { advice } : {}),
-    ...(adviceReason ? { adviceReason } : {}),
+    ...(kind ? { kind } : {}),
   };
 }
 

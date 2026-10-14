@@ -191,11 +191,16 @@ function errorMessage(err: unknown, fallback: string): string {
 
 const mathpixMock = () => !process.env.MATHPIX_APP_ID || !process.env.MATHPIX_APP_KEY;
 
+export function taskNeedsOpenAI(def: { needsOpenAI: boolean }, params: Record<string, unknown>): boolean {
+  return def.needsOpenAI && params.engine !== "mathpix";
+}
+
 export const TASKS: Record<TaskKind, TaskDef> = {
   // Mathpix 글자 인식(결과 화면으로 가는 "글자로 인식" · 번호 읽기 · 전체 번호 인식).
   ocr: {
     // mock(키 미설정)은 실제 호출이 아니라 받지 않는다. 무제한·BYOK 는 Mathpix 를 무료로 쓴다(넣는 쪽이 거른다).
-    deposit: () => (mathpixMock() ? 0 : OCR_TOKEN_COST),
+    // 번호 읽기(`params.free`)는 무료다. 글자로 인식(결과 화면)만 받는다.
+    deposit: (params) => (mathpixMock() || params.free === true ? 0 : OCR_TOKEN_COST),
     flat: true,
     needsOpenAI: false,
     images: { min: 1, max: 1 },
@@ -277,7 +282,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     name: "자동 자르기",
     async run(ctx) {
       try {
-        const { box, model, usage, number, choices, retried, rotate, advice, adviceReason } = await cropOneProblem(
+        const { box, model, usage, number, choices, retried, rotate, kind } = await cropOneProblem(
           ctx.images[0],
           readTarget(ctx.params.target),
           undefined,
@@ -294,10 +299,10 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         }
         const note = !box
           ? `${model} · 문제 자리를 못 찾았어요`
-          : `${model} · ${number ? `번호 ${number}` : "번호 못 봄"} · 선지 ${choices}개${retried ? " (다시 봄)" : ""}${rotate ? ` · ${rotate * 90}° 돌림` : ""}${advice ? ` · 추천 ${advice === "asis" ? "원본 그대로" : "AI로 다시 그리기"}` : ""}`;
+          : `${model} · ${number ? `번호 ${number}` : "번호 못 봄"} · 선지 ${choices}개${retried ? " (다시 봄)" : ""}${rotate ? ` · ${rotate * 90}° 돌림` : ""}${kind ? ` · ${kind === "math" ? "수학" : kind === "korean" ? "국어" : "그림·표 섞임"}` : ""}`;
         // 비교 화면이 다시 맞추기 비용을 합산하려고 금액을 결과에 싣는다 — 금액은 무제한·BYOK 에게만(다른 화면과 같은 규칙).
         const shownKrw = (ctx.unlimited || ctx.byok) && estKrw ? { estKrw: Math.round(estKrw * 100) / 100 } : {};
-        return { ok: true, result: { box, model, number, choices, rotate, advice, adviceReason, ...shownKrw }, model, estKrw, note };
+        return { ok: true, result: { box, model, number, choices, rotate, kind, ...shownKrw }, model, estKrw, note };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "자동 자르기에 실패했습니다.") };
       }
@@ -354,7 +359,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
 
   // 국어 지문 제목 짓기(luna, 고정 1토큰).
   title: {
-    deposit: () => 1,
+    deposit: () => 0,
     flat: true,
     needsOpenAI: true,
     images: { min: 0, max: 1 },
@@ -510,12 +515,25 @@ export const TASKS: Record<TaskKind, TaskDef> = {
 
   // sol 이 문제를 글자로 옮겨 적는다(수정 창의 "sol 인식 후 조판"). 실사용량 정산.
   typeset: {
-    deposit: () => SOL_TYPESET_TOKENS,
+    deposit: (params) => (params.engine === "mathpix" ? (mathpixMock() ? 0 : OCR_TOKEN_COST) : SOL_TYPESET_TOKENS),
     flat: true,
     needsOpenAI: true,
     images: { min: 1, max: 1 },
     name: "sol 조판 인식",
     async run(ctx) {
+      if (ctx.params.engine === "mathpix") {
+        // Mathpix 로 읽어 같은 조판 경로로 보낸다(수학 기본). 그림은 Mathpix 가 잡은 도형을 쓰지 않고 본문만 옮긴다.
+        try {
+          const r = await recognizeImage(ctx.images[0], {
+            appId: process.env.MATHPIX_APP_ID,
+            appKey: process.env.MATHPIX_APP_KEY,
+          });
+          if (r.mock || !r.text.trim()) return { ok: false, error: "Mathpix 가 글자를 읽지 못했어요." };
+          return { ok: true, result: { text: r.text, figures: [] }, model: "Mathpix", note: `글 ${r.text.length}자` };
+        } catch (err) {
+          return { ok: false, error: errorMessage(err, "Mathpix 인식에 실패했습니다.") };
+        }
+      }
       const ask = await askSol(
         TYPESET_PROMPT,
         ctx.images,
@@ -549,8 +567,8 @@ export const TASKS: Record<TaskKind, TaskDef> = {
 
   // sol 수정 대화 한 마디. 추론 강도는 안 보낸다(사용자 지시). images 는 원본·지금 그림 두 장, 또는 params.jobId.
   chat: {
-    deposit: () => 20,
-    flat: false,
+    deposit: () => 0,
+    flat: true,
     needsOpenAI: true,
     images: { min: 0, max: 2 },
     name: "sol 대화",

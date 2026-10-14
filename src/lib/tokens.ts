@@ -18,7 +18,7 @@
  * 아주 싸서 무료 회원도 자주 쓸 수 있어야 한다는 판단이다. 한때 1→5로
  * 올린 적이 있는데(위 이력) 그 반대 방향 결정이다.
  */
-export const OCR_TOKEN_COST = 1;
+export const OCR_TOKEN_COST = 3;
 
 /**
  * 토큰 하나의 판매가(원). 1000토큰을 3000원에 판다.
@@ -53,7 +53,7 @@ export const FIGURE_MARGIN = (() => {
  */
 export const FIGURE_TOKEN_DEPOSIT = (() => {
   const raw = Number(process.env.FIGURE_TOKEN_DEPOSIT);
-  return Number.isInteger(raw) && raw > 0 ? raw : 120;
+  return Number.isInteger(raw) && raw > 0 ? raw : 150;
 })();
 
 /**
@@ -82,7 +82,7 @@ export const PASSAGE_READ_TOKENS = 100;
  * 자르기 화면의 "sol로 인식"과 수정 창의 "sol 인식 후 조판"이 같은 값을 쓴다(화면도 이 값을 읽는다).
  * 원가는 한 번에 30~40원쯤(장부 `sol 조판 인식` 평균) — 무제한 계정 장부에는 원가가 그대로 쌓인다.
  */
-export const SOL_TYPESET_TOKENS = 50;
+export const SOL_TYPESET_TOKENS = 30;
 
 /** 지문 서식 검수(두 번째 호출)의 보증금. 실사용량으로 정산해 남으면 돌려준다. */
 export const PASSAGE_MARKS_DEPOSIT = 30;
@@ -101,7 +101,7 @@ export const TOKEN_GAUGE_FULL = 1000;
  */
 export const MAX_REDRAW_TOKENS = (() => {
   const raw = Number(process.env.MAX_REDRAW_TOKENS);
-  return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : 200;
+  return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : 150;
 })();
 
 /**
@@ -118,7 +118,7 @@ export const MAX_REDRAW_TOKENS = (() => {
  */
 export const GRADING_TOKEN_DEPOSIT = (() => {
   const raw = Number(process.env.GRADING_TOKEN_DEPOSIT);
-  return Number.isInteger(raw) && raw > 0 ? raw : 1;
+  return Number.isInteger(raw) && raw > 0 ? raw : 0;
 })();
 
 /**

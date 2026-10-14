@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBillingContext } from "@/lib/byok";
 import { loadAsDataUrl, removeStored } from "@/lib/figureRun";
-import { DIRECT_TASKS, MAX_TASK_PARAMS_CHARS, TASKS, type TaskKind } from "@/lib/aiTasks";
+import { DIRECT_TASKS, MAX_TASK_PARAMS_CHARS, TASKS, taskNeedsOpenAI, type TaskKind } from "@/lib/aiTasks";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
   if (def.unlimitedOnly && !billing.unlimited) {
     return done(NextResponse.json({ error: "이 기능은 무제한 계정에서만 쓸 수 있습니다." }, { status: 403 }));
   }
-  if (def.needsOpenAI) {
+  if (taskNeedsOpenAI(def, params)) {
     if (billing.byok && !billing.byokApiKey) {
       return done(
         NextResponse.json(

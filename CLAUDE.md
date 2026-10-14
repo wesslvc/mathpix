@@ -6280,3 +6280,13 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 #### 비교 화면: 모델 출력 복사 · 누락 점검 (2026-10-14)
 
 사용자 — "제미나이가 누락한 건지 일일이 대조해야 하나", "모델 아웃풋 복사 가능하게". `/admin/compare-korean` 결과 칸에 "읽은 글 복사"·"모델 출력(JSON) 복사" 버튼, 두 칸이 다 끝나면 **누락 점검**(`CoveragePanel`)이 뜬다: 한 모델 글의 줄 중 상대 글에 (공백 뺀) 통째로도, 4글자 조각 85% 이상으로도 안 들어 있는 줄만 양쪽으로 나열한다. 어느 모델이 빠뜨렸는지는 한쪽에만 있는 줄을 원본과 견주면 된다(둘이 같은 곳을 틀리면 못 잡는다). `tsc` 까지, 화면은 못 봤다.
+
+#### 가격 개편 · 종류별 인식 버튼 (2026-10-14)
+
+사용자 — "haiku 추천은 없애고 돈 안 드는 건 거의 무료로, sol 인식 말고 mathpix 도, 수학은 기본 Mathpix, 국어는 sol, haiku 가 수학/국어/텍스트만 있는 게 아님을 가려서 버튼을 갈라. 비용은 sol 30 · AI 150 · Mathpix 3, 나머지 전면 무료, 수정·재생성은 다시 150."
+- `tokens.ts`: `OCR_TOKEN_COST` 3 · `SOL_TYPESET_TOKENS` 30 · `FIGURE_TOKEN_DEPOSIT` 150 · `MAX_REDRAW_TOKENS`(high 다시 그리기) 150 · `PATCH_REDRAW_TOKENS` 150(그대로) · `GRADING_TOKEN_DEPOSIT` 0.
+  `aiTasks.ts`: 제목 짓기 0, sol 대화 0(flat), 채점·답지 0(위 상수). **번호 읽기는 `params.free` 로 무료**(luna 가 못 읽었을 때의 Mathpix 폴백 — `readNumberWithMathpix`·`ProblemNumberScanner`), "글자로 인식(결과 화면)"만 3토큰.
+- **빠른 Mathpix 인식**: 기존 `typeset` 작업에 `params.engine:"mathpix"` — sol 대신 Mathpix 로 읽은 mmd 글을 같은 조판 저장 경로(`typesetApply`)로 보낸다(그림 자리는 없다 = 도형은 안 오려 붙인다). 보증금 3, OpenAI 키 불필요(`taskNeedsOpenAI`). 패널은 라벨에 "Mathpix" 가 있으면 Mathpix 범주로 보인다.
+- **Haiku 추천(원본/AI) 제거** → 자동 자르기 응답의 `kind`: `math` · `korean` · `other`(표·지도·그림·사진이 섞임). 크롭 화면 버튼: 수학 = Mathpix(기본)·AI·원본, 국어 = sol(기본)·AI·원본, 그 밖 = AI·원본만, 모르면 전부. 한눈에 보기는 "종류별 기본으로 넣기"(수학 Mathpix · 국어 sol · 그 밖 AI)와 종류 꼬리표.
+- **안 건드린 것(원가가 큰 sol 흐름)**: 국어 지문 인식 100토큰·서식 검수 보증금 30(`passageRun`)은 그대로다 — "sol 30"을 문제 조판(typeset)으로 읽었다. 지문도 30 으로 내리려면 `PASSAGE_READ_TOKENS`·`passageDepositFrom` 을 같이 봐야 한다.
+- 검증: `tsc` 만. 실제 계정으로 Haiku 가 종류를 얼마나 맞게 가르는지, Mathpix 빠른 넣기 결과(본문 저장·카드)는 못 봤다.
