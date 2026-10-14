@@ -51,7 +51,7 @@ export default function DeleteGradeButton({
       if (error) throw error;
       // 지워진 행의 상세 화면에 머물 수는 없다. 라우터 캐시(동적 120초)가
       // 옛 목록을 그대로 내주지 않게 옮겨간 뒤 새로 받는다.
-      router.replace("/profile");
+      router.replace("/scores");
       router.refresh();
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "삭제에 실패했습니다.");

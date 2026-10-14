@@ -2,21 +2,15 @@ import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { getAccessState, isByokCheckoutReady, isCheckoutReady } from "@/lib/billing";
-import type { ExamScore } from "@/lib/supabase/types";
 import type { Subject } from "@/lib/gradeSummary";
-import { buildTrendSeries } from "@/lib/scoreTrend";
 import BillingStatus from "@/components/BillingStatus";
 import ByokSettingsForm from "@/components/ByokSettingsForm";
-import ScoreTrendChart from "@/components/ScoreTrendChart";
 import Logo from "@/components/Logo";
-import GradeHistoryList from "@/components/GradeHistoryList";
 import GradingPrefsForm, { type GradingPrefsValue } from "@/components/GradingPrefsForm";
 import CropShapeSetting from "@/components/CropShapeSetting";
-import ManualScoreForm from "@/components/ManualScoreForm";
 import LinkedAccounts from "@/components/LinkedAccounts";
 import AiCostPanel from "@/components/AiCostPanel";
 import { buttonVariants } from "@/components/ui/button";
-import { cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 const VALID_SUBJECTS: readonly Subject[] = ["korean", "math", "english", "elective"];
@@ -62,16 +56,8 @@ export default async function ProfilePage({
 
   // 셋이 서로 필요로 하는 게 없다 — 차례로 기다리면 왕복 세 번이 그대로
   // 화면 뜨는 시간이 된다(대시보드·실모 화면과 같은 이유).
-  const [access, { data: scores }, { data: prefs }] = await Promise.all([
+  const [access, { data: prefs }] = await Promise.all([
     getAccessState(supabase),
-    supabase
-      .from("exam_scores")
-      .select("*")
-      .order("taken_at", { ascending: true })
-      // 같은 날 같은 시험의 1선택·2선택은 2선택이 더 나중 기록이다.
-      .order("elective_slot", { ascending: true, nullsFirst: true })
-      .order("created_at", { ascending: true })
-      .returns<ExamScore[]>(),
     supabase
       .from("grading_prefs")
       .select(
@@ -90,15 +76,6 @@ export default async function ProfilePage({
   };
 
   const costTab = access.unlimited && searchParams?.tab === "cost";
-  const series = buildTrendSeries(scores ?? []);
-  // 등급 추세는 등급을 적어 둔 시험만 모인다 — 하나도 없으면 화면이 토글
-  // 자체를 감춘다. 순수 함수라 여기서 두 벌 만들어 내려보내면 된다.
-  const gradeSeries = buildTrendSeries(scores ?? [], "grade");
-  // 추세 그래프는 시간순(오름차순)이 필요하고, 기록 목록은 최근 것부터
-  // 보이는 게 자연스럽다 — 같은 쿼리 결과를 뒤집어 재사용한다(왕복을
-  // 늘리지 않는다).
-  const historyRows = [...(scores ?? [])].reverse();
-
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pb-10 pt-6">
       <header>
@@ -123,7 +100,7 @@ export default async function ProfilePage({
             aria-current={!costTab ? "page" : undefined}
             className={cn(buttonVariants({ variant: costTab ? "ghost" : "soft", size: "sm" }))}
           >
-            프로필 · 성적
+            프로필
           </Link>
           <Link
             href="/profile?tab=cost"
@@ -149,36 +126,6 @@ export default async function ProfilePage({
 
       <CropShapeSetting />
 
-      <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-base font-semibold text-ink">성적 추세</h2>
-          <Link href="/grade" className={buttonVariants({ variant: "ghost", size: "xs", className: "text-blue-700" })}>
-            자동채점 →
-          </Link>
-        </div>
-
-        {series.length === 0 && gradeSeries.length === 0 ? (
-          <p className={cn(cardClass, "px-4 py-6 text-center text-sm text-slate-400")}>
-            아직 성적 기록이 없어요. 자동채점을 하거나 아래에서 성적을 직접
-            적어 넣으면 여기에 추세가 쌓입니다.
-          </p>
-        ) : (
-          <ScoreTrendChart series={series} gradeSeries={gradeSeries} />
-        )}
-
-        {/* 추세에 필요한 건 과목·응시일·점수(또는 등급)뿐이라, 채점을 거치지
-            않은 시험도 그 넷만 적으면 같은 그래프에 얹힌다(사용자 요청).
-            그래프를 가리지 않게 아래에 둔다. */}
-        <ManualScoreForm />
-      </section>
-
-      {/* 추세(요약)와 기록(개별 시행 검색·상세)을 같은 화면에서 볼 수 있게
-          합쳤다 — 예전엔 /grades 와 /profile 로 나뉘어 있어 추세를 보다가
-          특정 시험 하나를 찾으려면 화면을 오가야 했다. */}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-base font-semibold text-ink">채점 기록</h2>
-        <GradeHistoryList rows={historyRows} />
-      </section>
         </>
       )}
     </main>

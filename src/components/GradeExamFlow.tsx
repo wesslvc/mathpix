@@ -1031,7 +1031,7 @@ export default function GradeExamFlow() {
             </Button>
             <Button
               type="button"
-              onClick={() => router.push("/profile")}
+              onClick={() => router.push("/scores")}
               variant="outline" className="self-start"
             >
               채점 기록 보기

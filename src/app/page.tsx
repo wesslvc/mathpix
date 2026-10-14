@@ -1,6 +1,9 @@
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import type { Category, Folder } from "@/lib/supabase/types";
+import type { Category, ExamScore, Folder } from "@/lib/supabase/types";
+import Link from "next/link";
+import { buildTrendSeries } from "@/lib/scoreTrend";
+import ScoreTrendChart from "@/components/ScoreTrendChart";
 import { examMaxScore, type Subject } from "@/lib/gradeSummary";
 import NewCategoryForm from "@/components/NewCategoryForm";
 import LogoutButton from "@/components/LogoutButton";
@@ -60,13 +63,14 @@ export default async function DashboardPage({
       .order("created_at", { ascending: true })
       .returns<Folder[]>(),
     // 실모 라벨의 만점(탐구 50 / 그 밖 100)은 연결된 채점 기록의 과목에서
-    // 온다 — categories 자체에는 과목이 없다. 없으면 100으로 두면 예전 표기
-    // 그대로다.
+    // 온다 — categories 자체에는 과목이 없다. 성적 추세도 같은 결과로 그린다(왕복 하나).
     supabase
       .from("exam_scores")
-      .select("category_id, subject")
-      .not("category_id", "is", null)
-      .returns<{ category_id: string; subject: Subject }[]>(),
+      .select("*")
+      .order("taken_at", { ascending: true })
+      .order("elective_slot", { ascending: true, nullsFirst: true })
+      .order("created_at", { ascending: true })
+      .returns<ExamScore[]>(),
     getAccessState(supabase),
   ]);
 
@@ -79,8 +83,10 @@ export default async function DashboardPage({
 
   const maxScoreByCategory: Record<string, number> = {};
   for (const row of linked ?? []) {
-    maxScoreByCategory[row.category_id] = examMaxScore(row.subject);
+    if (row.category_id) maxScoreByCategory[row.category_id] = examMaxScore(row.subject);
   }
+  const series = buildTrendSeries(linked ?? []);
+  const gradeSeries = buildTrendSeries(linked ?? [], "grade");
 
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 pt-6">
@@ -119,6 +125,19 @@ export default async function DashboardPage({
         folders={folders ?? []}
         currentFolderId={currentFolderId ?? null}
       />
+
+      {/* 성적 추세도 홈에서 같이 본다(성적 탭 분리, 2026-10-14). 기록이 없으면 안 그린다. */}
+      {(series.length > 0 || gradeSeries.length > 0) && (
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-ink">성적 추세</h2>
+            <Link href="/scores" className="text-xs font-medium text-blue-700 hover:underline">
+              성적 전체 보기 →
+            </Link>
+          </div>
+          <ScoreTrendChart series={series} gradeSeries={gradeSeries} />
+        </section>
+      )}
     </main>
   );
 }
