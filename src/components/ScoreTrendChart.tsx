@@ -169,7 +169,7 @@ function SummaryCard({
         <span className="text-xs text-slate-400">
           {metric === "grade" ? "등급" : last.hasScore ? `/ ${s.max}` : "%"}
         </span>
-        <Delta metric={metric} points={s.points} />
+        {!both && <Delta metric={metric} points={s.points} />}
         {both && last.grade != null && (
           <span
             className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-amber-800"
@@ -182,7 +182,30 @@ function SummaryCard({
       <span className="text-[11px] text-slate-400">
         {s.points.length}회 · 최고 {valueText(metric, best)}
       </span>
-      {avg && (
+      {both && (
+        <span className="mt-0.5 flex flex-col gap-0.5 border-t border-slate-100 pt-1.5 text-[11px] tabular-nums text-slate-500">
+          {(() => {
+            const scored = s.points.filter((p) => p.hasScore);
+            const graded = s.points.filter((p) => p.grade != null);
+            const mean = (a: number[]) => Math.round((a.reduce((x, v) => x + v, 0) / a.length) * 10) / 10;
+            return (
+              <>
+                {scored.length > 0 && (
+                  <span>
+                    평균 점수 <b className="text-ink">{mean(scored.map((p) => p.value))}점</b>
+                  </span>
+                )}
+                {graded.length > 0 && (
+                  <span>
+                    평균 등급 <b className="text-ink">{mean(graded.map((p) => p.grade as number))}등급</b>
+                  </span>
+                )}
+              </>
+            );
+          })()}
+        </span>
+      )}
+      {!both && avg && (
         <span className="mt-0.5 flex flex-col gap-0.5 border-t border-slate-100 pt-1.5 text-[11px] tabular-nums text-slate-500">
           <span>
             최근 {avg.recentCount}개 평균 <b className="text-ink">{avg.recent}등급</b> · 전체 평균{" "}
