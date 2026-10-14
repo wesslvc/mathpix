@@ -105,6 +105,7 @@ export default function AddProblemFlow({
   canAdd = true,
   onDone,
   answerByNumber = {},
+  wrongNumbers = [],
 }: {
   categoryId: string;
   /** false면 토큰이 없음 → 오답 추가 대신 이용권 안내를 보여준다. */
@@ -113,6 +114,8 @@ export default function AddProblemFlow({
   onDone?: () => void;
   /** 번호 → 정답(연결된 채점·읽어 둔 답지). 번호를 읽으면 곧바로 붙인다. */
   answerByNumber?: AnswerByNumber;
+  /** 연결된 채점의 틀린 번호 — 「틀린 문항만 자르기」의 처음 값. */
+  wrongNumbers?: number[];
 }) {
   const router = useRouter();
   const [stage, setStage] = useState<Stage>("idle");
@@ -992,6 +995,7 @@ export default function AddProblemFlow({
               <BatchSplitPanel
                 onSave={handleSaveToCategory}
                 answerByNumber={answerByNumber}
+                wrongNumbers={wrongNumbers}
                 unlimited={tokenStatus?.unlimited ?? false}
                 byok={tokenStatus?.byok ?? false}
                 figureCost={tokenStatus?.figureCost ?? null}
@@ -1006,6 +1010,7 @@ export default function AddProblemFlow({
                 byok={tokenStatus?.byok ?? false}
                 figureCost={tokenStatus?.figureCost ?? null}
                 answerByNumber={answerByNumber}
+                wrongNumbers={wrongNumbers}
  />
             </div>
             <div hidden={mode !== "csv"}>

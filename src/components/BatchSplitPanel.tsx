@@ -30,6 +30,7 @@ import { cutRefineWindows, refineProblems, snapPageProblems } from "@/lib/pageRe
 import type { AnswerByNumber } from "@/lib/answerMap";
 import { useFigureJobs } from "./FigureJobsProvider";
 import { Button } from "@/components/ui/button";
+import WrongOnlyToggle, { parseNumberList } from "@/components/WrongOnlyToggle";
 
 /**
  * 지면 한 장을 문제 여러 개로 잘라 한꺼번에 넣는 패널.
@@ -115,6 +116,8 @@ type Props = {
   figureCost?: number | null;
   /** 번호 → 정답. 번호를 읽으면 곧바로 정답도 붙인다(`answerMap.ts`). */
   answerByNumber?: AnswerByNumber;
+  /** 연결된 채점의 틀린 번호(「틀린 문항만 자르기」 번호 칸의 처음 값). */
+  wrongNumbers?: number[];
 };
 
 export default function BatchSplitPanel({
@@ -123,7 +126,14 @@ export default function BatchSplitPanel({
   byok = false,
   figureCost,
   answerByNumber = {},
+  wrongNumbers = [],
 }: Props) {
+  /** 틀린 문항만 자르기 — 자동으로 찾은 조각 중 번호가 틀린 번호가 아닌 것은 버린다(번호를 못 읽은 조각은 둔다). */
+  const [wrongOnly, setWrongOnly] = useState(false);
+  const [wrongText, setWrongText] = useState(wrongNumbers.join(", "));
+  const wrongRef = useRef({ on: false, set: new Set<number>() });
+  wrongRef.current = { on: wrongOnly, set: parseNumberList(wrongText) };
+  const [wrongNote, setWrongNote] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const moreRef = useRef<HTMLInputElement>(null);
   /** 아직 안 연 다음 지면들과 처음 고른 장수(여러 장을 연달아 처리한다). */
@@ -577,7 +587,19 @@ export default function BatchSplitPanel({
    * 단을 넘어 이어진 문제는 조각을 **읽는 차례대로 세로로 이어 붙인다.**
    */
   async function piecesFrom(source: PageSource, problems: DetectedProblem[]): Promise<{ pieces: Piece[]; snapped: number }> {
-    const { problems: found, snapped: snappedCount } = snapPageProblems(source.img, source.width, source.height, problems);
+    const { problems: snappedAll, snapped: snappedCount } = snapPageProblems(source.img, source.width, source.height, problems);
+    // 틀린 문항만: 번호를 읽은 조각 중 틀린 번호가 아닌 것은 자르지 않는다. 번호를 못 읽은 조각은 알 수 없어 둔다.
+    const w = wrongRef.current;
+    const keepWrong = w.on && w.set.size > 0;
+    const found = keepWrong
+      ? snappedAll.filter((p) => !(p.no && Number(p.no) > 0) || w.set.has(Number(p.no)))
+      : snappedAll;
+    if (keepWrong) {
+      const unread = found.filter((p) => !(p.no && Number(p.no) > 0)).length;
+      setWrongNote(
+        `틀린 문항만: ${snappedAll.length}개 중 ${found.length - unread}개를 남겼어요${unread ? ` (번호를 못 읽은 ${unread}개도 함께 — 직접 확인하세요)` : ""}.`,
+      );
+    }
     const img = source.img;
     const pieces: Piece[] = await Promise.all(
       found.map(async (prob) => ({
@@ -888,6 +910,16 @@ export default function BatchSplitPanel({
         void (pageImage ? addMore(dt.files) : pick(dt.files));
       }}
     >
+      {unlimited && !pageImage && !review && (
+        <WrongOnlyToggle
+          enabled={wrongOnly}
+          onEnabled={setWrongOnly}
+          text={wrongText}
+          onText={setWrongText}
+          fromGrade={wrongNumbers.length > 0}
+        />
+      )}
+      {wrongNote && <p className="text-xs text-emerald-700">{wrongNote}</p>}
       {!pageImage && !review && (
         <p className="text-xs text-slate-500">
           지면 사진을 <b>여러 장 한꺼번에</b> 고르거나 끌어다 놓으세요 — 한 장씩 차례로 열리고, 넣는 동안 다음 지면은 미리 잘라 둡니다.

@@ -351,6 +351,7 @@ export default async function CategoryPage({
       <AddProblemFlow
         categoryId={category.id}
         canAdd={access.canRecognize}
+        wrongNumbers={[...new Set((linkedGrades ?? []).flatMap((g) => g.wrong_numbers ?? []))].sort((a, b) => a - b)}
         answerByNumber={buildAnswerMap(
           (linkedGrades ?? []).map((g) => g.items),
           (answerKeys ?? []).map((k) => k.items),

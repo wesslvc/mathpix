@@ -30,6 +30,7 @@ import CropShapeToggle from "./CropShapeToggle";
 import { useCropShape } from "@/lib/cropShape";
 import { cropRegionToDataUrl, type Region } from "@/lib/polygon";
 import { Button } from "@/components/ui/button";
+import WrongOnlyToggle, { parseNumberList } from "@/components/WrongOnlyToggle";
 import { Card } from "@/components/ui/card";
 
 /**
@@ -127,6 +128,8 @@ type Props = {
   figureCost?: number | null;
   /** 번호 → 정답(연결된 채점·답지). 문제 번호를 읽으면 정답을 함께 붙인다. */
   answerByNumber?: AnswerByNumber;
+  /** 연결된 채점의 틀린 번호(「틀린 문항만 자르기」 번호 칸의 처음 값). */
+  wrongNumbers?: number[];
   onDone?: () => void;
 };
 
@@ -136,8 +139,11 @@ export default function KoreanModePanel({
   byok = false,
   figureCost,
   answerByNumber = {},
+  wrongNumbers = [],
   onDone,
 }: Props) {
+  const [wrongOnly, setWrongOnly] = useState(false);
+  const [wrongText, setWrongText] = useState(wrongNumbers.join(", "));
   const fileRef = useRef<HTMLInputElement>(null);
   const { enqueue } = useFigureJobs();
 
@@ -907,6 +913,29 @@ export default function KoreanModePanel({
         (target ?? loose).questions.push({ pageId: h.page.id, box: q.box, no: q.no });
       }
     }
+    // ── 틀린 문항만: 틀린 번호의 문항만 남기고, 그 문항이 없는 세트는 지문째 뺀다(문항이 든 세트는 지문을 그대로 둔다) ──
+    // 번호를 못 읽은 조각은 앞 문항의 이어짐으로 보고 앞 문항의 번호를 따라간다.
+    const wrongSet = parseNumberList(wrongText);
+    let wrongNote = "";
+    if (wrongOnly && wrongSet.size > 0) {
+      let keptQs = 0;
+      let droppedSets = 0;
+      const narrow = (d: SetDraft) => {
+        let prev: number | null = null;
+        d.questions = d.questions.filter((q) => {
+          const no = q.no ?? prev;
+          if (q.no !== null) prev = q.no;
+          return no !== null && wrongSet.has(no);
+        });
+        keptQs += new Set(d.questions.map((q) => q.no)).size;
+      };
+      for (const st of sets) narrow(st);
+      narrow(loose);
+      for (const st of sets) if (st.questions.length === 0 && st.passages.length > 0) droppedSets += 1;
+      // 문항이 하나도 안 남은 세트는 지문만 덩그러니 남지 않게 통째로 뺀다.
+      for (let i = sets.length - 1; i >= 0; i--) if (sets[i].questions.length === 0) sets.splice(i, 1);
+      wrongNote = `틀린 문항만: ${keptQs}개 문항을 남겼고 문항이 없는 지문 ${droppedSets}개는 뺐어요.`;
+    }
     const drafts = [...sets.filter((st) => st.passages.length > 0 || st.questions.length > 0), ...(loose.questions.length ? [loose] : [])];
 
     // ── 세트마다 자르기만 한다 — 저장은 사용자가 확인한 뒤(`commitStaged`) ──
@@ -950,6 +979,7 @@ export default function KoreanModePanel({
     setBusy(null);
     const notes = [
       pageOrderNote,
+      wrongNote,
       failedPages ? `사진 ${failedPages}장은 자리를 못 찾았어요.` : "",
       failedSets.length ? `못 자른 세트: ${failedSets.join(", ")}.` : "",
     ].filter(Boolean);
@@ -1172,6 +1202,13 @@ export default function KoreanModePanel({
           </Button>
           {unlimited && (
             <div className="flex flex-col gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+              <WrongOnlyToggle
+                enabled={wrongOnly}
+                onEnabled={setWrongOnly}
+                text={wrongText}
+                onText={setWrongText}
+                fromGrade={wrongNumbers.length > 0}
+              />
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
