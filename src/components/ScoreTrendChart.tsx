@@ -107,8 +107,8 @@ function useWidth<T extends HTMLElement>(fallback: number) {
   return [ref, width] as const;
 }
 
-function Sparkline({ points, color, metric }: { points: TrendPoint[]; color: string; metric: TrendMetric }) {
-  if (points.length < 2) return <div className="h-7" />;
+function Sparkline({ points, color, metric, heightClass = "h-7" }: { points: TrendPoint[]; color: string; metric: TrendMetric; heightClass?: string }) {
+  if (points.length < 2) return <div className={heightClass} />;
   const ys = points.map((p) => (metric === "grade" ? -p.value : p.pct));
   const lo = Math.min(...ys);
   const hi = Math.max(...ys);
@@ -121,7 +121,7 @@ function Sparkline({ points, color, metric }: { points: TrendPoint[]; color: str
     })
     .join(" ");
   return (
-    <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="h-7 w-full" aria-hidden>
+    <svg viewBox="0 0 100 28" preserveAspectRatio="none" className={`${heightClass} w-full`} aria-hidden>
       <path d={d} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
@@ -686,29 +686,30 @@ export default function ScoreTrendChart({
     const gradeOf = new Map(gradeSeries.map((g) => [g.key, g.points[g.points.length - 1]?.value]));
     const base = hasScore ? series : gradeSeries;
     return (
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {base.map((b) => {
           const last = b.points[b.points.length - 1];
           const grade = hasScore ? gradeOf.get(b.key) : last.value;
           return (
-            <div key={b.key} className="flex flex-col gap-0.5 rounded-xl border border-slate-200 bg-white px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colorOf.get(b.key) ?? PALETTE[0] }} />
+            <div key={b.key} className="flex flex-col gap-1.5 rounded-2xl border border-slate-200 bg-white p-4">
+              <span className="flex items-center gap-2 text-sm font-medium text-slate-600">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: colorOf.get(b.key) ?? PALETTE[0] }} />
                 <span className="truncate">{b.label}</span>
               </span>
               <span className="flex items-baseline gap-1.5">
                 {hasScore && (
-                  <span className="text-lg font-bold tabular-nums text-ink">
+                  <span className="text-3xl font-bold tracking-tight tabular-nums text-ink">
                     {last.value}
-                    <span className="ml-0.5 text-[11px] font-normal text-slate-400">{last.hasScore ? `/${b.max}` : "%"}</span>
+                    <span className="ml-1 text-sm font-normal text-slate-400">{last.hasScore ? `/${b.max}` : "%"}</span>
                   </span>
                 )}
                 {grade != null && (
-                  <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-amber-800">
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-sm font-semibold tabular-nums text-amber-800">
                     {grade}등급
                   </span>
                 )}
               </span>
+              <Sparkline points={b.points} color={colorOf.get(b.key) ?? PALETTE[0]} metric={hasScore ? "score" : "grade"} heightClass="h-14" />
             </div>
           );
         })}
