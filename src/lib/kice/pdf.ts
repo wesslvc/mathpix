@@ -1589,21 +1589,43 @@ async function drawToc(
   }
   y += LAYOUT.gap + size;
 
-  // 한 단에 몇 줄이 들어가는지 보고, 넘치면 오른쪽 단으로 넘긴다.
-  const perColumn = Math.max(1, Math.floor((bounds.contentBottom - y) / rowH));
-  for (let i = 0; i < lines.length; i++) {
-    const col = Math.floor(i / perColumn);
-    // 단이 둘뿐이라 그 이상은 그리지 않는다(세트가 그만큼 많은 경우는 없다).
-    if (col > 1) break;
-    const picked = await fontForText(ANSWER_FONT, lines[i]);
+  // 표지 틀의 세로 단 구분선이 목차를 관통한다 — "차 례" 아래부터 본문 끝까지
+  // 흰 덮개로 가린다(목차는 단 구분 없이 폭 전체를 쓴다).
+  page.drawRectangle({
+    x: LAYOUT.marginLeft - 4,
+    y: flip(bounds.contentBottom),
+    width: LAYOUT.pageWidth - (LAYOUT.marginLeft - 4) * 2,
+    height: bounds.contentBottom - (y - size - 2),
+    color: rgb(1, 1, 1),
+  });
+
+  // 한 줄이 폭을 넘으면 줄바꿈하고 둘째 줄부터 들여 쓴다.
+  const maxW = LAYOUT.pageWidth - LAYOUT.marginLeft * 2;
+  const indent = 14;
+  for (const line of lines) {
+    const picked = await fontForText(ANSWER_FONT, line);
     if (!picked.text.trim()) continue;
-    page.drawText(picked.text, {
-      x: columnX(col),
-      y: flip(y + (i % perColumn) * rowH),
-      size,
-      font: picked.font,
-      color: rgb(0.1, 0.1, 0.1),
-    });
+    const rows: string[] = [];
+    let cur = "";
+    for (const ch of [...picked.text]) {
+      const w = picked.font.widthOfTextAtSize(cur + ch, size) + (rows.length ? indent : 0);
+      if (w > maxW && cur) {
+        rows.push(cur);
+        cur = ch === " " ? "" : ch;
+      } else cur += ch;
+    }
+    if (cur) rows.push(cur);
+    for (let r = 0; r < rows.length; r++) {
+      if (y > bounds.contentBottom) return;
+      page.drawText(rows[r], {
+        x: LAYOUT.marginLeft + (r ? indent : 0),
+        y: flip(y),
+        size,
+        font: picked.font,
+        color: rgb(0.1, 0.1, 0.1),
+      });
+      y += rowH * (r === rows.length - 1 ? 1 : 0.8);
+    }
   }
 }
 
