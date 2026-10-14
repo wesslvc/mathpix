@@ -561,21 +561,23 @@ function TrendChart({
 }
 
 /** 볼 기간. "최근 N개월"은 오늘을 끝으로 잡는다. */
-type Period = "1m" | "3m" | "6m" | "1y" | "all";
-const PERIODS: { v: Period; label: string; months: number | null }[] = [
+type Period = "3d" | "1w" | "2w" | "1m" | "2m" | "all";
+const PERIODS: { v: Period; label: string; days?: number; months?: number }[] = [
+  { v: "3d", label: "3일", days: 3 },
+  { v: "1w", label: "1주일", days: 7 },
+  { v: "2w", label: "2주일", days: 14 },
   { v: "1m", label: "1개월", months: 1 },
-  { v: "3m", label: "3개월", months: 3 },
-  { v: "6m", label: "6개월", months: 6 },
-  { v: "1y", label: "1년", months: 12 },
-  { v: "all", label: "전체", months: null },
+  { v: "2m", label: "2개월", months: 2 },
+  { v: "all", label: "전체" },
 ];
 const PERIOD_KEY = "reprint.trendPeriod";
 
 function cutoffOf(period: Period): string | null {
-  const months = PERIODS.find((p) => p.v === period)?.months ?? null;
-  if (months == null) return null;
+  const p = PERIODS.find((x) => x.v === period);
+  if (!p || (p.days == null && p.months == null)) return null;
   const d = new Date();
-  d.setMonth(d.getMonth() - months);
+  if (p.days != null) d.setDate(d.getDate() - p.days);
+  else d.setMonth(d.getMonth() - (p.months as number));
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
