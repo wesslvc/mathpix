@@ -719,25 +719,25 @@ export default function ScoreTrendChart({
           const last = b.points[b.points.length - 1];
           const grade = hasScore ? gradeOf.get(b.key) : last.value;
           return (
-            <div key={b.key} className="flex flex-col gap-1.5 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
-              <span className="flex items-center gap-2 text-sm font-medium text-slate-600">
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: colorOf.get(b.key) ?? PALETTE[0] }} />
+            <div key={b.key} className="flex flex-col gap-1.5 rounded-2xl border border-slate-200 bg-white p-3">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colorOf.get(b.key) ?? PALETTE[0] }} />
                 <span className="truncate">{b.label}</span>
               </span>
               <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
                 {hasScore && (
-                  <span className="text-xl font-bold sm:text-3xl tracking-tight tabular-nums text-ink">
+                  <span className="text-2xl font-bold tracking-tight tabular-nums text-ink">
                     {last.value}
-                    <span className="ml-1 text-sm font-normal text-slate-400">{last.hasScore ? `/${b.max}` : "%"}</span>
+                    <span className="ml-1 text-xs font-normal text-slate-400">{last.hasScore ? `/${b.max}` : "%"}</span>
                   </span>
                 )}
                 {grade != null && (
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-sm font-semibold tabular-nums text-amber-800">
+                  <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-amber-800">
                     {grade}등급
                   </span>
                 )}
               </span>
-              <Sparkline points={b.points} color={colorOf.get(b.key) ?? PALETTE[0]} metric={hasScore ? "score" : "grade"} heightClass="h-14" />
+              <Sparkline points={b.points} color={colorOf.get(b.key) ?? PALETTE[0]} metric={hasScore ? "score" : "grade"}/>
             </div>
           );
         }}
