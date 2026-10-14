@@ -978,7 +978,17 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   // 영어 원문자를 그릴 별도 글꼴(있으면 동그라미를 직접 그리지 않고 이 글자를 쓴다).
   const circFont = spec.fonts[CIRCLED_LATIN_FONT] ? await fontFor(CIRCLED_LATIN_FONT) : null;
   const circCover = circFont ? new Set(circFont.getCharacterSet()) : null;
+  // 같은 글자 조각을 쪽 짜기(지문 맞춤·남는 자리·그리기)에서 수없이 다시 잰다 — 결과를 기억해 둔다.
+  const measureMemo = new Map<string, number>();
   const measure = (t: string, size: number, bold: boolean) => {
+    const key = `${size}|${bold ? 1 : 0}|${t}`;
+    const hit = measureMemo.get(key);
+    if (hit !== undefined) return hit;
+    const w = measureRaw(t, size, bold);
+    if (measureMemo.size < 400000) measureMemo.set(key, w);
+    return w;
+  };
+  const measureRaw = (t: string, size: number, bold: boolean) => {
     let w = 0;
     for (const run of oldHangul ? oldHangulRuns(t) : [{ t, old: false }]) {
       if (run.old) {
