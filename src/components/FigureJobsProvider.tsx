@@ -348,6 +348,28 @@ export default function FigureJobsProvider({
     });
   }, []);
 
+  /**
+   * 서버에 **넣는** 일은 줄을 세우지 않고 10개까지 동시에 한다(2026-10-14, 사용자 — "sol 도 10개씩 돌리고").
+   * 예전에는 모든 넣기가 한 줄(`chainRef`)이라 지문 사진 올리기가 한 작업씩 이어져 서버가 10개를 받아 줘도 하나씩
+   * 출발했다. 서버 동시 상한(무제한 계정 10)은 그대로 서버가 지킨다.
+   */
+  const submitSlotsRef = useRef({ active: 0, waiting: [] as Array<() => void> });
+  const runSubmit = useCallback((task: () => Promise<void>) => {
+    const s = submitSlotsRef.current;
+    const start = () => {
+      s.active++;
+      void task()
+        .catch((err) => console.error("[figureJobs]", err))
+        .finally(() => {
+          s.active--;
+          const next = s.waiting.shift();
+          if (next) next();
+        });
+    };
+    if (s.active < 10) start();
+    else s.waiting.push(start);
+  }, []);
+
   /** 서버 행의 값을 로컬 작업에 옮긴다. */
   const fromServer = useCallback(
     (row: ServerJob): Partial<Internal> => ({
@@ -901,9 +923,9 @@ export default function FigureJobsProvider({
         prev.some((j) => j.id === job.id) ? prev : [...prev, { ...job, status: "pending" }],
       );
       signedOutRef.current = false;
-      runOnChain(() => submit(job.id));
+      runSubmit(() => submit(job.id));
     },
-    [runOnChain, setJobs, submit],
+    [runSubmit, setJobs, submit],
   );
 
   const retry = useCallback(
@@ -913,7 +935,7 @@ export default function FigureJobsProvider({
       if (!job.serverId) {
         // 서버에 넣기도 전에 실패했다 — 처음부터 다시 넣는다.
         patchJob(id, { status: "pending", error: undefined });
-        runOnChain(() => submit(id));
+        runSubmit(() => submit(id));
         return;
       }
       const serverId = job.serverId;
@@ -939,7 +961,7 @@ export default function FigureJobsProvider({
         setTick((n) => n + 1);
       });
     },
-    [fromServer, patchJob, runOnChain, submit],
+    [fromServer, patchJob, runOnChain, runSubmit, submit],
   );
 
   const dismiss = useCallback(

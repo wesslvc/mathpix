@@ -392,6 +392,14 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
   // AI 그림 작업은 화면 바깥(FigureJobsProvider)에서 돈다 — 인식 화면과 같은
   // 큐를 쓴다. 수정 창을 닫아도 작업은 계속 돌고, 끝나면 저장본이 갱신된다.
   const { jobs, enqueue, dismiss, putSnapshot } = useFigureJobs();
+  /** 지금 다시 인식 중인 지문 행 id — 끝날 때까지 그 지문의 "다시 인식"만 잠근다(다른 지문은 그대로). */
+  const rereadingIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const j of jobs) {
+      if (j.mode === "passage" && j.problemId && (j.status === "pending" || j.status === "running")) s.add(j.problemId);
+    }
+    return s;
+  }, [jobs]);
 
   // 미리보기에 그릴 것들. 표는 본문에서 다시 뽑고(본문을 고치면 따라 바뀐다)
   // 저장돼 있던 자리·크기만 입힌다.
@@ -618,7 +626,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
    * 열어 또 눌러도 된다. 결과 확인은 대기열 패널·목록에서.
    */
   function queuePassageReread(crop: string) {
-    if (!editing) return;
+    if (!editing || rereadingIds.has(editing.id)) return;
     setEditError(null);
     enqueue({
       id: `reread:${editing.id}:${Date.now().toString(36)}`,
@@ -925,6 +933,7 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
 
   /** 목록에서 바로 지문을 다시 인식한다 — 창을 열지 않고 다른 지문도 연달아 누를 수 있다(서버 대기열). */
   function rereadFromList(problem: GalleryProblem) {
+    if (rereadingIds.has(problem.id)) return;
     enqueue({
       id: `reread:${problem.id}:${Date.now().toString(36)}`,
       problemKey: `korean:${problem.id}`,
@@ -1329,10 +1338,11 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
         <Button
           type="button"
           onClick={() => rereadFromList(problem)}
+          disabled={rereadingIds.has(problem.id)}
           variant="soft" size="sm"
-          title="지문 글자를 서버 대기열에서 다시 읽어요 — 다른 지문도 연달아 눌러도 돼요"
+          title="지문 글자를 서버 대기열에서 다시 읽어요 — 끝날 때까지 이 지문은 다시 못 눌러요(다른 지문은 눌러도 돼요)"
         >
-          다시 인식
+          {rereadingIds.has(problem.id) ? "인식 중…" : "다시 인식"}
         </Button>
       )}
       {/* 따로 넣은 문제를 지문에 묶는다 — 내보낼 때 지문 세트로 함께 조판된다. */}
@@ -1845,9 +1855,10 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
                               <Button
                                 type="button"
                                 onClick={() => queuePassageReread(f.origin ?? raster)}
+                                disabled={rereadingIds.has(editing.id)}
                                 variant="outline" size="xs"
                               >
-                                다시 인식하기
+                                {rereadingIds.has(editing.id) ? "인식 중…" : "다시 인식하기"}
                               </Button>
                               <Button
                                 type="button"
