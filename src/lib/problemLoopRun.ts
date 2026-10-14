@@ -617,8 +617,8 @@ async function runPatch(
   // 같은 시간 안에서 sol 이 원본과 다시 견줘 남은 차이를 새로 찾는다(실패해도 고친 그림은 그대로 둔다).
   let diffs: TextDiff[] | null = null;
   let solKrw = 0;
-  // sol 을 고른 경우에만 다시 검수한다(안 골랐으면 sol 을 안 부른다).
-  const original = state.patch?.useSol ? await loadAsDataUrl(admin, job.input_path) : null;
+  // 수정 뒤에는 **언제나** sol 이 다시 검수한다(강한 지시를 골랐든 아니든).
+  const original = await loadAsDataUrl(admin, job.input_path);
   if (original) {
     const ask = await askSol(VERIFY_PROMPT, [original, resultUrl], ctx, "검수", { cacheKey: VERIFY_CACHE_KEY });
     solKrw = ask.krw;
@@ -649,8 +649,21 @@ async function runPatch(
     patch: undefined,
     instruction: history.length ? accumulatedCorrection(history) : state.instruction,
   };
-  const summary = !state.patch?.useSol ? "sol 검수 없이 저장" : diffs === null ? "검수는 못 했어요" : diffs.length === 0 ? "글자·도형 차이 없음" : `남은 차이 ${diffs.length}곳`;
+  const summary = diffs === null ? "검수는 못 했어요" : diffs.length === 0 ? "글자·도형 차이 없음" : `남은 차이 ${diffs.length}곳`;
   const understood = state.patch?.understood;
+  // 검수에서 차이가 하나도 없으면 더 고칠 것이 없다 — 확인 대기로 돌려보내지 않고 끝낸다.
+  if (diffs !== null && diffs.length === 0) {
+    return {
+      kind: "done",
+      dataUrl: resultUrl,
+      modelId: ctx.modelIds[0] ?? "",
+      usage: withSol(next),
+      note: `수정 ${k}차 반영 · 수정사항 없음 — sol 검수 결과 원본과 차이가 없어요${keptNote}`,
+      cleanup: pathsOf(next),
+      rounds: rounds.length,
+      maxDrawn: false,
+    };
+  }
   return {
     kind: "done",
     dataUrl: resultUrl,
