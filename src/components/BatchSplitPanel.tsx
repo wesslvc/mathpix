@@ -229,16 +229,41 @@ export default function BatchSplitPanel({
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [bg.pending, autoPages]);
 
+  /**
+   * **무제한 계정은 지면을 고르면 먼저 묻는다**(사용자 — "지면 넣으면 자동 자르기 하기 전에 수동으로 넣을지부터 물어봐"):
+   * AI 가 자동으로 자를지, 직접 네모를 그릴지. 자동을 고르면 예전처럼(2장 이상이면 한눈에 보기) 돌고,
+   * 직접을 고르면 AI 를 한 번도 부르지 않고 손으로 그리는 화면을 연다(`manualRef` 가 열자마자 자동 찾기를 막는다).
+   */
+  const [askFiles, setAskFiles] = useState<File[] | null>(null);
+  const manualRef = useRef(false);
+
   async function pick(list: FileList | null | undefined) {
     const files = Array.from(list ?? []);
     if (files.length === 0) return;
     setError(null);
+    if (unlimited && !review) {
+      setAskFiles(files);
+      return;
+    }
+    await startAuto(files);
+  }
+
+  async function startAuto(files: File[]) {
+    setAskFiles(null);
+    manualRef.current = false;
     if (unlimited && (files.length >= 2 || review)) {
       startReview(files);
       return;
     }
     setTotalPages(files.length);
     if (unlimited) files.forEach((f) => void prefetchDetect(f).catch(() => undefined));
+    await loadFrom(files);
+  }
+
+  async function startManual(files: File[]) {
+    setAskFiles(null);
+    manualRef.current = true;
+    setTotalPages(files.length);
     await loadFrom(files);
   }
 
@@ -336,7 +361,11 @@ export default function BatchSplitPanel({
       startReview(files);
       return;
     }
-    if (unlimited) files.forEach((f) => void prefetchDetect(f).catch(() => undefined));
+    if (!pageImage && unlimited) {
+      setAskFiles(files);
+      return;
+    }
+    if (unlimited && !manualRef.current) files.forEach((f) => void prefetchDetect(f).catch(() => undefined));
     if (!pageImage) {
       setTotalPages(files.length);
       await loadFrom(files);
@@ -682,6 +711,7 @@ export default function BatchSplitPanel({
   // 무제한 계정은 지면을 열자마자 luna 가 찾은 자리로 자른다 — 누를 것 없이 확인하고 넘기기만 하면 된다.
   useEffect(() => {
     if (!unlimited || !pageImage || pieces.length > 0 || boxes.length > 0) return;
+    if (manualRef.current) return;
     if (autoDetectedRef.current === pageImage) return;
     autoDetectedRef.current = pageImage;
     void detect();
@@ -955,6 +985,24 @@ export default function BatchSplitPanel({
         )}
         {pageImage && <CropShapeToggle value={shape} onChange={setShape} />}
       </div>
+
+      {askFiles && (
+        <div className="flex flex-col gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm">
+          <p className="font-medium text-slate-800">지면 {askFiles.length}장을 어떻게 자를까요?</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="primary" size="sm" onClick={() => void startAuto(askFiles)}>
+              AI가 자동으로 자르기
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void startManual(askFiles)}>
+              직접 자르기 (수동)
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setAskFiles(null)}>
+              취소
+            </Button>
+          </div>
+          <p className="text-xs text-slate-500">직접 자르기는 AI를 부르지 않고 사진 위에 네모를 직접 그려요.</p>
+        </div>
+      )}
 
       {review && (
         <PageReview
