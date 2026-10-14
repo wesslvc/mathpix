@@ -9,6 +9,7 @@
  * 값이다. 이름을 또 하나 만들면 모델을 추측하는 셈이 된다.
  */
 
+import { callOpenRouterVision } from "./openrouterVision";
 import { OPENAI_DETECT_MODEL } from "./detectProblems";
 import { marksReviewPrompt, parseMarksReview, type MarksReviewPara } from "./kice/marksReview";
 import type { GradedItem, GradeSlot, Subject } from "./gradeSummary";
@@ -1037,6 +1038,52 @@ export async function readKoreanRichTextWith(
     target.effort,
   );
   return { blocks: parseBlocks(text), usage, model, raw: text };
+}
+
+/**
+ * **비교용(OpenRouter)** — 같은 프롬프트·같은 파싱으로 OpenRouter 모델(예: `google/gemini-4-argon`)이
+ * 지문을 읽는다. OpenRouter 에는 Responses 백그라운드가 없어 **이 요청 안에서** 기다린다(함수 한도 300초).
+ * 비용은 OpenRouter 가 응답에 실어 준 실제 청구액(`costUsd`)이다.
+ */
+export async function readKoreanRichTextOpenRouter(
+  imageDataUrl: string,
+  target: { model: string; effort?: string },
+  signal?: AbortSignal,
+  figures: string[] = [],
+): Promise<{ blocks: unknown; model: string; raw: string; usage?: { input: number; output: number; costUsd?: number } }> {
+  let usage: { input: number; output: number; costUsd?: number } | undefined;
+  const text = await callOpenRouterVision(
+    [imageDataUrl, ...figures],
+    koreanTextPrompt(figures.length),
+    target.model,
+    (u) => (usage = { input: u.input, output: u.output, costUsd: u.costUsd }),
+    16000,
+    signal,
+    target.effort,
+  );
+  return { blocks: parseBlocks(text), model: target.model, raw: text, usage };
+}
+
+/** **비교용(OpenRouter)** 서식 검수 — 운영과 같은 프롬프트·파싱. */
+export async function reviewMarksOpenRouter(
+  images: string[],
+  paragraphs: string[],
+  target: { model: string; effort?: string },
+  signal?: AbortSignal,
+): Promise<{ review: MarksReviewPara[]; model: string; usage?: { input: number; output: number; costUsd?: number } }> {
+  let usage: { input: number; output: number; costUsd?: number } | undefined;
+  const text = await callOpenRouterVision(
+    images,
+    marksReviewPrompt(paragraphs),
+    target.model,
+    (u) => (usage = { input: u.input, output: u.output, costUsd: u.costUsd }),
+    16000,
+    signal,
+    target.effort,
+  );
+  const review = parseMarksReview(text);
+  if (review.length === 0) throw new GradeError("서식 검수 결과를 읽지 못했습니다.", 502);
+  return { review, model: target.model, usage };
 }
 
 /**

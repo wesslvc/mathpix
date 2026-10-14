@@ -6268,3 +6268,11 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 #### 첫 장 목차가 단 구분선에 갈리고 오른쪽으로 넘치던 것 (2026-10-14)
 
 사용자 캡처 — 국어 PDF 1쪽(표지 틀) 목차를 세로 단 구분선이 관통하고, 긴 줄(지문 제목 여럿)이 쪽 밖으로 잘렸다. `drawToc`(pdf.ts)가 이제 "차 례" 아래를 흰 덮개로 가려 구분선을 지우고, 줄을 폭 전체(좌우 여백 안)에 쓰며 넘치면 줄바꿈(둘째 줄 들여쓰기)한다. 예전 2단 나눔은 없앴다. `tsc` 까지, 실제 PDF 는 못 봤다.
+
+#### 국어 지문 비교에 gemini-4-argon (OpenRouter) 을 넣었다 (2026-10-14)
+
+사용자 — "6.1sol 을 4 argon 으로 바꿀까 찾아봐" → "라우터쪽, 최근 제미나이" → "국어지문조판테스트로 둘만 비교". **모델 이름은 짐작하지 않았다**: 일꾼 `probe: "openrouter-models"` 로 OpenRouter 목록에서 `google/gemini-4-argon`(입력 $2 · 출력 $10 /100만 — sol 과 같다)·`:batch`(1/5)를 확인했고, `openrouter-vision` 으로 사진 + JSON 요청이 통하는 것을 봤다(64×64, 2.9초). OpenAI 쪽 목록(`/v1/models`)에는 argon 이 없다(`gpt-6-astra`·`gpt-6-luna`·`gpt-6-sol`·`gpt-6.1-sol` 등만).
+- **웹 평판**(검색, 2026-10-14): Reddit·HN 글은 안 잡히고 블로그·벤치마크 글뿐이다. 종합지수는 sol 과 비슷(argon 52~53 vs sol 51~52, 출처마다 다르다), 에이전트형 벤치마크는 argon 우세 주장, 환각률도 argon 이 낮다는 글이 있다. 다만 argon 은 출력 토큰이 길어 같은 일에 비용이 2.8배라는 글, 일부 출처에서 "접근이 제한적(단계적 공개)"이라는 글이 있고 **벤더 발표 수치가 많아 독립 검증이 덜 됐다.** 문서 OCR·한글 지문 벤치마크는 못 찾았다.
+- `/admin/compare-korean` 의 두 칸이 이제 **칸마다 모델을 고른다**(`Reader.provider/model`): 기본 a = gpt-6.1-sol(medium), b = google/gemini-4-argon(기본 강도). OpenRouter 칸은 `/api/admin/compare-korean` 이 `provider:"openrouter"` 로 받아 **그 요청 안에서** 읽고(`readKoreanRichTextOpenRouter`, 서식 검수는 `reviewMarksOpenRouter`) 곧바로 결과를 준다 — 백그라운드 없음(함수 한도 300초에서 15초 앞에서 끊는다). **프롬프트·파싱·서식 검수는 sol 과 같은 것**을 쓴다. 비용은 OpenRouter 가 준 실제 청구액 × `USD_KRW_RATE`. `callOpenRouterVision` 이 사진 여러 장(`string[]`)을 받는다.
+- 운영 경로는 안 바꿨다. sol 은 Responses 백그라운드·캐시 키·결과 삭제 같은 OpenAI 전용 기능에 기대 있어 argon 으로 바꾸려면 따로 설계해야 한다 — 비교에서 나은 것이 확인된 뒤에 할 일이다.
+- 검증: `tsc` 만. **실제 지문으로 둘을 돌려 서식 구간·원문자·글자 정확도를 보는 것은 사용자 계정으로 해야 한다**(로그인 필요). 추론 강도 칸 값(xhigh·max 등)이 OpenRouter 에서 거부될 수 있다 — low·medium·high 가 안전하다.

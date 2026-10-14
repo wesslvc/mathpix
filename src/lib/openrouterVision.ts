@@ -32,7 +32,8 @@ export async function listOpenRouterVisionModels(): Promise<OpenRouterModel[]> {
 
 /** 사진 한 장 + 지시 → 글. 429·5xx 는 3·8·15초 뒤 세 번 더(제공사가 잠깐 막는 일이 흔하다 — 같은 모델에 지면 여러 장이 동시에 가면 더). */
 export async function callOpenRouterVision(
-  dataUrl: string,
+  /** 사진 한 장 또는 여러 장(지문 + 그림들). */
+  dataUrl: string | string[],
   prompt: string,
   model: string,
   onUsage?: (u: DetectUsage) => void,
@@ -50,7 +51,7 @@ export async function callOpenRouterVision(
         role: "user",
         content: [
           { type: "text", text: prompt },
-          { type: "image_url", image_url: { url: dataUrl } },
+          ...(Array.isArray(dataUrl) ? dataUrl : [dataUrl]).map((url) => ({ type: "image_url", image_url: { url } })),
         ],
       },
     ],

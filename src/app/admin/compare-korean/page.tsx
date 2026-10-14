@@ -62,12 +62,21 @@ const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
  */
 const OPENAI_PRESETS = ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"];
 
-type Reader = { key: "a" | "b"; effort: string };
+type Reader = { key: "a" | "b"; provider: "openai" | "openrouter"; model: string; effort: string };
 
-// 기본은 운영 강도(medium)와 한 단계 위(high).
+/**
+ * 칸에서 고르는 읽기 모델. `google/gemini-4-argon` 은 2026-10-14 에 OpenRouter 모델 목록(`probe: "openrouter-models"`)
+ * 에서 확인했고(단가 입력 $2 · 출력 $10 — sol 과 같다), 사진 + JSON 요청이 통하는 것까지 봤다.
+ */
+const READER_MODELS: { label: string; provider: Reader["provider"]; model: string }[] = [
+  { label: "gpt-6.1-sol", provider: "openai", model: READ_MODEL },
+  { label: "gemini-4-argon (OpenRouter)", provider: "openrouter", model: "google/gemini-4-argon" },
+];
+
+// 기본: 운영 모델(sol medium) 대 gemini-4-argon(기본 강도).
 const DEFAULT_READERS: Reader[] = [
-  { key: "a", effort: "medium" },
-  { key: "b", effort: "high" },
+  { key: "a", provider: "openai", model: READ_MODEL, effort: "medium" },
+  { key: "b", provider: "openrouter", model: "google/gemini-4-argon", effort: "" },
 ];
 
 type Result =
@@ -286,7 +295,7 @@ async function makePdf(blocks: RichBlock[], title: string, tocLine: string): Pro
 
 /** 칸 머리글·PDF 제목. */
 function readerTitle(r: Reader): string {
-  return `${READ_MODEL} · ${r.effort || "기본"}`;
+  return `${r.model} · ${r.effort || "기본"}`;
 }
 
 export default function CompareKoreanPage() {
@@ -409,8 +418,8 @@ export default function CompareKoreanPage() {
         body: JSON.stringify({
           image,
           figures: forReader,
-          provider: "openai",
-          model: READ_MODEL,
+          provider: reader.provider,
+          model: reader.model,
           effort: reader.effort,
         }),
       });
@@ -443,8 +452,8 @@ export default function CompareKoreanPage() {
               image: overview,
               strips,
               paragraphs: reviewParagraphs(read),
-              provider: "openai",
-              model: READ_MODEL,
+              provider: reader.provider,
+              model: reader.model,
               effort: reader.effort,
             }),
           });
@@ -465,7 +474,7 @@ export default function CompareKoreanPage() {
         blocks = applied.blocks;
         reviewNote = describeMarksReview(applied.stats);
       }
-      const model = json.model ?? READ_MODEL;
+      const model = json.model ?? reader.model;
       const tag = reader.effort ? `${model} (${reader.effort})` : model;
       const pdfUrl = await makePdf(blocks, `지문 비교 — ${readerTitle(reader)}`, `2p, ${tag}`);
       setResults((r) => ({
@@ -545,7 +554,7 @@ export default function CompareKoreanPage() {
       <div>
         <h1 className="text-xl font-bold text-slate-900">국어 지문 인식 비교</h1>
         <p className="mt-1 text-sm text-slate-600">
-          같은 지문 사진을 운영과 같은 한 번의 호출({READ_MODEL})로 두 번 보내 평가원 양식 PDF 를
+          같은 지문 사진을 운영과 같은 프롬프트·같은 한 번의 호출로 두 모델(기본 {READ_MODEL} 대 google/gemini-4-argon)에 보내 평가원 양식 PDF 를
           각각 뽑습니다. 모델이 글자와 함께 굵게·밑줄·네모가 정확히 어디부터 어디까지인지 짚어
           줍니다. 칸마다 추론 강도만 바꿔 견줍니다. 토큰은 차감하지 않습니다(무제한 계정 전용).
         </p>
@@ -761,6 +770,22 @@ export default function CompareKoreanPage() {
               className={cn(cardClass, "flex min-w-0 flex-col gap-3 p-4 sm:p-5")}
  >
               <h2 className="font-semibold text-slate-900">{readerTitle(reader)}</h2>
+              <div className="flex flex-wrap gap-1 text-xs">
+                {READER_MODELS.map((m) => (
+                  <button
+                    key={m.model}
+                    type="button"
+                    onClick={() => patchReader(reader.key, { provider: m.provider, model: m.model, effort: m.provider === "openai" ? "medium" : "" })}
+                    className={`rounded-lg border px-2 py-1 ${
+                      reader.model === m.model
+                        ? "border-blue-600 bg-blue-50 text-blue-700"
+                        : "border-slate-300 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-wrap items-end gap-1 text-xs">
                 {EFFORTS.map((e) => (
                   <button

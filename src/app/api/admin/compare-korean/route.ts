@@ -5,6 +5,8 @@ import {
   GradeError,
   pollKoreanTextBackground,
   pollVisionBackground,
+  readKoreanRichTextOpenRouter,
+  reviewMarksOpenRouter,
   startKoreanTextBackground,
   startVisionBackground,
 } from "@/lib/gradeExam";
@@ -19,7 +21,7 @@ function readDetect(text: string) {
   const { passages, figures } = parseKoreanPassages(text);
   return { regions: passages, figures };
 }
-import { gradingEstKrw } from "@/lib/tokens";
+import { gradingEstKrw, USD_KRW_RATE } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,14 +66,55 @@ export async function POST(req: NextRequest) {
   if (!image.startsWith("data:image/")) {
     return NextResponse.json({ error: "지문 사진이 필요합니다." }, { status: 400 });
   }
-  const provider = body.provider === "gemini" ? "gemini" : body.provider === "openai" ? "openai" : null;
+  const provider =
+    body.provider === "gemini" ? "gemini" : body.provider === "openai" ? "openai" : body.provider === "openrouter" ? "openrouter" : null;
   const model = typeof body.model === "string" ? body.model.trim() : "";
   const effort = typeof body.effort === "string" ? body.effort.trim() : "";
-  if (!provider || !/^[\w.-]{3,80}$/.test(model)) {
+  if (!provider || !/^[\w./:-]{3,80}$/.test(model)) {
     return NextResponse.json({ error: "provider 와 model 이 필요합니다." }, { status: 400 });
   }
   if (effort && !/^[a-z]{1,16}$/.test(effort)) {
     return NextResponse.json({ error: "effort 값이 이상합니다." }, { status: 400 });
+  }
+  // **OpenRouter 모델**(예: google/gemini-4-argon) — 지문 읽기·서식 검수만. Responses 백그라운드가 없어
+  // 이 요청 안에서 끝까지 기다린다(함수 한도 300초, 우리가 15초 앞에서 끊는다). 비용은 OpenRouter 가 준 실제 청구액.
+  if (provider === "openrouter" && (body.task === "marks" || (body.task !== "detect"))) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), (maxDuration - 15) * 1000);
+    const t0 = Date.now();
+    const krw = (u?: { costUsd?: number }) => (u?.costUsd != null ? u.costUsd * USD_KRW_RATE : null);
+    try {
+      if (body.task === "marks") {
+        const strips = Array.isArray(body.strips)
+          ? body.strips.filter((f): f is string => typeof f === "string" && f.startsWith("data:image/")).slice(0, 12)
+          : [];
+        const paragraphs = Array.isArray(body.paragraphs)
+          ? body.paragraphs.filter((t): t is string => typeof t === "string").slice(0, 300)
+          : [];
+        if (paragraphs.length === 0) return NextResponse.json({ error: "검수할 문단이 없습니다." }, { status: 400 });
+        const out = await reviewMarksOpenRouter([image, ...strips], paragraphs, { model, effort: effort || undefined }, ac.signal);
+        return NextResponse.json({ status: "done", review: out.review, model: out.model, estKrw: krw(out.usage), ms: Date.now() - t0 });
+      }
+      const figs = Array.isArray(body.figures)
+        ? body.figures.filter((f): f is string => typeof f === "string" && f.startsWith("data:image/")).slice(0, 8)
+        : [];
+      const out = await readKoreanRichTextOpenRouter(image, { model, effort: effort || undefined }, ac.signal, figs);
+      return NextResponse.json({
+        status: "done",
+        blocks: out.blocks,
+        model: out.model,
+        usage: out.usage ? { inputTokens: out.usage.input, outputTokens: out.usage.output } : undefined,
+        estKrw: krw(out.usage),
+        ms: Date.now() - t0,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "OpenRouter 호출에 실패했습니다.", ms: Date.now() - t0 },
+        { status: 502 },
+      );
+    } finally {
+      clearTimeout(timer);
+    }
   }
   const detect = body.task === "detect";
   // **서식 검수**(두 번째 호출) — 운영과 같은 프롬프트, 칸의 모델·강도로.
