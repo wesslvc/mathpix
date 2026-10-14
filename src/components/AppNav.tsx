@@ -69,6 +69,16 @@ export default function AppNav() {
               {l.label}
             </Link>
           ))}
+          {/* 사파리 웹앱(홈 화면 앱)에는 새로고침이 없어서 직접 둔다. */}
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            aria-label="새로고침"
+            title="새로고침"
+            className="shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+          >
+            ↻ 새로고침
+          </button>
         </div>
       </div>
     </nav>
