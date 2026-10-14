@@ -130,12 +130,12 @@ export default async function DashboardPage({
       {(series.length > 0 || gradeSeries.length > 0) && (
         <section className="flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-base font-semibold text-ink">성적 추세</h2>
+            <h2 className="text-base font-semibold text-ink">최근 성적</h2>
             <Link href="/scores" className="text-xs font-medium text-blue-700 hover:underline">
               성적 전체 보기 →
             </Link>
           </div>
-          <ScoreTrendChart series={series} gradeSeries={gradeSeries} />
+          <ScoreTrendChart series={series} gradeSeries={gradeSeries} compact />
         </section>
       )}
     </main>

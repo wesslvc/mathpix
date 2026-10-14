@@ -579,8 +579,11 @@ function withinPeriod(list: TrendSeries[], cutoff: string | null): TrendSeries[]
 export default function ScoreTrendChart({
   series,
   gradeSeries = [],
+  compact = false,
 }: {
   series: TrendSeries[];
+  /** 홈처럼 작게: 과목별 최근 점수·등급만 한 줄 카드로(그래프·기간·평균·등락 없음). */
+  compact?: boolean;
   /** 등급으로 본 추세. 등급을 하나도 안 적었으면 비어 있고, 그때는 토글을 감춘다. */
   gradeSeries?: TrendSeries[];
 }) {
@@ -623,7 +626,7 @@ export default function ScoreTrendChart({
       /* 무시 */
     }
   }
-  const cutoff = cutoffOf(period);
+  const cutoff = compact ? null : cutoffOf(period);
 
   const shown: Colored[] = useMemo(
     () =>
@@ -674,6 +677,41 @@ export default function ScoreTrendChart({
         <p className={cn(cardClass, "px-4 py-6 text-center text-sm text-slate-400")}>
           이 기간에는 기록이 없어요. 기간을 넓혀 보세요.
         </p>
+      </div>
+    );
+  }
+
+  if (compact) {
+    // 점수 목록 기준으로 과목마다 최근 한 번의 점수와 등급만 보여 준다.
+    const gradeOf = new Map(gradeSeries.map((g) => [g.key, g.points[g.points.length - 1]?.value]));
+    const base = hasScore ? series : gradeSeries;
+    return (
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        {base.map((b) => {
+          const last = b.points[b.points.length - 1];
+          const grade = hasScore ? gradeOf.get(b.key) : last.value;
+          return (
+            <div key={b.key} className="flex flex-col gap-0.5 rounded-xl border border-slate-200 bg-white px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colorOf.get(b.key) ?? PALETTE[0] }} />
+                <span className="truncate">{b.label}</span>
+              </span>
+              <span className="flex items-baseline gap-1.5">
+                {hasScore && (
+                  <span className="text-lg font-bold tabular-nums text-ink">
+                    {last.value}
+                    <span className="ml-0.5 text-[11px] font-normal text-slate-400">{last.hasScore ? `/${b.max}` : "%"}</span>
+                  </span>
+                )}
+                {grade != null && (
+                  <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-amber-800">
+                    {grade}등급
+                  </span>
+                )}
+              </span>
+            </div>
+          );
+        })}
       </div>
     );
   }
