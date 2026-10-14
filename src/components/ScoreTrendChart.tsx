@@ -127,6 +127,33 @@ function Sparkline({ points, color, metric, heightClass = "h-7" }: { points: Tre
   );
 }
 
+const MAIN_KEYS = new Set(["korean", "math", "english"]);
+
+/**
+ * 과목 카드 배치 — 국어·수학·영어는 3칸 한 줄, 탐구는 아래에 2칸(카드가 더 커 보인다)으로
+ * 위아래 대칭을 맞춘다(2026-10-14, 사용자 요청). 홈의 작은 카드와 성적 화면 요약이 같이 쓴다.
+ */
+function SubjectGrid<T extends { key: string }>({
+  items,
+  render,
+}: {
+  items: T[];
+  render: (item: T) => React.ReactNode;
+}) {
+  const main = items.filter((i) => MAIN_KEYS.has(i.key));
+  const elective = items.filter((i) => !MAIN_KEYS.has(i.key));
+  return (
+    <div className="flex flex-col gap-2.5">
+      {main.length > 0 && (
+        <div className="grid grid-cols-3 gap-2.5 [&>*]:min-w-0">{main.map((i) => render(i))}</div>
+      )}
+      {elective.length > 0 && (
+        <div className="grid grid-cols-2 gap-2.5 [&>*]:min-w-0">{elective.map((i) => render(i))}</div>
+      )}
+    </div>
+  );
+}
+
 function SummaryCard({
   s,
   metric,
@@ -686,19 +713,20 @@ export default function ScoreTrendChart({
     const gradeOf = new Map(gradeSeries.map((g) => [g.key, g.points[g.points.length - 1]?.value]));
     const base = hasScore ? series : gradeSeries;
     return (
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {base.map((b) => {
+      <SubjectGrid
+        items={base}
+        render={(b) => {
           const last = b.points[b.points.length - 1];
           const grade = hasScore ? gradeOf.get(b.key) : last.value;
           return (
-            <div key={b.key} className="flex flex-col gap-1.5 rounded-2xl border border-slate-200 bg-white p-4">
+            <div key={b.key} className="flex flex-col gap-1.5 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
               <span className="flex items-center gap-2 text-sm font-medium text-slate-600">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: colorOf.get(b.key) ?? PALETTE[0] }} />
                 <span className="truncate">{b.label}</span>
               </span>
-              <span className="flex items-baseline gap-1.5">
+              <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
                 {hasScore && (
-                  <span className="text-3xl font-bold tracking-tight tabular-nums text-ink">
+                  <span className="text-xl font-bold sm:text-3xl tracking-tight tabular-nums text-ink">
                     {last.value}
                     <span className="ml-1 text-sm font-normal text-slate-400">{last.hasScore ? `/${b.max}` : "%"}</span>
                   </span>
@@ -712,8 +740,8 @@ export default function ScoreTrendChart({
               <Sparkline points={b.points} color={colorOf.get(b.key) ?? PALETTE[0]} metric={hasScore ? "score" : "grade"} heightClass="h-14" />
             </div>
           );
-        })}
-      </div>
+        }}
+      />
     );
   }
 
@@ -724,8 +752,9 @@ export default function ScoreTrendChart({
     <div className="flex flex-col gap-4">
       {periodControl}
       {/* 과목 요약 — 한눈에 최근 점수·변화를 보고, 눌러서 아래 그래프를 바꾼다. */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
-        {shown.map((s) => (
+      <SubjectGrid
+        items={shown}
+        render={(s) => (
           <SummaryCard
             key={s.key}
             s={s}
@@ -734,8 +763,8 @@ export default function ScoreTrendChart({
             selected={selection === s.key}
             onSelect={() => setPicked(s.key)}
           />
-        ))}
-      </div>
+        )}
+      />
 
       <Card className="flex flex-col gap-3 p-3 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
