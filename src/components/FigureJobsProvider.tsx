@@ -736,7 +736,8 @@ export default function FigureJobsProvider({
     ]);
 
     const uploaded: string[] = [];
-    const base = `${user.id}/_jobs/p-${job.id}`;
+    // 경로에는 \w . / - 만 허용된다(서버 ownJobPath) — 작업 id 의 ':' 등은 '_' 로 바꾼다.
+    const base = `${user.id}/_jobs/p-${job.id.replace(/[^\w-]/g, "_")}`;
     const up = async (name: string, dataUrl: string) => {
       const blob = await (await fetch(dataUrl)).blob();
       const ext = blob.type === "image/png" ? "png" : "jpg";
