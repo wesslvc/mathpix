@@ -67,7 +67,9 @@ kind "figure" — FIGURE DETAIL. compare every graph, geometric figure, diagram,
 - lines that should meet at one point (intersections, tangent points, axis crossings, maxima/minima) do not, or a line grazes instead of passing exactly through / touching at exactly one point
 - axes, origin O, tick numbers, units, asymptotes, dashed vs solid lines, angle arcs, right-angle marks, equal-length hatches, arrowheads, shaded regions, legend swatches differ
 - a table drawing has wrong cell contents, merged cells split/merged wrongly, or a row/column missing
-describe both sides concretely ("원본: 점 P 가 직선 l 위에 있음" / "그림: P 가 l 에서 떨어져 있음"). colour or line-thickness differences alone are NOT differences.
+describe both sides concretely ("원본: 점 P 가 직선 l 위에 있음" / "그림: P 가 l 에서 떨어져 있음"). line-thickness differences alone are NOT differences.
+
+TONE / SHADE CONTRAST — this matters because the student must tell regions apart while solving. whenever image 1 uses several shades or fills to distinguish things (dark vs slightly lighter grey, dark vs light colour, different hatch / dot patterns, bars or map regions / legend swatches (가)(나)(다) that differ only in darkness), rank them from darkest to lightest in image 1 and again in image 2 and compare. report kind "figure" when two things that look different in image 1 look the same (or nearly the same) in image 2, when the darkness order flips, when a light/dark one becomes clearly too light or too dark, or when a legend swatch no longer matches its region. quote both rankings in "original"/"recreated" ("원본: 석탄 막대가 (다)보다 연한 회색, (가) 가장 진함" / "그림: 석탄과 (다)가 같은 회색"). small uniform brightness shifts that keep every distinction clear are NOT differences; a hue change that keeps the distinctions clear is NOT a difference.
 
 MAPS AND DIAGRAMS WITH MARKED POINTS (dots, ×, ●, ▲, labelled locations A/B/C/㉠/가) — be explicit, do both jobs below for every such figure.
 (1) POSITION of every point. list each dot/marker in image 1 with a CONCRETE location: relative to printed landmarks (a coastline bend, an island, a river or border, a printed grid / latitude–longitude line, a named region, another dot, an axis) AND an approximate position in % of the figure box (x from the left edge, y from the top edge), e.g. "점 A: 한강 하구 바로 북쪽 해안선 위 (x≈38%, y≈27%)". do the same for image 2, then compare point by point. report kind "figure" when a point is missing / extra / on the wrong side of a landmark / clearly shifted (more than about one dot-width, or across any printed line or boundary) / has a different label; write both concrete locations in "original" and "recreated" so the redraw can be corrected. a dot that sits exactly on a line, boundary or grid crossing in image 1 must sit exactly there in image 2.
@@ -88,7 +90,7 @@ circled markers (㉠㉡㉢ / ㉮㉯㉰ / ①②③ / ⓐⓑⓒ) — YOU are the 
 - report a difference when the inner glyph differs, the family changes (㉠→① / ㉠→㉮), a marker is missing / extra / renumbered, a circle is drawn as a square / parenthesis / bare character, or the same marker looks different in different places
 - in "recreated" write the inner glyph you actually see, e.g. "㉡ (inner ㄴ)"
 
-do NOT report: font, size, spacing, line breaks, alignment, box/table border style, line thickness / colour / shading style of figures, image quality, the same math written in different but equivalent notation. handwriting that image 2 correctly removed is NOT a difference.
+do NOT report: font, size, spacing, line breaks, alignment, box/table border style, line thickness of figures, colour/shading changes that keep every shade distinction clear, image quality, the same math written in different but equivalent notation. handwriting that image 2 correctly removed is NOT a difference.
 be precise — quote the exact characters. if you are not sure a difference exists, do not report it.
 
 return JSON only:
