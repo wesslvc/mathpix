@@ -1,3 +1,4 @@
+import PriceTable from "./PriceTable";
 import TokenGauge from "./TokenGauge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -39,8 +40,9 @@ export default function BillingStatus({
   if (compact && !empty) {
     if (unlimited || byok) return null;
     return (
-      <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-2 text-sm text-slate-600">
         <TokenGauge tokens={credits} className="min-w-[180px]" />
+        <PriceTable />
         {checkoutReady && (
           <a href="/api/checkout?plan=tokens" className={buttonVariants({ variant: "ghost", size: "xs", className: "text-blue-700" })}>
             충전하기
@@ -108,6 +110,7 @@ export default function BillingStatus({
           empty && <span className="shrink-0 text-xs text-amber-700">결제 준비 중</span>
         )}
       </div>
+      <PriceTable />
 
       {/* **+5000토큰 배너 바로 밑에 BYOK를 나란히 안내한다**(사용자 요청).
           한 줄짜리(compact)에서는 뺀다 — 프로필에서 본다. */}
