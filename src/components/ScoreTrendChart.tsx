@@ -587,7 +587,9 @@ export default function ScoreTrendChart({
   const hasGrade = gradeSeries.length > 0;
   const hasScore = series.length > 0;
   // 등급만 적어 둔 기록뿐이면 처음부터 등급으로 본다(점수 보기는 비어 있다).
-  const [metric, setMetric] = useState<"score" | "grade" | "both">(hasScore ? "score" : "grade");
+  const [metric, setMetric] = useState<"score" | "grade" | "both">(
+    hasScore && hasGrade ? "both" : hasScore ? "score" : "grade",
+  );
   const isGrade = (metric === "grade" && hasGrade) || !hasScore;
   const shownMetric: TrendMetric = isGrade ? "grade" : "score";
   // "함께" — 점수 그래프에 등급을 같이 적는다(점수·등급이 둘 다 있을 때만).
