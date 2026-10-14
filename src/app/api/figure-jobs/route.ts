@@ -147,6 +147,9 @@ export async function POST(req: NextRequest) {
     auto?: boolean;
     /** 수정 창에서 그림 하나를 다시 그릴 때 sol 검수 흐름을 고른다. */
     sol?: boolean;
+    /** 재검수 — 저장된 그림(`current`)을 원본(`image`)과 sol 이 다시 견주기만 한다(그리기 없음, 토큰 없음). */
+    reverify?: boolean;
+    current?: string;
   };
   try {
     body = await req.json();
@@ -220,6 +223,21 @@ export async function POST(req: NextRequest) {
   }
 
   const mode = body.mode === "problem" ? "problem" : "figure";
+
+  // 재검수: 저장된 그림을 첫 라운드로 놓고 곧바로 검수 단계(`verify:0`)부터 돈다. 그리기도 보증금도 없다.
+  let reverifyPath = "";
+  if (body.reverify === true && mode === "problem" && typeof body.current === "string") {
+    const cur = splitDataUrl(body.current);
+    if (!cur || body.current.length > MAX_IMAGE_CHARS) {
+      await removeStored(admin, [inputPath]);
+      return NextResponse.json({ error: "저장된 그림 형식이 올바르지 않아요." }, { status: 400 });
+    }
+    reverifyPath = `${user.id}/_jobs/${jobId}-r0.${cur.ext}`;
+    if (!(await storeBytes(supabase, reverifyPath, cur.bytes, cur.mime))) {
+      await removeStored(admin, [inputPath]);
+      return NextResponse.json({ error: "그림을 올리지 못했어요.", }, { status: 502 });
+    }
+  }
   const inserted = await admin
     .from("figure_jobs")
     .insert({
@@ -239,7 +257,14 @@ export async function POST(req: NextRequest) {
       ...(mode === "problem" && body.auto === true ? { payload: { auto: true } } : {}),
       ...(body.sol === true && (mode === "figure" || (mode === "problem" && body.auto !== true)) ? { payload: { sol: true } } : {}),
       // 새로 만드는 문제 통째로 그리기는 luna 가 난이도를 보고 시작 quality 를 고르는 단계부터(`problemLoopRun.ts` 의 assess).
-      ...(mode === "problem" && body.auto !== true && body.sol !== true ? { stage: "assess" } : {}),
+      ...(mode === "problem" && body.auto !== true && body.sol !== true && !reverifyPath ? { stage: "assess" } : {}),
+      ...(reverifyPath
+        ? {
+            payload: { reverify: true },
+            stage: "verify:0",
+            state: { rounds: [{ quality: "saved", path: reverifyPath }], start: 0 },
+          }
+        : {}),
       width: typeof body.width === "number" && body.width > 0 ? Math.round(body.width) : null,
       height:
         typeof body.height === "number" && body.height > 0 ? Math.round(body.height) : null,
@@ -248,7 +273,7 @@ export async function POST(req: NextRequest) {
     .single<FigureJobRow>();
 
   if (inserted.error || !inserted.data) {
-    await removeStored(admin, [inputPath]);
+    await removeStored(admin, reverifyPath ? [inputPath, reverifyPath] : [inputPath]);
     // 동시에 두 번 들어와 한쪽이 먼저 넣은 경우(고유 인덱스).
     if (inserted.error?.code === "23505") {
       const again = await admin
@@ -271,7 +296,7 @@ export async function POST(req: NextRequest) {
   // 있고, 일꾼은 세션 없이 도는데 기존 차감 함수는 세션(auth.uid())을 요구한다.
   // 실패하면 일꾼이(또는 멈춘 작업 정리가) 이만큼 돌려준다.
   let job = inserted.data;
-  if (!billing.unlimited && !billing.byok) {
+  if (!billing.unlimited && !billing.byok && !reverifyPath) {
     const { data, error } = await supabase.rpc("consume_recognition_credit", {
       p_amount: FIGURE_TOKEN_DEPOSIT,
     });
@@ -567,7 +592,7 @@ export async function PATCH(req: NextRequest) {
       finished_at: null,
       started_at: null,
       // 문제 통째로 그리기는 그리기·검수를 단계로 도는데, 다시 시도는 깨끗이 처음부터 한다.
-      ...(row.mode === "problem" || (row.payload as { sol?: boolean } | null)?.sol ? { stage: null, state: null, note: null } : {}),
+      ...((row.payload as { reverify?: boolean } | null)?.reverify ? {} : row.mode === "problem" || (row.payload as { sol?: boolean } | null)?.sol ? { stage: null, state: null, note: null } : {}),
     };
     if (!billing.unlimited && !billing.byok && !row.charged) {
       const { data, error } = await supabase.rpc("consume_recognition_credit", {

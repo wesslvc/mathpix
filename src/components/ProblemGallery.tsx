@@ -401,6 +401,15 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     return s;
   }, [jobs]);
 
+  /** 재검수 중인 문제 행 id — 끝날 때까지 그 문제의 "재검수"만 잠근다. */
+  const reverifyingIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const j of jobs) {
+      if (j.id.startsWith("reverify:") && j.problemId && (j.status === "pending" || j.status === "running")) s.add(j.problemId);
+    }
+    return s;
+  }, [jobs]);
+
   // 미리보기에 그릴 것들. 표는 본문에서 다시 뽑고(본문을 고치면 따라 바뀐다)
   // 저장돼 있던 자리·크기만 입힌다.
   const blocks = useMemo(
@@ -946,6 +955,36 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
     });
   }
 
+  /**
+   * 목록에서 바로 **재검수**한다 — 저장된 그림을 원본(AI 이전 그림)과 sol 이 다시 견주기만 한다(그리기 없음, 토큰 없음).
+   * 차이가 남으면 대기열 패널의 확인 창에 "이게 다릅니다"로 뜨고, 없으면 "수정사항 없음"으로 끝난다.
+   */
+  async function reverifyFromList(problem: GalleryProblem) {
+    if (reverifyingIds.has(problem.id)) return;
+    try {
+      const data = await prefetchBox(problem.id);
+      const figs = readStoredFigures(data?.box_range).filter((f) => f.kind !== "table");
+      const raw = figs.length === 1 ? (figs[0].origin ?? null) : null;
+      const originSrc = raw ? rasterFromSvg(raw) : null;
+      if (!originSrc) {
+        window.alert("원본(AI 이전 그림)이 남아 있지 않아 재검수할 수 없어요.");
+        return;
+      }
+      enqueue({
+        id: `reverify:${problem.id}:${Date.now().toString(36)}`,
+        problemKey: `reverify:${problem.id}`,
+        label: `재검수 · ${problem.number ? `${problem.number}번` : "문제"}`,
+        crop: originSrc,
+        reverifyCurrent: problem.imageUrl,
+        mode: "problem",
+        korean: problem.korean ? true : undefined,
+        problemId: problem.id,
+      });
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "재검수를 시작하지 못했어요.");
+    }
+  }
+
   /** 따로 넣은 문제를 국어 지문 세트에 묶는다(setId 가 빈 문자열이면 묶음을 푼다). */
   async function bindToPassage(problem: GalleryProblem, setId: string) {
     setBusyId(problem.id);
@@ -1343,6 +1382,17 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
           title="지문 글자를 서버 대기열에서 다시 읽어요 — 끝날 때까지 이 지문은 다시 못 눌러요(다른 지문은 눌러도 돼요)"
         >
           {rereadingIds.has(problem.id) ? "인식 중…" : "다시 인식"}
+        </Button>
+      )}
+      {problem.korean?.role !== "passage" && (problem.text ?? "").trim() === "" && (
+        <Button
+          type="button"
+          onClick={() => void reverifyFromList(problem)}
+          disabled={reverifyingIds.has(problem.id)}
+          variant="soft" size="sm"
+          title="저장된 그림을 원본과 sol 이 다시 견줘 봐요(그리기 없음, 토큰 없음) — 끝날 때까지 이 문제는 다시 못 눌러요"
+        >
+          {reverifyingIds.has(problem.id) ? "검수 중…" : "재검수"}
         </Button>
       )}
       {/* 따로 넣은 문제를 지문에 묶는다 — 내보낼 때 지문 세트로 함께 조판된다. */}

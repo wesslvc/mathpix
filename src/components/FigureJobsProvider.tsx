@@ -105,6 +105,8 @@ export type FigureJob = {
   auto?: boolean;
   /** 수정 창에서 그림 하나를 다시 그릴 때 **sol 검수 흐름**을 골랐다(그리기 → sol 대조 → 고쳐 그리기). */
   sol?: boolean;
+  /** 재검수 — 저장된 그림(이게 현재 그림, `crop` 은 원본). 그리지 않고 sol 이 견주기만 한다. */
+  reverifyCurrent?: string;
   status: "pending" | "running" | "done" | "error";
   /** 이 작업에 실제로 든 **추정** 비용(달러). 캐시에 걸렸으면 없다. */
   costUsd?: number;
@@ -846,10 +848,11 @@ export default function FigureJobsProvider({
 
         // 같은 그림을 이미 그린 적이 있으면 그대로 쓴다(세트 문항 대비).
         // 모드·모델·지시를 키에 넣는다 — 하나라도 빠지면 바꿨는데도 옛 결과가 나온다.
+        const reverifyCur = job.reverifyCurrent ? await prepareProblemForModel(await ensureDataUrl(job.reverifyCurrent)) : null;
         const cacheKey = await figureCacheKey(
           `${mode}${mode === "problem" && job.auto ? ":auto" : ""}${job.sol ? ":sol" : ""}:${DEFAULT_FIGURE_MODEL}:${job.instruction ?? ""}:${forModel}`,
         );
-        const cached = readFigureCache(cacheKey);
+        const cached = reverifyCur ? null : readFigureCache(cacheKey);
         if (cached) {
           // 서버를 안 거치므로 돈이 안 나갔다 — 비용 칸은 비워 둔다.
           patchJob(id, { status: "done", svg: cached });
@@ -876,6 +879,8 @@ export default function FigureJobsProvider({
             instruction: job.instruction,
             auto: mode === "problem" && job.auto ? true : undefined,
             sol: job.sol ? true : undefined,
+            reverify: reverifyCur ? true : undefined,
+            current: reverifyCur ?? undefined,
             // 넣을 때 아직 저장 전일 수 있다 — 화면이 계속 갱신해 주는
             // 스냅샷에서 지금 아는 값을 읽는다. 나중에 생기면 sync 가 알려 준다.
             problemId:
