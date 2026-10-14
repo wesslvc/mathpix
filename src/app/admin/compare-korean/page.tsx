@@ -817,6 +817,8 @@ export default function CompareKoreanPage() {
         })}
       </div>
 
+      <CoveragePanel a={results.a} b={results.b} />
+
       <Button
         type="button"
         disabled={!file || busy}
@@ -885,6 +887,10 @@ function ResultView({ result }: { result: Result }) {
  >
         PDF 받기
       </a>
+      <div className="flex flex-wrap gap-2">
+        <CopyButton label="읽은 글 복사" text={richToPlainText(result.blocks)} />
+        <CopyButton label="모델 출력(JSON) 복사" text={result.raw} />
+      </div>
       <details className="text-xs">
         <summary className="cursor-pointer text-slate-500">읽은 글 보기</summary>
         <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-50 p-2">
@@ -913,4 +919,110 @@ function Elapsed({ since, note }: { since: number; note?: string }) {
       {note ?? "읽는 중…"} {Math.round((Date.now() - since) / 1000)}초
     </p>
   );
+}
+
+function CopyButton({ label, text }: { label: string; text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        setDone(true);
+        setTimeout(() => setDone(false), 1500);
+      }}
+      className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+    >
+      {done ? "복사됨 ✓" : label}
+    </button>
+  );
+}
+
+/** 글자 4개짜리 조각(공백 뺀)으로 한 줄이 상대 글에 얼마나 들어 있는지 잰다. */
+function grams(t: string): Set<string> {
+  const out = new Set<string>();
+  for (let i = 0; i + 4 <= t.length; i++) out.add(t.slice(i, i + 4));
+  return out;
+}
+function missingLines(from: string, other: string): { line: string; cover: number }[] {
+  const norm = (x: string) => x.replace(/\s+/g, "");
+  const otherNorm = norm(other);
+  const otherGrams = grams(otherNorm);
+  const out: { line: string; cover: number }[] = [];
+  for (const raw of from.split(/\n+/)) {
+    const line = raw.trim();
+    const n = norm(line);
+    if (n.length < 6) continue;
+    if (otherNorm.includes(n)) continue;
+    const g = grams(n);
+    if (g.size === 0) continue;
+    let hit = 0;
+    g.forEach((x) => {
+      if (otherGrams.has(x)) hit++;
+    });
+    const cover = hit / g.size;
+    if (cover < 0.85) out.push({ line, cover });
+  }
+  return out;
+}
+
+function CoveragePanel({ a, b }: { a: Result; b: Result }) {
+  if (a.state !== "done" || b.state !== "done") return null;
+  const ta = richToPlainText(a.blocks);
+  const tb = richToPlainText(b.blocks);
+  const onlyA = missingLines(ta, tb);
+  const onlyB = missingLines(tb, ta);
+  const Col = ({ title, items }: { title: string; items: { line: string; cover: number }[] }) => (
+    <div className="min-w-0">
+      <p className="mb-1 text-xs font-semibold text-slate-700">{title} ({items.length}줄)</p>
+      {items.length === 0 ? (
+        <p className="text-xs text-emerald-600">없음 — 상대 글에 다 들어 있어요.</p>
+      ) : (
+        <ul className="flex flex-col gap-1 text-xs">
+          {items.map((it, i) => (
+            <li key={i} className="break-words rounded bg-amber-50 p-1.5">
+              <span className="mr-1 font-mono text-slate-400">{Math.round(it.cover * 100)}%</span>
+              {it.line}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+  return (
+    <section className={cn(cardClass, "flex flex-col gap-3 p-4 sm:p-5")}>
+      <h2 className="font-semibold text-slate-900">누락 점검 (두 모델 글 대조)</h2>
+      <p className="text-xs text-slate-500">
+        글자 {ta.replace(/\s+/g, "").length.toLocaleString()}자 vs {tb.replace(/\s+/g, "").length.toLocaleString()}자(공백 제외).
+        한쪽 줄이 상대 글에 거의 없으면(% = 겹치는 정도) 아래에 나열합니다. 한쪽에만 있는 줄이 어느 모델 탓인지는
+        원본 사진과 견줘야 하지만, 여기 뜬 줄만 보면 됩니다.
+      </p>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Col title={`${readerTitleOf(a)}에만 있는 줄`} items={onlyA} />
+        <Col title={`${readerTitleOf(b)}에만 있는 줄`} items={onlyB} />
+      </div>
+      <CopyButton
+        label="대조 결과 복사"
+        text={[
+          `[A에만 있는 줄 ${onlyA.length}]`,
+          ...onlyA.map((x) => x.line),
+          `[B에만 있는 줄 ${onlyB.length}]`,
+          ...onlyB.map((x) => x.line),
+        ].join("\n")}
+      />
+    </section>
+  );
+}
+
+function readerTitleOf(r: Result): string {
+  return r.state === "done" ? r.model : "";
 }

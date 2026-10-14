@@ -6276,3 +6276,7 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 - `/admin/compare-korean` 의 두 칸이 이제 **칸마다 모델을 고른다**(`Reader.provider/model`): 기본 a = gpt-6.1-sol(medium), b = google/gemini-4-argon(기본 강도). OpenRouter 칸은 `/api/admin/compare-korean` 이 `provider:"openrouter"` 로 받아 **그 요청 안에서** 읽고(`readKoreanRichTextOpenRouter`, 서식 검수는 `reviewMarksOpenRouter`) 곧바로 결과를 준다 — 백그라운드 없음(함수 한도 300초에서 15초 앞에서 끊는다). **프롬프트·파싱·서식 검수는 sol 과 같은 것**을 쓴다. 비용은 OpenRouter 가 준 실제 청구액 × `USD_KRW_RATE`. `callOpenRouterVision` 이 사진 여러 장(`string[]`)을 받는다.
 - 운영 경로는 안 바꿨다. sol 은 Responses 백그라운드·캐시 키·결과 삭제 같은 OpenAI 전용 기능에 기대 있어 argon 으로 바꾸려면 따로 설계해야 한다 — 비교에서 나은 것이 확인된 뒤에 할 일이다.
 - 검증: `tsc` 만. **실제 지문으로 둘을 돌려 서식 구간·원문자·글자 정확도를 보는 것은 사용자 계정으로 해야 한다**(로그인 필요). 추론 강도 칸 값(xhigh·max 등)이 OpenRouter 에서 거부될 수 있다 — low·medium·high 가 안전하다.
+
+#### 비교 화면: 모델 출력 복사 · 누락 점검 (2026-10-14)
+
+사용자 — "제미나이가 누락한 건지 일일이 대조해야 하나", "모델 아웃풋 복사 가능하게". `/admin/compare-korean` 결과 칸에 "읽은 글 복사"·"모델 출력(JSON) 복사" 버튼, 두 칸이 다 끝나면 **누락 점검**(`CoveragePanel`)이 뜬다: 한 모델 글의 줄 중 상대 글에 (공백 뺀) 통째로도, 4글자 조각 85% 이상으로도 안 들어 있는 줄만 양쪽으로 나열한다. 어느 모델이 빠뜨렸는지는 한쪽에만 있는 줄을 원본과 견주면 된다(둘이 같은 곳을 틀리면 못 잡는다). `tsc` 까지, 화면은 못 봤다.
