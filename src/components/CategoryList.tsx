@@ -226,7 +226,7 @@ export default function CategoryList({
         </div>
         <p className="mt-0.5 text-xs text-slate-400">
           {folderName && <>📁 {folderName} · </>}
-          {new Date(category.created_at).toLocaleDateString("ko-KR")}
+          {new Date(category.exam_date ?? category.created_at).toLocaleDateString("ko-KR")}
         </p>
       </>
     );

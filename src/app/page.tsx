@@ -70,6 +70,13 @@ export default async function DashboardPage({
     getAccessState(supabase),
   ]);
 
+  // 시행일(없으면 만든 날) 최신순 — 추가한 날이 아니라 실제 응시일 기준이다(6모는 맨 아래로).
+  const dayOf = (c: Category) => (c.exam_date ?? c.created_at).slice(0, 10);
+  categories?.sort((a, b) => {
+    const d = dayOf(b).localeCompare(dayOf(a));
+    return d !== 0 ? d : b.created_at.localeCompare(a.created_at);
+  });
+
   const maxScoreByCategory: Record<string, number> = {};
   for (const row of linked ?? []) {
     maxScoreByCategory[row.category_id] = examMaxScore(row.subject);
