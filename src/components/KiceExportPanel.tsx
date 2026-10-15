@@ -1,5 +1,6 @@
 "use client";
 
+import { renderSolutionPng } from "@/lib/renderSolutionPng";
 import { useState } from "react";
 import { LAYOUT, type KiceSpec, type NumberCover } from "@/lib/kice/pdf";
 import { buildKicePdfOffThread } from "@/lib/kice/pdfOffThread";
@@ -324,14 +325,29 @@ export default function KiceExportPanel({ title, items }: Props) {
             })),
         solutions:
           hasSolutions && showSolutions
-            ? (renum ? renum.order : items.map((_, i) => i))
-                .filter((i) => (items[i].solution ?? "").trim() !== "")
-                .map((i) => ({
-                  label: renum ? `${renum.newNo.get(i)}번` : items[i].answerLabel,
-                  source: items[i].source,
-                  answer: items[i].answer,
-                  text: items[i].solution!.trim(),
-                }))
+            ? await Promise.all(
+                (renum ? renum.order : items.map((_, i) => i))
+                  .filter((i) => (items[i].solution ?? "").trim() !== "")
+                  .map(async (i, k) => {
+                    const label = renum ? `${renum.newNo.get(i)}번` : items[i].answerLabel;
+                    const source = items[i].source;
+                    const answer = items[i].answer;
+                    const text = items[i].solution!.trim();
+                    const multi = source ? `${source.trim()} ` : "";
+                    // 수식·기호가 든 해설은 앱의 수식 렌더러로 그려 그림으로 넣는다(글꼴에 없는 기호 때문).
+                    let png: Uint8Array | undefined;
+                    try {
+                      png = await renderSolutionPng({
+                        heading: `${multi}${label}${answer?.trim() ? `  ·  정답 ${answer.trim()}` : ""}`,
+                        text,
+                        title: k === 0 ? "해  설" : undefined,
+                      });
+                    } catch {
+                      png = undefined;
+                    }
+                    return { label, source, answer, text, png };
+                  }),
+              )
             : undefined,
         onWarn: (m) => console.warn("[kice]", m),
       });

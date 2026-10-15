@@ -681,7 +681,7 @@ export type KiceSpec = {
    * **해설지.** 정답표 뒤에 두 단으로 흘려 붙인다(변형문제의 해설 텍스트). 비어 있으면 붙이지 않는다.
    * 글은 평문이고 줄 단위로 문단이 나뉜다. 정답표만 따로 뽑을 때(`answerPage`)는 쓰지 않는다.
    */
-  solutions?: { label: string; source?: string; answer?: string; text: string }[];
+  solutions?: { label: string; source?: string; answer?: string; text: string; /** 수식 렌더러로 그린 해설 그림(PNG). 있으면 글 대신 이걸 놓는다. */ png?: Uint8Array }[];
   /**
    * 그리다 생긴 문제를 알린다(글꼴에 없는 글자 등). 던지지 않는 이유는
    * **나머지는 멀쩡히 나오기 때문**이다 — PDF 는 주되 무엇이 어긋났는지
@@ -1198,8 +1198,44 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       rest = f.rest;
     }
   }
+  // 해설이 수식 렌더러로 그린 그림이면 단에 위에서부터 쌓는다(한 단에 안 들어가면 다음 단·쪽). 그림은 미리 넣어 크기를 안다.
+  type SolImg = { img: PDFImage; x: number; y: number; w: number; h: number };
+  const solImagePages: SolImg[][] = [];
+  if (!spec.answerPage && spec.solutions && spec.solutions.length > 0 && spec.solutions.every((x) => x.png)) {
+    let k = 0;
+    let colIdx = 0;
+    let y = -1;
+    let cols = columnsOf(firstSolNo, [0, 1]);
+    let cur: SolImg[] = [];
+    solImagePages.push(cur);
+    y = cols[0].top;
+    for (const sol of spec.solutions) {
+      const img = await pdf.embedPng(sol.png!);
+      const w = cols[0].width;
+      let h = (img.height * w) / img.width;
+      const colH = cols[0].bottom - cols[0].top;
+      let dw = w;
+      if (h > colH) {
+        dw = (w * colH) / h;
+        h = colH;
+      }
+      if (y + h > cols[colIdx].bottom) {
+        colIdx++;
+        if (colIdx > 1) {
+          k++;
+          colIdx = 0;
+          cols = columnsOf(firstSolNo + k, [0, 1]);
+          cur = [];
+          solImagePages.push(cur);
+        }
+        y = cols[colIdx].top;
+      }
+      cur.push({ img, x: cols[colIdx].x, y, w: dw, h });
+      y += h + 8;
+    }
+  }
   // 정답표·해설지도 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
-  const total = pages.length + answerPages.length + solutionPages.length;
+  const total = pages.length + answerPages.length + (solImagePages.length > 0 ? solImagePages.length : solutionPages.length);
 
   for (let n = 0; n < pages.length; n++) {
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
@@ -1293,7 +1329,13 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     await drawAnswers(page, frame, blocks, fontForText, flip);
   }
 
-  for (const [k, results] of solutionPages.entries()) {
+  for (const [k, list] of solImagePages.entries()) {
+    const pageNo = firstSolNo + k;
+    const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
+    await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo, total });
+    for (const it of list) page.drawImage(it.img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
+  }
+  for (const [k, results] of (solImagePages.length > 0 ? [] : solutionPages).entries()) {
     const pageNo = firstSolNo + k;
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
     await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo, total });

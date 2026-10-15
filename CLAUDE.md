@@ -6356,3 +6356,10 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 - **서버 작업 `variant`**(`aiTasks.ts`, `figure_jobs.mode='task'`, 무제한 계정 전용 `unlimitedOnly`, 토큰 0): 한 작업이 ① sol 변형 설계(`askSol`, 강도 `params.effort` low·medium·high) → ② 그림 모델 편집(`runFigureGeneration` + `variantNote`, `params.quality`) → ③ 지정한 묶음(`params.categoryId`)에 **서버가 직접 저장**(그림·정답·해설·원래 번호)한다. 화면을 닫아도 끝까지 가서 폴더에 들어간다. 장부에 `sol 변형 설계`·`그림 변형 <quality>` 로 쌓인다. 한 작업의 한도가 270초라 sol 강도 high + 그림이 느리면 그림 시간이 모자라 실패할 수 있다(그때 "sol 강도를 낮춰 보세요").
 - `/variants` 화면: 문제를 **여러 폴더·실모에서 모아 담는다**(실모를 바꿔도 담은 목록이 유지, `picked` 레코드), 문제당 변형 수 1~5, sol 강도, 그림 품질, 저장 폴더 이름. 시작하면 폴더·`변형문제 · <원본>` 묶음을 **미리 만들고**(동시에 만들다 겹치지 않게) 문제×변형 수만큼 작업을 한꺼번에 넣는다(최대 60). 같은 원본의 여러 변형은 `params.copy/copies` 로 "서로 다르게" 시킨다. 화면은 `runAiTask` 로 결과를 기다리며 보여 주고, 패널에도 뜬다. 옛 `/api/variant` 라우트와 클라이언트 저장 버튼은 쓰지 않는다.
 - `answerOf`(정답 → 저장 값)는 `variantPlan.ts` 로 옮겼다. 검증: `tsc`·`build`. **실제 계정으로 서버 작업이 도는 것, 270초 안에 끝나는지, 동시 여러 개 저장 시 sort_order 겹침(허용)은 못 봤다.**
+
+#### 해설지의 특수기호는 수식 렌더러로 그린다 (2026-10-16)
+
+사용자 — "그런 특수기호는 mathpix 의 도움을 받자". Mathpix 는 그림→글자라 기호를 그려 주지는 못해서, **Mathpix 형식(`$…$` LaTeX)으로 해설을 쓰고 앱의 KaTeX 렌더러로 그리는** 쪽을 사용자가 골랐다.
+- sol 이 `solution` 을 Mathpix 마크다운으로 쓴다(`VARIANT_PROMPT`: 한국어 문장 + `$\sqrt{}$ \le \pi \angle …$`, 문단마다 한 단계, 끝에 "정답: …"). 이미 저장된 평문 해설도 그대로 렌더된다.
+- 내보내기(`KiceExportPanel`)가 해설마다 `renderSolutionPng`(브라우저, `renderMathTextWithInfo` + html-to-image, CSS 360px ↔ 한 단 폭, 글자 ≈9.2pt)로 PNG 를 만들어 `spec.solutions[].png` 로 넘긴다. `pdf.ts` 는 **모든 해설에 png 가 있으면** 글 흘리기 대신 그림을 두 단에 위에서부터 쌓는다(안 들어가면 다음 단·쪽, 쪽수는 미리 센다). 하나라도 없으면(렌더 실패) 예전 글 흘리기(나눔명조 `해설` 글꼴)로 돌아간다. 첫 해설 그림 위에 "해  설" 제목이 들어 있다.
+- 대가: 해설이 글이 아니라 그림이라 PDF 에서 복사·검색이 안 된다. 검증: `tsc`·`build`. **실제 계정으로 KaTeX 렌더·PDF 쪽 배치(단 쌓기)를 눈으로 본 적은 없다.**
