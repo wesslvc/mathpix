@@ -106,7 +106,7 @@ export async function listSavedAnswerKeys(
   opts: { excludeCategoryId?: string } = {},
 ): Promise<SavedKeySource[]> {
   const [cats, folders, keys, grades, probs] = await Promise.all([
-    supabase.from("categories").select("id, source, folder_id, exam_date, created_at").returns<CategoryRow[]>(),
+    supabase.from("categories").select("id, source, folder_id, exam_date, created_at").eq("is_variant", false).returns<CategoryRow[]>(),
     supabase.from("folders").select("id, name").returns<FolderRow[]>(),
     supabase
       .from("answer_keys")

@@ -6363,3 +6363,11 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 - sol 이 `solution` 을 Mathpix 마크다운으로 쓴다(`VARIANT_PROMPT`: 한국어 문장 + `$\sqrt{}$ \le \pi \angle …$`, 문단마다 한 단계, 끝에 "정답: …"). 이미 저장된 평문 해설도 그대로 렌더된다.
 - 내보내기(`KiceExportPanel`)가 해설마다 `renderSolutionPng`(브라우저, `renderMathTextWithInfo` + html-to-image, CSS 360px ↔ 한 단 폭, 글자 ≈9.2pt)로 PNG 를 만들어 `spec.solutions[].png` 로 넘긴다. `pdf.ts` 는 **모든 해설에 png 가 있으면** 글 흘리기 대신 그림을 두 단에 위에서부터 쌓는다(안 들어가면 다음 단·쪽, 쪽수는 미리 센다). 하나라도 없으면(렌더 실패) 예전 글 흘리기(나눔명조 `해설` 글꼴)로 돌아간다. 첫 해설 그림 위에 "해  설" 제목이 들어 있다.
 - 대가: 해설이 글이 아니라 그림이라 PDF 에서 복사·검색이 안 된다. 검증: `tsc`·`build`. **실제 계정으로 KaTeX 렌더·PDF 쪽 배치(단 쌓기)를 눈으로 본 적은 없다.**
+
+#### 변형문제: 창 자체 폴더(is_variant) · 생성을 부분수정 방식으로 (2026-10-16)
+
+사용자 — "생성은 부분수정방식으로 하고있지? 그리고 … 기존폴더가아니라 변형문제 창자체 폴더구조를 쓰라는거야 그래야 변형한거끼리보지".
+- **정정**: 직전까지 변형 생성은 부분수정이 아니라 원본 전체를 한 번에 고쳐 그리는 `variantPrompt` 였다. 이제 `kind` 가 comparison·computation 이면 수정하기와 같은 길(`patchNote`+`patchStrong` → `patchPrompt`, 결과를 `compositePatch` 로 원본 픽셀과 합침 — 안 바뀐 곳은 원본 그대로)을 탄다. **concept(단원·유형을 바꾸는 개념문제)는 구조가 바뀌므로 예전 `variantPrompt` 전체 편집**을 유지한다.
+- **변형문제 전용 폴더**: 마이그레이션 `0042`(적용됨) — `categories.is_variant boolean default false`. 변형 폴더 = `is_variant=true` 인 categories 행(평면, 중첩 없음). 실모 목록(`page.tsx`)·연결 선택(`LinkCategoryPicker`)·저장된 정답표 불러오기(`savedAnswerKeys`)는 `is_variant=false` 만 본다. 옛 `변형문제 · …` 실모는 변형 폴더로 옮기고 folder_id 를 비웠다.
+- `VariantPanel`: 만들기 탭(저장할 변형 폴더 고르기/새로 만들기) · **모아보기 탭**(폴더별 격자 — 원본 번호·정답·해설·삭제, 폴더 이름 바꾸기·지우기, PDF 내보내기 `/export?ids=` 링크).
+- 검증: `tsc`·`build`. **실제 계정으로 변형 생성(sol high + 그림 편집이 서버 270초 안인지), 합성 비율, 모아보기 화면은 못 봤다.** 채점 연동 등 categories 를 나열하는 다른 자리가 변형 폴더를 보여 주는지는 더 훑지 않았다.

@@ -58,6 +58,7 @@ import { runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
 import { figureImageModelIds } from "./figureImageGen";
 import { cardUrl } from "./cardUrl";
 import { toStoredFigures } from "./storedFigures";
+import { compositePatch } from "./patchComposite";
 import { DEFAULT_FONT_PT } from "./fontSize";
 
 export type TaskKind =
@@ -696,7 +697,9 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         image: ctx.images[0],
         mode: "problem",
         korean: false,
-        variantNote: plan.edits,
+        // 부분수정 방식: 개념형(문제를 새로 쓰는 것)이 아니면 수정하기와 같은 편집 프롬프트로 목록의 곳만 고치고,
+        // 아래에서 안 바뀐 곳은 원본 픽셀 그대로 되돌린다(compositePatch). 개념형은 통째로 다시 쓰는 편집 프롬프트.
+        ...(plan.kind === "concept" ? { variantNote: plan.edits } : { patchNote: plan.edits, patchStrong: true }),
         inputSize: w > 0 && h > 0 ? { width: w, height: h } : undefined,
         modelIds: figureImageModelIds(),
         byokApiKey: ctx.byokApiKey,
@@ -712,7 +715,22 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         }
       }
 
-      const parts = splitDataUrl(gen.dataUrl);
+      let outUrl = gen.dataUrl;
+      let kept = "";
+      if (plan.kind !== "concept") {
+        try {
+          const b = splitDataUrl(ctx.images[0]);
+          const e = splitDataUrl(gen.dataUrl);
+          const comp = b && e ? await compositePatch(b.bytes, e.bytes) : null;
+          if (comp) {
+            outUrl = `data:${comp.mime};base64,${comp.bytes.toString("base64")}`;
+            kept = ` · 안 바뀐 곳 ${Math.round(comp.keptRatio * 100)}%는 원본 그대로`;
+          }
+        } catch (e) {
+          console.warn(`${ctx.tag} 변형 합성 실패 — 편집 결과를 그대로 씁니다:`, e instanceof Error ? e.message : e);
+        }
+      }
+      const parts = splitDataUrl(outUrl);
       if (!parts) return { ok: false, error: "그린 그림을 읽지 못했어요.", estKrw: spent || undefined };
       const ext = parts.mime.includes("jpeg") ? "jpg" : "png";
       const path = `${ctx.userId}/${categoryId}/${crypto.randomUUID()}.${ext}`;
@@ -778,7 +796,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         },
         estKrw: spent > 0 ? spent : undefined,
         model: gen.modelId,
-        note: `${plan.kind || "변형"} · 정답 ${plan.newAnswer || "?"}`,
+        note: `${plan.kind || "변형"} · 정답 ${plan.newAnswer || "?"}${kept}`,
       };
     },
   },

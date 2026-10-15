@@ -132,6 +132,7 @@ export default function LinkCategoryPicker({
         supabase
           .from("categories")
           .select("*")
+          .eq("is_variant", false)
           .order("created_at", { ascending: false })
           .returns<Category[]>(),
         supabase

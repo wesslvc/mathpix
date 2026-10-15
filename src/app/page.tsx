@@ -55,6 +55,7 @@ export default async function DashboardPage({
     supabase
       .from("categories")
       .select("*")
+      .eq("is_variant", false)
       .order("created_at", { ascending: false })
       .returns<Category[]>(),
     supabase
