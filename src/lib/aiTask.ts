@@ -27,7 +27,8 @@ export type AiTaskKind =
   | "passageRead"
   | "passageMarks"
   | "typeset"
-  | "chat";
+  | "chat"
+  | "variant";
 
 export class AiTaskError extends Error {
   constructor(

@@ -57,3 +57,13 @@ export function parseVariantPlan(text: string): VariantPlan {
     edits,
   };
 }
+
+/** sol 이 적은 정답("③", "3", "① 또는…")에서 저장할 답과 유형을 뽑는다. 1~5 한 자리만 객관식. */
+export function answerOf(raw: string): { answer: string | null; type: "choice" | "short" } {
+  const t = raw.trim();
+  if (!t) return { answer: null, type: "short" };
+  const circled = "①②③④⑤".indexOf(t[0]);
+  if (circled >= 0) return { answer: String(circled + 1), type: "choice" };
+  if (/^[1-5]$/.test(t)) return { answer: t, type: "choice" };
+  return { answer: t, type: "short" };
+}

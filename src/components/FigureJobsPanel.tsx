@@ -76,6 +76,7 @@ const TASK_RUNNING: Record<string, string> = {
   passageMarks: "sol 이 서식(원문자·밑줄·네모·굵게)을 검수하는 중",
   typeset: "sol 이 문제를 글자로 옮겨 적는 중",
   chat: "sol 이 답하는 중",
+  variant: "sol 이 변형을 설계하고 그림 모델이 고쳐 그리는 중",
 };
 /** 짧은 작업의 남은 시간 어림(초). */
 const TASK_SECONDS: Record<string, number> = {
@@ -90,6 +91,7 @@ const TASK_SECONDS: Record<string, number> = {
   passageMarks: 90,
   typeset: 90,
   chat: 30,
+  variant: 150,
 };
 
 function statusText(j: FigureJob, top: string): string {

@@ -5,10 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cardUrl } from "@/lib/cardUrl";
 import { fileToDataUrl } from "@/lib/cropImage";
 import { ensureDataUrl, imageSizeOf, prepareProblemForModel } from "@/lib/figureImage";
-import { putBlob, removeBlobs } from "@/lib/blobClient";
-import { toStoredFigures } from "@/lib/storedFigures";
-import { DEFAULT_FONT_PT } from "@/lib/fontSize";
-import type { VariantPlan } from "@/lib/variantPlan";
+import { runAiTask } from "@/lib/aiTask";
 import { Button } from "@/components/ui/button";
 import { cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -35,62 +32,33 @@ type Item = {
   catId?: string;
   no?: number | null;
 };
+type VariantResult = {
+  imagePath: string;
+  kind: string;
+  summary: string;
+  changes: { from: string; to: string; why: string }[];
+  originalAnswer: string;
+  newAnswer: string;
+  solution: string;
+  edits: string;
+  estKrw?: number;
+};
 type Run = {
   key: string;
   label: string;
-  stage: "prep" | "plan" | "draw" | "done" | "error";
+  copy: number;
+  stage: "prep" | "queued" | "done" | "error";
   original?: string;
-  plan?: VariantPlan;
-  image?: string;
+  result?: VariantResult;
   error?: string;
-  krw: number;
   ms?: number;
-  catId?: string;
-  no?: number | null;
-  saved?: "saving" | "done" | string;
 };
 
-/** sol 이 적은 정답("③", "3", "① 또는…")에서 저장할 답과 유형을 뽑는다. */
-function answerOf(raw: string): { answer: string | null; type: "choice" | "short" } {
-  const t = raw.trim();
-  if (!t) return { answer: null, type: "short" };
-  const circled = "①②③④⑤".indexOf(t[0]);
-  if (circled >= 0) return { answer: String(circled + 1), type: "choice" };
-  if (/^[1-5]$/.test(t)) return { answer: t, type: "choice" };
-  return { answer: t, type: "short" };
-}
+const KIND_LABEL: Record<string, string> = { comparison: "대소 비교형", computation: "계산형", concept: "개념형" };
+const EFFORTS = ["low", "medium", "high"];
 
 const QUALITIES = ["auto", "low", "medium", "high"];
 const won = (n: number) => `${Math.round(n).toLocaleString()}원`;
-
-async function postJson<T>(body: unknown): Promise<T> {
-  const res = await fetch("/api/variant", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-  return json;
-}
-
-async function waitPlan(jobId: string): Promise<{ plan: VariantPlan; estKrw: number | null }> {
-  const until = Date.now() + 20 * 60_000;
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 2500));
-    let poll: { status?: string; message?: string; error?: string; plan?: VariantPlan; estKrw?: number | null };
-    try {
-      const res = await fetch(`/api/variant?id=${encodeURIComponent(jobId)}`, { cache: "no-store" });
-      poll = await res.json();
-    } catch {
-      if (Date.now() > until) throw new Error("20분이 지나도 끝나지 않았습니다.");
-      continue;
-    }
-    if (poll.status === "done" && poll.plan) return { plan: poll.plan, estKrw: poll.estKrw ?? null };
-    if (poll.status === "error") throw new Error(poll.message ?? poll.error ?? "실패했습니다.");
-    if (Date.now() > until) throw new Error("20분이 지나도 끝나지 않았습니다.");
-  }
-}
 
 export default function VariantPanel() {
   const supabase = useRef(createClient()).current;
@@ -99,9 +67,12 @@ export default function VariantPanel() {
   const [folderId, setFolderId] = useState<string>("");
   const [catId, setCatId] = useState<string>("");
   const [probs, setProbs] = useState<Prob[]>([]);
-  const [picked, setPicked] = useState<Set<string>>(new Set());
+  /** 여러 폴더·실모에서 고른 문제를 모아 둔다(실모를 바꿔도 안 지워진다). */
+  const [picked, setPicked] = useState<Record<string, Item>>({});
   const [uploads, setUploads] = useState<Item[]>([]);
   const [quality, setQuality] = useState("medium");
+  const [effort, setEffort] = useState("medium");
+  const [copies, setCopies] = useState(1);
   const [saveFolder, setSaveFolder] = useState("변형문제");
   const [runs, setRuns] = useState<Run[]>([]);
   const [busy, setBusy] = useState(false);
@@ -119,7 +90,6 @@ export default function VariantPanel() {
   }, [supabase]);
 
   useEffect(() => {
-    setPicked(new Set());
     if (!catId) {
       setProbs([]);
       return;
@@ -143,6 +113,35 @@ export default function VariantPanel() {
   }, [catId, supabase]);
 
   const shownCats = cats.filter((c) => (folderId === "" ? true : folderId === "_none" ? !c.folder_id : c.folder_id === folderId));
+  const catName = (id?: string) => cats.find((c) => c.id === id)?.source ?? "실모";
+
+  function itemOf(p: Prob): Item {
+    return {
+      key: `p:${p.id}`,
+      label: `${catName(catId)} ${p.problemNo != null ? `${p.problemNo}번` : "(번호 없음)"}`,
+      src: cardUrl(p.image_path),
+      catId,
+      no: p.problemNo,
+    };
+  }
+  function toggle(p: Prob) {
+    setPicked((m) => {
+      const n = { ...m };
+      if (n[`p:${p.id}`]) delete n[`p:${p.id}`];
+      else n[`p:${p.id}`] = itemOf(p);
+      return n;
+    });
+  }
+  function setAllHere(on: boolean) {
+    setPicked((m) => {
+      const n = { ...m };
+      for (const p of probs) {
+        if (on) n[`p:${p.id}`] = itemOf(p);
+        else delete n[`p:${p.id}`];
+      }
+      return n;
+    });
+  }
 
   async function onFiles(files: FileList | null) {
     if (!files) return;
@@ -157,162 +156,130 @@ export default function VariantPanel() {
     setUploads((u) => [...u, ...out]);
   }
 
-  const items: Item[] = [
-    ...probs
-      .filter((p) => picked.has(p.id))
-      .map((p) => ({
-        key: `p:${p.id}`,
-        label: `${cats.find((c) => c.id === catId)?.source ?? "실모"} ${p.problemNo != null ? `${p.problemNo}번` : "(번호 없음)"}`,
-        src: cardUrl(p.image_path),
-        catId,
-        no: p.problemNo,
-      })),
-    ...uploads,
-  ];
+  const items: Item[] = [...Object.values(picked), ...uploads];
 
   function patch(key: string, p: Partial<Run>) {
     setRuns((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
   }
 
-  async function runOne(item: Item) {
-    const t0 = Date.now();
-    let krw = 0;
-    try {
-      const original = await prepareProblemForModel(await ensureDataUrl(item.src));
-      const size = await imageSizeOf(original);
-      patch(item.key, { original, stage: "plan" });
-      const { jobId } = await postJson<{ jobId: string }>({ task: "plan", image: original });
-      const { plan, estKrw } = await waitPlan(jobId);
-      krw += estKrw ?? 0;
-      patch(item.key, { plan, stage: "draw", krw });
-      const gen = await postJson<{ image: string; usage: { estKrw?: number } | null }>({
-        task: "generate",
-        image: original,
-        edits: plan.edits,
-        width: size?.width,
-        height: size?.height,
-        quality: quality === "auto" ? undefined : quality,
-      });
-      krw += gen.usage?.estKrw ?? 0;
-      patch(item.key, { image: gen.image, stage: "done", krw, ms: Date.now() - t0 });
-    } catch (err) {
-      patch(item.key, { stage: "error", error: err instanceof Error ? err.message : "실패했습니다.", krw });
+  /** 저장할 폴더와 `변형문제 · <원본>` 묶음을 (없으면 만들어) 돌려준다. 서버 작업들이 동시에 만들다 겹치지 않게 미리 한다. */
+  async function ensureTarget(sourceCatId: string | undefined, uid: string, folderCache: { id: string | null; ready: boolean }) {
+    const src = cats.find((c) => c.id === sourceCatId);
+    let folderTarget: string | null = src?.folder_id ?? null;
+    const fname = saveFolder.trim();
+    if (fname) {
+      if (!folderCache.ready) {
+        const hit = folders.find((f) => f.name === fname);
+        if (hit) folderCache.id = hit.id;
+        else {
+          const { data: nf, error: fe } = await supabase.from("folders").insert({ user_id: uid, name: fname }).select("id,name").single();
+          if (fe) throw fe;
+          setFolders((fs) => [...fs, nf as Folder]);
+          folderCache.id = (nf as Folder).id;
+        }
+        folderCache.ready = true;
+      }
+      folderTarget = folderCache.id;
     }
+    const name = `변형문제 · ${src?.source ?? "직접 올림"}`;
+    const existing = cats.find((c) => c.source === name && (c.folder_id ?? null) === folderTarget);
+    if (existing) return existing.id;
+    const { data, error: e } = await supabase
+      .from("categories")
+      .insert({ user_id: uid, source: name, is_exam: false, score: null, exam_date: null, folder_id: folderTarget })
+      .select("id,source,folder_id")
+      .single();
+    if (e) throw e;
+    setCats((c) => [data as Cat, ...c]);
+    return (data as Cat).id;
   }
 
   async function start() {
     if (!items.length) return;
     setError(null);
     setBusy(true);
-    setRuns(items.map((i) => ({ key: i.key, label: i.label, stage: "prep", krw: 0, catId: i.catId, no: i.no })));
-    // 동시에 10개까지.
-    const queue = [...items];
-    await Promise.all(
-      Array.from({ length: Math.min(10, queue.length) }, async () => {
-        for (let it = queue.shift(); it; it = queue.shift()) await runOne(it);
-      }),
-    );
-    setBusy(false);
-  }
-
-  /** 변형 결과를 `변형문제 · <원본 실모>` 실모에 저장한다(해설 텍스트·새 정답 포함). */
-  async function saveRun(r: Run) {
-    if (!r.image || !r.plan || r.saved === "saving" || r.saved === "done") return;
-    patch(r.key, { saved: "saving" });
+    const all: Run[] = [];
+    for (const it of items) for (let k = 1; k <= copies; k++) all.push({ key: `${it.key}#${k}`, label: it.label, copy: k, stage: "prep" });
+    setRuns(all);
     try {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth.user?.id;
       if (!uid) throw new Error("로그인이 필요해요.");
-      const src = cats.find((c) => c.id === r.catId);
-      const name = `변형문제 · ${src?.source ?? "직접 올림"}`;
-      // 저장 폴더: 이름을 적으면 그 이름의 폴더(없으면 만든다), 비우면 원본 실모의 폴더.
-      let folderTarget: string | null = src?.folder_id ?? null;
-      const fname = saveFolder.trim();
-      if (fname) {
-        const hit = folders.find((f) => f.name === fname);
-        if (hit) folderTarget = hit.id;
-        else {
-          const { data: nf, error: fe } = await supabase
-            .from("folders")
-            .insert({ user_id: uid, name: fname })
-            .select("id,name")
-            .single();
-          if (fe) throw fe;
-          setFolders((fs) => [...fs, nf as Folder]);
-          folderTarget = (nf as Folder).id;
-        }
+      // 묶음은 미리 하나씩 만든다.
+      const folderCache = { id: null as string | null, ready: false };
+      const targets = new Map<string, string>();
+      for (const it of items) {
+        const k = it.catId ?? "_up";
+        if (!targets.has(k)) targets.set(k, await ensureTarget(it.catId, uid, folderCache));
       }
-      let target = cats.find((c) => c.source === name && (c.folder_id ?? null) === folderTarget);
-      if (!target) {
-        const { data, error: e } = await supabase
-          .from("categories")
-          .insert({ user_id: uid, source: name, is_exam: false, score: null, exam_date: null, folder_id: folderTarget })
-          .select("id,source,folder_id")
-          .single();
-        if (e) throw e;
-        target = data as Cat;
-        setCats((c) => [target as Cat, ...c]);
-      }
-      const blob = await (await fetch(r.image)).blob();
-      const ext = blob.type.includes("jpeg") ? "jpg" : "png";
-      const path = `${uid}/${target.id}/${crypto.randomUUID()}.${ext}`;
-      const up = await putBlob(supabase, path, blob, blob.type || "image/png");
-      if (!up.ok) throw new Error(up.error);
-      const { data: maxRow } = await supabase
-        .from("problems")
-        .select("sort_order")
-        .eq("category_id", target.id)
-        .order("sort_order", { ascending: false, nullsFirst: false })
-        .limit(1)
-        .maybeSingle();
-      const { answer, type } = answerOf(r.plan.newAnswer);
-      const { error: insErr } = await supabase.from("problems").insert({
-        category_id: target.id,
-        user_id: uid,
-        image_path: path,
-        latex: null,
-        text_content: null,
-        answer,
-        answer_type: type,
-        sort_order: (maxRow?.sort_order ?? 0) + 1,
-        box_range: {
-          ranges: null,
-          fontPt: DEFAULT_FONT_PT,
-          figures: toStoredFigures([
-            {
-              id: crypto.randomUUID(),
-              markup: `<img src="${cardUrl(path)}" alt="" />`,
-              layout: { scale: 100, offsetX: 0, offsetY: 0 },
-              position: 0,
-            },
-          ]),
-          ...(r.no != null ? { number: r.no } : {}),
-          ...(r.plan.solution ? { solution: r.plan.solution } : {}),
-        },
-      });
-      if (insErr) {
-        await removeBlobs([path]);
-        throw insErr;
-      }
-      patch(r.key, { saved: "done" });
+      // 원본 준비(줄이기)는 4개씩, 서버에 넣는 건 곧바로 — 이후는 서버 대기열이 돌린다(창을 닫아도 계속).
+      const queue = [...items];
+      await Promise.all(
+        Array.from({ length: Math.min(4, queue.length) }, async () => {
+          for (let it = queue.shift(); it; it = queue.shift()) {
+            const item = it;
+            let original: string;
+            let size: { width: number; height: number } | null = null;
+            try {
+              original = await prepareProblemForModel(await ensureDataUrl(item.src));
+              size = await imageSizeOf(original);
+            } catch (err) {
+              for (let k = 1; k <= copies; k++) {
+                patch(`${item.key}#${k}`, { stage: "error", error: err instanceof Error ? err.message : "원본을 열지 못했어요." });
+              }
+              continue;
+            }
+            for (let k = 1; k <= copies; k++) patch(`${item.key}#${k}`, { original, stage: "queued" });
+            void Promise.all(
+              Array.from({ length: copies }, async (_, i) => {
+                const k = i + 1;
+                const key = `${item.key}#${k}`;
+                const t0 = Date.now();
+                try {
+                  const out = await runAiTask<VariantResult>("variant", {
+                    label: `변형 · ${item.label}${copies > 1 ? ` (${k}/${copies})` : ""}`,
+                    images: [original],
+                    params: {
+                      effort,
+                      quality: quality === "auto" ? "" : quality,
+                      copies,
+                      copy: k,
+                      categoryId: targets.get(item.catId ?? "_up"),
+                      no: item.no ?? null,
+                      width: size?.width,
+                      height: size?.height,
+                    },
+                  });
+                  patch(key, { stage: "done", result: out.result, ms: Date.now() - t0 });
+                } catch (err) {
+                  patch(key, { stage: "error", error: err instanceof Error ? err.message : "실패했습니다.", ms: Date.now() - t0 });
+                }
+              }),
+            );
+          }
+        }),
+      );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : (err as { message?: string })?.message ?? "저장 실패";
-      patch(r.key, { saved: `실패: ${msg}` });
+      setError(err instanceof Error ? err.message : (err as { message?: string })?.message ?? "시작하지 못했어요.");
     }
+    // 화면은 결과를 기다리지만, 서버 작업은 이 화면을 닫아도 계속 돌아 폴더에 저장된다.
+    setBusy(false);
   }
 
   const stageText: Record<Run["stage"], string> = {
     prep: "준비 중",
-    plan: "sol 이 문제를 이해하고 변형을 설계하는 중",
-    draw: "sunburst 가 원본을 바탕으로 고쳐 그리는 중",
-    done: "완료",
+    queued: "서버에서 변형을 설계하고 그리는 중 (창을 닫아도 계속돼요)",
+    done: "완료 · 폴더에 저장됨",
     error: "실패",
   };
+  const totalJobs = items.length * copies;
+  const doneN = runs.filter((r) => r.stage === "done").length;
+  const sumKrw = runs.reduce((a, r) => a + (r.result?.estKrw ?? 0), 0);
 
   return (
     <div className="flex flex-col gap-4">
       <section className={cn(cardClass, "flex flex-col gap-3 p-4 sm:p-5")}>
-        <h2 className="text-sm font-semibold text-ink">1. 원본 문제 고르기</h2>
+        <h2 className="text-sm font-semibold text-ink">1. 원본 문제 고르기 (여러 폴더·실모에서 모아 담을 수 있어요)</h2>
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs text-slate-500">
             폴더
@@ -353,29 +320,21 @@ export default function VariantPanel() {
         {probs.length > 0 && (
           <>
             <div className="flex items-center gap-2 text-xs text-slate-500">
-              <span>{picked.size}개 선택</span>
-              <button className="underline" onClick={() => setPicked(new Set(probs.map((p) => p.id)))}>
-                전체 선택
+              <button className="underline" onClick={() => setAllHere(true)}>
+                이 실모 전체 담기
               </button>
-              <button className="underline" onClick={() => setPicked(new Set())}>
-                해제
+              <button className="underline" onClick={() => setAllHere(false)}>
+                이 실모 빼기
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {probs.map((p) => {
-                const on = picked.has(p.id);
+                const on = !!picked[`p:${p.id}`];
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() =>
-                      setPicked((s) => {
-                        const n = new Set(s);
-                        if (n.has(p.id)) n.delete(p.id);
-                        else n.add(p.id);
-                        return n;
-                      })
-                    }
+                    onClick={() => toggle(p)}
                     className={cn(
                       "overflow-hidden rounded-lg border bg-white text-left",
                       on ? "border-blue-500 ring-2 ring-blue-200" : "border-slate-200",
@@ -389,6 +348,36 @@ export default function VariantPanel() {
               })}
             </div>
           </>
+        )}
+
+        {Object.keys(picked).length > 0 && (
+          <div className="rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
+            <div className="mb-1 flex items-center justify-between">
+              <b>담은 문제 {Object.keys(picked).length}개</b>
+              <button className="underline" onClick={() => setPicked({})}>
+                모두 비우기
+              </button>
+            </div>
+            <ul className="flex flex-wrap gap-1">
+              {Object.values(picked).map((it) => (
+                <li key={it.key} className="rounded-full bg-white px-2 py-0.5">
+                  {it.label}{" "}
+                  <button
+                    className="text-slate-400"
+                    onClick={() =>
+                      setPicked((m) => {
+                        const n = { ...m };
+                        delete n[it.key];
+                        return n;
+                      })
+                    }
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         <div className="border-t border-slate-100 pt-3">
@@ -413,12 +402,28 @@ export default function VariantPanel() {
 
       <section className={cn(cardClass, "flex flex-wrap items-center gap-3 p-4 sm:p-5")}>
         <label className="flex items-center gap-2 text-sm text-slate-600">
+          문제당 변형 수
+          <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={copies} onChange={(e) => setCopies(Number(e.target.value))}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <option key={n} value={n}>
+                {n}개
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          sol 설계 강도
+          <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={effort} onChange={(e) => setEffort(e.target.value)}>
+            {EFFORTS.map((q) => (
+              <option key={q} value={q}>
+                {q}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
           그림 품질
-          <select
-            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
-            value={quality}
-            onChange={(e) => setQuality(e.target.value)}
-          >
+          <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={quality} onChange={(e) => setQuality(e.target.value)}>
             {QUALITIES.map((q) => (
               <option key={q} value={q}>
                 {q}
@@ -435,22 +440,19 @@ export default function VariantPanel() {
             placeholder="폴더 이름"
           />
         </label>
-        <Button onClick={() => void start()} disabled={busy || items.length === 0}>
-          {busy ? "만드는 중…" : `변형문제 만들기 (${items.length}개)`}
+        <Button onClick={() => void start()} disabled={busy || items.length === 0 || totalJobs > 60}>
+          {busy ? "서버에 넣는 중…" : `변형문제 만들기 (${totalJobs}개)`}
         </Button>
-        {runs.some((r) => r.stage === "done" && r.saved !== "done") && (
-          <Button
-            variant="outline"
-            onClick={() => {
-              for (const r of runs) if (r.stage === "done") void saveRun(r);
-            }}
-          >
-            완료된 것 모두 폴더에 저장
-          </Button>
+        <p className="w-full text-xs text-slate-500">
+          서버 대기열에서 돌아요(수정하기와 같은 방식 — 창을 닫아도 끝까지 가서 폴더에 저장돼요). 한 번에 최대 60개. 토큰은 안 떼고 원가만 보여요(시험 중).
+          {totalJobs > 60 && <b className="text-red-600"> 지금 {totalJobs}개라 너무 많아요.</b>}
+          {effort === "high" && " sol 강도 high 는 오래 걸려 그림 시간이 모자랄 수 있어요(medium 권장)."}
+        </p>
+        {runs.length > 0 && (
+          <p className="w-full text-xs text-slate-600">
+            {doneN}/{runs.length} 완료 {sumKrw > 0 && `· 원가 ${won(sumKrw)}`}
+          </p>
         )}
-        <span className="text-xs text-slate-500">
-          문제마다 sol 이해·설계 → sunburst 편집. 토큰은 안 떼고 원가만 아래에 보여요(시험 중).
-        </span>
       </section>
 
       {error && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -458,24 +460,19 @@ export default function VariantPanel() {
       {runs.map((r) => (
         <section key={r.key} className={cn(cardClass, "flex flex-col gap-3 p-4 sm:p-5")}>
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="text-sm font-semibold text-ink">{r.label}</h3>
+            <h3 className="text-sm font-semibold text-ink">
+              {r.label}
+              {copies > 1 && ` · 변형 ${r.copy}`}
+              {r.result?.kind && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-600">{KIND_LABEL[r.result.kind] ?? r.result.kind}</span>}
+            </h3>
             <span className={cn("text-xs", r.stage === "error" ? "text-red-600" : r.stage === "done" ? "text-emerald-600" : "text-slate-500")}>
               {stageText[r.stage]}
-              {r.krw > 0 && ` · ${won(r.krw)}`}
+              {r.result?.estKrw ? ` · ${won(r.result.estKrw)}` : ""}
               {r.ms != null && ` · ${(r.ms / 1000).toFixed(0)}초`}
             </span>
           </div>
           {r.error && <p className="text-sm text-red-700">{r.error}</p>}
-          {r.stage === "done" && (
-            <div className="flex items-center gap-2 text-xs">
-              <Button size="sm" variant="outline" disabled={r.saved === "saving" || r.saved === "done"} onClick={() => void saveRun(r)}>
-                {r.saved === "done" ? "저장됨" : r.saved === "saving" ? "저장 중…" : "폴더에 저장 (해설 포함)"}
-              </Button>
-              {r.saved && r.saved !== "done" && r.saved !== "saving" && <span className="text-red-600">{r.saved}</span>}
-              {r.saved === "done" && <span className="text-emerald-600">지정한 폴더에 들어갔어요.</span>}
-            </div>
-          )}
-          {(r.original || r.image) && (
+          {(r.original || r.result) && (
             <div className="grid gap-3 sm:grid-cols-2">
               <figure className="flex flex-col gap-1">
                 <figcaption className="text-xs text-slate-500">원본</figcaption>
@@ -484,9 +481,9 @@ export default function VariantPanel() {
               </figure>
               <figure className="flex flex-col gap-1">
                 <figcaption className="text-xs text-slate-500">변형</figcaption>
-                {r.image ? (
+                {r.result ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={r.image} alt="변형" className="w-full rounded border border-blue-200" />
+                  <img src={cardUrl(r.result.imagePath)} alt="변형" className="w-full rounded border border-blue-200" />
                 ) : (
                   <div className="flex h-32 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">
                     {r.error ? "만들지 못했어요" : "만드는 중…"}
@@ -495,15 +492,12 @@ export default function VariantPanel() {
               </figure>
             </div>
           )}
-          {r.plan && (
-            <details className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700" open={r.stage === "done"}>
-              <summary className="cursor-pointer text-xs font-semibold text-slate-600">
-                sol 이 이해한 것 · 바꾼 값 · 새 정답
-              </summary>
-              <p className="mt-2">{r.plan.summary}</p>
-              {r.plan.keeps.length > 0 && <p className="mt-1 text-xs text-slate-500">그대로: {r.plan.keeps.join(" / ")}</p>}
+          {r.result && (
+            <details className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+              <summary className="cursor-pointer text-xs font-semibold text-slate-600">sol 이 이해한 것 · 바꾼 값 · 새 정답 · 해설</summary>
+              <p className="mt-2">{r.result.summary}</p>
               <ul className="mt-2 list-disc pl-5 text-xs">
-                {r.plan.changes.map((c, i) => (
+                {r.result.changes.map((c, i) => (
                   <li key={i}>
                     <b>{c.from}</b> → <b>{c.to}</b>
                     {c.why && <span className="text-slate-500"> — {c.why}</span>}
@@ -511,12 +505,12 @@ export default function VariantPanel() {
                 ))}
               </ul>
               <p className="mt-2 text-xs">
-                정답: {r.plan.originalAnswer || "?"} → <b>{r.plan.newAnswer || "?"}</b>
+                정답: {r.result.originalAnswer || "?"} → <b>{r.result.newAnswer || "?"}</b>
               </p>
-              {r.plan.solution && <pre className="mt-1 whitespace-pre-wrap text-xs text-slate-600">{r.plan.solution}</pre>}
+              {r.result.solution && <pre className="mt-1 whitespace-pre-wrap text-xs text-slate-600">{r.result.solution}</pre>}
               <details className="mt-2">
                 <summary className="cursor-pointer text-xs text-slate-500">그림 모델에 보낸 편집 지시</summary>
-                <pre className="mt-1 whitespace-pre-wrap text-xs">{r.plan.edits}</pre>
+                <pre className="mt-1 whitespace-pre-wrap text-xs">{r.result.edits}</pre>
               </details>
             </details>
           )}

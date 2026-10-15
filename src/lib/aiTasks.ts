@@ -50,8 +50,15 @@ import {
   type ChatTurn,
 } from "./problemCompare";
 import { askSol, loadPatchImages } from "./problemLoopRun";
+import { removeStored } from "./figureRun";
 import { cropOneProblem, findProblemNumber, lunaUsage, placeFigures } from "./lunaQuick";
 import type { ProblemBox } from "./problemBoxes";
+import { answerOf, parseVariantPlan, VARIANT_PROMPT } from "./variantPlan";
+import { runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
+import { figureImageModelIds } from "./figureImageGen";
+import { cardUrl } from "./cardUrl";
+import { toStoredFigures } from "./storedFigures";
+import { DEFAULT_FONT_PT } from "./fontSize";
 
 export type TaskKind =
   | "ocr"
@@ -65,7 +72,8 @@ export type TaskKind =
   | "passageRead"
   | "passageMarks"
   | "typeset"
-  | "chat";
+  | "chat"
+  | "variant";
 
 export const TASK_KINDS: readonly TaskKind[] = [
   "ocr",
@@ -80,6 +88,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
   "passageMarks",
   "typeset",
   "chat",
+  "variant",
 ];
 
 /**
@@ -632,6 +641,148 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       }
     },
   },
+
+  // **변형문제**(`/variants`, 무제한 계정 전용 — 시험 중). 수정하기처럼 서버에서 돈다: sol 이 변형을 설계(강도 선택) →
+  // 그림 모델이 원본을 고쳐 그림(품질 선택) → 지정한 폴더의 묶음(`params.categoryId`)에 해설·정답과 함께 저장. 화면을 닫아도 끝까지 간다.
+  variant: {
+    deposit: () => 0,
+    flat: true,
+    needsOpenAI: true,
+    unlimitedOnly: true,
+    images: { min: 1, max: 1 },
+    name: "변형문제",
+    async run(ctx) {
+      const t0 = Date.now();
+      const effortRaw = str(ctx.params.effort, 12);
+      const effort = ["low", "medium", "high"].includes(effortRaw) ? effortRaw : "medium";
+      const qRaw = str(ctx.params.quality, 12);
+      const quality = ["low", "medium", "high", "xhigh", "max"].includes(qRaw) ? qRaw : undefined;
+      const copies = Math.min(5, Math.max(1, Math.round(Number(ctx.params.copies) || 1)));
+      const copy = Math.min(copies, Math.max(1, Math.round(Number(ctx.params.copy) || 1)));
+      const categoryId = str(ctx.params.categoryId, 60);
+      if (!/^[0-9a-f-]{36}$/i.test(categoryId)) return { ok: false, error: "저장할 묶음이 정해지지 않았어요." };
+      const { data: cat } = await ctx.admin.from("categories").select("id").eq("id", categoryId).eq("user_id", ctx.userId).maybeSingle();
+      if (!cat) return { ok: false, error: "저장할 묶음을 찾지 못했어요." };
+
+      const tail =
+        copies > 1
+          ? `\n\nthis is variant ${copy} of ${copies} made from the same original: make it clearly DIFFERENT from the other variants (different values / a different part of the unit), while following every rule above.`
+          : "";
+      const planBudget = Math.min(150_000, ctx.deadlineMs - 70_000);
+      const ask = await askSol(
+        VARIANT_PROMPT,
+        ctx.images,
+        { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: planBudget, tag: ctx.tag },
+        "변형 설계",
+        { effort, cacheKey: "reprint-variant", tail },
+      );
+      let spent = ask.krw;
+      if (ask.krw > 0 && !ctx.byok) {
+        await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "sol 변형 설계", krw: ask.krw, tokens: solTokens(ask.usage) });
+      }
+      if (ask.text === null) return { ok: false, error: `sol 이 변형을 설계하지 못했어요. ${ask.fail.slice(0, 160)}`, estKrw: spent || undefined };
+      let plan;
+      try {
+        plan = parseVariantPlan(ask.text);
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : "변형 계획을 읽지 못했어요.", estKrw: spent || undefined };
+      }
+
+      const left = ctx.deadlineMs - (Date.now() - t0);
+      if (left < 45_000) return { ok: false, error: "설계에 시간이 너무 걸려 그림을 그릴 시간이 없었어요. sol 강도를 낮춰 보세요.", estKrw: spent || undefined };
+      const w = Number(ctx.params.width);
+      const h = Number(ctx.params.height);
+      const gen = await runFigureGeneration({
+        image: ctx.images[0],
+        mode: "problem",
+        korean: false,
+        variantNote: plan.edits,
+        inputSize: w > 0 && h > 0 ? { width: w, height: h } : undefined,
+        modelIds: figureImageModelIds(),
+        byokApiKey: ctx.byokApiKey,
+        deadlineMs: left,
+        tag: ctx.tag,
+        quality,
+      });
+      if (!gen.ok) return { ok: false, error: gen.error, estKrw: spent || undefined };
+      if (gen.usage) {
+        spent += gen.usage.estKrw;
+        if (!ctx.byok) {
+          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: `그림 변형${quality ? ` ${quality}` : ""}`, krw: gen.usage.estKrw, usd: gen.usage.estUsd });
+        }
+      }
+
+      const parts = splitDataUrl(gen.dataUrl);
+      if (!parts) return { ok: false, error: "그린 그림을 읽지 못했어요.", estKrw: spent || undefined };
+      const ext = parts.mime.includes("jpeg") ? "jpg" : "png";
+      const path = `${ctx.userId}/${categoryId}/${crypto.randomUUID()}.${ext}`;
+      if (!(await storeBytes(ctx.admin, path, parts.bytes, parts.mime))) {
+        return { ok: false, error: "그림을 저장하지 못했어요.", estKrw: spent || undefined };
+      }
+      const { data: maxRow } = await ctx.admin
+        .from("problems")
+        .select("sort_order")
+        .eq("category_id", categoryId)
+        .order("sort_order", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      const no = Number(ctx.params.no);
+      const { answer, type } = answerOf(plan.newAnswer);
+      const { data: row, error: insErr } = await ctx.admin
+        .from("problems")
+        .insert({
+          category_id: categoryId,
+          user_id: ctx.userId,
+          image_path: path,
+          latex: null,
+          text_content: null,
+          answer,
+          answer_type: type,
+          sort_order: (maxRow?.sort_order ?? 0) + 1,
+          box_range: {
+            ranges: null,
+            fontPt: DEFAULT_FONT_PT,
+            figures: toStoredFigures([
+              {
+                id: crypto.randomUUID(),
+                markup: `<img src="${cardUrl(path)}" alt="" />`,
+                layout: { scale: 100, offsetX: 0, offsetY: 0 },
+                position: 0,
+              },
+            ]),
+            ...(Number.isFinite(no) && no > 0 ? { number: no } : {}),
+            ...(plan.solution ? { solution: plan.solution } : {}),
+          },
+        })
+        .select("id")
+        .single();
+      if (insErr || !row) {
+        await removeStored(ctx.admin, [path]);
+        return { ok: false, error: `저장하지 못했어요: ${insErr?.message ?? ""}`, estKrw: spent || undefined };
+      }
+      return {
+        ok: true,
+        result: {
+          imagePath: path,
+          problemId: row.id,
+          categoryId,
+          kind: plan.kind,
+          summary: plan.summary,
+          changes: plan.changes.slice(0, 12),
+          originalAnswer: plan.originalAnswer,
+          newAnswer: plan.newAnswer,
+          solution: plan.solution,
+          edits: plan.edits,
+          copy,
+          ...(ctx.unlimited || ctx.byok ? { estKrw: Math.round(spent * 10) / 10 } : {}),
+        },
+        estKrw: spent > 0 ? spent : undefined,
+        model: gen.modelId,
+        note: `${plan.kind || "변형"} · 정답 ${plan.newAnswer || "?"}`,
+      };
+    },
+  },
+
 };
 
 /** 한 대화에서 오갈 수 있는 말 수(사용자 + sol). 끝없이 늘어 요금이 커지는 것을 막는다. */
