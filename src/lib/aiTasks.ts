@@ -40,7 +40,7 @@ import {
   SOL_TYPESET_TOKENS,
   USD_KRW_RATE,
 } from "./tokens";
-import { HAIKU_MODEL, logAiCost, solTokens } from "./costLog";
+import { HAIKU_MODEL, imageTokens, logAiCost, solTokens } from "./costLog";
 import {
   parseSolChat,
   parseTranscription,
@@ -711,7 +711,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       if (gen.usage) {
         spent += gen.usage.estKrw;
         if (!ctx.byok) {
-          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: `그림 변형${quality ? ` ${quality}` : ""}`, krw: gen.usage.estKrw, usd: gen.usage.estUsd });
+          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: `그림 변형${quality ? ` ${quality}` : ""}`, krw: gen.usage.estKrw, usd: gen.usage.estUsd, tokens: imageTokens(gen.usage) });
         }
       }
 
