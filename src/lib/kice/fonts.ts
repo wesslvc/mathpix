@@ -67,6 +67,13 @@ export function loadKiceFonts(): Promise<Record<string, Uint8Array>> {
     } catch {
       /* 없어도 된다 */
     }
+    // 해설지용 글꼴(나눔명조 한글 2350자+기호만 잘라 둔 1.6MB, OFL). 본문 글꼴(신중명조)과 다른 서체로 해설을 찍는다.
+    try {
+      const res = await fetch("/fonts/solution-serif.ttf", { cache: "no-cache" });
+      if (res.ok) entries.push(["해설", new Uint8Array(await res.arrayBuffer())] as const);
+    } catch {
+      /* 없어도 된다 */
+    }
     // 영어 원문자(ⓐ~ⓩ Ⓐ~Ⓩ) — 본문 글꼴에 없어서 나눔명조(OFL)에서 그 구간만 잘라 둔 16KB. 없으면 직접 그려 넣는다.
     try {
       const res = await fetch("/fonts/circled-latin.ttf", { cache: "no-cache" });

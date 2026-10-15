@@ -102,6 +102,7 @@ export default function VariantPanel() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [uploads, setUploads] = useState<Item[]>([]);
   const [quality, setQuality] = useState("medium");
+  const [saveFolder, setSaveFolder] = useState("변형문제");
   const [runs, setRuns] = useState<Run[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -204,10 +205,10 @@ export default function VariantPanel() {
     setError(null);
     setBusy(true);
     setRuns(items.map((i) => ({ key: i.key, label: i.label, stage: "prep", krw: 0, catId: i.catId, no: i.no })));
-    // 동시에 3개까지.
+    // 동시에 10개까지.
     const queue = [...items];
     await Promise.all(
-      Array.from({ length: Math.min(3, queue.length) }, async () => {
+      Array.from({ length: Math.min(10, queue.length) }, async () => {
         for (let it = queue.shift(); it; it = queue.shift()) await runOne(it);
       }),
     );
@@ -224,11 +225,28 @@ export default function VariantPanel() {
       if (!uid) throw new Error("로그인이 필요해요.");
       const src = cats.find((c) => c.id === r.catId);
       const name = `변형문제 · ${src?.source ?? "직접 올림"}`;
-      let target = cats.find((c) => c.source === name && (c.folder_id ?? null) === (src?.folder_id ?? null));
+      // 저장 폴더: 이름을 적으면 그 이름의 폴더(없으면 만든다), 비우면 원본 실모의 폴더.
+      let folderTarget: string | null = src?.folder_id ?? null;
+      const fname = saveFolder.trim();
+      if (fname) {
+        const hit = folders.find((f) => f.name === fname);
+        if (hit) folderTarget = hit.id;
+        else {
+          const { data: nf, error: fe } = await supabase
+            .from("folders")
+            .insert({ user_id: uid, name: fname })
+            .select("id,name")
+            .single();
+          if (fe) throw fe;
+          setFolders((fs) => [...fs, nf as Folder]);
+          folderTarget = (nf as Folder).id;
+        }
+      }
+      let target = cats.find((c) => c.source === name && (c.folder_id ?? null) === folderTarget);
       if (!target) {
         const { data, error: e } = await supabase
           .from("categories")
-          .insert({ user_id: uid, source: name, is_exam: false, score: null, exam_date: null, folder_id: src?.folder_id ?? null })
+          .insert({ user_id: uid, source: name, is_exam: false, score: null, exam_date: null, folder_id: folderTarget })
           .select("id,source,folder_id")
           .single();
         if (e) throw e;
@@ -408,6 +426,15 @@ export default function VariantPanel() {
             ))}
           </select>
         </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          저장 폴더
+          <input
+            className="w-40 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+            value={saveFolder}
+            onChange={(e) => setSaveFolder(e.target.value)}
+            placeholder="폴더 이름"
+          />
+        </label>
         <Button onClick={() => void start()} disabled={busy || items.length === 0}>
           {busy ? "만드는 중…" : `변형문제 만들기 (${items.length}개)`}
         </Button>
@@ -418,7 +445,7 @@ export default function VariantPanel() {
               for (const r of runs) if (r.stage === "done") void saveRun(r);
             }}
           >
-            완료된 것 모두 실모에 저장
+            완료된 것 모두 폴더에 저장
           </Button>
         )}
         <span className="text-xs text-slate-500">
@@ -442,10 +469,10 @@ export default function VariantPanel() {
           {r.stage === "done" && (
             <div className="flex items-center gap-2 text-xs">
               <Button size="sm" variant="outline" disabled={r.saved === "saving" || r.saved === "done"} onClick={() => void saveRun(r)}>
-                {r.saved === "done" ? "저장됨" : r.saved === "saving" ? "저장 중…" : "실모에 저장 (해설 포함)"}
+                {r.saved === "done" ? "저장됨" : r.saved === "saving" ? "저장 중…" : "폴더에 저장 (해설 포함)"}
               </Button>
               {r.saved && r.saved !== "done" && r.saved !== "saving" && <span className="text-red-600">{r.saved}</span>}
-              {r.saved === "done" && <span className="text-emerald-600">‘변형문제 · …’ 실모에 들어갔어요.</span>}
+              {r.saved === "done" && <span className="text-emerald-600">지정한 폴더에 들어갔어요.</span>}
             </div>
           )}
           {(r.original || r.image) && (

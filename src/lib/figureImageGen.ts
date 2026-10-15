@@ -733,12 +733,12 @@ rules: fix only the named places; when an item is ambiguous change the smallest 
  * 않고 바뀐 숫자에 맞게 다시 그리게 한다.
  */
 export function variantPrompt(edits: string): string {
-  return `task: this image = an ORIGINAL Korean exam question. produce a VARIANT of it by EDITING the image: keep the page, layout, fonts, sizes, spacing, question wording, choice layout, numbering and the white background exactly like the original, and apply the changes below. the question keeps the same structure and the same reasoning — only the numbers/values named below change.
+  return `task: this image = an ORIGINAL Korean exam question. produce a VARIANT of it by EDITING the image: keep the page, layout, fonts, sizes, spacing, question wording, choice layout, numbering and the white background exactly like the original, and apply the changes below. the question keeps its structure and layout; change exactly what the list names — numbers/values, and where the list rewrites a stem, choice or example, that wording too.
 changes to apply (these were worked out by a reviewer who solved the question; follow them exactly):
 """
 ${edits.trim()}
 """
-rules: every printed character of the variant must be exactly what the changes say (digits especially, choices ①–⑤ with their new values). figures, graphs, tables, tick labels, point labels and diagrams must be REDRAWN to match the new values — do NOT copy the original figure unchanged, but keep its style, line weights and labels. erase any handwriting (restore the printed content under it). do not add a solution, an answer, or any new text that is not listed. circled markers (㉠ ① ⓐ) not listed stay exactly as they are. output = the whole question image, ready to print.`;
+rules: every printed character the changes name must be exactly what they say (digits especially, choices ①–⑤ with their new values). figures, graphs, tables, tick labels, point labels and diagrams must be REDRAWN to match the new values — do NOT copy the original figure unchanged, but keep its style, line weights and labels. erase any handwriting (restore the printed content under it). do not add a solution, an answer, or any new text that is not listed. circled markers (㉠ ① ⓐ) not listed stay exactly as they are. output = the whole question image, ready to print.`;
 }
 
 function withInstruction(prompt: string, instruction?: string): string {

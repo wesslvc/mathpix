@@ -1163,6 +1163,22 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
    * 한 쪽도 못 채우는 단(진행이 없음)이면 멈춰서 무한 반복을 막는다.
    */
   const solStyle = { ...DEFAULT_FLOW_STYLE, size: 9.2 };
+  // 해설은 본문 글꼴(신중명조)이 아니라 따로 받은 글꼴(나눔명조)로 — ×·÷ 같은 계산 기호가 있다. 못 받았으면 본문 글꼴.
+  const hasSolFont = !!spec.fonts["해설"];
+  const solFontObj = hasSolFont ? await fontFor("해설") : null;
+  const measureSol = (t: string, size: number, bold: boolean) => {
+    if (!solFontObj) return measure(t, size, bold);
+    let w = 0;
+    for (const ch of t) {
+      try {
+        w += solFontObj.widthOfTextAtSize(ch, size);
+      } catch {
+        w += size * 0.5;
+      }
+    }
+    return w * (bold ? 1.02 : 1);
+  };
+  const solFontForText = (name: string, text: string) => fontForText(hasSolFont && name === BODY_FONT ? "해설" : name, text);
   const firstSolNo = firstAnswerNo + answerPages.length;
   const solutionPages: ReturnType<typeof flowBlocks>["results"][] = [];
   if (!spec.answerPage && spec.solutions && spec.solutions.length > 0) {
@@ -1176,7 +1192,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       }
     }
     for (let k = 0; rest.length > 0 && k < 300; k++) {
-      const f = flowBlocks(rest, columnsOf(firstSolNo + k, [0, 1]), measure, solStyle);
+      const f = flowBlocks(rest, columnsOf(firstSolNo + k, [0, 1]), measureSol, solStyle);
       if (!f.results.some((r) => r.items.length > 0)) break;
       solutionPages.push(f.results);
       rest = f.rest;
@@ -1282,7 +1298,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
     await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo, total });
     for (const r of results) {
-      await drawFlow(page, r.items, fontForText, flip, new Map(), oldHangul);
+      await drawFlow(page, r.items, solFontForText, flip, new Map(), oldHangul);
     }
   }
 
