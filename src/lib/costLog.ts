@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { USD_KRW_RATE } from "./tokens";
 
 /**
  * AI 원가 장부에 한 줄 적는다(`ai_cost_log`, 마이그레이션 0031).
@@ -23,7 +24,8 @@ export async function logAiCost(
   },
 ): Promise<void> {
   if (!(row.krw > 0)) return;
-  const usd = row.usd ?? (row.krwRate && row.krwRate > 0 ? row.krw / row.krwRate : 0);
+  // usd 를 안 넘긴 호출(하이쿠 등 원 단위로만 적던 자리)은 환율로 되돌린다 — 안 그러면 est_usd 가 0 으로 남아 달러 합계에서 빠진다.
+  const usd = row.usd ?? row.krw / (row.krwRate && row.krwRate > 0 ? row.krwRate : USD_KRW_RATE);
   try {
     const { error } = await admin.from("ai_cost_log").insert({
       user_id: row.userId,

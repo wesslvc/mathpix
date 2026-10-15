@@ -69,7 +69,7 @@ const COMPS = [
 ] as const;
 const fmtTok = (n = 0) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : `${n}`);
 const tokLine = (t: Tok) => `입력 ${fmtTok(t.input)} · 캐시 읽기 ${fmtTok(t.cacheRead)} · 캐시 쓰기 ${fmtTok(t.cacheWrite)} · 출력 ${fmtTok(t.output)}`;
-const usd = (n: number) => `$${n.toFixed(2)}`;
+const usd = (n: number) => `$${n < 0.1 && n > 0 ? n.toFixed(3) : n.toFixed(2)}`;
 
 export default function AiCostPanel() {
   const [data, setData] = useState<Data | null>(null);
