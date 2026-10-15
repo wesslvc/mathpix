@@ -21,6 +21,23 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 
+/** 수식 그림을 못 만들었을 때 글로 넣을 해설 — `$…$`·LaTeX 를 읽을 수 있는 글로 바꾼다. */
+function plainSolution(t: string): string {
+  const rep: [RegExp, string][] = [
+    [/\\left|\\right/g, ""],
+    [/\\times/g, "×"], [/\\div/g, "÷"], [/\\cdot/g, "·"], [/\\pm/g, "±"],
+    [/\\le(?:q)?\b/g, "≤"], [/\\ge(?:q)?\b/g, "≥"], [/\\neq?\b/g, "≠"],
+    [/\\to\b|\\rightarrow/g, "→"], [/\\pi\b/g, "π"], [/\\angle/g, "∠"],
+    [/\\%/g, "%"], [/\\text\{([^}]*)\}/g, "$1"],
+  ];
+  let out = t;
+  for (let i = 0; i < 3; i++) {
+    out = out.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, "($1)/($2)").replace(/\\sqrt\{([^{}]*)\}/g, "√($1)");
+  }
+  for (const [re, to] of rep) out = out.replace(re, to);
+  return out.replace(/\$/g, "").replace(/[{}]/g, "").replace(/\^2/g, "²").replace(/\^\{?2\}?/g, "²");
+}
+
 /**
  * 평가원 문제지 양식으로 내보내기.
  *
@@ -285,6 +302,7 @@ export default function KiceExportPanel({ title, items }: Props) {
       }
 
       setProgress("PDF 조립 중...");
+      let solFail: string | undefined;
       const bytes = await buildKicePdfOffThread({
         frames,
         replace,
@@ -342,10 +360,11 @@ export default function KiceExportPanel({ title, items }: Props) {
                         text,
                         title: k === 0 ? "해  설" : undefined,
                       });
-                    } catch {
+                    } catch (e) {
                       png = undefined;
+                      solFail = solFail ?? (e instanceof Error ? e.message : String(e));
                     }
-                    return { label, source, answer, text, png };
+                    return { label, source, answer, text: plainSolution(text), png };
                   }),
               )
             : undefined,
@@ -360,6 +379,9 @@ export default function KiceExportPanel({ title, items }: Props) {
       link.download = `${name.replace(/[\\/:*?"<>|]/g, "_")}.pdf`;
       link.click();
       URL.revokeObjectURL(objectUrl);
+      if (solFail) {
+        setError(`해설을 수식 그림으로 만들지 못해 글로 넣었어요(수식 기호가 깨질 수 있음). 이유: ${solFail}`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "PDF 만들기에 실패했습니다.");
     } finally {

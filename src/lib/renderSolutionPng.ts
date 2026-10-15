@@ -32,7 +32,22 @@ export async function renderSolutionPng(opts: { heading: string; text: string; t
     if (document.fonts?.ready) await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 2000))]);
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     await waitForImages(card);
-    const url = await toPng(card, CARD_CAPTURE_OPTIONS);
+    // Safari(WebKit)는 첫 캡처가 비거나 던지는 일이 있어(글꼴·SVG foreignObject) 한 번 더 찍고, 실패하면 몇 번 다시 시도한다.
+    const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Android/.test(navigator.userAgent);
+    let url = "";
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3 && !url; attempt++) {
+      try {
+        if (webkit) await toPng(card, CARD_CAPTURE_OPTIONS).catch(() => "");
+        url = await toPng(card, CARD_CAPTURE_OPTIONS);
+      } catch (e) {
+        lastErr = e;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+    if (!url) {
+      throw new Error(`해설 그림 만들기 실패: ${lastErr instanceof Error ? lastErr.message : String(lastErr ?? "알 수 없음")}`);
+    }
     const bin = atob(url.slice(url.indexOf(",") + 1));
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
