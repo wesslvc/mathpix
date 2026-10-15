@@ -426,3 +426,35 @@ export function parseFigures(text: string, blockCount: number): FigurePlace[] {
   }
   return out;
 }
+
+// ── 단원 표지(변형문제 "유형별 원본 가져오기") ──────────────────────────────────────────────
+/**
+ * 모델: 기본은 luna(`OPENAI_DETECT_MODEL`). 더 큰 모델을 쓰려면 재배포 없이 `OPENAI_UNIT_MODEL` 로 바꾼다(이름은 계정 목록에 있는
+ * 것만 — 이 계정에는 `gpt-6-luna-pro` 가 없다). 추론 강도는 안 보낸다(auto = 모델 기본값).
+ */
+export const OPENAI_UNIT_MODEL = process.env.OPENAI_UNIT_MODEL?.trim() || OPENAI_DETECT_MODEL;
+
+const UNIT_PROMPT = (hint: string) => `This is one cropped Korean high-school exam problem (CSAT / mock-exam style).${hint ? ` It comes from this folder: "${hint}".` : ""}
+Decide which curriculum unit (단원) it tests, so the user can later search problems by unit name.
+
+Write the label in Korean as a single line: "<대단원> · <소단원> · <핵심 개념/유형 키워드들>" — use the usual textbook / 교육과정 unit names, and add the 2–4 most specific concept keywords the solution needs (e.g. "판 구조론", "방사성 동위원소 반감기", "이차함수의 최대·최소", "수열의 극한"). Include common alternative names of the unit in the keywords when there are any. Do NOT include the problem number or answers.
+
+answer as JSON object only: {"unit":"..."}`;
+
+export async function labelUnit(
+  dataUrl: string,
+  hint: string,
+): Promise<{ unit: string; model: string; usage?: DetectUsage }> {
+  let usage: DetectUsage | undefined;
+  const text = await callOpenAIVision(dataUrl, UNIT_PROMPT(hint.slice(0, 60)), OPENAI_UNIT_MODEL, undefined, (u) => {
+    usage = u;
+  });
+  let unit = "";
+  try {
+    const raw = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")) as { unit?: unknown };
+    if (typeof raw?.unit === "string") unit = raw.unit.replace(/\s+/g, " ").trim().slice(0, 200);
+  } catch {
+    /* 아래에서 빈 값 처리 */
+  }
+  return { unit, model: OPENAI_UNIT_MODEL, usage };
+}

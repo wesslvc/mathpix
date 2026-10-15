@@ -51,10 +51,10 @@ import {
 } from "./problemCompare";
 import { askSol, loadPatchImages } from "./problemLoopRun";
 import { removeStored } from "./figureRun";
-import { cropOneProblem, findProblemNumber, lunaUsage, placeFigures } from "./lunaQuick";
+import { cropOneProblem, findProblemNumber, labelUnit, lunaUsage, OPENAI_UNIT_MODEL, placeFigures } from "./lunaQuick";
 import type { ProblemBox } from "./problemBoxes";
 import { answerOf, parseVariantPlan, VARIANT_PROMPT } from "./variantPlan";
-import { runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
+import { loadAsDataUrl, runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
 import { figureImageModelIds } from "./figureImageGen";
 import { cardUrl } from "./cardUrl";
 import { toStoredFigures } from "./storedFigures";
@@ -74,7 +74,8 @@ export type TaskKind =
   | "passageMarks"
   | "typeset"
   | "chat"
-  | "variant";
+  | "variant"
+  | "unitLabel";
 
 export const TASK_KINDS: readonly TaskKind[] = [
   "ocr",
@@ -90,6 +91,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
   "typeset",
   "chat",
   "variant",
+  "unitLabel",
 ];
 
 /**
@@ -97,7 +99,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
  * 할 수 있다면"). 전부 luna(+고정 요금)라 몇 초~수십 초면 끝난다 — 줄에 넣고 일꾼을 깨우고 1~2초마다 묻는 왕복을 뺀다.
  * `/api/ai-direct` 가 같은 `run` 을 요청 안에서 돌린다. 화면(`aiTask.ts` 의 `DIRECT_KINDS`)도 같은 목록을 든다.
  */
-export const DIRECT_TASKS: readonly TaskKind[] = ["crop", "figures", "numberBox", "detect", "title", "grade", "answerKey"];
+export const DIRECT_TASKS: readonly TaskKind[] = ["crop", "figures", "numberBox", "detect", "title", "grade", "answerKey", "unitLabel"];
 
 export type TaskCtx = {
   admin: SupabaseClient;
@@ -639,6 +641,38 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         };
       } catch (err) {
         return { ok: false, error: errorMessage(err, "sol 답변을 읽지 못했어요."), estKrw };
+      }
+    },
+  },
+
+  // **문제 단원 표지**(변형문제 "유형별 원본 가져오기", 무제한 계정 전용, 토큰 0): 저장된 문제 그림을 서버가 직접 읽어
+  // luna 가 단원을 적고 `problem_units` 에 저장한다. 한 번 적으면 다시 검색할 때 모델을 안 부른다.
+  unitLabel: {
+    deposit: () => 0,
+    flat: true,
+    needsOpenAI: true,
+    unlimitedOnly: true,
+    images: { min: 0, max: 0 },
+    name: "단원 표지",
+    async run(ctx) {
+      const problemId = str(ctx.params.problemId, 60);
+      if (!/^[0-9a-f-]{36}$/i.test(problemId)) return { ok: false, error: "문제가 정해지지 않았어요." };
+      const { data: prob } = await ctx.admin.from("problems").select("id,image_path").eq("id", problemId).eq("user_id", ctx.userId).maybeSingle();
+      if (!prob?.image_path) return { ok: false, error: "문제를 찾지 못했어요." };
+      const dataUrl = await loadAsDataUrl(ctx.admin, prob.image_path as string);
+      if (!dataUrl) return { ok: false, error: "문제 그림을 읽지 못했어요." };
+      try {
+        const { unit, model, usage } = await labelUnit(dataUrl, str(ctx.params.hint, 60));
+        const estKrw = usage ? gradingEstKrw(lunaUsage(usage), OPENAI_UNIT_MODEL) : undefined;
+        if (estKrw && usage && !ctx.byok) {
+          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "luna 단원 표지", krw: estKrw, model, tokens: usage });
+        }
+        if (!unit) return { ok: false, error: "단원을 읽지 못했어요.", estKrw };
+        const { error: upErr } = await ctx.admin.from("problem_units").upsert({ problem_id: problemId, user_id: ctx.userId, unit, model }, { onConflict: "problem_id" });
+        if (upErr) return { ok: false, error: `단원을 저장하지 못했어요: ${upErr.message}`, estKrw };
+        return { ok: true, result: { unit, model }, estKrw, model };
+      } catch (err) {
+        return { ok: false, error: errorMessage(err, "단원 표지를 달지 못했어요.") };
       }
     },
   },

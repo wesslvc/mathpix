@@ -28,7 +28,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
   haiku: "자동 자르기 (사진·지면 문제 자리)",
   luna: "빠른 작업 (그림 자리·채점·제목·번호)",
 };
-const LUNA_TASKS = new Set(["figures", "numberBox", "title", "grade", "answerKey"]);
+const LUNA_TASKS = new Set(["figures", "numberBox", "title", "grade", "answerKey", "unitLabel"]);
 function categoryOf(j: FigureJob): Category {
   if (j.mode === "passage") return "passage";
   if (j.mode !== "task") return "draw";
@@ -42,6 +42,7 @@ const LOCAL_RUNNING: Record<string, string> = {
   crop: "haiku 가 문제 자리를 자르는 중",
   figures: "luna 가 그림 자리를 찾는 중",
   numberBox: "luna 가 문제 번호 자리를 찾는 중",
+  unitLabel: "luna 가 문제 단원을 읽는 중",
   detect: "haiku 가 문제 자리를 찾는 중",
   title: "luna 가 지문 제목을 짓는 중",
   grade: "luna 가 채점하는 중",
@@ -69,6 +70,7 @@ const TASK_RUNNING: Record<string, string> = {
   crop: "haiku 가 문제 자리를 자르는 중",
   figures: "luna 가 그림 자리를 찾는 중",
   numberBox: "luna 가 문제 번호 자리를 찾는 중",
+  unitLabel: "luna 가 문제 단원을 읽는 중",
   title: "luna 가 지문 제목을 짓는 중",
   grade: "luna 가 채점하는 중",
   answerKey: "luna 가 답지를 읽는 중",
@@ -84,6 +86,7 @@ const TASK_SECONDS: Record<string, number> = {
   detect: 60,
   crop: 10,
   numberBox: 8,
+  unitLabel: 10,
   title: 15,
   grade: 40,
   answerKey: 30,

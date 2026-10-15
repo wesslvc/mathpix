@@ -55,9 +55,12 @@ type Run = {
 };
 
 const KIND_LABEL: Record<string, string> = { comparison: "대소 비교형", computation: "계산형", concept: "개념형" };
-const EFFORTS = ["low", "medium", "high"];
+/** 변형 생성은 고정이다(사용자 — "med auto 로 고정"): sol 설계 강도 medium, 그림 품질 auto(= 모델 기본, 서버에는 빈 값). */
+const SOL_EFFORT = "medium";
 
-const QUALITIES = ["auto", "low", "medium", "high"];
+type UnitRow = { id: string; catId: string; image_path: string; no: number | null; unit: string | null };
+/** 검색용 정규화 — 공백·가운뎃점·화살표·하이픈을 없애고 소문자로. */
+const normU = (t: string) => t.replace(/[\s·>\-→,/()]/g, "").toLowerCase();
 const won = (n: number) => `${Math.round(n).toLocaleString()}원`;
 
 export default function VariantPanel() {
@@ -70,8 +73,14 @@ export default function VariantPanel() {
   /** 여러 폴더·실모에서 고른 문제를 모아 둔다(실모를 바꿔도 안 지워진다). */
   const [picked, setPicked] = useState<Record<string, Item>>({});
   const [uploads, setUploads] = useState<Item[]>([]);
-  const [quality, setQuality] = useState("medium");
-  const [effort, setEffort] = useState("medium");
+  // 유형별 원본 가져오기(단원 검색)
+  const [unitFolder, setUnitFolder] = useState("");
+  const [unitRows, setUnitRows] = useState<UnitRow[]>([]);
+  const [unitQuery, setUnitQuery] = useState("");
+  const [unitBusy, setUnitBusy] = useState<"" | "load" | "label">("");
+  const [unitProg, setUnitProg] = useState<{ done: number; total: number; fail: number } | null>(null);
+  const [unitNote, setUnitNote] = useState<string | null>(null);
+  const unitCancel = useRef(false);
   const [copies, setCopies] = useState(1);
   /** 변형문제 창의 폴더(= is_variant 묶음). "" = 새로 만들기. */
   const [saveTarget, setSaveTarget] = useState("");
@@ -145,6 +154,109 @@ export default function VariantPanel() {
         if (on) n[`p:${p.id}`] = itemOf(p);
         else delete n[`p:${p.id}`];
       }
+      return n;
+    });
+  }
+
+
+  const unitItem = (r: UnitRow): Item => ({
+    key: `p:${r.id}`,
+    label: `${catName(r.catId)} ${r.no != null ? `${r.no}번` : "(번호 없음)"}`,
+    src: cardUrl(r.image_path),
+    catId: r.catId,
+    no: r.no,
+  });
+
+  /** 고른 과목 폴더의 모든 실모 문제(국어 지문 빼고)와, 이미 적어 둔 단원 표지를 불러온다. */
+  async function loadUnitRows() {
+    if (!unitFolder) return;
+    setUnitBusy("load");
+    setUnitNote(null);
+    setUnitRows([]);
+    setUnitProg(null);
+    try {
+      const catIds = cats
+        .filter((c) => !c.is_variant && (unitFolder === "_none" ? !c.folder_id : c.folder_id === unitFolder))
+        .map((c) => c.id);
+      if (!catIds.length) {
+        setUnitNote("이 폴더에는 실모가 없어요.");
+        return;
+      }
+      const rows: UnitRow[] = [];
+      for (let i = 0; i < catIds.length; i += 20) {
+        const { data, error: e } = await supabase
+          .from("problems")
+          .select("id,category_id,image_path,problemNo:box_range->number,korean:box_range->korean")
+          .in("category_id", catIds.slice(i, i + 20));
+        if (e) throw e;
+        for (const p of (data as unknown as { id: string; category_id: string; image_path: string; problemNo: number | null; korean?: { role?: string } | null }[]) ?? []) {
+          if (p.korean?.role === "passage" || !p.image_path) continue;
+          rows.push({ id: p.id, catId: p.category_id, image_path: p.image_path, no: p.problemNo, unit: null });
+        }
+      }
+      const labels = new Map<string, string>();
+      for (let i = 0; i < rows.length; i += 60) {
+        const { data, error: e } = await supabase
+          .from("problem_units")
+          .select("problem_id,unit")
+          .in("problem_id", rows.slice(i, i + 60).map((r) => r.id));
+        if (e) throw e;
+        for (const l of (data as { problem_id: string; unit: string }[]) ?? []) labels.set(l.problem_id, l.unit);
+      }
+      const order = new Map(catIds.map((id, i) => [id, i]));
+      rows.sort((a, b) => (order.get(a.catId) ?? 0) - (order.get(b.catId) ?? 0) || (a.no ?? 1e9) - (b.no ?? 1e9));
+      setUnitRows(rows.map((r) => ({ ...r, unit: labels.get(r.id) ?? null })));
+      if (!rows.length) setUnitNote("문제가 없어요.");
+    } catch (err) {
+      setUnitNote(`불러오지 못했어요: ${err instanceof Error ? err.message : (err as { message?: string })?.message ?? ""}`);
+    } finally {
+      setUnitBusy("");
+    }
+  }
+
+  /** 단원 표지가 없는 문제를 luna 가 읽어 적는다(문제당 한 번, 8개 동시). 한 번 적으면 다시 검색할 때 공짜다. */
+  async function labelMissing() {
+    const todo = unitRows.filter((r) => !r.unit);
+    if (!todo.length) return;
+    unitCancel.current = false;
+    setUnitBusy("label");
+    setUnitNote(null);
+    setUnitProg({ done: 0, total: todo.length, fail: 0 });
+    const hint = folders.find((f) => f.id === unitFolder)?.name ?? "";
+    const queue = [...todo];
+    let done = 0;
+    let fail = 0;
+    let firstErr = "";
+    await Promise.all(
+      Array.from({ length: Math.min(8, queue.length) }, async () => {
+        for (let r = queue.shift(); r && !unitCancel.current; r = queue.shift()) {
+          const row = r;
+          try {
+            const out = await runAiTask<{ unit: string }>("unitLabel", {
+              label: `단원 · ${catName(row.catId)} ${row.no ?? ""}`,
+              params: { problemId: row.id, hint },
+            });
+            setUnitRows((rs) => rs.map((x) => (x.id === row.id ? { ...x, unit: out.result.unit } : x)));
+          } catch (err) {
+            fail++;
+            firstErr = firstErr || (err instanceof Error ? err.message : "실패");
+          }
+          done++;
+          setUnitProg({ done, total: todo.length, fail });
+        }
+      }),
+    );
+    if (firstErr) setUnitNote(`${fail}개는 단원을 못 읽었어요: ${firstErr}`);
+    setUnitBusy("");
+  }
+
+  const unitTokens = normU(unitQuery) ? unitQuery.trim().split(/\s+/).map(normU).filter(Boolean) : [];
+  const unitHits = unitTokens.length ? unitRows.filter((r) => r.unit && unitTokens.every((t) => normU(r.unit!).includes(t))) : [];
+  const unitLabeled = unitRows.filter((r) => r.unit).length;
+  function addUnitHits(rows: UnitRow[]) {
+    setPicked((m) => {
+      const n = { ...m };
+      for (const r of rows) n[`p:${r.id}`] = unitItem(r);
       return n;
     });
   }
@@ -227,8 +339,8 @@ export default function VariantPanel() {
                     label: `변형 · ${item.label}${copies > 1 ? ` (${k}/${copies})` : ""}`,
                     images: [original],
                     params: {
-                      effort,
-                      quality: quality === "auto" ? "" : quality,
+                      effort: SOL_EFFORT,
+                      quality: "",
                       copies,
                       copy: k,
                       categoryId: targetId,
@@ -374,6 +486,109 @@ export default function VariantPanel() {
 
       {tab === "make" && (<>
       <section className={cn(cardClass, "flex flex-col gap-3 p-4 sm:p-5")}>
+        <h2 className="text-sm font-semibold text-ink">유형별 원본 가져오기 (단원 검색)</h2>
+        <p className="text-xs text-slate-500">
+          과목 폴더 안 모든 문항의 단원을 luna 가 읽어 적어 두고(문제당 한 번, 약 1원 — 한 번 적으면 다시 검색할 땐 무료), 입력한 단원명이 든 문제를 찾아 아래 원본으로 담아요.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+            value={unitFolder}
+            onChange={(e) => {
+              setUnitFolder(e.target.value);
+              setUnitRows([]);
+              setUnitProg(null);
+              setUnitNote(null);
+            }}
+          >
+            <option value="">과목 폴더 고르기</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+            <option value="_none">(폴더 없음)</option>
+          </select>
+          <Button size="sm" variant="outline" disabled={!unitFolder || unitBusy !== ""} onClick={() => void loadUnitRows()}>
+            {unitBusy === "load" ? "불러오는 중…" : "문항 불러오기"}
+          </Button>
+          {unitRows.length > 0 && (
+            <>
+              <span className="text-xs text-slate-600">
+                {unitRows.length}문항 · 단원 표지 {unitLabeled}개
+              </span>
+              {unitLabeled < unitRows.length && (
+                <Button size="sm" disabled={unitBusy !== ""} onClick={() => void labelMissing()}>
+                  {unitBusy === "label" ? "단원 읽는 중…" : `단원 읽기 (${unitRows.length - unitLabeled}개, luna)`}
+                </Button>
+              )}
+              {unitBusy === "label" && (
+                <button className="text-xs underline" onClick={() => (unitCancel.current = true)}>
+                  멈추기
+                </button>
+              )}
+            </>
+          )}
+        </div>
+        {unitProg && (
+          <p className="text-xs text-slate-600">
+            {unitProg.done}/{unitProg.total} 읽음{unitProg.fail > 0 && ` · 실패 ${unitProg.fail}`}
+          </p>
+        )}
+        {unitNote && <p className="text-xs text-red-600">{unitNote}</p>}
+        {unitRows.length > 0 && (
+          <>
+            <input
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              value={unitQuery}
+              onChange={(e) => setUnitQuery(e.target.value)}
+              placeholder="단원명 검색 (예: 판 구조론, 이차함수 · 여러 단어는 모두 들어간 것만)"
+            />
+            {unitTokens.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                <span>{unitHits.length}문항 찾음</span>
+                {unitHits.length > 0 && (
+                  <button className="underline" onClick={() => addUnitHits(unitHits)}>
+                    찾은 {unitHits.length}문항 모두 원본으로 담기
+                  </button>
+                )}
+                {unitLabeled < unitRows.length && <span>(단원 표지가 없는 {unitRows.length - unitLabeled}문항은 아직 검색에 안 나와요)</span>}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {unitHits.slice(0, 60).map((r) => {
+                const on = !!picked[`p:${r.id}`];
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() =>
+                      setPicked((m) => {
+                        const n = { ...m };
+                        if (n[`p:${r.id}`]) delete n[`p:${r.id}`];
+                        else n[`p:${r.id}`] = unitItem(r);
+                        return n;
+                      })
+                    }
+                    className={cn("flex flex-col gap-1 rounded-lg border p-2 text-left", on ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white")}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={cardUrl(r.image_path)} alt="" className="w-full rounded" loading="lazy" />
+                    <span className="text-xs font-medium text-ink">
+                      {on ? "✓ " : ""}
+                      {catName(r.catId)} {r.no != null ? `${r.no}번` : ""}
+                    </span>
+                    <span className="text-[11px] leading-snug text-slate-500">{r.unit}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {unitHits.length > 60 && <p className="text-xs text-slate-500">앞 60문항만 보여요(모두 담기는 전체에 적용돼요).</p>}
+          </>
+        )}
+      </section>
+
+      <section className={cn(cardClass, "flex flex-col gap-3 p-4 sm:p-5")}>
         <h2 className="text-sm font-semibold text-ink">1. 원본 문제 고르기 (여러 폴더·실모에서 모아 담을 수 있어요)</h2>
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs text-slate-500">
@@ -506,26 +721,7 @@ export default function VariantPanel() {
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          sol 설계 강도
-          <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={effort} onChange={(e) => setEffort(e.target.value)}>
-            {EFFORTS.map((q) => (
-              <option key={q} value={q}>
-                {q}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          그림 품질
-          <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={quality} onChange={(e) => setQuality(e.target.value)}>
-            {QUALITIES.map((q) => (
-              <option key={q} value={q}>
-                {q}
-              </option>
-            ))}
-          </select>
-        </label>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">sol 설계 medium · 그림 auto (고정)</span>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           저장할 묶음
           <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={saveTarget} onChange={(e) => setSaveTarget(e.target.value)}>
@@ -551,7 +747,6 @@ export default function VariantPanel() {
         <p className="w-full text-xs text-slate-500">
           서버 대기열에서 돌아요(수정하기와 같은 부분 수정 방식 — 창을 닫아도 끝까지 가서 고른 묶음 하나에 모두 저장돼요(원본 실모별로 나누지 않아요)). 한 번에 최대 60개. 토큰은 안 떼고 원가만 보여요(시험 중).
           {totalJobs > 60 && <b className="text-red-600"> 지금 {totalJobs}개라 너무 많아요.</b>}
-          {effort === "high" && " sol 강도 high 는 오래 걸려 그림 시간이 모자랄 수 있어요(medium 권장)."}
         </p>
         {runs.length > 0 && (
           <p className="w-full text-xs text-slate-600">
