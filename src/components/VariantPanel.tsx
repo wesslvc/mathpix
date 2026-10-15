@@ -75,7 +75,7 @@ export default function VariantPanel() {
   const [copies, setCopies] = useState(1);
   /** 변형문제 창의 폴더(= is_variant 묶음). "" = 새로 만들기. */
   const [saveTarget, setSaveTarget] = useState("");
-  const [newFolder, setNewFolder] = useState("변형문제");
+  const [newFolder, setNewFolder] = useState("");
   const [tab, setTab] = useState<"make" | "library">("make");
   const [libId, setLibId] = useState("");
   const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null }[]>([]);
@@ -171,7 +171,9 @@ export default function VariantPanel() {
   /** 변형문제 폴더(= is_variant 묶음)를 (없으면 만들어) 돌려준다. 서버 작업들이 동시에 만들다 겹치지 않게 미리 한다. */
   async function ensureTarget(uid: string): Promise<string> {
     if (saveTarget) return saveTarget;
-    const name = newFolder.trim() || "변형문제";
+    const d = new Date();
+    const stamp = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    const name = newFolder.trim() || `변형 묶음 ${stamp}`;
     const existing = cats.find((c) => c.is_variant && c.source === name);
     if (existing) return existing.id;
     const { data, error: e } = await supabase
@@ -525,9 +527,9 @@ export default function VariantPanel() {
           </select>
         </label>
         <label className="flex items-center gap-2 text-sm text-slate-600">
-          변형문제 폴더
+          저장할 묶음
           <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={saveTarget} onChange={(e) => setSaveTarget(e.target.value)}>
-            <option value="">+ 새 폴더 만들기</option>
+            <option value="">+ 새 묶음 만들기</option>
             {variantFolders.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.source}
@@ -540,14 +542,14 @@ export default function VariantPanel() {
             className="w-40 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
             value={newFolder}
             onChange={(e) => setNewFolder(e.target.value)}
-            placeholder="새 폴더 이름"
+            placeholder="묶음 이름 (비우면 날짜·시간)"
           />
         )}
         <Button onClick={() => void start()} disabled={busy || items.length === 0 || totalJobs > 60}>
           {busy ? "서버에 넣는 중…" : `변형문제 만들기 (${totalJobs}개)`}
         </Button>
         <p className="w-full text-xs text-slate-500">
-          서버 대기열에서 돌아요(수정하기와 같은 부분 수정 방식 — 창을 닫아도 끝까지 가서 변형문제 폴더에 저장돼요). 한 번에 최대 60개. 토큰은 안 떼고 원가만 보여요(시험 중).
+          서버 대기열에서 돌아요(수정하기와 같은 부분 수정 방식 — 창을 닫아도 끝까지 가서 고른 묶음 하나에 모두 저장돼요(원본 실모별로 나누지 않아요)). 한 번에 최대 60개. 토큰은 안 떼고 원가만 보여요(시험 중).
           {totalJobs > 60 && <b className="text-red-600"> 지금 {totalJobs}개라 너무 많아요.</b>}
           {effort === "high" && " sol 강도 high 는 오래 걸려 그림 시간이 모자랄 수 있어요(medium 권장)."}
         </p>
