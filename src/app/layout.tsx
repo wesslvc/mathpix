@@ -3,6 +3,8 @@ import "./globals.css";
 import FigureJobsProvider from "@/components/FigureJobsProvider";
 import FigureJobsPanel from "@/components/FigureJobsPanel";
 import AppNav from "@/components/AppNav";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { createClient } from "@/lib/supabase/server";
 import NepicaFooter from "@/components/NepicaFooter";
 
 /**
@@ -108,11 +110,27 @@ export const viewport: Viewport = {
   themeColor: "#f6f7f9",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // 변형문제 탭은 시험 중이라 무제한 계정에만 보인다. 실패하면 그냥 감춘다.
+  let showVariants = false;
+  try {
+    if (isSupabaseConfigured()) {
+      const supabase = await createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const { data: ent } = await supabase.from("entitlements").select("unlimited").eq("user_id", user.id).maybeSingle();
+        showVariants = ent?.unlimited === true;
+      }
+    }
+  } catch {
+    showVariants = false;
+  }
   return (
     <html lang="ko">
       {/* 글꼴 — 지오글(seji)과 같은 짝을 쓴다. 본문은 Pretendard, 로고·숫자
@@ -142,7 +160,7 @@ export default function RootLayout({
           {/* 전역 내비 — 예전에는 없어서 화면마다 "← 목록으로"를 따로 만들고
               있었다(다섯 곳). 그래서 지금 어디에 있는지·어디로 갈 수 있는지가
               화면을 옮길 때마다 달라졌다. */}
-          <AppNav />
+          <AppNav showVariants={showVariants} />
           <div className="flex-1">{children}</div>
           {/* 브랜드 표기는 화면마다 달지 않고 여기 한 번만 둔다 — 어느 화면을
               보고 있든 맨 밑에 같은 자리에 있어야 한다. 형제 사이트(VDIC·지오글)의

@@ -727,6 +727,20 @@ ${changes.trim()}
 rules: fix only the named places; when an item is ambiguous change the smallest possible area; circled markers (㉠ ① ⓐ) not listed stay exactly as they are (a thin circle with the inner glyph centered); handwriting that is mentioned must be erased completely (restore the printed content under it, or clean white paper); output = the same image with only those fixes.${force}`;
 }
 
+/**
+ * **변형문제**(`/variants`)용 편집 프롬프트. sol 이 원본을 이해해 "어느 숫자를 무엇으로 바꾸고 그림은 어떻게
+ * 고칠지"를 적어 주면(`edits`), 그림 모델이 원본 그림을 **바탕으로 고쳐** 그린다. 그림·도표도 그대로 베끼지
+ * 않고 바뀐 숫자에 맞게 다시 그리게 한다.
+ */
+export function variantPrompt(edits: string): string {
+  return `task: this image = an ORIGINAL Korean exam question. produce a VARIANT of it by EDITING the image: keep the page, layout, fonts, sizes, spacing, question wording, choice layout, numbering and the white background exactly like the original, and apply the changes below. the question keeps the same structure and the same reasoning — only the numbers/values named below change.
+changes to apply (these were worked out by a reviewer who solved the question; follow them exactly):
+"""
+${edits.trim()}
+"""
+rules: every printed character of the variant must be exactly what the changes say (digits especially, choices ①–⑤ with their new values). figures, graphs, tables, tick labels, point labels and diagrams must be REDRAWN to match the new values — do NOT copy the original figure unchanged, but keep its style, line weights and labels. erase any handwriting (restore the printed content under it). do not add a solution, an answer, or any new text that is not listed. circled markers (㉠ ① ⓐ) not listed stay exactly as they are. output = the whole question image, ready to print.`;
+}
+
 function withInstruction(prompt: string, instruction?: string): string {
   const text = instruction?.trim();
   if (!text) return prompt;
@@ -793,6 +807,8 @@ export async function generateFigureImage(
   patchNote?: string,
   /** 수정 지시를 **강하게** 전달한다(sol 이 위치까지 재서 못박은 지시일 때). */
   patchStrong = false,
+  /** 있으면 **변형문제** 편집 프롬프트를 쓴다(`variantPrompt`). */
+  variantNote?: string,
 ): Promise<FigureImageResult | null> {
   const apiKey = apiKeyOverride || process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -835,7 +851,9 @@ export async function generateFigureImage(
       "prompt",
       patchNote !== undefined
         ? patchPrompt(patchNote, patchStrong)
-        : withInstruction(
+        : variantNote !== undefined
+          ? variantPrompt(variantNote)
+          : withInstruction(
         mode === "problem"
           ? withReference(
               skipCircled ? stripCircled(WHOLE_PROBLEM_PROMPT) : WHOLE_PROBLEM_PROMPT,

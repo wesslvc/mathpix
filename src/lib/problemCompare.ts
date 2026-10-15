@@ -319,7 +319,7 @@ export function planToChanges(plan: PatchPlan): string {
   return `${lines.join("\n")}${plan.keep ? `\nkeep unchanged: ${plan.keep}` : ""}`;
 }
 
-function parseJsonObject(text: string): unknown {
+export function parseJsonObject(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {

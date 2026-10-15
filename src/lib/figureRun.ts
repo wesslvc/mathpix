@@ -62,6 +62,8 @@ export type RunInput = {
   patchNote?: string;
   /** 수정 지시를 강하게 전달한다(`patchPrompt` 의 strong). */
   patchStrong?: boolean;
+  /** 변형문제 편집(`variantPrompt`). */
+  variantNote?: string;
 };
 
 export type RunOutcome =
@@ -109,6 +111,7 @@ export async function runFigureGeneration(input: RunInput): Promise<RunOutcome> 
               input.skipCircled,
               input.patchNote,
               input.patchStrong,
+              input.variantNote,
             );
             break;
           } catch (err) {

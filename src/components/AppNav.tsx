@@ -29,7 +29,7 @@ const LINKS = [
   { href: "/answer-sheet", label: "정답표" },
 ] as const;
 
-export default function AppNav() {
+export default function AppNav({ showVariants = false }: { showVariants?: boolean }) {
   const pathname = usePathname();
 
   // 로그인·인증 콜백에서는 감춘다.
@@ -56,7 +56,7 @@ export default function AppNav() {
 
         {/* 링크가 많아지면 좁은 화면에서 가로로 민다(잘리지 않는다). */}
         <div className="flex flex-1 gap-1 overflow-x-auto">
-          {LINKS.map((l) => (
+          {[...LINKS, ...(showVariants ? [{ href: "/variants", label: "변형문제" } as const] : [])].map((l) => (
             <Link
               key={l.href}
               href={l.href}
