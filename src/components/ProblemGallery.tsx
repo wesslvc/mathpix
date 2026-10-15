@@ -114,6 +114,8 @@ export type GalleryProblem = {
    * 이 기능 이전에 만든 문제는 null이다.
    */
   gradeId?: string | null;
+  /** 변형문제의 해설(텍스트, `box_range.solution`). PDF 해설지에 쓴다. 수정해 저장할 때 옮겨 담는다. */
+  solution?: string | null;
 };
 
 /** 같은 폴더 안에 새 파일명을 만든다. (덮어쓰기 대신 새 오브젝트로 저장) */
@@ -1190,6 +1192,8 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
             // 통째로 새로 쓰므로 여기서 옮겨 담지 않으면 처음 수정하는
             // 순간 어느 채점 기록에서 왔는지가 사라진다.
             gradeId: editing.gradeId ?? undefined,
+            // 변형문제 해설도 같은 이유로 옮겨 담는다(안 그러면 수정 저장 때 사라진다).
+            solution: editing.solution ?? undefined,
             // 국어 지문 세트 정보도 같은 이유로 옮겨 담아야 한다 — 안 그러면
             // 이 모달에서 아무거나 한 번 고쳐 저장하는 순간 이 행이 어느
             // 지문 세트에 속했는지(role·title·blocks)가 통째로 사라진다

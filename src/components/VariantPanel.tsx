@@ -5,6 +5,9 @@ import { createClient } from "@/lib/supabase/client";
 import { cardUrl } from "@/lib/cardUrl";
 import { fileToDataUrl } from "@/lib/cropImage";
 import { ensureDataUrl, imageSizeOf, prepareProblemForModel } from "@/lib/figureImage";
+import { putBlob, removeBlobs } from "@/lib/blobClient";
+import { toStoredFigures } from "@/lib/storedFigures";
+import { DEFAULT_FONT_PT } from "@/lib/fontSize";
 import type { VariantPlan } from "@/lib/variantPlan";
 import { Button } from "@/components/ui/button";
 import { cardClass } from "@/components/ui/card";
@@ -28,6 +31,9 @@ type Item = {
   label: string;
   /** 원본 그림 — 실모 문제는 주소, 올린 사진은 data URL. */
   src: string;
+  /** 저장할 때 쓴다 — 원본 실모와 번호(올린 사진은 없음). */
+  catId?: string;
+  no?: number | null;
 };
 type Run = {
   key: string;
@@ -39,7 +45,20 @@ type Run = {
   error?: string;
   krw: number;
   ms?: number;
+  catId?: string;
+  no?: number | null;
+  saved?: "saving" | "done" | string;
 };
+
+/** sol 이 적은 정답("③", "3", "① 또는…")에서 저장할 답과 유형을 뽑는다. */
+function answerOf(raw: string): { answer: string | null; type: "choice" | "short" } {
+  const t = raw.trim();
+  if (!t) return { answer: null, type: "short" };
+  const circled = "①②③④⑤".indexOf(t[0]);
+  if (circled >= 0) return { answer: String(circled + 1), type: "choice" };
+  if (/^[1-5]$/.test(t)) return { answer: t, type: "choice" };
+  return { answer: t, type: "short" };
+}
 
 const QUALITIES = ["auto", "low", "medium", "high"];
 const won = (n: number) => `${Math.round(n).toLocaleString()}원`;
@@ -144,6 +163,8 @@ export default function VariantPanel() {
         key: `p:${p.id}`,
         label: `${cats.find((c) => c.id === catId)?.source ?? "실모"} ${p.problemNo != null ? `${p.problemNo}번` : "(번호 없음)"}`,
         src: cardUrl(p.image_path),
+        catId,
+        no: p.problemNo,
       })),
     ...uploads,
   ];
@@ -182,7 +203,7 @@ export default function VariantPanel() {
     if (!items.length) return;
     setError(null);
     setBusy(true);
-    setRuns(items.map((i) => ({ key: i.key, label: i.label, stage: "prep", krw: 0 })));
+    setRuns(items.map((i) => ({ key: i.key, label: i.label, stage: "prep", krw: 0, catId: i.catId, no: i.no })));
     // 동시에 3개까지.
     const queue = [...items];
     await Promise.all(
@@ -191,6 +212,75 @@ export default function VariantPanel() {
       }),
     );
     setBusy(false);
+  }
+
+  /** 변형 결과를 `변형문제 · <원본 실모>` 실모에 저장한다(해설 텍스트·새 정답 포함). */
+  async function saveRun(r: Run) {
+    if (!r.image || !r.plan || r.saved === "saving" || r.saved === "done") return;
+    patch(r.key, { saved: "saving" });
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id;
+      if (!uid) throw new Error("로그인이 필요해요.");
+      const src = cats.find((c) => c.id === r.catId);
+      const name = `변형문제 · ${src?.source ?? "직접 올림"}`;
+      let target = cats.find((c) => c.source === name && (c.folder_id ?? null) === (src?.folder_id ?? null));
+      if (!target) {
+        const { data, error: e } = await supabase
+          .from("categories")
+          .insert({ user_id: uid, source: name, is_exam: false, score: null, exam_date: null, folder_id: src?.folder_id ?? null })
+          .select("id,source,folder_id")
+          .single();
+        if (e) throw e;
+        target = data as Cat;
+        setCats((c) => [target as Cat, ...c]);
+      }
+      const blob = await (await fetch(r.image)).blob();
+      const ext = blob.type.includes("jpeg") ? "jpg" : "png";
+      const path = `${uid}/${target.id}/${crypto.randomUUID()}.${ext}`;
+      const up = await putBlob(supabase, path, blob, blob.type || "image/png");
+      if (!up.ok) throw new Error(up.error);
+      const { data: maxRow } = await supabase
+        .from("problems")
+        .select("sort_order")
+        .eq("category_id", target.id)
+        .order("sort_order", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      const { answer, type } = answerOf(r.plan.newAnswer);
+      const { error: insErr } = await supabase.from("problems").insert({
+        category_id: target.id,
+        user_id: uid,
+        image_path: path,
+        latex: null,
+        text_content: null,
+        answer,
+        answer_type: type,
+        sort_order: (maxRow?.sort_order ?? 0) + 1,
+        box_range: {
+          ranges: null,
+          fontPt: DEFAULT_FONT_PT,
+          figures: toStoredFigures([
+            {
+              id: crypto.randomUUID(),
+              markup: `<img src="${cardUrl(path)}" alt="" />`,
+              layout: { scale: 100, offsetX: 0, offsetY: 0 },
+              position: 0,
+            },
+          ]),
+          ...(r.no != null ? { number: r.no } : {}),
+          ...(r.plan.solution ? { solution: r.plan.solution } : {}),
+        },
+      });
+      if (insErr) {
+        await removeBlobs([path]);
+        throw insErr;
+      }
+      patch(r.key, { saved: "done" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : (err as { message?: string })?.message ?? "저장 실패";
+      patch(r.key, { saved: `실패: ${msg}` });
+    }
   }
 
   const stageText: Record<Run["stage"], string> = {
@@ -321,6 +411,16 @@ export default function VariantPanel() {
         <Button onClick={() => void start()} disabled={busy || items.length === 0}>
           {busy ? "만드는 중…" : `변형문제 만들기 (${items.length}개)`}
         </Button>
+        {runs.some((r) => r.stage === "done" && r.saved !== "done") && (
+          <Button
+            variant="outline"
+            onClick={() => {
+              for (const r of runs) if (r.stage === "done") void saveRun(r);
+            }}
+          >
+            완료된 것 모두 실모에 저장
+          </Button>
+        )}
         <span className="text-xs text-slate-500">
           문제마다 sol 이해·설계 → sunburst 편집. 토큰은 안 떼고 원가만 아래에 보여요(시험 중).
         </span>
@@ -339,6 +439,15 @@ export default function VariantPanel() {
             </span>
           </div>
           {r.error && <p className="text-sm text-red-700">{r.error}</p>}
+          {r.stage === "done" && (
+            <div className="flex items-center gap-2 text-xs">
+              <Button size="sm" variant="outline" disabled={r.saved === "saving" || r.saved === "done"} onClick={() => void saveRun(r)}>
+                {r.saved === "done" ? "저장됨" : r.saved === "saving" ? "저장 중…" : "실모에 저장 (해설 포함)"}
+              </Button>
+              {r.saved && r.saved !== "done" && r.saved !== "saving" && <span className="text-red-600">{r.saved}</span>}
+              {r.saved === "done" && <span className="text-emerald-600">‘변형문제 · …’ 실모에 들어갔어요.</span>}
+            </div>
+          )}
           {(r.original || r.image) && (
             <div className="grid gap-3 sm:grid-cols-2">
               <figure className="flex flex-col gap-1">

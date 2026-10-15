@@ -678,6 +678,11 @@ export type KiceSpec = {
    */
   answerPage?: { no: number; total: number };
   /**
+   * **해설지.** 정답표 뒤에 두 단으로 흘려 붙인다(변형문제의 해설 텍스트). 비어 있으면 붙이지 않는다.
+   * 글은 평문이고 줄 단위로 문단이 나뉜다. 정답표만 따로 뽑을 때(`answerPage`)는 쓰지 않는다.
+   */
+  solutions?: { label: string; source?: string; answer?: string; text: string }[];
+  /**
    * 그리다 생긴 문제를 알린다(글꼴에 없는 글자 등). 던지지 않는 이유는
    * **나머지는 멀쩡히 나오기 때문**이다 — PDF 는 주되 무엇이 어긋났는지
    * 화면에 적어 준다.
@@ -1153,8 +1158,32 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
           return planAnswerPages(answers, b.contentBottom - top, width);
         })()
       : [];
-  // 정답표도 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
-  const total = pages.length + answerPages.length;
+  /**
+   * 해설지를 미리 흘려 본다 — 쪽수를 알아야 쪽번호 상자에 찍을 수 있다. 정답표 바로 뒤에서 시작한다.
+   * 한 쪽도 못 채우는 단(진행이 없음)이면 멈춰서 무한 반복을 막는다.
+   */
+  const solStyle = { ...DEFAULT_FLOW_STYLE, size: 9.2 };
+  const firstSolNo = firstAnswerNo + answerPages.length;
+  const solutionPages: ReturnType<typeof flowBlocks>["results"][] = [];
+  if (!spec.answerPage && spec.solutions && spec.solutions.length > 0) {
+    const multi = new Set(spec.solutions.map((s) => (s.source ?? "").trim()).filter(Boolean)).size >= 2;
+    let rest: RichBlock[] = [{ kind: "para", center: true, runs: [{ t: "해  설", b: true }] }];
+    for (const s of spec.solutions) {
+      const head = `${multi && s.source ? `${s.source.trim()} ` : ""}${s.label}${s.answer?.trim() ? `  ·  정답 ${s.answer.trim()}` : ""}`;
+      rest.push({ kind: "para", runs: [{ t: head, b: true }] });
+      for (const line of s.text.split(/\r?\n/)) {
+        if (line.trim()) rest.push({ kind: "para", runs: [{ t: line.trim() }] });
+      }
+    }
+    for (let k = 0; rest.length > 0 && k < 300; k++) {
+      const f = flowBlocks(rest, columnsOf(firstSolNo + k, [0, 1]), measure, solStyle);
+      if (!f.results.some((r) => r.items.length > 0)) break;
+      solutionPages.push(f.results);
+      rest = f.rest;
+    }
+  }
+  // 정답표·해설지도 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
+  const total = pages.length + answerPages.length + solutionPages.length;
 
   for (let n = 0; n < pages.length; n++) {
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
@@ -1246,6 +1275,15 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     await drawFrame(page, bare, { pageNo, total: shownTotal });
     // 본문 위아래 끝은 **원래 틀**에서 잰다(구분선을 뺀 틀에는 아래 끝이 없다).
     await drawAnswers(page, frame, blocks, fontForText, flip);
+  }
+
+  for (const [k, results] of solutionPages.entries()) {
+    const pageNo = firstSolNo + k;
+    const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
+    await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo, total });
+    for (const r of results) {
+      await drawFlow(page, r.items, fontForText, flip, new Map(), oldHangul);
+    }
   }
 
   if (spec.onWarn && (missing.size > 0 || swappedFont.size > 0)) {

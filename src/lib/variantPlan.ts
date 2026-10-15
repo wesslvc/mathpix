@@ -9,8 +9,9 @@ export const VARIANT_PROMPT = `task: you are a Korean math/science exam writer. 
 the figure(s) too: list exactly what must change in each figure/graph/table so it matches the new numbers (labels, tick values, bar heights, point coordinates, shaded regions, table cells …) — figures are edited, never copied unchanged, unless they contain no number at all (then say so).
 do not change: the wording, the question stem, the order/layout, the circled markers (㉠ ① ⓐ), answer format, problem number.
 write "edits" as ONE self-contained instruction for an image editor that sees only the original image: a numbered list; each item = where it is, the exact original text/value → the exact new text/value; include every changed choice and every figure change; finish with one line "keep everything else exactly as in the original".
+"solution" = the 해설지 text printed at the back of a workbook: plain text only (NO LaTeX, NO markdown, NO $ signs) — one step per line, keys of the reasoning first, then the computation with simple characters (digits, + - × ÷ = ( ) / and ^ for powers, √( ) for roots), last line "정답: …". explain the SAME solution path as the original, with the new numbers.
 return JSON only:
-{"summary":"한국어 1~2문장: 핵심 논리와 쓰이는 계산","keeps":["그대로 둔 것(논리·계산 유형)"],"changes":[{"from":"원래 값/문구","to":"새 값/문구","why":"왜 이렇게 바꿨는지(계산이 깨끗하게 유지되는 이유)"}],"original_answer":"원본의 정답","new_answer":"변형의 정답","solution":"변형 풀이 핵심 3~6줄(한국어)","edits":"그림 모델에 줄 편집 지시 전체"}`;
+{"summary":"한국어 1~2문장: 핵심 논리와 쓰이는 계산","keeps":["그대로 둔 것(논리·계산 유형)"],"changes":[{"from":"원래 값/문구","to":"새 값/문구","why":"왜 이렇게 바꿨는지(계산이 깨끗하게 유지되는 이유)"}],"original_answer":"원본의 정답","new_answer":"변형의 정답","solution":"변형 문제의 해설(한국어 평문, 6~18줄)","edits":"그림 모델에 줄 편집 지시 전체"}`;
 
 export type VariantPlan = {
   summary: string;
@@ -45,7 +46,7 @@ export function parseVariantPlan(text: string): VariantPlan {
     changes,
     originalAnswer: str(obj.original_answer, 100),
     newAnswer: str(obj.new_answer, 100),
-    solution: str(obj.solution, 1200),
+    solution: str(obj.solution, 4000),
     edits,
   };
 }

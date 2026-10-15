@@ -90,6 +90,8 @@ export type KiceItem = {
   source?: string;
   /** 국어 지문·문제 묶음. 국어 모드로 넣은 것에만 있다. */
   korean?: KoreanMeta | null;
+  /** 변형문제 해설(텍스트). */
+  solution?: string;
 };
 
 type Props = {
@@ -108,6 +110,9 @@ export default function KiceExportPanel({ title, items }: Props) {
   const [showSource, setShowSource] = useState(false);
   /** 맨 뒤에 정답표를 붙일지. 오답프린트라 기본은 켜짐이다. */
   const [showAnswers, setShowAnswers] = useState(true);
+  /** 정답표 뒤에 해설지를 붙일지(해설이 저장된 변형문제가 있을 때만 뜬다). 기본은 켜짐. */
+  const hasSolutions = items.some((it) => (it.solution ?? "").trim() !== "");
+  const [showSolutions, setShowSolutions] = useState(true);
   const [layoutKey, setLayoutKey] = useState<LayoutKey>(
     DEFAULT_LAYOUT[hasKorean ? "국어" : "사회탐구"],
   );
@@ -317,6 +322,17 @@ export default function KiceExportPanel({ title, items }: Props) {
               // 알 수 없다.
               source: item.source,
             })),
+        solutions:
+          hasSolutions && showSolutions
+            ? (renum ? renum.order : items.map((_, i) => i))
+                .filter((i) => (items[i].solution ?? "").trim() !== "")
+                .map((i) => ({
+                  label: renum ? `${renum.newNo.get(i)}번` : items[i].answerLabel,
+                  source: items[i].source,
+                  answer: items[i].answer,
+                  text: items[i].solution!.trim(),
+                }))
+            : undefined,
         onWarn: (m) => console.warn("[kice]", m),
       });
 
@@ -454,6 +470,19 @@ export default function KiceExportPanel({ title, items }: Props) {
               문제 그림의 원래 번호 자리를 덮어 새 번호를 쓰고, 정답표도 새 번호로 한 표에 모아요(내가 고른 답은 빼요).
             </span>
           </span>
+        </label>
+      )}
+
+      {hasSolutions && (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={showSolutions}
+            onChange={(e) => setShowSolutions(e.target.checked)}
+            className="h-4 w-4"
+          />
+          정답표 뒤에 해설지 붙이기
+          <span className="text-xs text-slate-400">변형문제에 저장해 둔 해설을 텍스트로 조판합니다.</span>
         </label>
       )}
 

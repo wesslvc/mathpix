@@ -48,6 +48,8 @@ export type ComposerProblem = {
    * 무엇을 잘못 골랐는지 바로 보인다. 연동이 없으면 undefined.
    */
   studentAnswer?: string;
+  /** 변형문제 해설(텍스트). 있으면 PDF 맨 뒤에 해설지로 붙일 수 있다. */
+  solution?: string;
   /** 국어 지문·문제 묶음 정보. 국어 모드로 넣은 것에만 있다. */
   korean?: KoreanMeta | null;
 };
@@ -342,6 +344,7 @@ export default function ExportComposer({
           ...answerParts(problem, showPicked),
           source: problem.source,
           korean: problem.korean ?? null,
+          solution: problem.solution,
         }))}
       />
     </div>

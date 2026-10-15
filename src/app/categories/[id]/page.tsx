@@ -59,6 +59,7 @@ type ProblemListRow = {
   /** 이 문제가 어느 채점 기록에서 왔는지(exam_scores.id). 수동으로 추가한
    * 문제나 이 기능 이전에 만든 문제는 없다. */
   gradeId: string | null;
+  solution: string | null;
   /** 이 문제의 배점. 정해두지 않았으면 null. */
   points: number | null;
   korean: unknown;
@@ -82,6 +83,7 @@ const PROBLEM_LIST_COLUMNS = [
   // 미납으로 잠긴 문제. 결제 전에는 목록에서 가리고 PDF 에서도 뺀다.
   "debt:box_range->debt",
   "gradeId:box_range->>gradeId",
+  "solution:box_range->>solution",
   "points:box_range->points",
   // 국어 지문·문제 묶음. **지문을 문제로 취급하지 않으려면** 이 값이 필요하다
   // (번호 인식·답지 붙이기에서 지문을 빼야 한다).
@@ -211,6 +213,7 @@ export default async function CategoryPage({
         boxNone: (box.none as boolean | null) ?? null,
         problemNo: (box.number as number | null) ?? null,
         gradeId: (box.gradeId as string | null) ?? null,
+        solution: (box.solution as string | null) ?? null,
         points: (box.points as number | null) ?? null,
       };
     });
@@ -244,6 +247,7 @@ export default async function CategoryPage({
         number: readProblemNumber({ number: p.problemNo }),
         debt: typeof p.debt === "number" && p.debt > 0 ? p.debt : null,
         gradeId: p.gradeId ?? null,
+        solution: p.solution ?? null,
         points: typeof p.points === "number" ? p.points : null,
         korean: readKoreanMeta(p.korean),
       };

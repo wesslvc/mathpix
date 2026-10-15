@@ -38,6 +38,8 @@ const EXPORT_COLUMNS = [
   "debt:box_range->debt",
   // 어느 채점 기록에서 온 문제인지 — 정답표에 "내가 고른 답"을 같이 찍는 데 쓴다.
   "gradeId:box_range->>gradeId",
+  // 변형문제 해설(텍스트) — PDF 해설지에 쓴다.
+  "solution:box_range->>solution",
   // 국어 지문·문제 묶음. 그림이 든 box_range 를 통째로 받지 않으려고 이 키만 뽑는다.
   "korean:box_range->korean",
 ].join(", ");
@@ -55,6 +57,7 @@ type ExportRow = {
   problemNo: number | null;
   debt: number | null;
   gradeId: string | null;
+  solution: string | null;
   korean: unknown;
 };
 
@@ -127,6 +130,7 @@ export default async function ExportPage({
         ...(p as unknown as ExportRow),
         problemNo: (box.number as number | null) ?? null,
         debt: (box.debt as number | null) ?? null,
+        solution: (box.solution as string | null) ?? null,
       };
     });
   }
@@ -217,6 +221,7 @@ export default async function ExportPage({
         // 객관식이면 "1" -> "①"로 바꿔 정답표에 찍는다. 저장은 원문 그대로이고
         // 변환은 표시할 때만 한다(유형을 바꾸면 되돌아가야 하므로).
         answer: formatAnswer(p.answer, toAnswerType(p.answer_type)),
+        solution: p.solution?.trim() ? p.solution.trim() : undefined,
         // 내가 고른 답(틀린 문제면 이게 곧 "왜 틀렸는지"다). 정답과 같은
         // 방식으로 원숫자로 바꿔 찍는다.
         studentAnswer: (() => {
