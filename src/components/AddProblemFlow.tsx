@@ -77,12 +77,13 @@ import { cn } from "@/lib/utils";
 type Stage = "idle" | "upload" | "review" | "crop" | "loading" | "result";
 
 /** 문제를 넣는 길. 한 화면에 전부 펼쳐 두면 어지러워서 탭으로 가른다. */
-type Mode = "photo" | "page" | "korean" | "csv";
+type Mode = "photo" | "page" | "korean" | "csv" | "variant";
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "photo", label: "사진", hint: "문제 사진 여러 장을 한 장씩 잘라 넣어요" },
   { id: "page", label: "지면 통째로", hint: "한 쪽에 문제가 여럿이면 문제마다 영역을 그려 한 번에" },
   { id: "korean", label: "국어 세트", hint: "지문 한 편과 그 문항들을 한 세트로" },
   { id: "csv", label: "CSV 일괄", hint: "이미 잘린 사진 여러 장 + 정답 CSV 를 한 번에(토큰 없음)" },
+  { id: "variant", label: "변형문제", hint: "저장된 오답을 바탕으로 비슷한 변형 문제를 만들어요" },
 ];
 const MODE_KEY = "reprint.addMode";
 
@@ -1016,6 +1017,12 @@ export default function AddProblemFlow({
               {/* 이미 깔끔하게 잘려 있는 사진 여러 장 + 정답 CSV(학원가 "연계교재
                   선별" 자료가 흔히 이 모양)를 한 번에 매칭해서 올린다. */}
               <BulkMappedImportPanel categoryId={categoryId} embedded />
+            </div>
+            <div hidden={mode !== "variant"}>
+              {/* 변형문제 생성 — 탭만 먼저 만들어 둔 자리. 기능은 아직 없다. */}
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                변형문제 생성 기능은 준비 중이에요.
+              </div>
             </div>
           </div>
         </section>
