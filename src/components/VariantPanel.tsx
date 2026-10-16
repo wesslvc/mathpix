@@ -230,6 +230,28 @@ export default function VariantPanel() {
         if (e) throw e;
         for (const l of (data as { problem_id: string; unit: string }[]) ?? []) labels.set(l.problem_id, l.unit);
       }
+      // 내가 단원 묶음(유형별)으로 범주화해 둔 것도 단원으로 친다 — luna 가 읽은 표지는 문제마다 표현이 달라("별의 광도"…)
+      // 키워드가 다 안 걸린다. 묶음 복사본은 원본과 같은 image_path 를 가리키므로 그걸로 이어 묶음 이름을 붙인다.
+      const bundles = cats.filter((c) => c.hide_home);
+      const bundleByPath = new Map<string, string[]>();
+      for (let i = 0; i < bundles.length; i += 10) {
+        const part = bundles.slice(i, i + 10);
+        const { data } = await supabase
+          .from("problems")
+          .select("category_id,image_path")
+          .in("category_id", part.map((b) => b.id));
+        for (const p of (data as { category_id: string; image_path: string }[]) ?? []) {
+          const name = part.find((b) => b.id === p.category_id)?.source;
+          if (!name || !p.image_path) continue;
+          const arr = bundleByPath.get(p.image_path) ?? [];
+          if (!arr.includes(name)) arr.push(name);
+          bundleByPath.set(p.image_path, arr);
+        }
+      }
+      for (const r of rows) {
+        const names = bundleByPath.get(r.image_path);
+        if (names?.length) labels.set(r.id, [labels.get(r.id), ...names].filter(Boolean).join(" · "));
+      }
       const order = new Map(catIds.map((id, i) => [id, i]));
       rows.sort((a, b) => (order.get(a.catId) ?? 0) - (order.get(b.catId) ?? 0) || (a.no ?? 1e9) - (b.no ?? 1e9));
       setUnitRows(rows.map((r) => ({ ...r, unit: labels.get(r.id) ?? null })));
