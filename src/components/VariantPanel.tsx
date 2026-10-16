@@ -143,9 +143,17 @@ export default function VariantPanel() {
     })();
   }, [catId, supabase]);
 
-  const shownCats = cats.filter((c) => !c.is_variant).filter((c) => (folderId === "" ? true : folderId === "_none" ? !c.folder_id : c.folder_id === folderId));
+  const [catQ, setCatQ] = useState("");
+  const [bundleQ, setBundleQ] = useState("");
+  const normQ = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+  const hit = (name: string | null | undefined, q: string) => !q.trim() || normQ(name ?? "").includes(normQ(q));
+  const shownCats = cats
+    .filter((c) => (folderId === "_variant" ? c.is_variant : !c.is_variant))
+    .filter((c) => (folderId === "" || folderId === "_variant" ? true : folderId === "_none" ? !c.folder_id : c.folder_id === folderId))
+    .filter((c) => hit(c.source, catQ) || c.id === catId);
   const catName = (id?: string) => cats.find((c) => c.id === id)?.source ?? "실모";
   const variantFolders = cats.filter((c) => c.is_variant);
+  const saveChoices = variantFolders.filter((c) => hit(c.source, bundleQ) || c.id === saveTarget);
 
   function itemOf(p: Prob): Item {
     return {
@@ -638,6 +646,7 @@ export default function VariantPanel() {
             >
               <option value="">전체</option>
               <option value="_none">폴더 없음</option>
+              <option value="_variant">변형 묶음 (단원별 등)</option>
               {folders.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.name}
@@ -646,7 +655,13 @@ export default function VariantPanel() {
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs text-slate-500">
-            실모
+            실모 (몇 글자만 치면 걸러져요)
+            <input
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-ink"
+              value={catQ}
+              onChange={(e) => setCatQ(e.target.value)}
+              placeholder="예: 허블, 서바 14, 이신혁"
+            />
             <select
               className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-ink"
               value={catId}
@@ -788,9 +803,15 @@ export default function VariantPanel() {
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">sol 설계 medium · 그림 auto (고정)</span>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           저장할 묶음
+          <input
+            className="w-28 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+            value={bundleQ}
+            onChange={(e) => setBundleQ(e.target.value)}
+            placeholder="묶음 검색"
+          />
           <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={saveTarget} onChange={(e) => setSaveTarget(e.target.value)}>
             <option value="">+ 새 묶음 만들기</option>
-            {variantFolders.map((c) => (
+            {saveChoices.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.source}
               </option>
