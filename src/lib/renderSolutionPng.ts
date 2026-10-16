@@ -16,7 +16,7 @@ const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt
 // 안 나온다. 첫 카드에서 한 번 만들어 다음 해설에 그대로 쓴다.
 let fontCssPromise: Promise<string> | null = null;
 
-export async function renderSolutionPng(opts: { heading: string; text: string; title?: string }): Promise<Uint8Array> {
+export async function renderSolutionPng(opts: { heading: string; text: string; title?: string; no?: string; source?: string; answer?: string }): Promise<Uint8Array> {
   const host = document.createElement("div");
   host.style.cssText = "position:fixed;left:-100000px;top:0;z-index:-1;pointer-events:none";
   const card = document.createElement("div");
@@ -25,11 +25,20 @@ export async function renderSolutionPng(opts: { heading: string; text: string; t
   card.style.padding = "2px 0 6px";
   card.style.fontSize = `${SOLUTION_FONT_PX}px`;
   card.style.lineHeight = "1.6";
-  const body = renderMathTextWithInfo(opts.text).html;
+  // 머리: 문제 번호를 크게(왼쪽 네모 딱지), 정답은 오른쪽에, 출처는 작고 옅게 번호 아래에. 번호를 못 가르면 예전 한 줄 머리.
+  const head =
+    opts.no
+      ? `<div style="display:flex;align-items:center;gap:8px;margin:${opts.title ? "0" : "4px"} 0 6px;padding-top:6px;border-top:1.5px solid #222">` +
+        `<span style="font-size:2.1em;font-weight:800;line-height:1;letter-spacing:-0.02em">${esc(opts.no)}</span>` +
+        `<span style="display:flex;flex-direction:column;gap:1px;min-width:0;flex:1">` +
+        (opts.source ? `<span style="font-size:0.72em;color:#777;line-height:1.2;word-break:keep-all">${esc(opts.source)}</span>` : "") +
+        `<span style="font-size:0.85em;font-weight:700;line-height:1.2">${opts.answer?.trim() ? `정답 ${esc(opts.answer.trim())}` : "&nbsp;"}</span>` +
+        `</span></div>`
+      : `<p style="font-weight:700;margin:0 0 3px">${esc(opts.heading)}</p>`;
   card.innerHTML =
-    (opts.title ? `<p style="text-align:center;font-weight:700;font-size:1.25em;margin:0 0 8px">${esc(opts.title)}</p>` : "") +
-    `<p style="font-weight:700;margin:0 0 3px">${esc(opts.heading)}</p>` +
-    body;
+    (opts.title ? `<p style="text-align:center;font-weight:700;font-size:1.25em;margin:0 0 10px">${esc(opts.title)}</p>` : "") +
+    head +
+    renderMathTextWithInfo(opts.text).html;
   host.appendChild(card);
   document.body.appendChild(host);
   try {

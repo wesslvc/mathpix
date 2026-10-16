@@ -332,6 +332,9 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
               png = await Promise.race([
                 renderSolutionPng({
                   heading: `${multi}${label}${answer?.trim() ? `  ·  정답 ${answer.trim()}` : ""}`,
+                  no: (/\d+/.exec(label) ?? [])[0],
+                  source: source?.trim() || undefined,
+                  answer: answer ?? undefined,
                   text,
                   title: k === 0 ? "해  설" : undefined,
                 }),

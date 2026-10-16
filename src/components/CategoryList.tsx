@@ -1,5 +1,6 @@
 "use client";
 
+import { VARIANT_FOLDER_ID } from "@/lib/variantFolder";
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -294,7 +295,7 @@ export default function CategoryList({
                 className="rounded px-2 py-1.5 text-sm text-ink"
               >
                 <option value={NO_FOLDER}>폴더 없음</option>
-                {folders.map((f) => (
+                {folders.filter((f) => f.id !== VARIANT_FOLDER_ID).map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.name}
                   </option>
@@ -450,6 +451,7 @@ export default function CategoryList({
                 </h2>
                 {/* 폴더 이름 바꾸기·삭제도 실모 줄과 같은 `⋯` 로 통일한다 —
                     화면마다 다른 모양이면 어디에 뭐가 있는지 외워야 한다. */}
+                {currentFolder.id !== VARIANT_FOLDER_ID && (
                 <details className="relative shrink-0">
                   <summary
                     className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 [&::-webkit-details-marker]:hidden"
@@ -478,6 +480,7 @@ export default function CategoryList({
                     </button>
                   </div>
                 </details>
+                )}
               </>
             )}
           </div>
