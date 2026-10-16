@@ -107,7 +107,18 @@ export default function VariantPanel() {
   const [newFolder, setNewFolder] = useState("");
   const [tab, setTab] = useState<"make" | "library">("make");
   const [libId, setLibId] = useState("");
-  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null }[]>([]);
+  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null }[]>([]);
+  const [libFix, setLibFix] = useState<Record<string, "busy" | "done" | string>>({});
+  async function fixLibRow(id: string) {
+    setLibFix((m) => ({ ...m, [id]: "busy" }));
+    try {
+      const out = await runAiTask<{ imagePath: string }>("variantFix", { label: "변형 수정 (저장된 지적)", params: { problemId: id } });
+      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: out.result.imagePath, review: null } : x)));
+      setLibFix((m) => ({ ...m, [id]: "done" }));
+    } catch (err) {
+      setLibFix((m) => ({ ...m, [id]: err instanceof Error ? err.message : "수정에 실패했어요." }));
+    }
+  }
   const [runs, setRuns] = useState<Run[]>([]);
   // 제작 검수 지적을 사용자가 확인·손봐서 고치는 칸(런마다). 다시 만들지 않고 이미 만든 그림만 부분 수정한다.
   const [fixDraft, setFixDraft] = useState<Record<string, string>>({});
@@ -471,7 +482,7 @@ export default function VariantPanel() {
     void (async () => {
       const { data } = await supabase
         .from("problems")
-        .select("id,image_path,answer,no:box_range->number,solution:box_range->>solution")
+        .select("id,image_path,answer,no:box_range->number,solution:box_range->>solution,review:box_range->variantReview")
         .eq("category_id", libId)
         .order("sort_order", { ascending: true });
       setLibRows((data as unknown as typeof libRows) ?? []);
@@ -538,6 +549,17 @@ export default function VariantPanel() {
                 <button className="underline text-red-600" onClick={() => void deleteFolder(libId)}>
                   폴더 지우기
                 </button>
+                {libRows.some((x) => x.review?.fixSuggestion) && (
+                  <button
+                    className="rounded border border-amber-400 bg-amber-50 px-2 py-0.5 font-medium text-amber-800"
+                    onClick={() => {
+                      if (!window.confirm(`지적된 ${libRows.filter((x) => x.review?.fixSuggestion).length}개를 저장된 지시대로 한꺼번에 고칠까요? (문제당 그림 1번)`)) return;
+                      libRows.filter((x) => x.review?.fixSuggestion && libFix[x.id] !== "busy").forEach((x) => void fixLibRow(x.id));
+                    }}
+                  >
+                    지적된 {libRows.filter((x) => x.review?.fixSuggestion).length}개 모두 수정
+                  </button>
+                )}
                 <a className="underline" href={`/export?ids=${libId}`}>
                   PDF 내보내기 (해설 포함)
                 </a>
@@ -558,6 +580,30 @@ export default function VariantPanel() {
                         지우기
                       </button>
                     </div>
+                    {r.review?.issues?.length ? (
+                      <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+                        <b>검수 지적 {r.review.issues.length}건</b>
+                        <ul className="list-disc pl-4">
+                          {r.review.issues.map((i, n) => (
+                            <li key={n}>
+                              [{i.kind}] {i.where}: {i.problem}
+                            </li>
+                          ))}
+                        </ul>
+                        {r.review.fixSuggestion && (
+                          <button
+                            className="mt-1 rounded bg-amber-600 px-2 py-0.5 text-white disabled:opacity-50"
+                            disabled={libFix[r.id] === "busy"}
+                            onClick={() => void fixLibRow(r.id)}
+                          >
+                            {libFix[r.id] === "busy" ? "수정 중…" : "지적대로 수정"}
+                          </button>
+                        )}
+                        {libFix[r.id] && libFix[r.id] !== "busy" && libFix[r.id] !== "done" && <p className="text-red-600">{libFix[r.id]}</p>}
+                      </div>
+                    ) : libFix[r.id] === "done" ? (
+                      <p className="text-xs text-emerald-700">수정했어요</p>
+                    ) : null}
                     {r.solution && (
                       <details className="text-xs text-slate-600">
                         <summary className="cursor-pointer">해설</summary>

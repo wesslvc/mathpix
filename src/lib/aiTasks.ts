@@ -928,6 +928,16 @@ export const TASKS: Record<TaskKind, TaskDef> = {
             ]),
             ...(plan.solution ? { solution: plan.solution } : {}),
             ...(variantOf ? { variantOf } : {}),
+            // 검수에서 남은 지적을 저장해 둔다 — 모아보기에서 지적된 것만 모아 고칠 수 있다.
+            ...(review && review.issues.length
+              ? {
+                  variantReview: {
+                    fixSuggestion: review.fixSuggestion ?? "",
+                    issues: review.issues.slice(0, 8).map((i) => ({ kind: i.kind, where: String(i.where).slice(0, 160), problem: String(i.problem).slice(0, 300) })),
+                    at: new Date().toISOString(),
+                  },
+                }
+              : {}),
           },
         })
         .select("id")
@@ -979,9 +989,8 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     async run(ctx) {
       const t0 = Date.now();
       const problemId = str(ctx.params.problemId, 60);
-      const instruction = str(ctx.params.instruction, 2500);
+      let instruction = str(ctx.params.instruction, 2500);
       if (!/^[0-9a-f-]{36}$/i.test(problemId)) return { ok: false, error: "문제가 정해지지 않았어요." };
-      if (!instruction.trim()) return { ok: false, error: "고칠 내용이 비어 있어요." };
       const { data: prob } = await ctx.admin
         .from("problems")
         .select("id,category_id,image_path,box_range")
@@ -989,6 +998,12 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         .eq("user_id", ctx.userId)
         .maybeSingle();
       if (!prob?.image_path) return { ok: false, error: "문제를 찾지 못했어요." };
+      if (!instruction.trim()) {
+        // 지시를 안 주면 저장해 둔 검수 지적을 쓴다.
+        const saved = (prob.box_range as { variantReview?: { fixSuggestion?: string } } | null)?.variantReview?.fixSuggestion;
+        instruction = typeof saved === "string" ? saved.slice(0, 2500) : "";
+      }
+      if (!instruction.trim()) return { ok: false, error: "고칠 내용이 비어 있어요." };
       const base = await loadAsDataUrl(ctx.admin, prob.image_path as string);
       if (!base) return { ok: false, error: "문제 그림을 읽지 못했어요." };
       const gen = await runFigureGeneration({
@@ -1032,7 +1047,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         : figures;
       const { error: upErr } = await ctx.admin
         .from("problems")
-        .update({ image_path: path, box_range: { ...br, figures: nextFigures } })
+        .update({ image_path: path, box_range: { ...br, figures: nextFigures, variantReview: undefined } })
         .eq("id", problemId)
         .eq("user_id", ctx.userId);
       if (upErr) {
