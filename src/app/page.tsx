@@ -57,7 +57,7 @@ export default async function DashboardPage({
       .from("categories")
       .select("*")
       .order("created_at", { ascending: false })
-      .returns<(Category & { is_variant?: boolean })[]>(),
+      .returns<(Category & { is_variant?: boolean; hide_home?: boolean })[]>(),
     supabase
       .from("folders")
       .select("*")
@@ -79,7 +79,7 @@ export default async function DashboardPage({
   // 묶음(`is_variant`)은 가짜 폴더 하나("변형문제")에 모아 보여 준다 — 그러면 폴더 안에서
   // 열기·검색·선택해서 PDF 내보내기가 실모와 똑같이 된다. 실제 폴더 행이 아니라서
   // 이름 바꾸기·삭제·옮기기는 막는다(CategoryList 의 VARIANT_FOLDER_ID).
-  const categories = (allCategories ?? []).map((c) =>
+  const categories = (allCategories ?? []).filter((c) => !c.hide_home).map((c) =>
     c.is_variant ? { ...c, folder_id: VARIANT_FOLDER_ID } : c,
   );
   const variantCount = categories.filter((c) => c.folder_id === VARIANT_FOLDER_ID).length;
@@ -90,6 +90,7 @@ export default async function DashboardPage({
       : []),
   ];
 
+  // `hide_home` = 원본을 단원별로 범주화해 둔 묶음(지구과학 단원 15개 등) — 진짜 변형이 아니라 홈에서 뺀다(변형문제 탭에서만 쓴다).
   // 시행일(없으면 만든 날) 최신순 — 추가한 날이 아니라 실제 응시일 기준이다(6모는 맨 아래로).
   const dayOf = (c: Category) => (c.exam_date ?? c.created_at).slice(0, 10);
   categories.sort((a, b) => {
