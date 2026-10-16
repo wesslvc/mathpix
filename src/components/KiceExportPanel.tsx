@@ -163,9 +163,9 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
   const multiSource = new Set(items.map((it) => (it.source ?? "").trim()).filter(Boolean)).size >= 2;
   const [renumber, setRenumber] = useState(true);
   const hasOriginal = items.some((it) => it.original);
-  // 원본을 끼운 묶음은 번호를 새로 매기지 않는다(원본이 번호를 먹고 변형과 어긋난다).
+  // 원본을 끼운 묶음에서도 변형만 1번부터 새로 매긴다(원본은 "[원본] N번" 그대로).
   const canRenumber = multiSource || variantSet;
-  const doRenumber = canRenumber && renumber && !hasOriginal;
+  const doRenumber = canRenumber && renumber;
 
   const subjects = KICE_SUBJECTS[area];
 
@@ -230,7 +230,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
       const { sets, loose } = groupKoreanSets(items, (it) => it.korean ?? null);
       order = [...sets.flatMap((set) => set.questions), ...loose].map((q) => index.get(q.id)!);
     } else {
-      order = items.map((_, i) => i).filter((i) => items[i].korean?.role !== "passage");
+      order = items.map((_, i) => i).filter((i) => items[i].korean?.role !== "passage" && !items[i].original);
     }
     const covers = new Map<number, NumberCover>();
     const newNo = new Map<number, number>();
@@ -377,10 +377,14 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
           ? []
           : renum
             ? // 새 번호 차례로 한 표에 — 출처별로 가르지 않고(번호가 이제 안 겹친다) 내가 고른 답도 뺀다.
-              renum.order.map((i) => ({
-                label: `${renum.newNo.get(i)}번`,
-                answer: items[i].answer,
-              }))
+              // 원본(함께 내보내기)은 번호를 새로 안 매기고 "N번(원본)" 그대로, 나머지는 새 번호.
+              items.flatMap((it, i) =>
+                it.original
+                  ? [{ label: it.answerLabel, answer: it.answer }]
+                  : renum.newNo.has(i)
+                    ? [{ label: `${renum.newNo.get(i)}번`, answer: it.answer }]
+                    : [],
+              )
             : items.map((item) => ({
               label: item.answerLabel,
               answer: item.answer,
