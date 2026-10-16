@@ -326,6 +326,7 @@ export default function VariantPanel() {
       if (!uid) throw new Error("로그인이 필요해요.");
       const targetId = await ensureTarget(uid);
       // 원본 준비(줄이기)는 4개씩, 서버에 넣는 건 곧바로 — 이후는 서버 대기열이 돌린다(창을 닫아도 계속).
+      const warmRef: { current: Promise<unknown> | null } = { current: null };
       const queue = [...items];
       await Promise.all(
         Array.from({ length: Math.min(4, queue.length) }, async () => {
@@ -351,7 +352,14 @@ export default function VariantPanel() {
                 try {
                   // 같은 원본의 두 번째 변형부터는 잠깐 늦게 낸다 — 첫 요청이 지시문+원본 그림을 읽어 두어야
                   // 뒤 요청이 OpenAI 프롬프트 캐시(입력 단가 대폭 할인)에 맞는다. 동시에 내면 전부 캐시 미스다.
-                  if (k > 1) await new Promise((r) => setTimeout(r, 25_000));
+                  // 이번 실행에서 맨 처음 나가는 요청 하나만 먼저 보내고 나머지는 25초 뒤에 낸다 — 지시문(약 2천 토큰)은
+                  // 원본이 달라도 같아서, 처음 요청이 읽어 두면 다른 원본·다른 변형도 그 앞부분이 캐시에 맞는다.
+                  if (!warmRef.current) {
+                    warmRef.current = new Promise((r) => setTimeout(r, 25_000));
+                  } else {
+                    await warmRef.current;
+                    if (k > 1) await new Promise((r) => setTimeout(r, 2_000 * (k - 1)));
+                  }
                   const out = await runAiTask<VariantResult>("variant", {
                     label: `변형 · ${item.label}${copies > 1 ? ` (${k}/${copies})` : ""}`,
                     images: [original],
