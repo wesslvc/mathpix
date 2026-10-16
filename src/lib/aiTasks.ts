@@ -87,6 +87,7 @@ export type TaskKind =
   | "typeset"
   | "chat"
   | "variant"
+  | "variantFix"
   | "unitLabel";
 
 export const TASK_KINDS: readonly TaskKind[] = [
@@ -103,6 +104,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
   "typeset",
   "chat",
   "variant",
+  "variantFix",
   "unitLabel",
 ];
 
@@ -778,7 +780,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       }
       // **제작 검수**: 기획(설계)대로 나왔는지 sol 이 원본과 견준다. 고칠 수 있는 결함이 있고 시간이 남으면 그 곳만 한 번 고친다
       // (다시 검수는 안 한다 — 원가). 검수가 실패하면 그림은 그대로 저장하고 "검수 못 함"으로 알린다.
-      let review: (VariantReview & { fixed: boolean; skipped?: string }) | null = null;
+      let review: (VariantReview & { fixed: boolean; skipped?: string; fixSuggestion?: string; finalChecked?: boolean }) | null = null;
       {
         const rLeft = ctx.deadlineMs - (Date.now() - t0);
         if (rLeft < 50_000) {
@@ -843,8 +845,30 @@ export const TASKS: Record<TaskKind, TaskDef> = {
                 outUrl = fix.dataUrl;
               }
               review.fixed = true;
+              // **최종 검수**: 고친 그림을 한 번 더 견줘 남은 차이를 구한다. 그래도 계획과 다른 곳은 화면에서 사용자가 확인·수정한다.
+              const lLeft = ctx.deadlineMs - (Date.now() - t0);
+              if (lLeft >= 40_000) {
+                const rv2 = await askSol(
+                  VARIANT_REVIEW_PROMPT,
+                  [ctx.images[0], outUrl],
+                  { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(90_000, lLeft - 10_000), tag: ctx.tag },
+                  "변형 최종 검수",
+                  { effort: "medium", cacheKey: "reprint-variant-review", tail: `\n\nPLAN\n${planJson}` },
+                );
+                spent += rv2.krw;
+                if (rv2.krw > 0 && !ctx.byok) {
+                  await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "sol 변형 최종 검수", krw: rv2.krw, tokens: solTokens(rv2.usage) });
+                }
+                try {
+                  if (rv2.text === null) throw new Error(rv2.fail || "검수 실패");
+                  review = { ...parseVariantReview(rv2.text), fixed: true, finalChecked: true };
+                } catch {
+                  /* 최종 검수를 못 했으면 첫 검수 결과를 그대로 둔다 */
+                }
+              }
             }
           }
+          review.fixSuggestion = review.issues.length ? reviewFixInstruction(review) : "";
         }
       }
       const parts = splitDataUrl(outUrl);
@@ -919,8 +943,8 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         ok: true,
         result: {
           imagePath: path,
-          problemId: row.id,
           categoryId,
+          problemId: row.id,
           kind: plan.kind,
           summary: plan.summary,
           changes: plan.changes.slice(0, 12),
@@ -940,6 +964,90 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         note: `${plan.kind || "변형"} · 정답 ${plan.newAnswer || "?"}${kept}${
           review ? (review.skipped ? ` · ${review.skipped}` : review.ok ? " · 검수 통과" : ` · 검수 ${review.issues.length}건${review.fixed ? " 고침" : ""}`) : ""
         }`,
+      };
+    },
+  },
+
+  // **변형문제 검수 수정**: 이미 만든 변형 그림을 다시 만들지 않고, 사용자가 확인한 지시대로 그 곳만 고친다(수정하기와 같은 부분 편집 + 합성).
+  variantFix: {
+    deposit: () => 0,
+    flat: true,
+    needsOpenAI: true,
+    unlimitedOnly: true,
+    images: { min: 0, max: 0 },
+    name: "변형문제 수정",
+    async run(ctx) {
+      const t0 = Date.now();
+      const problemId = str(ctx.params.problemId, 60);
+      const instruction = str(ctx.params.instruction, 2500);
+      if (!/^[0-9a-f-]{36}$/i.test(problemId)) return { ok: false, error: "문제가 정해지지 않았어요." };
+      if (!instruction.trim()) return { ok: false, error: "고칠 내용이 비어 있어요." };
+      const { data: prob } = await ctx.admin
+        .from("problems")
+        .select("id,category_id,image_path,box_range")
+        .eq("id", problemId)
+        .eq("user_id", ctx.userId)
+        .maybeSingle();
+      if (!prob?.image_path) return { ok: false, error: "문제를 찾지 못했어요." };
+      const base = await loadAsDataUrl(ctx.admin, prob.image_path as string);
+      if (!base) return { ok: false, error: "문제 그림을 읽지 못했어요." };
+      const gen = await runFigureGeneration({
+        image: base,
+        mode: "problem",
+        korean: false,
+        patchNote: instruction,
+        patchStrong: true,
+        modelIds: figureImageModelIds(),
+        byokApiKey: ctx.byokApiKey,
+        deadlineMs: ctx.deadlineMs - (Date.now() - t0) - 10_000,
+        tag: ctx.tag,
+        quality: "medium",
+      });
+      if (!gen.ok) return { ok: false, error: gen.error };
+      let spent = 0;
+      if (gen.usage) {
+        spent = gen.usage.estKrw;
+        if (!ctx.byok) {
+          await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "그림 변형 검수 수정", krw: gen.usage.estKrw, usd: gen.usage.estUsd, tokens: imageTokens(gen.usage) });
+        }
+      }
+      let outUrl = gen.dataUrl;
+      try {
+        const b = splitDataUrl(base);
+        const e = splitDataUrl(gen.dataUrl);
+        const comp = b && e ? await compositePatch(b.bytes, e.bytes) : null;
+        if (comp) outUrl = `data:${comp.mime};base64,${comp.bytes.toString("base64")}`;
+      } catch {
+        /* 합성 실패 — 편집 결과를 그대로 쓴다 */
+      }
+      const parts = splitDataUrl(outUrl);
+      if (!parts) return { ok: false, error: "고친 그림을 읽지 못했어요.", estKrw: spent || undefined };
+      const ext = parts.mime.includes("jpeg") ? "jpg" : "png";
+      const path = `${ctx.userId}/${prob.category_id}/${crypto.randomUUID()}.${ext}`;
+      if (!(await storeBytes(ctx.admin, path, parts.bytes, parts.mime))) return { ok: false, error: "그림을 저장하지 못했어요.", estKrw: spent || undefined };
+      const br = ((prob.box_range ?? {}) as Record<string, unknown>) || {};
+      const figures = Array.isArray(br.figures) ? (br.figures as Record<string, unknown>[]) : [];
+      const nextFigures = figures.length
+        ? figures.map((f, i) => (i === 0 ? { ...f, markup: `<img src="${cardUrl(path)}" alt="" />` } : f))
+        : figures;
+      const { error: upErr } = await ctx.admin
+        .from("problems")
+        .update({ image_path: path, box_range: { ...br, figures: nextFigures } })
+        .eq("id", problemId)
+        .eq("user_id", ctx.userId);
+      if (upErr) {
+        await removeStored(ctx.admin, [path]);
+        return { ok: false, error: `저장하지 못했어요: ${upErr.message}`, estKrw: spent || undefined };
+      }
+      // 옛 그림은 다른 문제가 같이 쓰지 않을 때만 지운다.
+      const { count } = await ctx.admin.from("problems").select("id", { count: "exact", head: true }).eq("image_path", prob.image_path as string);
+      if (!count) await removeStored(ctx.admin, [prob.image_path as string]);
+      return {
+        ok: true,
+        result: { imagePath: path, problemId, ...(ctx.unlimited || ctx.byok ? { estKrw: Math.round(spent * 10) / 10 } : {}) },
+        estKrw: spent > 0 ? spent : undefined,
+        model: gen.modelId,
+        note: "검수 지적대로 고쳤어요",
       };
     },
   },

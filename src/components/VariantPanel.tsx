@@ -35,6 +35,7 @@ type Item = {
 };
 type VariantResult = {
   imagePath: string;
+  problemId?: string;
   kind: string;
   summary: string;
   changes: { from: string; to: string; why: string }[];
@@ -52,6 +53,8 @@ type VariantResult = {
     issues: { kind: string; where: string; problem: string; fix: string }[];
     fixed: boolean;
     skipped?: string;
+    fixSuggestion?: string;
+    finalChecked?: boolean;
   } | null;
   estKrw?: number;
 };
@@ -106,6 +109,24 @@ export default function VariantPanel() {
   const [libId, setLibId] = useState("");
   const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null }[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
+  // 제작 검수 지적을 사용자가 확인·손봐서 고치는 칸(런마다). 다시 만들지 않고 이미 만든 그림만 부분 수정한다.
+  const [fixDraft, setFixDraft] = useState<Record<string, string>>({});
+  const [fixState, setFixState] = useState<Record<string, "busy" | "done" | string>>({});
+  async function applyFix(r: Run, instruction: string) {
+    const pid = r.result?.problemId;
+    if (!pid || !instruction.trim()) return;
+    setFixState((m) => ({ ...m, [r.key]: "busy" }));
+    try {
+      const out = await runAiTask<{ imagePath: string }>("variantFix", {
+        label: `변형 수정 · ${r.label}`,
+        params: { problemId: pid, instruction },
+      });
+      setRuns((rs) => rs.map((x) => (x.key === r.key && x.result ? { ...x, result: { ...x.result, imagePath: out.result.imagePath } } : x)));
+      setFixState((m) => ({ ...m, [r.key]: "done" }));
+    } catch (err) {
+      setFixState((m) => ({ ...m, [r.key]: err instanceof Error ? err.message : "수정에 실패했어요." }));
+    }
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -933,7 +954,7 @@ export default function VariantPanel() {
                 ? r.result.review.skipped
                 : r.result.review.ok
                   ? `기획대로 나왔어요(sol 이 푼 정답 ${r.result.review.solvedAnswer || "?"})`
-                  : `${r.result.review.issues.length}건 지적${r.result.review.fixed ? " — 고칠 수 있는 곳은 한 번 고쳤어요(다시 검수는 안 함)" : ""}${
+                  : `${r.result.review.issues.length}건 지적${r.result.review.fixed ? (r.result.review.finalChecked ? " — 한 번 고친 뒤 최종 검수에서도 남은 것이에요" : " — 한 번 고쳤어요(최종 검수는 못 함)") : ""} — 아래 '계획과 다른 곳 수정하기'에서 확인하고 고칠 수 있어요${
                       r.result.review.answerMatches ? "" : ` · 정답 불일치(기획 ${r.result.newAnswer} / sol 이 푼 값 ${r.result.review.solvedAnswer})`
                     }${r.result.review.trapsKept ? "" : " · 함정 요소가 빠졌을 수 있어요"}${r.result.review.settingsOk ? "" : " · 난이도/새로움이 설정과 다를 수 있어요"}`}
               {r.result.review.issues.length > 0 && (
@@ -947,6 +968,33 @@ export default function VariantPanel() {
                 </ul>
               )}
             </div>
+          )}
+          {r.result?.problemId && (
+            <details className="rounded-lg border border-slate-200 p-3 text-xs" open={!!r.result.review && r.result.review.issues.length > 0}>
+              <summary className="cursor-pointer font-semibold text-slate-700">계획과 다른 곳 수정하기 (다시 만들지 않고 이 그림만 고쳐요)</summary>
+              <p className="mt-2 text-slate-500">
+                최종 검수에서 아직 남은 고칠 곳이 아래에 미리 적혀 있어요. 고치거나 직접 적고 [이대로 수정]을 눌러야 시작해요(그림 한 번 비용).
+              </p>
+              <textarea
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-ink"
+                rows={4}
+                value={fixDraft[r.key] ?? r.result.review?.fixSuggestion?.replace(/\nkeep everything else[\s\S]*$/, "") ?? ""}
+                onChange={(e) => setFixDraft((m) => ({ ...m, [r.key]: e.target.value }))}
+                placeholder="예: 3번 선지를 ③ 12 로, 그래프의 점 P 를 직선 위로"
+              />
+              <div className="mt-2 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={fixState[r.key] === "busy" || !(fixDraft[r.key] ?? r.result.review?.fixSuggestion ?? "").trim()}
+                  onClick={() => void applyFix(r, fixDraft[r.key] ?? r.result?.review?.fixSuggestion ?? "")}
+                >
+                  {fixState[r.key] === "busy" ? "고치는 중…" : "이대로 수정"}
+                </Button>
+                {fixState[r.key] === "done" && <span className="text-emerald-700">고쳤어요 — 위 변형 그림이 바뀌었어요.</span>}
+                {fixState[r.key] && fixState[r.key] !== "busy" && fixState[r.key] !== "done" && <span className="text-red-600">{fixState[r.key]}</span>}
+              </div>
+            </details>
           )}
           {r.result && (
             <details className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">

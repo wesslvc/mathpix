@@ -29,6 +29,7 @@ export type AiTaskKind =
   | "typeset"
   | "chat"
   | "variant"
+  | "variantFix"
   | "unitLabel";
 
 export class AiTaskError extends Error {
