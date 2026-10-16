@@ -345,6 +345,8 @@ export default function VariantPanel() {
                       copy: k,
                       categoryId: targetId,
                       no: item.no ?? null,
+                      srcKey: item.key,
+                      srcLabel: item.label,
                       width: size?.width,
                       height: size?.height,
                     },

@@ -6,6 +6,7 @@ import { parseProblemNumber, readProblemNumber } from "@/lib/problemNumber";
 import { formatAnswer, toAnswerType } from "@/lib/answer";
 import { readKoreanMeta } from "@/lib/koreanSet";
 import { cardUrl } from "@/lib/cardUrl";
+import { readVariantOf } from "@/lib/variantOf";
 import { sortByProblemNumber } from "@/lib/problemOrder";
 import ExportComposer, {
   type ComposerProblem,
@@ -40,6 +41,8 @@ const EXPORT_COLUMNS = [
   "gradeId:box_range->>gradeId",
   // 변형문제 해설(텍스트) — PDF 해설지에 쓴다.
   "solution:box_range->>solution",
+  // 변형문제가 어느 원본에서 왔는지(원본 그림 경로·이름·번호·정답) — 내보낼 때 원본을 함께 싣는 데 쓴다.
+  "variantOf:box_range->variantOf",
   // 국어 지문·문제 묶음. 그림이 든 box_range 를 통째로 받지 않으려고 이 키만 뽑는다.
   "korean:box_range->korean",
 ].join(", ");
@@ -58,6 +61,7 @@ type ExportRow = {
   debt: number | null;
   gradeId: string | null;
   solution: string | null;
+  variantOf: unknown;
   korean: unknown;
 };
 
@@ -131,6 +135,7 @@ export default async function ExportPage({
         problemNo: (box.number as number | null) ?? null,
         debt: (box.debt as number | null) ?? null,
         solution: (box.solution as string | null) ?? null,
+        variantOf: box.variantOf ?? null,
       };
     });
   }
@@ -222,6 +227,7 @@ export default async function ExportPage({
         // 변환은 표시할 때만 한다(유형을 바꾸면 되돌아가야 하므로).
         answer: formatAnswer(p.answer, toAnswerType(p.answer_type)),
         solution: p.solution?.trim() ? p.solution.trim() : undefined,
+        variantOf: readVariantOf(p.variantOf),
         // 내가 고른 답(틀린 문제면 이게 곧 "왜 틀렸는지"다). 정답과 같은
         // 방식으로 원숫자로 바꿔 찍는다.
         studentAnswer: (() => {

@@ -882,6 +882,11 @@ export default function AddProblemFlow({
       throw insertError ?? new Error("저장에 실패했습니다.");
     }
 
+    // **단원을 처음부터 적어 둔다**(무제한 계정만 — luna 가 서버에서 읽는다, 토큰 0). 변형문제의 "유형별 원본 가져오기"가
+    // 나중에 모델을 다시 부르지 않고 검색한다. 실패해도 저장에는 영향이 없다(나중에 "단원 읽기"로 채울 수 있다).
+    if (tokenStatus?.unlimited) {
+      void runAiTask("unitLabel", { label: "단원 표지", params: { problemId: inserted.id } }).catch(() => {});
+    }
     router.refresh();
     savedPathRef.current.set(inserted.id as string, path);
     return inserted.id as string;

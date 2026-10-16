@@ -60,6 +60,8 @@ type ProblemListRow = {
    * 문제나 이 기능 이전에 만든 문제는 없다. */
   gradeId: string | null;
   solution: string | null;
+  /** 변형문제의 원본 연결(`box_range.variantOf`) — 수정 저장 때 그대로 옮겨 담는다. */
+  variantOf: unknown;
   /** 이 문제의 배점. 정해두지 않았으면 null. */
   points: number | null;
   korean: unknown;
@@ -84,6 +86,7 @@ const PROBLEM_LIST_COLUMNS = [
   "debt:box_range->debt",
   "gradeId:box_range->>gradeId",
   "solution:box_range->>solution",
+  "variantOf:box_range->variantOf",
   "points:box_range->points",
   // 국어 지문·문제 묶음. **지문을 문제로 취급하지 않으려면** 이 값이 필요하다
   // (번호 인식·답지 붙이기에서 지문을 빼야 한다).
@@ -214,6 +217,7 @@ export default async function CategoryPage({
         problemNo: (box.number as number | null) ?? null,
         gradeId: (box.gradeId as string | null) ?? null,
         solution: (box.solution as string | null) ?? null,
+        variantOf: box.variantOf ?? null,
         points: (box.points as number | null) ?? null,
       };
     });
@@ -248,6 +252,7 @@ export default async function CategoryPage({
         debt: typeof p.debt === "number" && p.debt > 0 ? p.debt : null,
         gradeId: p.gradeId ?? null,
         solution: p.solution ?? null,
+        variantOf: p.variantOf ?? null,
         points: typeof p.points === "number" ? p.points : null,
         korean: readKoreanMeta(p.korean),
       };

@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { KoreanMeta } from "@/lib/koreanSet";
 import type { ZipItem } from "@/lib/zipExport";
+import type { VariantOfInfo } from "@/lib/variantOf";
+import { formatAnswer } from "@/lib/answer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -50,6 +52,10 @@ export type ComposerProblem = {
   studentAnswer?: string;
   /** 변형문제 해설(텍스트). 있으면 PDF 맨 뒤에 해설지로 붙일 수 있다. */
   solution?: string;
+  /** 변형문제의 원본 정보(`src/lib/variantOf.ts`). 있으면 "원본도 같이 내보내기"로 원본을 앞에 싣는다. */
+  variantOf?: VariantOfInfo | null;
+  /** 내보내기 때 끼워 넣은 **원본 문제**(저장된 문제가 아니다). */
+  original?: boolean;
   /** 국어 지문·문제 묶음 정보. 국어 모드로 넣은 것에만 있다. */
   korean?: KoreanMeta | null;
 };
@@ -151,6 +157,60 @@ export default function ExportComposer({
   }
 
   /**
+   * **변형문제는 원본과 함께 내보낼 수 있다**(사용자 요청 — "a원본 a변형들 b원본 b변형들").
+   * 켜면 같은 원본에서 나온 변형들을 첫 변형이 있는 자리에 모으고, 그 앞에 원본(표시가 따로 붙는다)을 끼운다.
+   * 원본은 저장된 문제가 아니라 내보낼 때만 만드는 항목이다.
+   */
+  const hasVariantOf = problems.some((p) => p.variantOf);
+  const [withOriginals, setWithOriginals] = useState(false);
+  const printList = useMemo<ComposerProblem[]>(() => {
+    if (!withOriginals) return order;
+    const groups = new Map<string, ComposerProblem[]>();
+    const sequence: (string | ComposerProblem)[] = [];
+    for (const p of order) {
+      const k = p.variantOf?.key;
+      if (!k) {
+        sequence.push(p);
+      } else if (!groups.has(k)) {
+        groups.set(k, [p]);
+        sequence.push(k);
+      } else {
+        groups.get(k)!.push(p);
+      }
+    }
+    const out: ComposerProblem[] = [];
+    for (const entry of sequence) {
+      if (typeof entry !== "string") {
+        out.push(entry);
+        continue;
+      }
+      const list = groups.get(entry)!;
+      const v = list[0].variantOf as VariantOfInfo;
+      out.push({
+        id: `orig:${entry}`,
+        imageUrl: v.imageUrl,
+        source: list[0].source,
+        origNumber: null,
+        manualNumber: v.no ?? null,
+        // 원본의 정답은 sol 이 푼 값이라 객관식(1~5 한 자리)만 원숫자로 바꾼다.
+        answer: formatAnswer(v.answer, /^[1-5]$/.test(v.answer ?? "") ? "choice" : "short"),
+        original: true,
+        korean: null,
+      });
+      out.push(...list);
+    }
+    return out;
+  }, [order, withOriginals]);
+
+  /** 원본을 뺀 차례(번호를 차례로 매길 때 원본이 번호를 먹지 않게). */
+  const seqOf = useMemo(() => {
+    const m = new Map<string, number>();
+    let n = 0;
+    for (const p of printList) if (!p.original) m.set(p.id, n++);
+    return m;
+  }, [printList]);
+
+  /**
    * 문제에 찍을 번호.
    *
    * 손으로 정해 둔 값이 있으면 **무엇보다 우선**한다 — 실제 시험지 번호를
@@ -159,7 +219,8 @@ export default function ExportComposer({
    */
   function numberFor(problem: ComposerProblem, index: number): number {
     if (problem.manualNumber != null) return problem.manualNumber;
-    return multi ? index + 1 : (problem.origNumber ?? index + 1);
+    const seq = seqOf.get(problem.id) ?? index;
+    return multi ? seq + 1 : (problem.origNumber ?? seq + 1);
   }
 
   /**
@@ -173,6 +234,7 @@ export default function ExportComposer({
    * 제목에 점수를 안 붙이게 되면서 두 갈래가 같은 글자가 되어 없앴다.)
    */
   function labelFor(problem: ComposerProblem, index: number): string {
+    if (problem.original) return `[원본]${problem.manualNumber != null ? ` ${problem.manualNumber}번` : ""}`;
     const n = numberFor(problem, index);
     if (!multi) return `${n}번`;
     return `${problem.source} ${n}번`;
@@ -313,9 +375,16 @@ export default function ExportComposer({
         </label>
       )}
 
+      {hasVariantOf && (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={withOriginals} onChange={(e) => setWithOriginals(e.target.checked)} />
+          원본 문제도 같이 내보내기 (원본 → 그 변형들 순서, 원본에는 [원본] 표시)
+        </label>
+      )}
+
       <ZipExportPanel
         title={title}
-        items={order.map((problem, index): ZipItem => {
+        items={printList.map((problem, index): ZipItem => {
           // 정답표와 달리 **원래 번호**를 쓴다(손으로 정한 값 → 본문에서 뽑은 값). 둘 다 없으면 번호 없이 차례만 쓴다.
           // 틀린 답은 켜고 끄는 체크와 상관없이 CSV 에는 늘 담는다 — 파일로 받는 쪽은 숨길 이유가 없다.
           const { answer, picked } = answerParts(problem, true);
@@ -323,7 +392,8 @@ export default function ExportComposer({
             id: problem.id,
             imageUrl: problem.imageUrl,
             source: problem.source,
-            number: problem.manualNumber ?? problem.origNumber ?? (multi ? null : index + 1),
+            number: problem.original ? (problem.manualNumber ?? null) : (problem.manualNumber ?? problem.origNumber ?? (multi ? null : (seqOf.get(problem.id) ?? index) + 1)),
+            original: problem.original,
             answer,
             picked,
             passage: problem.korean?.role === "passage",
@@ -334,11 +404,12 @@ export default function ExportComposer({
 
       <KiceExportPanel
         title={title}
-        items={order.map((problem, index) => ({
+        items={printList.map((problem, index) => ({
           id: problem.id,
           imageUrl: problem.imageUrl,
           label: labelFor(problem, index),
-          answerLabel: `${numberFor(problem, index)}번`,
+          answerLabel: problem.original ? `${problem.manualNumber != null ? `${problem.manualNumber}번` : "원본"}(원본)` : `${numberFor(problem, index)}번`,
+          original: problem.original,
           // 정답과 내가 틀린 답을 **갈라서** 넘긴다 — 정답표에서 틀린 답만
           // 다른 색으로 찍기 위해서다.
           ...answerParts(problem, showPicked),

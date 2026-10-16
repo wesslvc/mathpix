@@ -18,6 +18,8 @@ export type ZipItem = {
   passage: boolean;
   /** 국어 지문 제목. */
   passageTitle?: string;
+  /** 변형문제와 함께 내보내는 **원본** 문제면 true. */
+  original?: boolean;
 };
 
 export type ZipEntry = {
@@ -77,7 +79,8 @@ export function planZip(items: ZipItem[], byFolder: boolean): ZipEntry[] {
       : item.number != null
         ? `${item.number}번`
         : "번호없음";
-    const file = `${prefix}_${body}.png`;
+    const tagged = item.original ? `원본_${body}` : body;
+    const file = `${prefix}_${tagged}.png`;
     const folder = byFolder ? folderOf.get(item.source) : null;
     return {
       path: folder ? `${folder}/${file}` : file,
@@ -100,7 +103,7 @@ export function answersCsv(entries: ZipEntry[]): string {
   const rows = entries.map(({ path, item, numberText }) => [
     path,
     item.source,
-    item.passage ? "지문" : "문제",
+    item.passage ? "지문" : item.original ? "원본" : "문제",
     numberText,
     item.passage ? "" : item.answer,
     item.passage ? "" : item.picked,

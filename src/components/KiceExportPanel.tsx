@@ -98,6 +98,8 @@ export type KiceItem = {
   imageUrl: string;
   label: string;
   answerLabel: string;
+  /** 변형문제와 함께 내보내는 원본 문제. 출처 표기 설정과 상관없이 `[원본]` 표시를 늘 찍는다. */
+  original?: boolean;
   answer: string;
   /** 내가 **잘못 쓴** 답. 틀렸을 때만 있다 — 정답표에 다른 색으로 찍는다. */
   picked?: string;
@@ -158,7 +160,9 @@ export default function KiceExportPanel({ title, items }: Props) {
    */
   const multiSource = new Set(items.map((it) => (it.source ?? "").trim()).filter(Boolean)).size >= 2;
   const [renumber, setRenumber] = useState(true);
-  const doRenumber = multiSource && renumber;
+  const hasOriginal = items.some((it) => it.original);
+  // 원본을 끼운 묶음은 번호를 새로 매기지 않는다(원본이 번호를 먹고 변형과 어긋난다).
+  const doRenumber = multiSource && renumber && !hasOriginal;
 
   const subjects = KICE_SUBJECTS[area];
 
@@ -313,7 +317,9 @@ export default function KiceExportPanel({ title, items }: Props) {
           ...(renum?.covers.has(i) ? { cover: renum.covers.get(i)! } : {}),
           // 지문에는 "N번" 표기를 붙이지 않는다 — 지문은 문제가 아니다.
           label:
-            showSource && items[i].korean?.role !== "passage"
+            items[i].original
+              ? items[i].label
+              : showSource && items[i].korean?.role !== "passage"
               ? items[i].label // 출처 + 원래 번호 — 새 번호로 바꿔도 출처 표기는 원래 번호를 지킨다
               : "",
         })),

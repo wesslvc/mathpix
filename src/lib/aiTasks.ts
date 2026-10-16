@@ -8,6 +8,7 @@
 // 과금은 그림 작업과 같은 모양이다: **넣을 때 보증금을 걸고**(세션 차감), 일꾼이 끝나면 쓴 만큼으로 맞춘다
 // (남으면 돌려주고 모자라면 서비스용 차감 함수로 더 받는다). 실패하면 전부 돌려준다.
 
+import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { recognizeImage } from "./mathpixClient";
 import {
@@ -780,6 +781,23 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         .maybeSingle();
       const no = Number(ctx.params.no);
       const { answer, type } = answerOf(plan.newAnswer);
+      // **원본 사본**: 내보낼 때 "원본 → 변형들" 순서로 싣기 위해 원본 그림을 한 번 저장해 두고(같은 원본의 변형들이 나눠 쓴다)
+      // 각 변형 행이 `box_range.variantOf` 로 가리킨다. 저장에 실패하면 변형은 그대로 두고 원본 연결만 없다.
+      let variantOf: { key: string; label: string; path: string; no?: number; answer?: string } | undefined;
+      const srcKey = str(ctx.params.srcKey, 200);
+      const srcParts = srcKey ? splitDataUrl(ctx.images[0]) : null;
+      if (srcKey && srcParts) {
+        const originPath = `${ctx.userId}/_origins/${createHash("sha1").update(srcKey).digest("hex").slice(0, 24)}.jpg`;
+        if (await storeBytes(ctx.admin, originPath, srcParts.bytes, srcParts.mime)) {
+          variantOf = {
+            key: srcKey,
+            label: str(ctx.params.srcLabel, 120),
+            path: originPath,
+            ...(Number.isFinite(no) && no > 0 ? { no } : {}),
+            ...(plan.originalAnswer ? { answer: String(plan.originalAnswer).slice(0, 40) } : {}),
+          };
+        }
+      }
       const { data: row, error: insErr } = await ctx.admin
         .from("problems")
         .insert({
@@ -804,6 +822,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
             ]),
             ...(Number.isFinite(no) && no > 0 ? { number: no } : {}),
             ...(plan.solution ? { solution: plan.solution } : {}),
+            ...(variantOf ? { variantOf } : {}),
           },
         })
         .select("id")
