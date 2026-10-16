@@ -8,6 +8,7 @@
 // 과금은 그림 작업과 같은 모양이다: **넣을 때 보증금을 걸고**(세션 차감), 일꾼이 끝나면 쓴 만큼으로 맞춘다
 // (남으면 돌려주고 모자라면 서비스용 차감 함수로 더 받는다). 실패하면 전부 돌려준다.
 
+import { cleanAnswerText } from "./variantOf";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { recognizeImage } from "./mathpixClient";
@@ -900,7 +901,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
             label: str(ctx.params.srcLabel, 120),
             path: originPath,
             ...(Number.isFinite(no) && no > 0 ? { no } : {}),
-            ...(plan.originalAnswer ? { answer: String(plan.originalAnswer).slice(0, 40) } : {}),
+            ...(plan.originalAnswer ? { answer: cleanAnswerText(String(plan.originalAnswer)) } : {}),
           };
         }
       }

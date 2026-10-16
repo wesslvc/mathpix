@@ -15,6 +15,16 @@ export type VariantOfInfo = {
   answer?: string;
 };
 
+/**
+ * 정답 칸에는 "③" · "③ ㄱ, ㄴ" · "⑤ (ㄱ, ㄷ)" 처럼 **고른 답만** 둔다. sol 이 뒤에 설명 문장을 붙여 오는 일이 있어(저장된 옛 값도 있다)
+ * 정답표의 칸을 넘쳐 다른 글자와 겹쳐 찍혔다. 선지 표지(①~⑤)로 시작하면 그 뒤 ㄱ·ㄴ·ㄷ 목록까지만 남긴다.
+ */
+export function cleanAnswerText(raw: string): string {
+  const t = raw.trim();
+  const m = /^([①-⑤])\s*(\((?:[ㄱ-ㅎ]\s*,?\s*)+\)|(?:[ㄱ-ㅎ](?:\s*,\s*[ㄱ-ㅎ])*)?)/.exec(t);
+  return m ? `${m[1]}${m[2] ? ` ${m[2].trim()}` : ""}` : t.slice(0, 40);
+}
+
 export function readVariantOf(raw: unknown): VariantOfInfo | null {
   if (!raw || typeof raw !== "object") return null;
   const v = raw as Record<string, unknown>;
@@ -25,6 +35,6 @@ export function readVariantOf(raw: unknown): VariantOfInfo | null {
     label: typeof v.label === "string" ? v.label.slice(0, 120) : "",
     imageUrl: cardUrl(v.path),
     ...(typeof v.no === "number" && v.no > 0 ? { no: v.no } : {}),
-    ...(typeof v.answer === "string" && v.answer.trim() ? { answer: v.answer.trim().slice(0, 40) } : {}),
+    ...(typeof v.answer === "string" && v.answer.trim() ? { answer: cleanAnswerText(v.answer) } : {}),
   };
 }
