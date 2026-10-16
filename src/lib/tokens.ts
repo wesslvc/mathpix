@@ -182,7 +182,8 @@ const GRADING_PRICES: Record<string, ModelPrice> = {
   "gpt-6-luna": { input: 0.1, output: 0.5 },
   "gpt-6-sol": { input: 2.0, output: 10.0 },
   // 2026-09-30 사용자 확인 — 6.1 단가는 6 과 같다. 운영 지문 인식·서식 검수 기본 모델.
-  "gpt-6.1-sol": { input: 2.0, output: 10.0 },
+  // 2026-10-16 사용자 — "6.1 sol 은 0.2 에 2.5": 캐시 입력 $0.2 · 입력 $2.5 (출력은 안 알려 줘서 그대로 $10).
+  "gpt-6.1-sol": { input: 2.5, cachedInput: 0.2, output: 10.0 },
 };
 
 function priceFor(model?: string): ModelPrice | null {

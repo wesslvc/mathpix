@@ -10,15 +10,40 @@ export const VARIANT_PROMPT = `task: you are a Korean math/science exam writer. 
  - COMPUTATION type: same calculation structure with new numbers that keep the results clean (integers/simple fractions stay so), geometry stays valid, conditions ("positive", "distinct", ranges) still hold.
  - PURE CONCEPT/RECALL type (a simple concept check, definitions, 단순 개념): do NOT merely swap numbers or reshuffle choices. write a NEW question of the same unit and similar type that tests a DIFFERENT but related part of that unit (different concept, different example/situation/data). the stem, choices and any figure are then rewritten accordingly, keeping the same format, difficulty and choice layout.
  for the first two types keep the structure, wording, conditions, question type and solution path; change what feeds the logic (numbers, data, positions on axes …).
+
+SETTINGS: after the image(s) you receive a "SETTINGS" block with two knobs. DIFFICULTY (easier / similar / harder) = how hard the variant is to solve relative to the original: easier = fewer or simpler steps, friendlier values, a weaker trap; similar = the same step count and the same difficulty; harder = one more step or a less obvious route, uglier-but-still-valid values, a sharper trap — never beyond the original's grade level, and still exactly one correct answer. NOVELTY (same / slight / new) = how far the variant may leave the original: same = keep the situation, objects, wording and figure layout and change ONLY the values/data that feed the logic; slight = also change the surface setting or data (names, objects, numbers of items, which quantity is asked) but keep the structure and the solution path; new = write a clearly different question of the same unit/type (new situation, new data, new figure) that is solved by the same kind of reasoning. difficulty and novelty are independent; for PURE CONCEPT questions "same" still means a different but closely related item of the same unit (never an unchanged copy).
+TRAP RULE (applies at EVERY difficulty and novelty setting — settings never switch it off): before designing, find what makes students get THIS question wrong: a peripheral/easy-to-forget concept or condition, a definition boundary or exception, a unit/sign/direction trap, a plausible-looking distractor, an error-prone calculation (many steps, fractions, large or awkward numbers, a subtle simplification) or a trap hidden in the figure/table/graph reading. The variant MUST reproduce each such trap in the same form — the same peripheral concept is still needed, the same kind of complicated calculation structure is still there (same number of steps and the same kind of difficulty even though the values differ), and each distractor still encodes the same kind of mistake. A variant that removes the trap is a failure. list the traps in "traps".
 (4) SOLVE your variant to get its answer; recompute ALL choices ①–⑤ so the right one equals the new answer and the distractors stay plausible (same kind of mistake each distractor encoded in the original). if the answer is a written (주관식) number, give it.
 the figure(s) too: list exactly what must change in each figure/graph/table so it matches the new numbers (labels, tick values, bar heights, point coordinates, shaded regions, table cells …) — figures are edited, never copied unchanged, unless they contain no number at all (then say so).
 do not change (COMPARISON/COMPUTATION types): the wording, the question stem, the order/layout, the circled markers (㉠ ① ⓐ), answer format, problem number.
 write "edits" as ONE self-contained instruction for an image editor that sees only the original image: a numbered list; each item = where it is, the exact original text/value → the exact new text/value; include every changed choice and every figure change; finish with one line "keep everything else exactly as in the original".
 "solution" = the 해설지 for this variant, written in Mathpix markdown (the same format this app renders): Korean prose with math in $...$ (inline) — use real LaTeX for every symbol and formula (\\sqrt{}, \\le, \\ge, \\ne, \\pi, \\angle, \\triangle, \\to, \\frac{}{}, x^{2} …). one step per paragraph (blank line between steps), the key of the reasoning first, then the computation, last paragraph "정답: …". no headings, no bold/italic markers, no tables. for COMPARISON type explain the size argument, not a computation. explain the same solution path as the original (or, for a rewritten concept question, the reasoning for the new one).
 return JSON only:
-{"summary":"한국어 1~2문장: 핵심 논리와 쓰이는 계산","keeps":["그대로 둔 것(논리·계산 유형)"],"kind":"comparison|computation|concept","changes":[{"from":"원래 값/문구","to":"새 값/문구","why":"왜 이렇게 바꿨는지(풀이 논리가 유지되는 이유)"}],"original_answer":"원본의 정답","new_answer":"변형의 정답","solution":"변형 문제의 해설(Mathpix 마크다운, 한국어 문장 + $수식$, 6~18문단)","edits":"그림 모델에 줄 편집 지시 전체"}`;
+{"summary":"한국어 1~2문장: 핵심 논리와 쓰이는 계산","keeps":["그대로 둔 것(논리·계산 유형)"],"traps":["원본이 학생을 틀리게 만드는 요소(지엽적 개념·복잡한 연산 구조·함정 선지 등)와 변형에서 어떻게 그대로 살렸는지"],"kind":"comparison|computation|concept","changes":[{"from":"원래 값/문구","to":"새 값/문구","why":"왜 이렇게 바꿨는지(풀이 논리가 유지되는 이유)"}],"original_answer":"원본의 정답","new_answer":"변형의 정답","solution":"변형 문제의 해설(Mathpix 마크다운, 한국어 문장 + $수식$, 6~18문단)","edits":"그림 모델에 줄 편집 지시 전체"}`;
+
+export type VariantLevel = "easier" | "similar" | "harder";
+export type VariantNovelty = "same" | "slight" | "new";
+export const LEVEL_LABEL: Record<VariantLevel, string> = { easier: "쉽게", similar: "비슷하게", harder: "어렵게" };
+export const NOVELTY_LABEL: Record<VariantNovelty, string> = { same: "그대로", slight: "조금 새롭게", new: "새롭게" };
+
+export function readLevel(v: unknown): VariantLevel {
+  return v === "easier" || v === "harder" ? v : "similar";
+}
+export function readNovelty(v: unknown): VariantNovelty {
+  return v === "same" || v === "new" ? v : "slight";
+}
+
+/** 매번 바뀌는 설정은 **사진 뒤**(꼬리)에 둔다 — 지시문+원본 그림이 앞에서 같아야 프롬프트 캐시에 맞는다. */
+export function settingsTail(level: VariantLevel, novelty: VariantNovelty, copy: number, copies: number): string {
+  const extra =
+    copies > 1
+      ? `\nthis is variant ${copy} of ${copies} made from the same original: make it clearly DIFFERENT from the other variants (different values / a different part of the unit), while following every rule above.`
+      : "";
+  return `\n\nSETTINGS\ndifficulty: ${level}\nnovelty: ${novelty}\n(the TRAP RULE applies regardless of these settings)${extra}`;
+}
 
 export type VariantPlan = {
+  traps: string[];
   summary: string;
   kind: string;
   keeps: string[];
@@ -47,6 +72,7 @@ export function parseVariantPlan(text: string): VariantPlan {
         .filter((c) => c.from || c.to)
     : [];
   return {
+    traps: Array.isArray(obj.traps) ? obj.traps.slice(0, 12).map((k) => str(k, 300)).filter(Boolean) : [],
     summary: str(obj.summary, 600),
     kind: str(obj.kind, 20),
     keeps: Array.isArray(obj.keeps) ? obj.keeps.slice(0, 20).map((k) => str(k, 200)).filter(Boolean) : [],
@@ -66,4 +92,58 @@ export function answerOf(raw: string): { answer: string | null; type: "choice" |
   if (circled >= 0) return { answer: String(circled + 1), type: "choice" };
   if (/^[1-5]$/.test(t)) return { answer: t, type: "choice" };
   return { answer: t, type: "short" };
+}
+
+
+/**
+ * **제작 검수**(변형을 그린 뒤): 기획(설계 JSON)대로 그림이 나왔는지 sol 이 원본과 견준다. 지시문은 고정, 원본 그림이 앞,
+ * 만든 그림과 기획은 뒤(꼬리) — 같은 원본의 변형 여럿이 지시문+원본을 캐시로 나눠 쓴다.
+ */
+export const VARIANT_REVIEW_PROMPT = `task: quality-check a generated VARIANT of a Korean exam question against its PLAN. image 1 = the ORIGINAL question. image 2 = the GENERATED variant picture. the PLAN (JSON: kind, difficulty, novelty, traps, changes, edits, new_answer) is given after the images.
+check, in this order, and be strict:
+1. EDITS: for every numbered item in plan.edits (and every entry of plan.changes) look at the exact place in image 2: was it applied exactly (right text/value, right position)? 
+2. COLLATERAL: compare image 2 with image 1 outside the edits — any other text, number, choice, marker (㉠ ① ⓐ), figure part, table cell or problem number that changed, vanished or got garbled (broken Korean strokes, invented glyphs, dropped words)? 
+3. FIGURES: do graphs/diagrams/tables show exactly the NEW values (axis ticks, points, bars, shading, labels)? a figure that still shows old values is an error.
+4. ANSWER: SOLVE the question as it appears in image 2 (choices ①–⑤ as printed). does the correct choice equal plan.new_answer? is there exactly one correct answer? write what you got in "solved_answer".
+5. TRAPS: is each trap listed in plan.traps still present in image 2 in the same form (peripheral concept still needed, same kind of complicated calculation, distractors encoding the same mistakes)? 
+6. SETTINGS: does the variant match plan.difficulty (easier/similar/harder than the original) and plan.novelty (same = only values changed; slight = surface changed, same structure; new = clearly different question of the same unit)? 
+the problem number and handwriting do not matter. an issue is a concrete defect, not a style preference.
+return JSON only: {"ok":true|false,"solved_answer":"image 2 에서 직접 푼 정답","answer_matches":true|false,"traps_kept":true|false,"settings_ok":true|false,"issues":[{"kind":"edit|collateral|figure|answer|trap|settings","where":"위치","problem":"무엇이 잘못됐는지(한국어)","fix":"그림 편집기에 줄 한 줄 수정 지시: where → exact value/text it must show (english or korean)"}]}
+"ok" is true only when issues is empty. do not invent issues.`;
+
+export type VariantReview = {
+  ok: boolean;
+  solvedAnswer: string;
+  answerMatches: boolean;
+  trapsKept: boolean;
+  settingsOk: boolean;
+  issues: { kind: string; where: string; problem: string; fix: string }[];
+};
+
+export function parseVariantReview(text: string): VariantReview {
+  const obj = parseJsonObject(text) as Record<string, unknown> | null;
+  if (!obj || typeof obj !== "object") throw new Error("검수 결과를 읽지 못했습니다.");
+  const issues = Array.isArray(obj.issues)
+    ? obj.issues
+        .slice(0, 20)
+        .map((c) => {
+          const r = (c ?? {}) as Record<string, unknown>;
+          return { kind: str(r.kind, 20), where: str(r.where, 200), problem: str(r.problem, 300), fix: str(r.fix, 400) };
+        })
+        .filter((c) => c.problem || c.fix)
+    : [];
+  return {
+    ok: issues.length === 0,
+    solvedAnswer: str(obj.solved_answer, 100),
+    answerMatches: obj.answer_matches !== false,
+    trapsKept: obj.traps_kept !== false,
+    settingsOk: obj.settings_ok !== false,
+    issues,
+  };
+}
+
+/** 검수에서 나온 문제 중 그림 편집기가 고칠 수 있는 것(글·값·그림)을 한 지시로 묶는다. */
+export function reviewFixInstruction(r: VariantReview): string {
+  const fixes = r.issues.filter((i) => i.fix && i.kind !== "trap" && i.kind !== "settings").map((i, n) => `${n + 1}. ${i.fix}`);
+  return fixes.length ? `${fixes.join("\n")}\nkeep everything else exactly as in the picture.` : "";
 }

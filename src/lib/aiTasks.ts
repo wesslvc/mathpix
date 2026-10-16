@@ -54,7 +54,18 @@ import { askSol, loadPatchImages } from "./problemLoopRun";
 import { removeStored } from "./figureRun";
 import { cropOneProblem, findProblemNumber, labelUnit, lunaUsage, OPENAI_UNIT_MODEL, placeFigures } from "./lunaQuick";
 import type { ProblemBox } from "./problemBoxes";
-import { answerOf, parseVariantPlan, VARIANT_PROMPT } from "./variantPlan";
+import {
+  answerOf,
+  parseVariantPlan,
+  parseVariantReview,
+  readLevel,
+  readNovelty,
+  reviewFixInstruction,
+  settingsTail,
+  VARIANT_PROMPT,
+  VARIANT_REVIEW_PROMPT,
+  type VariantReview,
+} from "./variantPlan";
 import { loadAsDataUrl, runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
 import { figureImageModelIds } from "./figureImageGen";
 import { cardUrl } from "./cardUrl";
@@ -700,10 +711,10 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       const { data: cat } = await ctx.admin.from("categories").select("id").eq("id", categoryId).eq("user_id", ctx.userId).maybeSingle();
       if (!cat) return { ok: false, error: "저장할 묶음을 찾지 못했어요." };
 
-      const tail =
-        copies > 1
-          ? `\n\nthis is variant ${copy} of ${copies} made from the same original: make it clearly DIFFERENT from the other variants (different values / a different part of the unit), while following every rule above.`
-          : "";
+      const level = readLevel(ctx.params.level);
+      const novelty = readNovelty(ctx.params.novelty);
+      // 바뀌는 설정은 사진 뒤(꼬리) — 지시문+원본이 앞에서 같아야 프롬프트 캐시에 맞는다.
+      const tail = settingsTail(level, novelty, copy, copies);
       const planBudget = Math.min(150_000, ctx.deadlineMs - 70_000);
       const ask = await askSol(
         VARIANT_PROMPT,
@@ -763,6 +774,75 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           }
         } catch (e) {
           console.warn(`${ctx.tag} 변형 합성 실패 — 편집 결과를 그대로 씁니다:`, e instanceof Error ? e.message : e);
+        }
+      }
+      // **제작 검수**: 기획(설계)대로 나왔는지 sol 이 원본과 견준다. 고칠 수 있는 결함이 있고 시간이 남으면 그 곳만 한 번 고친다
+      // (다시 검수는 안 한다 — 원가). 검수가 실패하면 그림은 그대로 저장하고 "검수 못 함"으로 알린다.
+      let review: (VariantReview & { fixed: boolean; skipped?: string }) | null = null;
+      {
+        const rLeft = ctx.deadlineMs - (Date.now() - t0);
+        if (rLeft < 50_000) {
+          review = { ok: false, solvedAnswer: "", answerMatches: true, trapsKept: true, settingsOk: true, issues: [], fixed: false, skipped: "시간이 모자라 검수를 건너뜀" };
+        } else {
+          const planJson = JSON.stringify({
+            kind: plan.kind,
+            difficulty: level,
+            novelty,
+            traps: plan.traps,
+            changes: plan.changes.slice(0, 30),
+            edits: plan.edits,
+            new_answer: plan.newAnswer,
+          });
+          const rv = await askSol(
+            VARIANT_REVIEW_PROMPT,
+            [ctx.images[0], outUrl],
+            { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(100_000, rLeft - 15_000), tag: ctx.tag },
+            "변형 검수",
+            { effort: "medium", cacheKey: "reprint-variant-review", tail: `\n\nPLAN\n${planJson}` },
+          );
+          spent += rv.krw;
+          if (rv.krw > 0 && !ctx.byok) {
+            await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "sol 변형 검수", krw: rv.krw, tokens: solTokens(rv.usage) });
+          }
+          try {
+            if (rv.text === null) throw new Error(rv.fail || "검수 실패");
+            review = { ...parseVariantReview(rv.text), fixed: false };
+          } catch (e) {
+            review = { ok: false, solvedAnswer: "", answerMatches: true, trapsKept: true, settingsOk: true, issues: [], fixed: false, skipped: `검수 못 함 — ${e instanceof Error ? e.message.slice(0, 80) : ""}` };
+          }
+          const fixNote = review.issues.length ? reviewFixInstruction(review) : "";
+          const fLeft = ctx.deadlineMs - (Date.now() - t0);
+          if (fixNote && fLeft >= 60_000) {
+            const fix = await runFigureGeneration({
+              image: outUrl,
+              mode: "problem",
+              korean: false,
+              patchNote: fixNote,
+              patchStrong: true,
+              modelIds: figureImageModelIds(),
+              byokApiKey: ctx.byokApiKey,
+              deadlineMs: fLeft - 10_000,
+              tag: ctx.tag,
+              quality,
+            });
+            if (fix.ok) {
+              if (fix.usage) {
+                spent += fix.usage.estKrw;
+                if (!ctx.byok) {
+                  await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "그림 변형 검수 수정", krw: fix.usage.estKrw, usd: fix.usage.estUsd, tokens: imageTokens(fix.usage) });
+                }
+              }
+              try {
+                const b2 = splitDataUrl(outUrl);
+                const e2 = splitDataUrl(fix.dataUrl);
+                const comp2 = b2 && e2 ? await compositePatch(b2.bytes, e2.bytes) : null;
+                outUrl = comp2 ? `data:${comp2.mime};base64,${comp2.bytes.toString("base64")}` : fix.dataUrl;
+              } catch {
+                outUrl = fix.dataUrl;
+              }
+              review.fixed = true;
+            }
+          }
         }
       }
       const parts = splitDataUrl(outUrl);
@@ -844,12 +924,18 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           newAnswer: plan.newAnswer,
           solution: plan.solution,
           edits: plan.edits,
+          traps: plan.traps,
+          level,
+          novelty,
+          review,
           copy,
           ...(ctx.unlimited || ctx.byok ? { estKrw: Math.round(spent * 10) / 10 } : {}),
         },
         estKrw: spent > 0 ? spent : undefined,
         model: gen.modelId,
-        note: `${plan.kind || "변형"} · 정답 ${plan.newAnswer || "?"}${kept}`,
+        note: `${plan.kind || "변형"} · 정답 ${plan.newAnswer || "?"}${kept}${
+          review ? (review.skipped ? ` · ${review.skipped}` : review.ok ? " · 검수 통과" : ` · 검수 ${review.issues.length}건${review.fixed ? " 고침" : ""}`) : ""
+        }`,
       };
     },
   },

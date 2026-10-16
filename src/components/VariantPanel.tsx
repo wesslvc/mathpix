@@ -9,6 +9,7 @@ import { runAiTask } from "@/lib/aiTask";
 import { Button } from "@/components/ui/button";
 import { cardClass } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { LEVEL_LABEL, NOVELTY_LABEL, type VariantLevel, type VariantNovelty } from "@/lib/variantPlan";
 
 /**
  * **변형문제 생성**(시험 중 — 무제한 계정 전용).
@@ -41,6 +42,17 @@ type VariantResult = {
   newAnswer: string;
   solution: string;
   edits: string;
+  traps?: string[];
+  review?: {
+    ok: boolean;
+    solvedAnswer: string;
+    answerMatches: boolean;
+    trapsKept: boolean;
+    settingsOk: boolean;
+    issues: { kind: string; where: string; problem: string; fix: string }[];
+    fixed: boolean;
+    skipped?: string;
+  } | null;
   estKrw?: number;
 };
 type Run = {
@@ -82,6 +94,8 @@ export default function VariantPanel() {
   const [unitNote, setUnitNote] = useState<string | null>(null);
   const unitCancel = useRef(false);
   const [copies, setCopies] = useState(1);
+  const [level, setLevel] = useState<VariantLevel>("similar");
+  const [novelty, setNovelty] = useState<VariantNovelty>("slight");
   /** 변형문제 창의 폴더(= is_variant 묶음). "" = 새로 만들기. */
   const [saveTarget, setSaveTarget] = useState("");
   const [newFolder, setNewFolder] = useState("");
@@ -344,6 +358,8 @@ export default function VariantPanel() {
                     params: {
                       effort: SOL_EFFORT,
                       quality: "",
+                      level,
+                      novelty,
                       copies,
                       copy: k,
                       categoryId: targetId,
@@ -726,6 +742,26 @@ export default function VariantPanel() {
             ))}
           </select>
         </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          난이도
+          <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={level} onChange={(e) => setLevel(e.target.value as VariantLevel)}>
+            {(Object.keys(LEVEL_LABEL) as VariantLevel[]).map((k) => (
+              <option key={k} value={k}>
+                {LEVEL_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          새로운 정도
+          <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={novelty} onChange={(e) => setNovelty(e.target.value as VariantNovelty)}>
+            {(["same", "slight", "new"] as VariantNovelty[]).map((k) => (
+              <option key={k} value={k}>
+                {NOVELTY_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </label>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">sol 설계 medium · 그림 auto (고정)</span>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           저장할 묶음
@@ -797,10 +833,42 @@ export default function VariantPanel() {
               </figure>
             </div>
           )}
+          {r.result?.review && (
+            <div
+              className={cn(
+                "rounded-lg border px-3 py-2 text-xs",
+                r.result.review.skipped ? "border-slate-200 bg-slate-50 text-slate-600" : r.result.review.ok ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-300 bg-amber-50 text-amber-900",
+              )}
+            >
+              <b>제작 검수 · </b>
+              {r.result.review.skipped
+                ? r.result.review.skipped
+                : r.result.review.ok
+                  ? `기획대로 나왔어요(sol 이 푼 정답 ${r.result.review.solvedAnswer || "?"})`
+                  : `${r.result.review.issues.length}건 지적${r.result.review.fixed ? " — 고칠 수 있는 곳은 한 번 고쳤어요(다시 검수는 안 함)" : ""}${
+                      r.result.review.answerMatches ? "" : ` · 정답 불일치(기획 ${r.result.newAnswer} / sol 이 푼 값 ${r.result.review.solvedAnswer})`
+                    }${r.result.review.trapsKept ? "" : " · 함정 요소가 빠졌을 수 있어요"}${r.result.review.settingsOk ? "" : " · 난이도/새로움이 설정과 다를 수 있어요"}`}
+              {r.result.review.issues.length > 0 && (
+                <ul className="mt-1 list-disc pl-5">
+                  {r.result.review.issues.map((i, n) => (
+                    <li key={n}>
+                      [{i.kind}] {i.where && `${i.where}: `}
+                      {i.problem}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           {r.result && (
             <details className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
               <summary className="cursor-pointer text-xs font-semibold text-slate-600">sol 이 이해한 것 · 바꾼 값 · 새 정답 · 해설</summary>
               <p className="mt-2">{r.result.summary}</p>
+              {r.result.traps && r.result.traps.length > 0 && (
+                <p className="mt-2 text-xs">
+                  <b>그대로 살린 함정:</b> {r.result.traps.join(" / ")}
+                </p>
+              )}
               <ul className="mt-2 list-disc pl-5 text-xs">
                 {r.result.changes.map((c, i) => (
                   <li key={i}>
