@@ -11,7 +11,7 @@ import CategoryList from "@/components/CategoryList";
 import Landing from "@/components/Landing";
 import BillingStatus from "@/components/BillingStatus";
 import Logo from "@/components/Logo";
-import { VARIANT_FOLDER_ID } from "@/lib/variantFolder";
+import { UNIT_FOLDER_ID, VARIANT_FOLDER_ID, isVirtualFolder } from "@/lib/variantFolder";
 import { getAccessState, isByokCheckoutReady, isCheckoutReady } from "@/lib/billing";
 
 export default async function DashboardPage({
@@ -79,12 +79,14 @@ export default async function DashboardPage({
   // 묶음(`is_variant`)은 가짜 폴더 하나("변형문제")에 모아 보여 준다 — 그러면 폴더 안에서
   // 열기·검색·선택해서 PDF 내보내기가 실모와 똑같이 된다. 실제 폴더 행이 아니라서
   // 이름 바꾸기·삭제·옮기기는 막는다(CategoryList 의 VARIANT_FOLDER_ID).
-  const categories = (allCategories ?? []).filter((c) => !c.hide_home).map((c) =>
-    c.is_variant ? { ...c, folder_id: VARIANT_FOLDER_ID } : c,
+  const categories = (allCategories ?? []).map((c) =>
+    c.hide_home ? { ...c, folder_id: UNIT_FOLDER_ID } : c.is_variant ? { ...c, folder_id: VARIANT_FOLDER_ID } : c,
   );
   const variantCount = categories.filter((c) => c.folder_id === VARIANT_FOLDER_ID).length;
+  const unitCount = categories.filter((c) => c.folder_id === UNIT_FOLDER_ID).length;
   const folders: Folder[] = [
     ...(realFolders ?? []),
+    ...(unitCount > 0 ? [{ id: UNIT_FOLDER_ID, user_id: "", name: "유형별", created_at: "9999-12-30" }] : []),
     ...(variantCount > 0
       ? [{ id: VARIANT_FOLDER_ID, user_id: "", name: "변형문제", created_at: "9999-12-31" }]
       : []),
@@ -134,7 +136,7 @@ export default async function DashboardPage({
         </div>
       </header>
 
-      <NewCategoryForm folderId={currentFolderId && currentFolderId !== VARIANT_FOLDER_ID ? currentFolderId : null} />
+      <NewCategoryForm folderId={currentFolderId && !isVirtualFolder(currentFolderId) ? currentFolderId : null} />
 
       <CategoryList
         maxScoreByCategory={maxScoreByCategory}
