@@ -335,6 +335,9 @@ export default function VariantPanel() {
                 const key = `${item.key}#${k}`;
                 const t0 = Date.now();
                 try {
+                  // 같은 원본의 두 번째 변형부터는 잠깐 늦게 낸다 — 첫 요청이 지시문+원본 그림을 읽어 두어야
+                  // 뒤 요청이 OpenAI 프롬프트 캐시(입력 단가 대폭 할인)에 맞는다. 동시에 내면 전부 캐시 미스다.
+                  if (k > 1) await new Promise((r) => setTimeout(r, 25_000));
                   const out = await runAiTask<VariantResult>("variant", {
                     label: `변형 · ${item.label}${copies > 1 ? ` (${k}/${copies})` : ""}`,
                     images: [original],

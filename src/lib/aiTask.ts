@@ -257,7 +257,8 @@ export async function waitAiTask<T>(serverId: string): Promise<AiTaskResult<T>> 
     for (;;) {
       const elapsed = Date.now() - started;
       if (elapsed > GIVE_UP_MS) throw new AiTaskError("서버 작업이 너무 오래 걸려요. 잠시 뒤 다시 해주세요.");
-      if (!first) await sleep(elapsed < 20_000 ? 1000 : 2000);
+      // 오래 걸리는 일(변형·지문)은 물을수록 Vercel 호출만 쌓인다 — 시간이 갈수록 간격을 늘린다.
+      if (!first) await sleep(elapsed < 20_000 ? 1000 : elapsed < 60_000 ? 2500 : elapsed < 180_000 ? 5000 : 8000);
       first = false;
       let body: {
         status?: string;
