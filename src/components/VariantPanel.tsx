@@ -21,7 +21,7 @@ import { LEVEL_LABEL, NOVELTY_LABEL, type VariantLevel, type VariantNovelty } fr
  */
 
 type Folder = { id: string; name: string };
-type Cat = { id: string; source: string; folder_id: string | null; is_variant?: boolean };
+type Cat = { id: string; source: string; folder_id: string | null; is_variant?: boolean; hide_home?: boolean };
 type Prob = { id: string; image_path: string; problemNo: number | null; sort_order: number | null };
 
 type Item = {
@@ -113,7 +113,7 @@ export default function VariantPanel() {
     void (async () => {
       const [f, c] = await Promise.all([
         supabase.from("folders").select("id,name").order("name"),
-        supabase.from("categories").select("id,source,folder_id,is_variant").order("created_at", { ascending: false }),
+        supabase.from("categories").select("id,source,folder_id,is_variant,hide_home").order("created_at", { ascending: false }),
       ]);
       setFolders((f.data as Folder[]) ?? []);
       setCats((c.data as Cat[]) ?? []);
@@ -148,11 +148,13 @@ export default function VariantPanel() {
   const normQ = (s: string) => s.toLowerCase().replace(/\s+/g, "");
   const hit = (name: string | null | undefined, q: string) => !q.trim() || normQ(name ?? "").includes(normQ(q));
   const shownCats = cats
-    .filter((c) => (folderId === "_variant" ? c.is_variant : !c.is_variant))
-    .filter((c) => (folderId === "" || folderId === "_variant" ? true : folderId === "_none" ? !c.folder_id : c.folder_id === folderId))
+    .filter((c) =>
+      folderId === "_unit" ? c.hide_home : folderId === "_variant" ? c.is_variant && !c.hide_home : !c.is_variant,
+    )
+    .filter((c) => (folderId === "" || folderId === "_variant" || folderId === "_unit" ? true : folderId === "_none" ? !c.folder_id : c.folder_id === folderId))
     .filter((c) => hit(c.source, catQ) || c.id === catId);
   const catName = (id?: string) => cats.find((c) => c.id === id)?.source ?? "실모";
-  const variantFolders = cats.filter((c) => c.is_variant);
+  const variantFolders = cats.filter((c) => c.is_variant && !c.hide_home);
   const saveChoices = variantFolders.filter((c) => hit(c.source, bundleQ) || c.id === saveTarget);
 
   function itemOf(p: Prob): Item {
@@ -646,7 +648,8 @@ export default function VariantPanel() {
             >
               <option value="">전체</option>
               <option value="_none">폴더 없음</option>
-              <option value="_variant">변형 묶음 (단원별 등)</option>
+              <option value="_unit">유형별 (단원 묶음)</option>
+              <option value="_variant">변형문제 묶음</option>
               {folders.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.name}
@@ -662,6 +665,24 @@ export default function VariantPanel() {
               onChange={(e) => setCatQ(e.target.value)}
               placeholder="예: 허블, 서바 14, 이신혁"
             />
+            {catQ.trim() && (
+              <div className="flex max-h-44 flex-col overflow-auto rounded-lg border border-slate-200 bg-white">
+                {shownCats.slice(0, 15).map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setCatId(c.id);
+                      setCatQ("");
+                    }}
+                    className={cn("px-2 py-1.5 text-left text-sm hover:bg-blue-50", c.id === catId && "bg-blue-50 font-medium")}
+                  >
+                    {c.source}
+                  </button>
+                ))}
+                {shownCats.length === 0 && <span className="px-2 py-1.5 text-xs text-slate-400">맞는 게 없어요</span>}
+              </div>
+            )}
             <select
               className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-ink"
               value={catId}
