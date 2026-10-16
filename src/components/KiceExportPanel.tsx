@@ -305,8 +305,45 @@ export default function KiceExportPanel({ title, items }: Props) {
         replace["(사회문화)"] = subject ? `(${subject})` : "";
       }
 
-      setProgress("PDF 조립 중...");
+      // 해설은 PDF 조립 전에 한 편씩(동시에 캡처하면 아이패드에서 멈춘다) 그림으로 만든다. 한 편이 25초 넘게 걸리거나 연달아 둘
+      // 실패하면 나머지는 글로 넣는다.
       let solFail: string | undefined;
+      let solutionList:
+        | { label: string; source?: string; answer?: string; text: string; png?: Uint8Array }[]
+        | undefined;
+      if (hasSolutions && showSolutions) {
+        const idxs = (renum ? renum.order : items.map((_, i) => i)).filter((i) => (items[i].solution ?? "").trim() !== "");
+        solutionList = [];
+        let fails = 0;
+        for (let k = 0; k < idxs.length; k++) {
+          const i = idxs[k];
+          setProgress(`해설 그림 만드는 중 ${k + 1}/${idxs.length}`);
+          const label = renum ? `${renum.newNo.get(i)}번` : items[i].answerLabel;
+          const source = items[i].source;
+          const answer = items[i].answer;
+          const text = items[i].solution!.trim();
+          const multi = source ? `${source.trim()} ` : "";
+          let png: Uint8Array | undefined;
+          if (fails < 2) {
+            try {
+              png = await Promise.race([
+                renderSolutionPng({
+                  heading: `${multi}${label}${answer?.trim() ? `  ·  정답 ${answer.trim()}` : ""}`,
+                  text,
+                  title: k === 0 ? "해  설" : undefined,
+                }),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error("시간 초과(25초)")), 25_000)),
+              ]);
+            } catch (e) {
+              fails++;
+              solFail = solFail ?? (e instanceof Error ? e.message : String(e));
+            }
+          }
+          solutionList.push({ label, source, answer: answer ?? undefined, text: plainSolution(text), png });
+        }
+      }
+
+      setProgress("PDF 조립 중...");
       const bytes = await buildKicePdfOffThread({
         frames,
         replace,
@@ -347,33 +384,7 @@ export default function KiceExportPanel({ title, items }: Props) {
               // 알 수 없다.
               source: item.source,
             })),
-        solutions:
-          hasSolutions && showSolutions
-            ? await Promise.all(
-                (renum ? renum.order : items.map((_, i) => i))
-                  .filter((i) => (items[i].solution ?? "").trim() !== "")
-                  .map(async (i, k) => {
-                    const label = renum ? `${renum.newNo.get(i)}번` : items[i].answerLabel;
-                    const source = items[i].source;
-                    const answer = items[i].answer;
-                    const text = items[i].solution!.trim();
-                    const multi = source ? `${source.trim()} ` : "";
-                    // 수식·기호가 든 해설은 앱의 수식 렌더러로 그려 그림으로 넣는다(글꼴에 없는 기호 때문).
-                    let png: Uint8Array | undefined;
-                    try {
-                      png = await renderSolutionPng({
-                        heading: `${multi}${label}${answer?.trim() ? `  ·  정답 ${answer.trim()}` : ""}`,
-                        text,
-                        title: k === 0 ? "해  설" : undefined,
-                      });
-                    } catch (e) {
-                      png = undefined;
-                      solFail = solFail ?? (e instanceof Error ? e.message : String(e));
-                    }
-                    return { label, source, answer, text: plainSolution(text), png };
-                  }),
-              )
-            : undefined,
+        solutions: solutionList,
         onWarn: (m) => console.warn("[kice]", m),
       });
 

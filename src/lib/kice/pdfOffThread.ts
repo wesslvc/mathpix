@@ -22,6 +22,8 @@ export async function buildKicePdfOffThread(spec: KiceSpec): Promise<Uint8Array>
     };
     // 그림 바이트는 옮기지(transfer) 않고 복사한다 — 글꼴·틀 그림은 화면 쪽이 캐시해 다시 쓴다.
     worker.postMessage({ spec: data });
+    // 5분이 지나도 답이 없으면 멈춘 것이다 — 영원히 "조립 중"으로 두지 않고 오류로 알린다.
+    setTimeout(() => resolve({ ok: false, error: "PDF 조립이 5분 넘게 끝나지 않아 멈췄어요. 문제 수를 줄이거나 해설·원본 포함을 끄고 다시 해 보세요.", warns: [] }), 300_000);
   }).finally(() => worker.terminate());
   if (!reply) return onMainThread();
   for (const w of reply.warns) onWarn?.(w);
