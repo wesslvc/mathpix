@@ -282,6 +282,7 @@ export default async function ExportPage({
           defaultTitle={defaultTitle}
           examDate={examDate}
           problems={composerProblems}
+          variantSet={(categories ?? []).some((c) => (c as { is_variant?: boolean }).is_variant)}
         />
       )}
     </main>

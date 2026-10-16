@@ -117,9 +117,11 @@ export type KiceItem = {
 type Props = {
   title: string;
   items: KiceItem[];
+  /** 변형문제 묶음이면 실모가 하나여도 번호 새로 매기기를 보인다(기본 켜짐). */
+  variantSet?: boolean;
 };
 
-export default function KiceExportPanel({ title, items }: Props) {
+export default function KiceExportPanel({ title, items, variantSet = false }: Props) {
   // 국어 세트로 넣은 문제가 있으면 국어로 뽑으려는 것이 분명하다.
   const hasKorean = items.some((it) => it.korean);
   const [area, setArea] = useState<KiceArea>(hasKorean ? "국어" : "사회탐구");
@@ -162,7 +164,8 @@ export default function KiceExportPanel({ title, items }: Props) {
   const [renumber, setRenumber] = useState(true);
   const hasOriginal = items.some((it) => it.original);
   // 원본을 끼운 묶음은 번호를 새로 매기지 않는다(원본이 번호를 먹고 변형과 어긋난다).
-  const doRenumber = multiSource && renumber && !hasOriginal;
+  const canRenumber = multiSource || variantSet;
+  const doRenumber = canRenumber && renumber && !hasOriginal;
 
   const subjects = KICE_SUBJECTS[area];
 
@@ -511,7 +514,7 @@ export default function KiceExportPanel({ title, items }: Props) {
         )}
       </div>
 
-      {multiSource && (
+      {canRenumber && (
         <label className="flex items-start gap-2 text-sm text-slate-700">
           <input
             type="checkbox"

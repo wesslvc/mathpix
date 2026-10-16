@@ -88,6 +88,8 @@ type Props = {
   defaultTitle: string;
   examDate: string;
   problems: ComposerProblem[];
+  /** 변형문제 묶음을 내보내는 중 — 실모가 하나여도 번호를 새로 매기는 칸을 보인다. */
+  variantSet?: boolean;
 };
 
 function formatDate(iso: string): string {
@@ -101,6 +103,7 @@ export default function ExportComposer({
   defaultTitle,
   examDate,
   problems,
+  variantSet = false,
 }: Props) {
   const [title, setTitle] = useState(defaultTitle);
   const [order, setOrder] = useState<ComposerProblem[]>(problems);
@@ -403,6 +406,7 @@ export default function ExportComposer({
       />
 
       <KiceExportPanel
+        variantSet={variantSet}
         title={title}
         items={printList.map((problem, index) => ({
           id: problem.id,
