@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cardUrl } from "@/lib/cardUrl";
 import { fileToDataUrl } from "@/lib/cropImage";
@@ -59,6 +59,8 @@ type Run = {
   key: string;
   label: string;
   copy: number;
+  /** 이 변형에 쓴 옵션(난이도·새로움). */
+  opt?: string;
   stage: "prep" | "queued" | "done" | "error";
   original?: string;
   result?: VariantResult;
@@ -94,8 +96,9 @@ export default function VariantPanel() {
   const [unitNote, setUnitNote] = useState<string | null>(null);
   const unitCancel = useRef(false);
   const [copies, setCopies] = useState(1);
-  const [level, setLevel] = useState<VariantLevel>("similar");
-  const [novelty, setNovelty] = useState<VariantNovelty>("slight");
+  // 한 번에 여러 옵션으로 만든다: 고른 난이도 × 고른 새로움의 모든 조합을 문제마다 만든다.
+  const [levels, setLevels] = useState<VariantLevel[]>(["similar"]);
+  const [novelties, setNovelties] = useState<VariantNovelty[]>(["slight"]);
   /** 변형문제 창의 폴더(= is_variant 묶음). "" = 새로 만들기. */
   const [saveTarget, setSaveTarget] = useState("");
   const [newFolder, setNewFolder] = useState("");
@@ -313,12 +316,27 @@ export default function VariantPanel() {
     return (data as Cat).id;
   }
 
+  /** 문제 하나에서 만들 변형들: 고른 난이도 × 새로움 × 개수. */
+  const variantList = useMemo(() => {
+    const out: { n: number; level: VariantLevel; novelty: VariantNovelty; opt: string }[] = [];
+    let n = 0;
+    for (const lv of levels) {
+      for (const nv of novelties) {
+        for (let c = 0; c < copies; c++) {
+          n++;
+          out.push({ n, level: lv, novelty: nv, opt: `${LEVEL_LABEL[lv]} · ${NOVELTY_LABEL[nv]}` });
+        }
+      }
+    }
+    return out;
+  }, [levels, novelties, copies]);
+
   async function start() {
     if (!items.length) return;
     setError(null);
     setBusy(true);
     const all: Run[] = [];
-    for (const it of items) for (let k = 1; k <= copies; k++) all.push({ key: `${it.key}#${k}`, label: it.label, copy: k, stage: "prep" });
+    for (const it of items) for (const v of variantList) all.push({ key: `${it.key}#${v.n}`, label: it.label, copy: v.n, opt: v.opt, stage: "prep" });
     setRuns(all);
     try {
       const { data: auth } = await supabase.auth.getUser();
@@ -326,7 +344,6 @@ export default function VariantPanel() {
       if (!uid) throw new Error("로그인이 필요해요.");
       const targetId = await ensureTarget(uid);
       // 원본 준비(줄이기)는 4개씩, 서버에 넣는 건 곧바로 — 이후는 서버 대기열이 돌린다(창을 닫아도 계속).
-      const warmRef: { current: Promise<unknown> | null } = { current: null };
       const queue = [...items];
       await Promise.all(
         Array.from({ length: Math.min(4, queue.length) }, async () => {
@@ -338,38 +355,27 @@ export default function VariantPanel() {
               original = await prepareProblemForModel(await ensureDataUrl(item.src));
               size = await imageSizeOf(original);
             } catch (err) {
-              for (let k = 1; k <= copies; k++) {
-                patch(`${item.key}#${k}`, { stage: "error", error: err instanceof Error ? err.message : "원본을 열지 못했어요." });
+              for (const v of variantList) {
+                patch(`${item.key}#${v.n}`, { stage: "error", error: err instanceof Error ? err.message : "원본을 열지 못했어요." });
               }
               continue;
             }
-            for (let k = 1; k <= copies; k++) patch(`${item.key}#${k}`, { original, stage: "queued" });
+            for (const v of variantList) patch(`${item.key}#${v.n}`, { original, stage: "queued" });
             void Promise.all(
-              Array.from({ length: copies }, async (_, i) => {
-                const k = i + 1;
-                const key = `${item.key}#${k}`;
+              variantList.map(async (v) => {
+                const key = `${item.key}#${v.n}`;
                 const t0 = Date.now();
                 try {
-                  // 같은 원본의 두 번째 변형부터는 잠깐 늦게 낸다 — 첫 요청이 지시문+원본 그림을 읽어 두어야
-                  // 뒤 요청이 OpenAI 프롬프트 캐시(입력 단가 대폭 할인)에 맞는다. 동시에 내면 전부 캐시 미스다.
-                  // 이번 실행에서 맨 처음 나가는 요청 하나만 먼저 보내고 나머지는 25초 뒤에 낸다 — 지시문(약 2천 토큰)은
-                  // 원본이 달라도 같아서, 처음 요청이 읽어 두면 다른 원본·다른 변형도 그 앞부분이 캐시에 맞는다.
-                  if (!warmRef.current) {
-                    warmRef.current = new Promise((r) => setTimeout(r, 25_000));
-                  } else {
-                    await warmRef.current;
-                    if (k > 1) await new Promise((r) => setTimeout(r, 2_000 * (k - 1)));
-                  }
                   const out = await runAiTask<VariantResult>("variant", {
-                    label: `변형 · ${item.label}${copies > 1 ? ` (${k}/${copies})` : ""}`,
+                    label: `변형 · ${item.label}${variantList.length > 1 ? ` (${v.n}/${variantList.length})` : ""}`,
                     images: [original],
                     params: {
                       effort: SOL_EFFORT,
                       quality: "",
-                      level,
-                      novelty,
-                      copies,
-                      copy: k,
+                      level: v.level,
+                      novelty: v.novelty,
+                      copies: variantList.length,
+                      copy: v.n,
                       categoryId: targetId,
                       no: item.no ?? null,
                       srcKey: item.key,
@@ -400,7 +406,7 @@ export default function VariantPanel() {
     done: "완료 · 폴더에 저장됨",
     error: "실패",
   };
-  const totalJobs = items.length * copies;
+  const totalJobs = items.length * variantList.length;
   const doneN = runs.filter((r) => r.stage === "done").length;
   const sumKrw = runs.reduce((a, r) => a + (r.result?.estKrw ?? 0), 0);
 
@@ -741,7 +747,7 @@ export default function VariantPanel() {
 
       <section className={cn(cardClass, "flex flex-wrap items-center gap-3 p-4 sm:p-5")}>
         <label className="flex items-center gap-2 text-sm text-slate-600">
-          문제당 변형 수
+          옵션마다 변형 수
           <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={copies} onChange={(e) => setCopies(Number(e.target.value))}>
             {[1, 2, 3, 4, 5].map((n) => (
               <option key={n} value={n}>
@@ -750,26 +756,35 @@ export default function VariantPanel() {
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
           난이도
-          <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={level} onChange={(e) => setLevel(e.target.value as VariantLevel)}>
-            {(Object.keys(LEVEL_LABEL) as VariantLevel[]).map((k) => (
-              <option key={k} value={k}>
-                {LEVEL_LABEL[k]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+          {(Object.keys(LEVEL_LABEL) as VariantLevel[]).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setLevels((cur) => (cur.includes(k) ? (cur.length > 1 ? cur.filter((x) => x !== k) : cur) : [...cur, k]))}
+              className={cn("rounded-full border px-3 py-1 text-xs", levels.includes(k) ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600")}
+            >
+              {LEVEL_LABEL[k]}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
           새로운 정도
-          <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" value={novelty} onChange={(e) => setNovelty(e.target.value as VariantNovelty)}>
-            {(["same", "slight", "new"] as VariantNovelty[]).map((k) => (
-              <option key={k} value={k}>
-                {NOVELTY_LABEL[k]}
-              </option>
-            ))}
-          </select>
-        </label>
+          {(["same", "slight", "new"] as VariantNovelty[]).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setNovelties((cur) => (cur.includes(k) ? (cur.length > 1 ? cur.filter((x) => x !== k) : cur) : [...cur, k]))}
+              className={cn("rounded-full border px-3 py-1 text-xs", novelties.includes(k) ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600")}
+            >
+              {NOVELTY_LABEL[k]}
+            </button>
+          ))}
+        </div>
+        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
+          문제당 {variantList.length}개 ({levels.length}×{novelties.length}옵션 × {copies}개)
+        </span>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">sol 설계 medium · 그림 auto (고정)</span>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           저장할 묶음
@@ -811,7 +826,8 @@ export default function VariantPanel() {
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="text-sm font-semibold text-ink">
               {r.label}
-              {copies > 1 && ` · 변형 ${r.copy}`}
+              {(variantList.length > 1 || runs.length > 1) && ` · 변형 ${r.copy}`}
+              {r.opt && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700">{r.opt}</span>}
               {r.result?.kind && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-600">{KIND_LABEL[r.result.kind] ?? r.result.kind}</span>}
             </h3>
             <span className={cn("text-xs", r.stage === "error" ? "text-red-600" : r.stage === "done" ? "text-emerald-600" : "text-slate-500")}>
