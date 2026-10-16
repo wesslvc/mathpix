@@ -900,7 +900,6 @@ export const TASKS: Record<TaskKind, TaskDef> = {
                 position: 0,
               },
             ]),
-            ...(Number.isFinite(no) && no > 0 ? { number: no } : {}),
             ...(plan.solution ? { solution: plan.solution } : {}),
             ...(variantOf ? { variantOf } : {}),
           },
@@ -911,6 +910,9 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         await removeStored(ctx.admin, [path]);
         return { ok: false, error: `저장하지 못했어요: ${insErr?.message ?? ""}`, estKrw: spent || undefined };
       }
+      // 묶음 안에서 1번부터 차례로 번호를 매긴다(원래 번호는 variantOf.no 에 남는다) — 같은 번호가 여럿 뜨면 구분이 안 된다.
+      const { error: numErr } = await ctx.admin.rpc("assign_variant_number", { p_problem: row.id });
+      if (numErr) console.warn(`${ctx.tag} 변형 번호 매기기 실패:`, numErr.message);
       return {
         ok: true,
         result: {
