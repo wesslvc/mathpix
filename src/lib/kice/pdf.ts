@@ -1270,6 +1270,19 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       page.drawImage(it.img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
       if (it.clip) page.pushOperators(popGraphicsState());
       if (it.cover) await drawNumberCover(page, it, it.cover);
+      // 변형문제와 함께 내보낸 원본은 한눈에 구분되게 짙은 테두리로 두른다(라벨이 "[원본]"으로 시작한다).
+      if (it.label.startsWith("[원본]")) {
+        const m = 3;
+        page.drawRectangle({
+          x: it.x - m,
+          y: flip(it.y + it.h) - m,
+          width: it.w + m * 2,
+          height: it.h + m * 2 + LABEL_SIZE + LABEL_GAP,
+          borderColor: rgb(0.1, 0.1, 0.1),
+          borderWidth: 1.6,
+          borderDashArray: [6, 3],
+        });
+      }
     }
     const planned = plan?.pages[n];
     if (planned?.kind === "toc") {
