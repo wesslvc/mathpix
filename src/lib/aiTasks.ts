@@ -823,7 +823,9 @@ export const TASKS: Record<TaskKind, TaskDef> = {
               byokApiKey: ctx.byokApiKey,
               deadlineMs: fLeft - 10_000,
               tag: ctx.tag,
-              quality,
+              // 검수 수정은 지적된 몇 곳만 고치고 나머지는 원본 픽셀로 되돌리는 작은 편집이라 medium 이면 충분하다
+              // (장부: auto 평균 93원·medium 평균 36원). 사용자가 더 낮은 품질을 골랐으면 그 값을 쓴다.
+              quality: quality === "low" ? "low" : "medium",
             });
             if (fix.ok) {
               if (fix.usage) {
