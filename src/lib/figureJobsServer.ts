@@ -84,8 +84,8 @@ export async function kickWorker(
  * (`runFigureGeneration` 이 429 는 잠깐 기다렸다 다시 보내지만 애초에 덜 몰리게 한다). 문제 하나의 그리기는
  * 35~45초, 검수 15초라 열 개가 돌아도 이미지는 분당 10장 안팎이다. 계정 티어가 오르면 환경변수로 올린다.
  */
-export const UNLIMITED_CONCURRENCY = envInt("FIGURE_UNLIMITED_CONCURRENCY", 10);
-export const GLOBAL_CONCURRENCY = envInt("FIGURE_GLOBAL_CONCURRENCY", 12);
+export const UNLIMITED_CONCURRENCY = envInt("FIGURE_UNLIMITED_CONCURRENCY", 50);
+export const GLOBAL_CONCURRENCY = envInt("FIGURE_GLOBAL_CONCURRENCY", 50);
 function envInt(name: string, fallback: number): number {
   const n = Number(process.env[name]);
   return Number.isFinite(n) && n >= 1 ? Math.round(n) : fallback;
