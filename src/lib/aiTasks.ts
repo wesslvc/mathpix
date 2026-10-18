@@ -1081,7 +1081,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         .update({
           image_path: path,
           // 이전 그림을 보관한다 — 모아보기에서 수정 전·후를 견주고 되돌릴 수 있다.
-          box_range: { ...br, figures: nextFigures, variantReview: undefined, variantFix: { at: new Date().toISOString(), instruction: instruction.slice(0, 1200), prevImagePath: prob.image_path, ...(recheck ? { recheck } : {}) } },
+          box_range: { ...br, figures: nextFigures, variantReview: undefined, variantRecheck: undefined, variantFix: { at: new Date().toISOString(), instruction: instruction.slice(0, 1200), prevImagePath: prob.image_path, ...(recheck ? { recheck } : {}) } },
         })
         .eq("id", problemId)
         .eq("user_id", ctx.userId);
@@ -1089,7 +1089,9 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         await removeStored(ctx.admin, [path]);
         return { ok: false, error: `저장하지 못했어요: ${upErr.message}`, estKrw: spent || undefined };
       }
-      // 옛 그림은 지우지 않는다(`variantFix.prevImagePath` — 확정하거나 되돌릴 때 모아보기가 정리한다).
+      // 방금 그림의 바로 앞 그림만 보관한다(`variantFix.prevImagePath` — 확정하거나 되돌릴 때 모아보기가 정리한다). 그보다 더 앞서 보관하던 그림은 지운다.
+      const olderPrev = (br.variantFix as { prevImagePath?: string } | undefined)?.prevImagePath;
+      if (olderPrev && olderPrev !== prob.image_path) await removeStored(ctx.admin, [olderPrev]);
       return {
         ok: true,
         result: { imagePath: path, problemId, recheck, ...(ctx.unlimited || ctx.byok ? { estKrw: Math.round(spent * 10) / 10 } : {}) },

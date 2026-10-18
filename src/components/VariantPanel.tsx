@@ -123,6 +123,23 @@ export default function VariantPanel() {
       setRecheckBusy((m) => ({ ...m, [id]: false }));
     }
   }
+  /** 재검수에서 잡힌 문제점들을 그림 편집 지시로 만든다(사용자가 고칠 수 있다). */
+  const noteInstruction = (notes: string[]) => `${notes.map((n, i) => `${i + 1}. ${n}`).join("\n")}\nkeep everything else exactly as in the picture.`;
+  const [reDraft, setReDraft] = useState<Record<string, string>>({});
+  async function fixFromRecheck(id: string) {
+    const row = libRows.find((x) => x.id === id);
+    const instruction = (reDraft[id] ?? (row?.recheck ? noteInstruction(row.recheck.notes) : "")).trim();
+    if (!row || !instruction) return;
+    setLibFix((m) => ({ ...m, [id]: "busy" }));
+    try {
+      const out = await runAiTask<{ imagePath: string; recheck?: { ok: boolean; notes: string[] } | null }>("variantFix", { label: "변형 수정 (재검수 지적)", params: { problemId: id, instruction } });
+      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: out.result.imagePath, recheck: null, review: null, fix: { at: new Date().toISOString(), prevImagePath: x.image_path, instruction, recheck: out.result.recheck ?? null } } : x)));
+      setReDraft((m) => { const n = { ...m }; delete n[id]; return n; });
+      setLibFix((m) => ({ ...m, [id]: "done" }));
+    } catch (err) {
+      setLibFix((m) => ({ ...m, [id]: err instanceof Error ? err.message : "수정에 실패했어요." }));
+    }
+  }
   async function fixLibRow(id: string) {
     setLibFix((m) => ({ ...m, [id]: "busy" }));
     try {
@@ -628,6 +645,18 @@ export default function VariantPanel() {
                 >
                   확인 대기 {libRows.filter((x) => x.fix?.prevImagePath).length}개 모두 sol 재검수
                 </button>
+                {libRows.some((x) => x.recheck && !x.recheck.ok) && (
+                  <button
+                    className="rounded bg-amber-600 px-2 py-0.5 text-white"
+                    onClick={() => {
+                      const list = libRows.filter((x) => x.recheck && !x.recheck.ok && libFix[x.id] !== "busy");
+                      if (!window.confirm(`재검수에서 잡힌 ${list.length}개를 지적된 내용만 일부 수정할까요? (문제당 그림 1번 + sol 재검수, 약 70원)`)) return;
+                      list.forEach((x) => void fixFromRecheck(x.id));
+                    }}
+                  >
+                    잡힌 {libRows.filter((x) => x.recheck && !x.recheck.ok).length}개 모두 일부 수정
+                  </button>
+                )}
                 <span className="text-slate-500">확인 대기 중: 재검수 통과 {libRows.filter((x) => x.fix?.prevImagePath && x.recheck?.ok).length} · 남은 문제 {libRows.filter((x) => x.fix?.prevImagePath && x.recheck && !x.recheck.ok).length} · 아직 안 함 {libRows.filter((x) => x.fix?.prevImagePath && !x.recheck).length}</span>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -645,6 +674,20 @@ export default function VariantPanel() {
                         <div className="mt-1 rounded border border-amber-300 bg-amber-50 p-1 text-amber-900">
                           <b>남은 문제 {r.recheck.notes.length}건</b>
                           <ul className="list-disc pl-4">{r.recheck.notes.map((n, i) => (<li key={i}>{n}</li>))}</ul>
+                          <textarea
+                            className="mt-1 w-full rounded border border-amber-300 bg-white p-1 text-[11px] text-slate-800"
+                            rows={4}
+                            value={reDraft[r.id] ?? noteInstruction(r.recheck.notes)}
+                            onChange={(e) => setReDraft((m) => ({ ...m, [r.id]: e.target.value }))}
+                          />
+                          <button
+                            className="mt-1 rounded bg-amber-600 px-2 py-0.5 text-white disabled:opacity-50"
+                            disabled={libFix[r.id] === "busy"}
+                            onClick={() => void fixFromRecheck(r.id)}
+                          >
+                            {libFix[r.id] === "busy" ? "수정 중…" : "이 내용만 수정해서 붙이기"}
+                          </button>
+                          {libFix[r.id] && libFix[r.id] !== "busy" && libFix[r.id] !== "done" && <p className="text-red-600">{libFix[r.id]}</p>}
                         </div>
                       ))}
                     </div>
