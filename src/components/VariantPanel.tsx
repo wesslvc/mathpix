@@ -657,6 +657,18 @@ export default function VariantPanel() {
                     재검수 통과 {libRows.filter((x) => x.fix?.prevImagePath && x.recheck?.ok).length}개 모두 확정
                   </button>
                 )}
+                {libRows.some((x) => x.fix?.prevImagePath && !(x.recheck && !x.recheck.ok)) && (
+                  <button
+                    className="rounded border border-emerald-600 px-2 py-0.5 text-emerald-700"
+                    onClick={() => {
+                      const list = libRows.filter((x) => x.fix?.prevImagePath && !(x.recheck && !x.recheck.ok));
+                      if (!window.confirm(`재검수에서 남은 문제가 잡힌 것을 뺀 확인 대기 ${list.length}개(통과 + 재검수 안 한 것)를 모두 확정할까요? 이전 그림이 지워져 되돌릴 수 없어요.`)) return;
+                      list.forEach((x) => void confirmFix(x.id));
+                    }}
+                  >
+                    남은 문제 없는 {libRows.filter((x) => x.fix?.prevImagePath && !(x.recheck && !x.recheck.ok)).length}개 모두 확정
+                  </button>
+                )}
                 {libRows.some((x) => x.recheck && !x.recheck.ok) && (
                   <button
                     className="rounded bg-amber-600 px-2 py-0.5 text-white"
