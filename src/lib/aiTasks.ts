@@ -1045,12 +1045,12 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       const path = `${ctx.userId}/${prob.category_id}/${crypto.randomUUID()}.${ext}`;
       if (!(await storeBytes(ctx.admin, path, parts.bytes, parts.mime))) return { ok: false, error: "그림을 저장하지 못했어요.", estKrw: spent || undefined };
       // **sol 재검수**: 고친 그림이 지시대로 됐는지, 엉뚱한 곳이 바뀌지 않았는지 이전 그림과 견준다(실패해도 수정은 저장한다).
-      let recheck: { ok: boolean; notes: string[] } | null = null;
+      let recheck: { ok: boolean; notes: { problem: string; fix: string }[] } | null = null;
       try {
         const left = ctx.deadlineMs - (Date.now() - t0);
         if (left >= 30_000) {
           const rv = await askSol(
-            `task: check a PARTIAL EDIT of a Korean exam question picture. image 1 = BEFORE, image 2 = AFTER. the edit instruction is given after the images. for EACH numbered item decide whether image 2 now matches the instruction (read the text carefully, character by character). STRICT RULES to avoid false alarms: mark done:false ONLY when you can SEE in image 2 that the requested change is clearly not there or is wrong; if an item cannot be verified from the picture at all (e.g. a registered answer, a solution text, a 'make X consistent' note, an unknown original position) treat it as done:true. list a collateral change ONLY when something clearly visible in image 1 (text, numbers, choices, figure parts, labels) is clearly missing, garbled or altered in image 2 and was NOT named in the instruction; tiny anti-aliasing/pixel differences, slight shifts and equivalent re-typesetting are NOT changes. when in doubt, say nothing. reply ONLY JSON: {"items":[{"item":"짧은 한국어 설명","done":true|false,"note":"안 됐으면 무엇이 어떻게 다른지(한국어)"}],"collateral":["의도하지 않은 변경(한국어), 없으면 빈 배열"]}`,
+            `task: check a PARTIAL EDIT of a Korean exam question picture. image 1 = BEFORE, image 2 = AFTER. the edit instruction is given after the images. for EACH numbered item decide whether image 2 now matches the instruction (read the text carefully, character by character). STRICT RULES to avoid false alarms: mark done:false ONLY when you can SEE in image 2 that the requested change is clearly not there or is wrong; if an item cannot be verified from the picture at all (e.g. a registered answer, a solution text, a 'make X consistent' note, an unknown original position) treat it as done:true. list a collateral change ONLY when something clearly visible in image 1 (text, numbers, choices, figure parts, labels) is clearly missing, garbled or altered in image 2 and was NOT named in the instruction; tiny anti-aliasing/pixel differences, slight shifts and equivalent re-typesetting are NOT changes. when in doubt, say nothing. reply ONLY JSON: {"items":[{"item":"짧은 한국어 설명","done":true|false,"note":"안 됐으면 무엇이 어떻게 다른지(한국어)","fix":"done:false 일 때 그림 편집기에게 줄 구체적 행동 한 문장(한국어): 위치 + 현재 글/값 → 바꿀 글/값"}],"collateral":[{"what":"의도하지 않은 변경(한국어)","fix":"되돌리는 구체적 행동 한 문장: 위치 + 현재 → 원래(이미지 1) 글/값"}]}. fix must be an editing action, never your reasoning; if it cannot be fixed by editing the picture leave fix empty.`,
             [base, outUrl],
             { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(80_000, left - 10_000), tag: ctx.tag },
             "변형 수정 재검수",
@@ -1060,11 +1060,15 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           if (rv.krw > 0 && !ctx.byok) {
             await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "sol 변형 수정 재검수", krw: rv.krw, tokens: solTokens(rv.usage) });
           }
-          const obj = rv.text ? (parseJsonObject(rv.text) as { items?: { item?: string; done?: boolean; note?: string }[]; collateral?: string[] } | null) : null;
+          const obj = rv.text ? (parseJsonObject(rv.text) as { items?: { item?: string; done?: boolean; note?: string; fix?: string }[]; collateral?: (string | { what?: string; fix?: string })[] } | null) : null;
           if (obj) {
-            const notes: string[] = [];
-            for (const it of obj.items ?? []) if (it && it.done === false) notes.push(`${String(it.item ?? "").slice(0, 80)}: ${String(it.note ?? "").slice(0, 200)}`);
-            for (const c of obj.collateral ?? []) if (c) notes.push(`의도하지 않은 변경: ${String(c).slice(0, 200)}`);
+            const notes: { problem: string; fix: string }[] = [];
+            for (const it of obj.items ?? []) if (it && it.done === false) notes.push({ problem: `${String(it.item ?? "").slice(0, 80)}: ${String(it.note ?? "").slice(0, 200)}`, fix: String(it.fix ?? "").slice(0, 300) });
+            for (const c of obj.collateral ?? []) {
+              if (!c) continue;
+              const o = typeof c === "string" ? { what: c, fix: "" } : c;
+              notes.push({ problem: `의도하지 않은 변경: ${String(o.what ?? "").slice(0, 200)}`, fix: String(o.fix ?? "").slice(0, 300) });
+            }
             recheck = { ok: notes.length === 0, notes: notes.slice(0, 8) };
           }
         }
@@ -1124,7 +1128,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       const orig = typeof vo.path === "string" && vo.path ? await loadAsDataUrl(ctx.admin, vo.path) : null;
       const sol = typeof br.solution === "string" ? br.solution.slice(0, 3000) : "";
       const rv = await askSol(
-        `task: re-check a GENERATED VARIANT of a Korean exam question picture. ${orig ? "image 1 = the ORIGINAL question, image 2 = the VARIANT." : "the only image = the VARIANT."} after the images you get the variant's registered answer and its solution. check, reading character by character: (1) broken, misspelled or missing glyphs/words/numbers/units in the stem, the <보기> box, the table and the labels; (2) all five choices ①–⑤ present, none left over from the original that contradicts the new problem, and exactly the registered answer is correct (solve the variant yourself and compare with the solution); (3) values/figure/table in the picture agree with the solution's numbers (a figure still showing the original's values is a defect); (4) leftover original wording that no longer fits. reply ONLY JSON: {"notes":["문제점(한국어, 어디가 어떻게)", ...],"solved_answer":"푼 정답"}; empty notes if nothing is wrong.`,
+        `task: re-check a GENERATED VARIANT of a Korean exam question picture. ${orig ? "image 1 = the ORIGINAL question, image 2 = the VARIANT." : "the only image = the VARIANT."} after the images you get the variant's registered answer and its solution. check, reading character by character: (1) broken, misspelled or missing glyphs/words/numbers/units in the stem, the <보기> box, the table and the labels; (2) all five choices ①–⑤ present, none left over from the original that contradicts the new problem, and exactly the registered answer is correct (solve the variant yourself and compare with the solution); (3) values/figure/table in the picture agree with the solution's numbers (a figure still showing the original's values is a defect); (4) leftover original wording that no longer fits. for EACH problem give a concrete image-editor action. reply ONLY JSON: {"notes":[{"problem":"문제점(한국어, 어디가 어떻게)","fix":"그림 편집기에게 줄 구체적 행동 한 문장(한국어) — 반드시 '위치(예: <보기> ㄱ 둘째 줄) + 현재 글/값 → 바꿀 글/값' 꼴. 예: '표 (가) B행 위도 칸: (  ) 그대로 두고, 경도 칸 30°E → 30°W'. 그림 편집으로 고칠 수 없는 것(문제 설계·난이도·함정이 계획대로 안 된 것, 정답 값 자체)이면 빈 문자열"}],"solved_answer":"푼 정답"}. never describe your reasoning in fix; empty notes if nothing is wrong.`,
         orig ? [orig, cur] : [cur],
         { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(150_000, ctx.deadlineMs - (Date.now() - t0) - 10_000), tag: ctx.tag },
         "변형 재검수",
@@ -1134,9 +1138,16 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       if (rv.krw > 0 && !ctx.byok) {
         await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "sol 변형 재검수", krw: rv.krw, tokens: solTokens(rv.usage) });
       }
-      const obj = rv.text ? (parseJsonObject(rv.text) as { notes?: string[]; solved_answer?: string } | null) : null;
+      const obj = rv.text ? (parseJsonObject(rv.text) as { notes?: (string | { problem?: string; fix?: string })[]; solved_answer?: string } | null) : null;
       if (!obj) return { ok: false, error: rv.fail || "재검수 결과를 읽지 못했어요.", estKrw: spent || undefined };
-      const notes = (obj.notes ?? []).filter(Boolean).map((n) => String(n).slice(0, 240)).slice(0, 10);
+      const notes = (obj.notes ?? [])
+        .filter(Boolean)
+        .map((n) => {
+          const o = typeof n === "string" ? { problem: n, fix: "" } : (n as { problem?: string; fix?: string });
+          return { problem: String(o.problem ?? "").slice(0, 260), fix: String(o.fix ?? "").slice(0, 300) };
+        })
+        .filter((n) => n.problem)
+        .slice(0, 10);
       const recheck = { ok: notes.length === 0, notes, solved: String(obj.solved_answer ?? "").slice(0, 60), at: new Date().toISOString() };
       await ctx.admin.from("problems").update({ box_range: { ...br, variantRecheck: recheck } }).eq("id", problemId).eq("user_id", ctx.userId);
       spent = Math.round(spent * 10) / 10;

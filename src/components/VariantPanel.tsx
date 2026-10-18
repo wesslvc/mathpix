@@ -81,6 +81,10 @@ type UnitRow = { id: string; catId: string; image_path: string; no: number | nul
 const normU = (t: string) => t.replace(/[\s·>\-→,/()]/g, "").toLowerCase();
 const won = (n: number) => `${Math.round(n).toLocaleString()}원`;
 
+/** 재검수에서 잡힌 문제점. `fix` = 그림 편집기에게 줄 구체적 행동(없으면 그림으로 못 고치는 설계 문제). 옛 기록은 글 한 줄이다. */
+type RecheckNote = string | { problem: string; fix: string };
+const notePart = (n: RecheckNote) => (typeof n === "string" ? { problem: n, fix: n } : n);
+
 export default function VariantPanel() {
   const supabase = useRef(createClient()).current;
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -108,14 +112,14 @@ export default function VariantPanel() {
   const [newFolder, setNewFolder] = useState("");
   const [tab, setTab] = useState<"make" | "library">("make");
   const [libId, setLibId] = useState("");
-  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; recheck?: { ok: boolean; notes: string[]; solved?: string } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; recheck?: { ok: boolean; notes: string[] } | null } | null }[]>([]);
+  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; recheck?: { ok: boolean; notes: RecheckNote[]; solved?: string } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; recheck?: { ok: boolean; notes: RecheckNote[] } | null } | null }[]>([]);
   const [libFilter, setLibFilter] = useState<"all" | "flag" | "fixed">("all");
   const [libFix, setLibFix] = useState<Record<string, "busy" | "done" | string>>({});
   const [recheckBusy, setRecheckBusy] = useState<Record<string, boolean>>({});
   async function recheckRow(id: string) {
     setRecheckBusy((m) => ({ ...m, [id]: true }));
     try {
-      const out = await runAiTask<{ recheck: { ok: boolean; notes: string[]; solved?: string } }>("variantRecheck", { label: "변형 재검수", params: { problemId: id } });
+      const out = await runAiTask<{ recheck: { ok: boolean; notes: RecheckNote[]; solved?: string } }>("variantRecheck", { label: "변형 재검수", params: { problemId: id } });
       setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, recheck: out.result.recheck } : x)));
     } catch (err) {
       setLibFix((m) => ({ ...m, [id]: err instanceof Error ? err.message : "재검수에 실패했어요." }));
@@ -124,10 +128,13 @@ export default function VariantPanel() {
     }
   }
   /** 재검수에서 잡힌 문제점들을 그림 편집 지시로 만든다(사용자가 고칠 수 있다). */
-  const noteInstruction = (notes: string[]) => `${notes.map((n, i) => `${i + 1}. ${n}`).join("\n")}\nkeep everything else exactly as in the picture.`;
+  const noteInstruction = (notes: RecheckNote[]) => {
+    const fixes = notes.map((n) => notePart(n).fix.trim()).filter(Boolean);
+    return fixes.length ? `${fixes.map((f, i) => `${i + 1}. ${f}`).join("\n")}\nkeep everything else exactly as in the picture.` : "";
+  };
   const [reDraft, setReDraft] = useState<Record<string, string>>({});
   /** 재검수(따로 돌린 것)나 수정 직후 재검수에서 남은 문제점 — 없으면 null. */
-  const badNotes = (x: (typeof libRows)[number]): string[] | null => {
+  const badNotes = (x: (typeof libRows)[number]): RecheckNote[] | null => {
     // 따로 돌린 재검수가 있으면 그것이 판단한다(수정 직후 자동 재검수는 더 엄격해 오탐이 있었다).
     if (x.recheck) return !x.recheck.ok && x.recheck.notes.length ? x.recheck.notes : null;
     if (x.fix?.recheck && !x.fix.recheck.ok && x.fix.recheck.notes.length) return x.fix.recheck.notes;
@@ -140,7 +147,7 @@ export default function VariantPanel() {
     if (!row || !instruction) return;
     setLibFix((m) => ({ ...m, [id]: "busy" }));
     try {
-      const out = await runAiTask<{ imagePath: string; recheck?: { ok: boolean; notes: string[] } | null }>("variantFix", { label: "변형 수정 (재검수 지적)", params: { problemId: id, instruction } });
+      const out = await runAiTask<{ imagePath: string; recheck?: { ok: boolean; notes: RecheckNote[] } | null }>("variantFix", { label: "변형 수정 (재검수 지적)", params: { problemId: id, instruction } });
       setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: out.result.imagePath, recheck: null, review: null, fix: { at: new Date().toISOString(), prevImagePath: x.image_path, instruction, recheck: out.result.recheck ?? null } } : x)));
       setReDraft((m) => { const n = { ...m }; delete n[id]; return n; });
       setLibFix((m) => ({ ...m, [id]: "done" }));
@@ -151,7 +158,7 @@ export default function VariantPanel() {
   async function fixLibRow(id: string) {
     setLibFix((m) => ({ ...m, [id]: "busy" }));
     try {
-      const out = await runAiTask<{ imagePath: string; recheck?: { ok: boolean; notes: string[] } | null }>("variantFix", { label: "변형 수정 (저장된 지적)", params: { problemId: id } });
+      const out = await runAiTask<{ imagePath: string; recheck?: { ok: boolean; notes: RecheckNote[] } | null }>("variantFix", { label: "변형 수정 (저장된 지적)", params: { problemId: id } });
       setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: out.result.imagePath, review: null, fix: { at: new Date().toISOString(), prevImagePath: x.image_path, instruction: x.review?.fixSuggestion, recheck: out.result.recheck ?? null } } : x)));
       setLibFix((m) => ({ ...m, [id]: "done" }));
     } catch (err) {
@@ -705,7 +712,7 @@ export default function VariantPanel() {
                       ) : (
                         <div className="mt-1 rounded border border-amber-300 bg-amber-50 p-1 text-amber-900">
                           <b>남은 문제 {r.recheck.notes.length}건</b>
-                          <ul className="list-disc pl-4">{r.recheck.notes.map((n, i) => (<li key={i}>{n}</li>))}</ul>
+                          <ul className="list-disc pl-4">{r.recheck.notes.map((n, i) => (<li key={i}>{notePart(n).problem}{!notePart(n).fix && <span className="text-slate-500"> (그림 수정 대상 아님)</span>}</li>))}</ul>
                           <textarea
                             className="mt-1 w-full rounded border border-amber-300 bg-white p-1 text-[11px] text-slate-800"
                             rows={4}
@@ -734,7 +741,7 @@ export default function VariantPanel() {
                           ) : (
                             <div className="mt-1 rounded border border-amber-300 bg-amber-50 p-1 text-amber-900">
                               <b>sol 재검수: 남은 문제 {r.fix.recheck.notes.length}건</b>
-                              <ul className="list-disc pl-4">{r.fix.recheck.notes.map((n, i) => (<li key={i}>{n}</li>))}</ul>
+                              <ul className="list-disc pl-4">{r.fix.recheck.notes.map((n, i) => (<li key={i}>{notePart(n).problem}{!notePart(n).fix && <span className="text-slate-500"> (그림 수정 대상 아님)</span>}</li>))}</ul>
                               {!r.recheck && (
                                 <>
                                   <textarea
