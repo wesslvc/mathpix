@@ -936,12 +936,12 @@ export default function VariantPanel() {
             placeholder="묶음 이름 (비우면 날짜·시간)"
           />
         )}
-        <Button onClick={() => void start()} disabled={busy || items.length === 0 || totalJobs > 60}>
+        <Button onClick={() => void start()} disabled={busy || items.length === 0 || totalJobs > 100}>
           {busy ? "서버에 넣는 중…" : `변형문제 만들기 (${totalJobs}개)`}
         </Button>
         <p className="w-full text-xs text-slate-500">
-          서버 대기열에서 돌아요(수정하기와 같은 부분 수정 방식 — 창을 닫아도 끝까지 가서 고른 묶음 하나에 모두 저장돼요(원본 실모별로 나누지 않아요)). 한 번에 최대 60개. 토큰은 안 떼고 원가만 보여요(시험 중).
-          {totalJobs > 60 && <b className="text-red-600"> 지금 {totalJobs}개라 너무 많아요.</b>}
+          서버 대기열에서 돌아요(수정하기와 같은 부분 수정 방식 — 창을 닫아도 끝까지 가서 고른 묶음 하나에 모두 저장돼요(원본 실모별로 나누지 않아요)). 한 번에 최대 100개. 토큰은 안 떼고 원가만 보여요(시험 중).
+          {totalJobs > 100 && <b className="text-red-600"> 지금 {totalJobs}개라 너무 많아요.</b>}
         </p>
         {runs.length > 0 && (
           <p className="w-full text-xs text-slate-600">
