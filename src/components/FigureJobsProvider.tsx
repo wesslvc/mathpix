@@ -866,6 +866,31 @@ export default function FigureJobsProvider({
         }
 
         const size = await imageSizeOf(forModel);
+        // 그림을 R2 로 바로 올리고 경로만 보낸다 — 본문에 실으면 그 바이트가 Vercel 함수 전송량으로 센다(무료 10GB 를 넘겨 정지된 적이 있다).
+        // 올리기에 실패하면 예전처럼 본문에 싣는다.
+        let inPath: string | undefined;
+        let curPath: string | undefined;
+        try {
+          const sb = createClient();
+          const {
+            data: { user: u },
+          } = await sb.auth.getUser();
+          if (u) {
+            const safe = id.replace(/[^\w-]/g, "_");
+            const up = async (name: string, d: string) => {
+              const blob = await (await fetch(d)).blob();
+              const ext = blob.type === "image/png" ? "png" : "jpg";
+              const path = `${u.id}/_jobs/c-${safe}-${Date.now().toString(36)}-${name}.${ext}`;
+              const r = await putBlob(sb, path, blob, blob.type || "image/jpeg");
+              return r.ok ? path : undefined;
+            };
+            inPath = await up("in", forModel);
+            if (inPath && reverifyCur) curPath = await up("r0", reverifyCur);
+          }
+        } catch {
+          inPath = undefined;
+          curPath = undefined;
+        }
         const res = await fetch("/api/figure-jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -873,14 +898,14 @@ export default function FigureJobsProvider({
             figureId: id,
             problemKey: job.problemKey,
             label: job.label,
-            image: forModel,
+            ...(inPath ? { inputPath: inPath } : { image: forModel }),
             mode,
             korean: job.korean ? true : undefined,
             instruction: job.instruction,
             auto: mode === "problem" && job.auto ? true : undefined,
             sol: job.sol ? true : undefined,
             reverify: reverifyCur ? true : undefined,
-            current: reverifyCur ?? undefined,
+            ...(curPath ? { currentPath: curPath } : { current: reverifyCur ?? undefined }),
             // 넣을 때 아직 저장 전일 수 있다 — 화면이 계속 갱신해 주는
             // 스냅샷에서 지금 아는 값을 읽는다. 나중에 생기면 sync 가 알려 준다.
             problemId:

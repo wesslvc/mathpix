@@ -150,6 +150,8 @@ export async function POST(req: NextRequest) {
     /** 재검수 — 저장된 그림(`current`)을 원본(`image`)과 sol 이 다시 견주기만 한다(그리기 없음, 토큰 없음). */
     reverify?: boolean;
     current?: string;
+    /** 브라우저가 R2 로 바로 올려 둔 그림 경로(`<uid>/_jobs/…`) — 본문에 그림을 싣지 않는다(Vercel 전송량 절약). */
+    currentPath?: unknown;
   };
   try {
     body = await req.json();
@@ -165,12 +167,14 @@ export async function POST(req: NextRequest) {
   if (body.mode === "task") return enqueueTask(req, body, supabase, user.id);
 
   const figureId = typeof body.figureId === "string" ? body.figureId.slice(0, 100) : "";
+  // 그림은 본문에 싣거나(예전), 브라우저가 R2 에 바로 올린 경로로 받는다(전송량이 서버 함수를 안 지난다).
   const image = typeof body.image === "string" ? body.image : "";
-  if (!figureId || !image || image.length > MAX_IMAGE_CHARS) {
+  const preInput = ownJobPath(body.inputPath, user.id) ? body.inputPath : "";
+  if (!figureId || (!image && !preInput) || image.length > MAX_IMAGE_CHARS) {
     return NextResponse.json({ error: "그림을 받지 못했어요." }, { status: 400 });
   }
-  const parts = splitDataUrl(image);
-  if (!parts) {
+  const parts = image ? splitDataUrl(image) : null;
+  if (image && !parts) {
     return NextResponse.json({ error: "그림 형식이 올바르지 않아요." }, { status: 400 });
   }
 
@@ -217,8 +221,8 @@ export async function POST(req: NextRequest) {
   if (existing.data) return NextResponse.json({ job: existing.data });
 
   const jobId = crypto.randomUUID();
-  const inputPath = `${user.id}/_jobs/${jobId}-in.${parts.ext}`;
-  if (!(await storeBytes(supabase, inputPath, parts.bytes, parts.mime))) {
+  const inputPath = preInput || `${user.id}/_jobs/${jobId}-in.${parts!.ext}`;
+  if (!preInput && !(await storeBytes(supabase, inputPath, parts!.bytes, parts!.mime))) {
     return NextResponse.json({ error: "그림을 올리지 못했어요." }, { status: 502 });
   }
 
@@ -226,7 +230,9 @@ export async function POST(req: NextRequest) {
 
   // 재검수: 저장된 그림을 첫 라운드로 놓고 곧바로 검수 단계(`verify:0`)부터 돈다. 그리기도 보증금도 없다.
   let reverifyPath = "";
-  if (body.reverify === true && mode === "problem" && typeof body.current === "string") {
+  if (body.reverify === true && mode === "problem" && ownJobPath(body.currentPath, user.id)) {
+    reverifyPath = body.currentPath;
+  } else if (body.reverify === true && mode === "problem" && typeof body.current === "string") {
     const cur = splitDataUrl(body.current);
     if (!cur || body.current.length > MAX_IMAGE_CHARS) {
       await removeStored(admin, [inputPath]);
