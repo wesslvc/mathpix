@@ -126,9 +126,16 @@ export default function VariantPanel() {
   /** 재검수에서 잡힌 문제점들을 그림 편집 지시로 만든다(사용자가 고칠 수 있다). */
   const noteInstruction = (notes: string[]) => `${notes.map((n, i) => `${i + 1}. ${n}`).join("\n")}\nkeep everything else exactly as in the picture.`;
   const [reDraft, setReDraft] = useState<Record<string, string>>({});
+  /** 재검수(따로 돌린 것)나 수정 직후 재검수에서 남은 문제점 — 없으면 null. */
+  const badNotes = (x: (typeof libRows)[number]): string[] | null => {
+    if (x.recheck && !x.recheck.ok && x.recheck.notes.length) return x.recheck.notes;
+    if (x.fix?.recheck && !x.fix.recheck.ok && x.fix.recheck.notes.length) return x.fix.recheck.notes;
+    return null;
+  };
   async function fixFromRecheck(id: string) {
     const row = libRows.find((x) => x.id === id);
-    const instruction = (reDraft[id] ?? (row?.recheck ? noteInstruction(row.recheck.notes) : "")).trim();
+    const bn = row ? badNotes(row) : null;
+    const instruction = (reDraft[id] ?? (bn ? noteInstruction(bn) : "")).trim();
     if (!row || !instruction) return;
     setLibFix((m) => ({ ...m, [id]: "busy" }));
     try {
@@ -645,43 +652,43 @@ export default function VariantPanel() {
                 >
                   확인 대기 {libRows.filter((x) => x.fix?.prevImagePath).length}개 모두 sol 재검수
                 </button>
-                {libRows.some((x) => x.fix?.prevImagePath && x.recheck?.ok) && (
+                {libRows.some((x) => x.fix?.prevImagePath && !badNotes(x) && (x.recheck?.ok || x.fix?.recheck?.ok)) && (
                   <button
                     className="rounded bg-emerald-600 px-2 py-0.5 text-white"
                     onClick={() => {
-                      const list = libRows.filter((x) => x.fix?.prevImagePath && x.recheck?.ok);
+                      const list = libRows.filter((x) => x.fix?.prevImagePath && !badNotes(x) && (x.recheck?.ok || x.fix?.recheck?.ok));
                       if (!window.confirm(`sol 재검수를 통과한 ${list.length}개를 모두 확정할까요? (이전 그림이 지워져 되돌릴 수 없어요)`)) return;
                       list.forEach((x) => void confirmFix(x.id));
                     }}
                   >
-                    재검수 통과 {libRows.filter((x) => x.fix?.prevImagePath && x.recheck?.ok).length}개 모두 확정
+                    재검수 통과 {libRows.filter((x) => x.fix?.prevImagePath && !badNotes(x) && (x.recheck?.ok || x.fix?.recheck?.ok)).length}개 모두 확정
                   </button>
                 )}
-                {libRows.some((x) => x.fix?.prevImagePath && !(x.recheck && !x.recheck.ok)) && (
+                {libRows.some((x) => x.fix?.prevImagePath && !badNotes(x)) && (
                   <button
                     className="rounded border border-emerald-600 px-2 py-0.5 text-emerald-700"
                     onClick={() => {
-                      const list = libRows.filter((x) => x.fix?.prevImagePath && !(x.recheck && !x.recheck.ok));
+                      const list = libRows.filter((x) => x.fix?.prevImagePath && !badNotes(x));
                       if (!window.confirm(`재검수에서 남은 문제가 잡힌 것을 뺀 확인 대기 ${list.length}개(통과 + 재검수 안 한 것)를 모두 확정할까요? 이전 그림이 지워져 되돌릴 수 없어요.`)) return;
                       list.forEach((x) => void confirmFix(x.id));
                     }}
                   >
-                    남은 문제 없는 {libRows.filter((x) => x.fix?.prevImagePath && !(x.recheck && !x.recheck.ok)).length}개 모두 확정
+                    남은 문제 없는 {libRows.filter((x) => x.fix?.prevImagePath && !badNotes(x)).length}개 모두 확정
                   </button>
                 )}
-                {libRows.some((x) => x.recheck && !x.recheck.ok) && (
+                {libRows.some((x) => badNotes(x)) && (
                   <button
                     className="rounded bg-amber-600 px-2 py-0.5 text-white"
                     onClick={() => {
-                      const list = libRows.filter((x) => x.recheck && !x.recheck.ok && libFix[x.id] !== "busy");
+                      const list = libRows.filter((x) => badNotes(x) && libFix[x.id] !== "busy");
                       if (!window.confirm(`재검수에서 잡힌 ${list.length}개를 지적된 내용만 일부 수정할까요? (문제당 그림 1번 + sol 재검수, 약 70원)`)) return;
                       list.forEach((x) => void fixFromRecheck(x.id));
                     }}
                   >
-                    잡힌 {libRows.filter((x) => x.recheck && !x.recheck.ok).length}개 모두 일부 수정
+                    잡힌 {libRows.filter((x) => badNotes(x)).length}개 모두 일부 수정
                   </button>
                 )}
-                <span className="text-slate-500">확인 대기 중: 재검수 통과 {libRows.filter((x) => x.fix?.prevImagePath && x.recheck?.ok).length} · 남은 문제 {libRows.filter((x) => x.fix?.prevImagePath && x.recheck && !x.recheck.ok).length} · 아직 안 함 {libRows.filter((x) => x.fix?.prevImagePath && !x.recheck).length}</span>
+                <span className="text-slate-500">확인 대기 중: 재검수 통과 {libRows.filter((x) => x.fix?.prevImagePath && !badNotes(x) && (x.recheck?.ok || x.fix?.recheck?.ok)).length} · 남은 문제 {libRows.filter((x) => x.fix?.prevImagePath && badNotes(x)).length} · 아직 안 함 {libRows.filter((x) => x.fix?.prevImagePath && !x.recheck && !x.fix?.recheck).length}</span>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {libRows.filter((x) => (libFilter === "all" ? true : libFilter === "flag" ? !!x.review?.fixSuggestion : !!x.fix?.prevImagePath)).map((r) => (
@@ -727,6 +734,19 @@ export default function VariantPanel() {
                             <div className="mt-1 rounded border border-amber-300 bg-amber-50 p-1 text-amber-900">
                               <b>sol 재검수: 남은 문제 {r.fix.recheck.notes.length}건</b>
                               <ul className="list-disc pl-4">{r.fix.recheck.notes.map((n, i) => (<li key={i}>{n}</li>))}</ul>
+                              {!r.recheck && (
+                                <>
+                                  <textarea
+                                    className="mt-1 w-full rounded border border-amber-300 bg-white p-1 text-[11px] text-slate-800"
+                                    rows={4}
+                                    value={reDraft[r.id] ?? noteInstruction(r.fix.recheck.notes)}
+                                    onChange={(e) => setReDraft((m) => ({ ...m, [r.id]: e.target.value }))}
+                                  />
+                                  <button className="mt-1 rounded bg-amber-600 px-2 py-0.5 text-white disabled:opacity-50" disabled={libFix[r.id] === "busy"} onClick={() => void fixFromRecheck(r.id)}>
+                                    {libFix[r.id] === "busy" ? "수정 중…" : "이 내용만 수정해서 붙이기"}
+                                  </button>
+                                </>
+                              )}
                             </div>
                           )
                         ) : (
