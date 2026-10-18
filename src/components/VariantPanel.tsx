@@ -108,14 +108,14 @@ export default function VariantPanel() {
   const [newFolder, setNewFolder] = useState("");
   const [tab, setTab] = useState<"make" | "library">("make");
   const [libId, setLibId] = useState("");
-  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string } | null }[]>([]);
+  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; recheck?: { ok: boolean; notes: string[] } | null } | null }[]>([]);
   const [libFilter, setLibFilter] = useState<"all" | "flag" | "fixed">("all");
   const [libFix, setLibFix] = useState<Record<string, "busy" | "done" | string>>({});
   async function fixLibRow(id: string) {
     setLibFix((m) => ({ ...m, [id]: "busy" }));
     try {
-      const out = await runAiTask<{ imagePath: string }>("variantFix", { label: "변형 수정 (저장된 지적)", params: { problemId: id } });
-      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: out.result.imagePath, review: null, fix: { at: new Date().toISOString(), prevImagePath: x.image_path, instruction: x.review?.fixSuggestion } } : x)));
+      const out = await runAiTask<{ imagePath: string; recheck?: { ok: boolean; notes: string[] } | null }>("variantFix", { label: "변형 수정 (저장된 지적)", params: { problemId: id } });
+      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: out.result.imagePath, review: null, fix: { at: new Date().toISOString(), prevImagePath: x.image_path, instruction: x.review?.fixSuggestion, recheck: out.result.recheck ?? null } } : x)));
       setLibFix((m) => ({ ...m, [id]: "done" }));
     } catch (err) {
       setLibFix((m) => ({ ...m, [id]: err instanceof Error ? err.message : "수정에 실패했어요." }));
@@ -615,6 +615,18 @@ export default function VariantPanel() {
                         <b>수정했어요 — 위가 수정 후, 아래가 수정 전</b>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={cardUrl(r.fix.prevImagePath)} alt="수정 전" className="mt-1 w-full rounded opacity-90" loading="lazy" />
+                        {r.fix.recheck ? (
+                          r.fix.recheck.ok ? (
+                            <p className="mt-1 font-medium text-emerald-700">sol 재검수: 통과 — 지시대로 됐고 엉뚱한 변경이 없어요</p>
+                          ) : (
+                            <div className="mt-1 rounded border border-amber-300 bg-amber-50 p-1 text-amber-900">
+                              <b>sol 재검수: 남은 문제 {r.fix.recheck.notes.length}건</b>
+                              <ul className="list-disc pl-4">{r.fix.recheck.notes.map((n, i) => (<li key={i}>{n}</li>))}</ul>
+                            </div>
+                          )
+                        ) : (
+                          <p className="mt-1 text-slate-600">sol 재검수 결과 없음(직접 확인해 주세요)</p>
+                        )}
                         {r.fix.instruction && <p className="mt-1 whitespace-pre-wrap text-[11px] text-emerald-800">지시: {r.fix.instruction.replace(/\nkeep everything else[\s\S]*$/, "")}</p>}
                         <div className="mt-1 flex gap-2">
                           <button className="rounded bg-emerald-600 px-2 py-0.5 text-white" onClick={() => void confirmFix(r.id)}>잘 됐어요 (확정)</button>

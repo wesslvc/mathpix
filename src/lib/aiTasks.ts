@@ -50,6 +50,7 @@ import {
   solChatPrompt,
   TYPESET_PROMPT,
   type ChatTurn,
+  parseJsonObject,
 } from "./problemCompare";
 import { askSol, loadPatchImages } from "./problemLoopRun";
 import { removeStored } from "./figureRun";
@@ -1041,6 +1042,33 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       const ext = parts.mime.includes("jpeg") ? "jpg" : "png";
       const path = `${ctx.userId}/${prob.category_id}/${crypto.randomUUID()}.${ext}`;
       if (!(await storeBytes(ctx.admin, path, parts.bytes, parts.mime))) return { ok: false, error: "그림을 저장하지 못했어요.", estKrw: spent || undefined };
+      // **sol 재검수**: 고친 그림이 지시대로 됐는지, 엉뚱한 곳이 바뀌지 않았는지 이전 그림과 견준다(실패해도 수정은 저장한다).
+      let recheck: { ok: boolean; notes: string[] } | null = null;
+      try {
+        const left = ctx.deadlineMs - (Date.now() - t0);
+        if (left >= 30_000) {
+          const rv = await askSol(
+            `task: check a PARTIAL EDIT of a Korean exam question picture. image 1 = BEFORE, image 2 = AFTER. the edit instruction is given after the images. for EACH numbered item decide whether image 2 now matches the instruction exactly (read the text carefully, character by character), and whether anything NOT named in the instruction changed (text, numbers, choices, figure, layout, broken glyphs). reply ONLY JSON: {"items":[{"item":"짧은 한국어 설명","done":true|false,"note":"안 됐으면 무엇이 어떻게 다른지(한국어)"}],"collateral":["의도하지 않은 변경(한국어), 없으면 빈 배열"]}`,
+            [base, outUrl],
+            { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(80_000, left - 10_000), tag: ctx.tag },
+            "변형 수정 재검수",
+            { effort: "medium", cacheKey: "reprint-variant-fixcheck", tail: `\n\nINSTRUCTION\n${instruction}` },
+          );
+          spent += rv.krw;
+          if (rv.krw > 0 && !ctx.byok) {
+            await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "sol 변형 수정 재검수", krw: rv.krw, tokens: solTokens(rv.usage) });
+          }
+          const obj = rv.text ? (parseJsonObject(rv.text) as { items?: { item?: string; done?: boolean; note?: string }[]; collateral?: string[] } | null) : null;
+          if (obj) {
+            const notes: string[] = [];
+            for (const it of obj.items ?? []) if (it && it.done === false) notes.push(`${String(it.item ?? "").slice(0, 80)}: ${String(it.note ?? "").slice(0, 200)}`);
+            for (const c of obj.collateral ?? []) if (c) notes.push(`의도하지 않은 변경: ${String(c).slice(0, 200)}`);
+            recheck = { ok: notes.length === 0, notes: notes.slice(0, 8) };
+          }
+        }
+      } catch {
+        /* 재검수를 못 해도 수정은 저장한다 */
+      }
       const br = ((prob.box_range ?? {}) as Record<string, unknown>) || {};
       const figures = Array.isArray(br.figures) ? (br.figures as Record<string, unknown>[]) : [];
       const nextFigures = figures.length
@@ -1051,7 +1079,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         .update({
           image_path: path,
           // 이전 그림을 보관한다 — 모아보기에서 수정 전·후를 견주고 되돌릴 수 있다.
-          box_range: { ...br, figures: nextFigures, variantReview: undefined, variantFix: { at: new Date().toISOString(), instruction: instruction.slice(0, 1200), prevImagePath: prob.image_path } },
+          box_range: { ...br, figures: nextFigures, variantReview: undefined, variantFix: { at: new Date().toISOString(), instruction: instruction.slice(0, 1200), prevImagePath: prob.image_path, ...(recheck ? { recheck } : {}) } },
         })
         .eq("id", problemId)
         .eq("user_id", ctx.userId);
@@ -1062,7 +1090,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       // 옛 그림은 지우지 않는다(`variantFix.prevImagePath` — 확정하거나 되돌릴 때 모아보기가 정리한다).
       return {
         ok: true,
-        result: { imagePath: path, problemId, ...(ctx.unlimited || ctx.byok ? { estKrw: Math.round(spent * 10) / 10 } : {}) },
+        result: { imagePath: path, problemId, recheck, ...(ctx.unlimited || ctx.byok ? { estKrw: Math.round(spent * 10) / 10 } : {}) },
         estKrw: spent > 0 ? spent : undefined,
         model: gen.modelId,
         note: "검수 지적대로 고쳤어요",
