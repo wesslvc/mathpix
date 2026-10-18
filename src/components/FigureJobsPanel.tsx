@@ -80,6 +80,7 @@ const TASK_RUNNING: Record<string, string> = {
   chat: "sol 이 답하는 중",
   variant: "sol 이 변형을 설계하고 그림 모델이 고쳐 그리는 중",
   variantFix: "그림 모델이 검수 지적대로 고치는 중",
+  variantRecheck: "sol 이 변형문제를 다시 검수하는 중",
 };
 /** 짧은 작업의 남은 시간 어림(초). */
 const TASK_SECONDS: Record<string, number> = {
@@ -97,6 +98,7 @@ const TASK_SECONDS: Record<string, number> = {
   chat: 30,
   variant: 150,
   variantFix: 90,
+  variantRecheck: 60,
 };
 
 function statusText(j: FigureJob, top: string): string {

@@ -108,9 +108,21 @@ export default function VariantPanel() {
   const [newFolder, setNewFolder] = useState("");
   const [tab, setTab] = useState<"make" | "library">("make");
   const [libId, setLibId] = useState("");
-  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; recheck?: { ok: boolean; notes: string[] } | null } | null }[]>([]);
+  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; recheck?: { ok: boolean; notes: string[]; solved?: string } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; recheck?: { ok: boolean; notes: string[] } | null } | null }[]>([]);
   const [libFilter, setLibFilter] = useState<"all" | "flag" | "fixed">("all");
   const [libFix, setLibFix] = useState<Record<string, "busy" | "done" | string>>({});
+  const [recheckBusy, setRecheckBusy] = useState<Record<string, boolean>>({});
+  async function recheckRow(id: string) {
+    setRecheckBusy((m) => ({ ...m, [id]: true }));
+    try {
+      const out = await runAiTask<{ recheck: { ok: boolean; notes: string[]; solved?: string } }>("variantRecheck", { label: "변형 재검수", params: { problemId: id } });
+      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, recheck: out.result.recheck } : x)));
+    } catch (err) {
+      setLibFix((m) => ({ ...m, [id]: err instanceof Error ? err.message : "재검수에 실패했어요." }));
+    } finally {
+      setRecheckBusy((m) => ({ ...m, [id]: false }));
+    }
+  }
   async function fixLibRow(id: string) {
     setLibFix((m) => ({ ...m, [id]: "busy" }));
     try {
@@ -484,7 +496,7 @@ export default function VariantPanel() {
     void (async () => {
       const { data } = await supabase
         .from("problems")
-        .select("id,image_path,answer,no:box_range->number,solution:box_range->>solution,review:box_range->variantReview,fix:box_range->variantFix")
+        .select("id,image_path,answer,no:box_range->number,solution:box_range->>solution,review:box_range->variantReview,fix:box_range->variantFix,recheck:box_range->variantRecheck")
         .eq("category_id", libId)
         .order("sort_order", { ascending: true });
       setLibRows((data as unknown as typeof libRows) ?? []);
@@ -605,11 +617,37 @@ export default function VariantPanel() {
                   );
                 })}
               </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  className="rounded border border-slate-300 px-2 py-0.5"
+                  onClick={() => {
+                    const list = libRows.filter((x) => x.fix?.prevImagePath && !recheckBusy[x.id]);
+                    if (!window.confirm(`수정함(확인 대기) ${list.length}개를 sol 로 재검수할까요? (문제당 약 30원)`)) return;
+                    list.forEach((x) => void recheckRow(x.id));
+                  }}
+                >
+                  확인 대기 {libRows.filter((x) => x.fix?.prevImagePath).length}개 모두 sol 재검수
+                </button>
+                <span className="text-slate-500">확인 대기 중: 재검수 통과 {libRows.filter((x) => x.fix?.prevImagePath && x.recheck?.ok).length} · 남은 문제 {libRows.filter((x) => x.fix?.prevImagePath && x.recheck && !x.recheck.ok).length} · 아직 안 함 {libRows.filter((x) => x.fix?.prevImagePath && !x.recheck).length}</span>
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {libRows.filter((x) => (libFilter === "all" ? true : libFilter === "flag" ? !!x.review?.fixSuggestion : !!x.fix?.prevImagePath)).map((r) => (
                   <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-slate-200 p-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={cardUrl(r.image_path)} alt="" className="w-full rounded" loading="lazy" />
+                    <div className="text-xs">
+                      <button className="rounded border border-slate-300 px-2 py-0.5 disabled:opacity-50" disabled={recheckBusy[r.id]} onClick={() => void recheckRow(r.id)}>
+                        {recheckBusy[r.id] ? "재검수 중…" : "sol 재검수"}
+                      </button>
+                      {r.recheck && (r.recheck.ok ? (
+                        <span className="ml-2 font-medium text-emerald-700">통과{r.recheck.solved ? ` (sol 이 푼 정답 ${r.recheck.solved})` : ""}</span>
+                      ) : (
+                        <div className="mt-1 rounded border border-amber-300 bg-amber-50 p-1 text-amber-900">
+                          <b>남은 문제 {r.recheck.notes.length}건</b>
+                          <ul className="list-disc pl-4">{r.recheck.notes.map((n, i) => (<li key={i}>{n}</li>))}</ul>
+                        </div>
+                      ))}
+                    </div>
                     {r.fix?.prevImagePath && (
                       <div className="rounded border border-emerald-300 bg-emerald-50 p-2 text-xs text-emerald-900">
                         <b>수정했어요 — 위가 수정 후, 아래가 수정 전</b>

@@ -30,6 +30,7 @@ export type AiTaskKind =
   | "chat"
   | "variant"
   | "variantFix"
+  | "variantRecheck"
   | "unitLabel";
 
 export class AiTaskError extends Error {

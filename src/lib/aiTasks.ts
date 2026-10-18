@@ -90,6 +90,7 @@ export type TaskKind =
   | "chat"
   | "variant"
   | "variantFix"
+  | "variantRecheck"
   | "unitLabel";
 
 export const TASK_KINDS: readonly TaskKind[] = [
@@ -107,6 +108,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
   "chat",
   "variant",
   "variantFix",
+  "variantRecheck",
   "unitLabel",
 ];
 
@@ -1094,6 +1096,53 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         estKrw: spent > 0 ? spent : undefined,
         model: gen.modelId,
         note: "검수 지적대로 고쳤어요",
+      };
+    },
+  },
+
+
+  // **변형문제 재검수**: 저장된 변형 그림을 원본·저장된 정답과 해설에 견줘 sol 이 다시 본다(고치지는 않는다). 결과는 `box_range.variantRecheck`.
+  variantRecheck: {
+    deposit: () => 0,
+    flat: true,
+    needsOpenAI: true,
+    unlimitedOnly: true,
+    images: { min: 0, max: 0 },
+    name: "변형문제 재검수",
+    async run(ctx) {
+      const t0 = Date.now();
+      const problemId = str(ctx.params.problemId, 60);
+      if (!/^[0-9a-f-]{36}$/i.test(problemId)) return { ok: false, error: "문제가 정해지지 않았어요." };
+      const { data: prob } = await ctx.admin.from("problems").select("id,image_path,answer,box_range").eq("id", problemId).eq("user_id", ctx.userId).maybeSingle();
+      if (!prob?.image_path) return { ok: false, error: "문제를 찾지 못했어요." };
+      const br = ((prob.box_range ?? {}) as Record<string, unknown>) || {};
+      const vo = (br.variantOf ?? {}) as { path?: string };
+      const cur = await loadAsDataUrl(ctx.admin, prob.image_path as string);
+      if (!cur) return { ok: false, error: "문제 그림을 읽지 못했어요." };
+      const orig = typeof vo.path === "string" && vo.path ? await loadAsDataUrl(ctx.admin, vo.path) : null;
+      const sol = typeof br.solution === "string" ? br.solution.slice(0, 3000) : "";
+      const rv = await askSol(
+        `task: re-check a GENERATED VARIANT of a Korean exam question picture. ${orig ? "image 1 = the ORIGINAL question, image 2 = the VARIANT." : "the only image = the VARIANT."} after the images you get the variant's registered answer and its solution. check, reading character by character: (1) broken, misspelled or missing glyphs/words/numbers/units in the stem, the <보기> box, the table and the labels; (2) all five choices ①–⑤ present, none left over from the original that contradicts the new problem, and exactly the registered answer is correct (solve the variant yourself and compare with the solution); (3) values/figure/table in the picture agree with the solution's numbers (a figure still showing the original's values is a defect); (4) leftover original wording that no longer fits. reply ONLY JSON: {"notes":["문제점(한국어, 어디가 어떻게)", ...],"solved_answer":"푼 정답"}; empty notes if nothing is wrong.`,
+        orig ? [orig, cur] : [cur],
+        { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(150_000, ctx.deadlineMs - (Date.now() - t0) - 10_000), tag: ctx.tag },
+        "변형 재검수",
+        { effort: "medium", cacheKey: "reprint-variant-recheck", tail: `\n\nREGISTERED ANSWER: ${String(prob.answer ?? "")}\nSOLUTION\n${sol}` },
+      );
+      let spent = rv.krw;
+      if (rv.krw > 0 && !ctx.byok) {
+        await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "sol 변형 재검수", krw: rv.krw, tokens: solTokens(rv.usage) });
+      }
+      const obj = rv.text ? (parseJsonObject(rv.text) as { notes?: string[]; solved_answer?: string } | null) : null;
+      if (!obj) return { ok: false, error: rv.fail || "재검수 결과를 읽지 못했어요.", estKrw: spent || undefined };
+      const notes = (obj.notes ?? []).filter(Boolean).map((n) => String(n).slice(0, 240)).slice(0, 10);
+      const recheck = { ok: notes.length === 0, notes, solved: String(obj.solved_answer ?? "").slice(0, 60), at: new Date().toISOString() };
+      await ctx.admin.from("problems").update({ box_range: { ...br, variantRecheck: recheck } }).eq("id", problemId).eq("user_id", ctx.userId);
+      spent = Math.round(spent * 10) / 10;
+      return {
+        ok: true,
+        result: { problemId, recheck, ...(ctx.unlimited || ctx.byok ? { estKrw: spent } : {}) },
+        estKrw: spent > 0 ? spent : undefined,
+        note: recheck.ok ? "재검수 통과" : `재검수 ${notes.length}건`,
       };
     },
   },
