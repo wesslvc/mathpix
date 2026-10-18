@@ -1,5 +1,6 @@
 "use client";
 
+import { removeBlobs } from "@/lib/blobClient";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cardUrl } from "@/lib/cardUrl";
@@ -107,13 +108,14 @@ export default function VariantPanel() {
   const [newFolder, setNewFolder] = useState("");
   const [tab, setTab] = useState<"make" | "library">("make");
   const [libId, setLibId] = useState("");
-  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null }[]>([]);
+  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string } | null }[]>([]);
+  const [libFilter, setLibFilter] = useState<"all" | "flag" | "fixed">("all");
   const [libFix, setLibFix] = useState<Record<string, "busy" | "done" | string>>({});
   async function fixLibRow(id: string) {
     setLibFix((m) => ({ ...m, [id]: "busy" }));
     try {
       const out = await runAiTask<{ imagePath: string }>("variantFix", { label: "변형 수정 (저장된 지적)", params: { problemId: id } });
-      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: out.result.imagePath, review: null } : x)));
+      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: out.result.imagePath, review: null, fix: { at: new Date().toISOString(), prevImagePath: x.image_path, instruction: x.review?.fixSuggestion } } : x)));
       setLibFix((m) => ({ ...m, [id]: "done" }));
     } catch (err) {
       setLibFix((m) => ({ ...m, [id]: err instanceof Error ? err.message : "수정에 실패했어요." }));
@@ -482,13 +484,39 @@ export default function VariantPanel() {
     void (async () => {
       const { data } = await supabase
         .from("problems")
-        .select("id,image_path,answer,no:box_range->number,solution:box_range->>solution,review:box_range->variantReview")
+        .select("id,image_path,answer,no:box_range->number,solution:box_range->>solution,review:box_range->variantReview,fix:box_range->variantFix")
         .eq("category_id", libId)
         .order("sort_order", { ascending: true });
       setLibRows((data as unknown as typeof libRows) ?? []);
     })();
   }, [libId, tab, supabase]);
 
+  /** 수정 결과 확정: 보관해 둔 이전 그림을 지우고 수정 기록을 뗀다. */
+  async function confirmFix(id: string) {
+    const row = libRows.find((x) => x.id === id);
+    if (!row?.fix?.prevImagePath) return;
+    const { data } = await supabase.from("problems").select("box_range").eq("id", id).maybeSingle();
+    const br = { ...((data?.box_range as Record<string, unknown>) ?? {}) };
+    delete br.variantFix;
+    const { error: e } = await supabase.from("problems").update({ box_range: br }).eq("id", id);
+    if (e) return setError(e.message);
+    await removeBlobs([row.fix.prevImagePath]).catch(() => {});
+    setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, fix: null } : x)));
+  }
+  /** 수정 결과 되돌리기: 이전 그림을 다시 쓰고 방금 그림은 지운다. */
+  async function revertFix(id: string) {
+    const row = libRows.find((x) => x.id === id);
+    const prev = row?.fix?.prevImagePath;
+    if (!row || !prev) return;
+    const { data } = await supabase.from("problems").select("box_range").eq("id", id).maybeSingle();
+    const br = { ...((data?.box_range as Record<string, unknown>) ?? {}) } as Record<string, unknown> & { figures?: Record<string, unknown>[] };
+    const figures = Array.isArray(br.figures) ? br.figures.map((f, i) => (i === 0 ? { ...f, markup: `<img src="${cardUrl(prev)}" alt="" />` } : f)) : br.figures;
+    delete br.variantFix;
+    const { error: e } = await supabase.from("problems").update({ image_path: prev, box_range: { ...br, figures } }).eq("id", id);
+    if (e) return setError(e.message);
+    await removeBlobs([row.image_path]).catch(() => {});
+    setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: prev, fix: null } : x)));
+  }
   async function renameFolder(id: string) {
     const cur = cats.find((c) => c.id === id)?.source ?? "";
     const name = window.prompt("폴더 이름", cur)?.trim();
@@ -567,11 +595,33 @@ export default function VariantPanel() {
                   실모처럼 열어 수정
                 </a>
               </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {(["all", "flag", "fixed"] as const).map((k) => {
+                  const n = k === "all" ? libRows.length : k === "flag" ? libRows.filter((x) => x.review?.fixSuggestion).length : libRows.filter((x) => x.fix?.prevImagePath).length;
+                  return (
+                    <button key={k} onClick={() => setLibFilter(k)} className={cn("rounded-full border px-3 py-1", libFilter === k ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600")}>
+                      {k === "all" ? "전체" : k === "flag" ? "지적 남음" : "수정함(확인 대기)"} {n}
+                    </button>
+                  );
+                })}
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {libRows.map((r) => (
+                {libRows.filter((x) => (libFilter === "all" ? true : libFilter === "flag" ? !!x.review?.fixSuggestion : !!x.fix?.prevImagePath)).map((r) => (
                   <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-slate-200 p-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={cardUrl(r.image_path)} alt="" className="w-full rounded" loading="lazy" />
+                    {r.fix?.prevImagePath && (
+                      <div className="rounded border border-emerald-300 bg-emerald-50 p-2 text-xs text-emerald-900">
+                        <b>수정했어요 — 위가 수정 후, 아래가 수정 전</b>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={cardUrl(r.fix.prevImagePath)} alt="수정 전" className="mt-1 w-full rounded opacity-90" loading="lazy" />
+                        {r.fix.instruction && <p className="mt-1 whitespace-pre-wrap text-[11px] text-emerald-800">지시: {r.fix.instruction.replace(/\nkeep everything else[\s\S]*$/, "")}</p>}
+                        <div className="mt-1 flex gap-2">
+                          <button className="rounded bg-emerald-600 px-2 py-0.5 text-white" onClick={() => void confirmFix(r.id)}>잘 됐어요 (확정)</button>
+                          <button className="rounded border border-red-400 px-2 py-0.5 text-red-700" onClick={() => void revertFix(r.id)}>되돌리기</button>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between text-xs text-slate-600">
                       <span>
                         {r.no != null ? `${r.no}번 · ` : ""}정답 {r.answer ?? "?"}

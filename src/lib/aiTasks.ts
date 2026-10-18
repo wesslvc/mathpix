@@ -1048,16 +1048,18 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         : figures;
       const { error: upErr } = await ctx.admin
         .from("problems")
-        .update({ image_path: path, box_range: { ...br, figures: nextFigures, variantReview: undefined } })
+        .update({
+          image_path: path,
+          // 이전 그림을 보관한다 — 모아보기에서 수정 전·후를 견주고 되돌릴 수 있다.
+          box_range: { ...br, figures: nextFigures, variantReview: undefined, variantFix: { at: new Date().toISOString(), instruction: instruction.slice(0, 1200), prevImagePath: prob.image_path } },
+        })
         .eq("id", problemId)
         .eq("user_id", ctx.userId);
       if (upErr) {
         await removeStored(ctx.admin, [path]);
         return { ok: false, error: `저장하지 못했어요: ${upErr.message}`, estKrw: spent || undefined };
       }
-      // 옛 그림은 다른 문제가 같이 쓰지 않을 때만 지운다.
-      const { count } = await ctx.admin.from("problems").select("id", { count: "exact", head: true }).eq("image_path", prob.image_path as string);
-      if (!count) await removeStored(ctx.admin, [prob.image_path as string]);
+      // 옛 그림은 지우지 않는다(`variantFix.prevImagePath` — 확정하거나 되돌릴 때 모아보기가 정리한다).
       return {
         ok: true,
         result: { imagePath: path, problemId, ...(ctx.unlimited || ctx.byok ? { estKrw: Math.round(spent * 10) / 10 } : {}) },
