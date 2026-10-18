@@ -344,6 +344,8 @@ export default function FigureJobsProvider({
     [],
   );
 
+  /** 지운 작업의 서버 id — 서버 삭제가 끝나기 전에 다음 동기화가 와도 다시 띄우지 않는다(지워도 생겨나던 원인). */
+  const dismissedRef = useRef(new Set<string>());
   const runOnChain = useCallback((task: () => Promise<void>) => {
     chainRef.current = chainRef.current.then(task).catch((err) => {
       console.error("[figureJobs]", err);
@@ -639,6 +641,7 @@ export default function FigureJobsProvider({
     setJobs((prev) => {
       let next = [...prev];
       for (const row of rows) {
+        if (dismissedRef.current.has(row.id)) continue;
         const i = next.findIndex((j) => j.serverId === row.id);
         if (i !== -1) {
           next[i] = { ...next[i], ...fromServer(row) };
@@ -1000,11 +1003,18 @@ export default function FigureJobsProvider({
       setJobs((prev) => prev.filter((j) => j.id !== id));
       const serverId = job?.serverId;
       if (!serverId) return; // 넣는 중이면 submit 이 알아채고 서버에서 뺀다
-      runOnChain(async () => {
-        await fetch(`/api/figure-jobs?id=${encodeURIComponent(serverId)}`, {
-          method: "DELETE",
-        });
-      });
+      dismissedRef.current.add(serverId);
+      // 줄을 세우지 않고 바로 지운다 — 수십 개를 한 줄로 지우면 그동안 동기화가 와서 지운 것이 되살아났다. 실패하면 한 번 더.
+      void (async () => {
+        for (let k = 0; k < 2; k++) {
+          try {
+            const r = await fetch(`/api/figure-jobs?id=${encodeURIComponent(serverId)}`, { method: "DELETE" });
+            if (r.ok) return;
+          } catch {
+            /* 다시 */
+          }
+        }
+      })();
     },
     [runOnChain, setJobs],
   );
