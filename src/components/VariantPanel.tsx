@@ -128,7 +128,8 @@ export default function VariantPanel() {
   const [reDraft, setReDraft] = useState<Record<string, string>>({});
   /** 재검수(따로 돌린 것)나 수정 직후 재검수에서 남은 문제점 — 없으면 null. */
   const badNotes = (x: (typeof libRows)[number]): string[] | null => {
-    if (x.recheck && !x.recheck.ok && x.recheck.notes.length) return x.recheck.notes;
+    // 따로 돌린 재검수가 있으면 그것이 판단한다(수정 직후 자동 재검수는 더 엄격해 오탐이 있었다).
+    if (x.recheck) return !x.recheck.ok && x.recheck.notes.length ? x.recheck.notes : null;
     if (x.fix?.recheck && !x.fix.recheck.ok && x.fix.recheck.notes.length) return x.fix.recheck.notes;
     return null;
   };
