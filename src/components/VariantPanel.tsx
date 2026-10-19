@@ -120,7 +120,7 @@ export default function VariantPanel() {
     setRecheckBusy((m) => ({ ...m, [id]: true }));
     try {
       const out = await runAiTask<{ recheck: { ok: boolean; notes: RecheckNote[]; solved?: string } }>("variantRecheck", { label: "변형 재검수", params: { problemId: id } });
-      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, recheck: out.result.recheck } : x)));
+      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, recheck: out.result.recheck, fix: x.fix ? { ...x.fix, recheck: null } : x.fix } : x)));
     } catch (err) {
       setLibFix((m) => ({ ...m, [id]: err instanceof Error ? err.message : "재검수에 실패했어요." }));
     } finally {
@@ -758,7 +758,7 @@ export default function VariantPanel() {
                             </div>
                           )
                         ) : (
-                          <p className="mt-1 text-slate-600">sol 재검수 결과 없음(직접 확인해 주세요)</p>
+                          <p className="mt-1 text-slate-600">{r.recheck ? (r.recheck.ok ? "sol 재검수: 통과 (위 결과 참고)" : "sol 재검수: 남은 문제는 위 노란 상자를 보세요") : "sol 재검수 결과 없음(직접 확인해 주세요)"}</p>
                         )}
                         {r.fix.instruction && <p className="mt-1 whitespace-pre-wrap text-[11px] text-emerald-800">지시: {r.fix.instruction.replace(/\nkeep everything else[\s\S]*$/, "")}</p>}
                         <div className="mt-1 flex gap-2">

@@ -1149,7 +1149,12 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         .filter((n) => n.problem)
         .slice(0, 10);
       const recheck = { ok: notes.length === 0, notes, solved: String(obj.solved_answer ?? "").slice(0, 60), at: new Date().toISOString() };
-      await ctx.admin.from("problems").update({ box_range: { ...br, variantRecheck: recheck } }).eq("id", problemId).eq("user_id", ctx.userId);
+      await ctx.admin.from("problems").update({ box_range: {
+            ...br,
+            variantRecheck: recheck,
+            // 수정 직후의 옛 자동 재검수는 이 결과로 대신한다(둘이 엇갈려 보이던 것을 막는다).
+            ...(br.variantFix && typeof br.variantFix === "object" ? { variantFix: { ...(br.variantFix as Record<string, unknown>), recheck: undefined } } : {}),
+          } }).eq("id", problemId).eq("user_id", ctx.userId);
       spent = Math.round(spent * 10) / 10;
       return {
         ok: true,
