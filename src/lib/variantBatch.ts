@@ -99,9 +99,20 @@ function solBody(prompt: string, images: string[], tail: string, effort: string)
   };
 }
 
+/** 한 번 부를 동안 같은 원본을 R2 에서 여러 번 읽지 않게 들고 있는다(같은 원본의 변형이 여럿이다). */
+type SrcCache = Map<string, Promise<string | null>>;
+function srcOf(admin: SupabaseClient, cache: SrcCache, path: string) {
+  let p = cache.get(path);
+  if (!p) {
+    p = loadAsDataUrl(admin, path);
+    cache.set(path, p);
+  }
+  return p;
+}
+
 /** 줄 하나 만들기. 실패(그림을 못 읽음 등)면 null — 그 변형은 오류로 돌린다. */
-async function buildLine(admin: SupabaseClient, it: Item): Promise<{ body: Record<string, unknown> } | { error: string }> {
-  const src = await loadAsDataUrl(admin, it.src_path);
+async function buildLine(admin: SupabaseClient, it: Item, cache: SrcCache): Promise<{ body: Record<string, unknown> } | { error: string }> {
+  const src = await srcOf(admin, cache, it.src_path);
   if (!src) return { error: "원본 그림을 읽지 못했어요." };
   const p = it.params;
   if (it.stage === "plan") {
@@ -152,6 +163,7 @@ async function failItems(admin: SupabaseClient, ids: string[], error: string, dr
 /** batch 를 기다리지 않는(=batch_id 가 빈) plan/image/review 줄을 모아 단계별로 건다. */
 export async function submitReady(admin: SupabaseClient, deadline: number): Promise<number> {
   let submitted = 0;
+  const cache: SrcCache = new Map();
   for (const stage of ["plan", "image", "review"] as BatchStage[]) {
     for (;;) {
       if (Date.now() > deadline) return submitted;
@@ -169,7 +181,7 @@ export async function submitReady(admin: SupabaseClient, deadline: number): Prom
       const lines: string[] = [];
       const ok: Item[] = [];
       for (const it of mine) {
-        const built = await buildLine(admin, it);
+        const built = await buildLine(admin, it, cache);
         if ("error" in built) {
           await failItems(admin, [it.id], built.error, [it.draft_path]);
           continue;
@@ -240,7 +252,7 @@ async function logSolCost(admin: SupabaseClient, it: Item, what: string, body: R
 }
 
 /** 단계 하나가 끝난 변형 한 줄을 처리한다. */
-async function handleLine(admin: SupabaseClient, it: Item, line: OutLine | undefined) {
+async function handleLine(admin: SupabaseClient, it: Item, line: OutLine | undefined, cache: SrcCache) {
   const err = lineError(line);
   if (err) return failItems(admin, [it.id], `${it.stage} 단계 실패: ${err}`, [it.draft_path]);
   const body = (line!.response!.body ?? {}) as Record<string, unknown>;
@@ -270,7 +282,7 @@ async function handleLine(admin: SupabaseClient, it: Item, line: OutLine | undef
     let mime = sniffImageMime(b64);
     if (it.plan?.kind !== "concept") {
       try {
-        const srcUrl = await loadAsDataUrl(admin, it.src_path);
+        const srcUrl = await srcOf(admin, cache, it.src_path);
         const srcParts = srcUrl ? splitDataUrl(srcUrl) : null;
         const comp = srcParts ? await compositePatch(srcParts.bytes, bytes) : null;
         if (comp) {
@@ -367,6 +379,7 @@ export async function pollBatches(admin: SupabaseClient, deadline: number): Prom
     .select("id,stage,status")
     .is("done_at", null)
     .lt("polled_at", new Date(Date.now() - 45_000).toISOString())
+    .or(`created_at.gt.${new Date(Date.now() - 15 * 60_000).toISOString()},polled_at.lt.${new Date(Date.now() - 4 * 60_000).toISOString()}`)
     .order("polled_at")
     .limit(10);
   let checked = 0;
@@ -397,10 +410,11 @@ export async function pollBatches(admin: SupabaseClient, deadline: number): Prom
       continue;
     }
     const byId = new Map(lines.map((l) => [l.custom_id ?? "", l]));
+    const cache: SrcCache = new Map();
     for (const it of items) {
       try {
         if (status !== "completed" && !byId.has(it.id)) await failItems(admin, [it.id], `batch 가 ${status} 로 끝났어요.`, [it.draft_path]);
-        else await handleLine(admin, it, byId.get(it.id));
+        else await handleLine(admin, it, byId.get(it.id), cache);
       } catch (err) {
         await failItems(admin, [it.id], err instanceof Error ? err.message : "처리 실패", [it.draft_path]);
       }

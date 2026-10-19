@@ -72,3 +72,5 @@ $$;
 revoke all on function public.kick_variant_batches() from public, anon, authenticated;
 
 select cron.schedule('kick-variant-batches', '* * * * *', 'select public.kick_variant_batches()');
+
+-- (같은 날 고침) 확인할 때가 된 batch 가 있을 때만 깨운다: 걸린 지 15분 안은 1분마다, 그 뒤는 4분마다. 운영에는 variant_batches_cadence 로 적용됨.

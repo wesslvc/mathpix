@@ -661,11 +661,11 @@ export default function VariantPanel() {
       setLibRows((data as unknown as typeof libRows) ?? []);
     })();
   }, [libId, tab, supabase, libTick]);
-  // 검수·수정이 도는 동안은 12초마다 다시 읽는다(서버가 단계마다 상태를 바꾼다).
+  // 검수·수정이 도는 동안은 30초마다 다시 읽는다(서버가 단계마다 상태를 바꾼다).
   const autoRunning = libRows.some((x) => x.auto?.status === "checking" || x.auto?.status === "fixing");
   useEffect(() => {
     if (!autoRunning || tab !== "library") return;
-    const h = setInterval(() => setLibTick((n) => n + 1), 12_000);
+    const h = setInterval(() => setLibTick((n) => n + 1), 30_000);
     return () => clearInterval(h);
   }, [autoRunning, tab]);
 
@@ -1522,7 +1522,7 @@ function AutoBar<R extends { id: string }>({
             승인 대기 {waiting.length}개 모두 승인
           </button>
         )}
-        <span className="text-slate-500">진행 중인 동안 12초마다 새로 읽어요. 창을 닫아도 서버에서 계속 돌아요.</span>
+        <span className="text-slate-500">진행 중인 동안 30초마다 새로 읽어요. 창을 닫아도 서버에서 계속 돌아요.</span>
       </div>
     </div>
   );
@@ -1582,7 +1582,7 @@ function AutoCard({ auto, busy, onAction }: { auto: AutoState | null; busy: bool
 type BatchRow = { id: string; group_id: string; category_id: string; stage: string; error: string | null; cost_krw: number; created_at: string };
 const BATCH_STAGE: Record<string, string> = { plan: "설계", image: "그림", review: "검수", done: "저장됨", error: "실패" };
 
-/** Batch 로 넣은 변형들의 진행(최근 3일). 도는 것이 있으면 30초마다 다시 읽는다. */
+/** Batch 로 넣은 변형들의 진행(최근 3일). 도는 것이 있으면 1분마다 다시 읽는다. */
 function BatchProgress({ supabase, tick, cats }: { supabase: ReturnType<typeof createClient>; tick: number; cats: { id: string; source: string }[] }) {
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [t, setT] = useState(0);
@@ -1601,7 +1601,7 @@ function BatchProgress({ supabase, tick, cats }: { supabase: ReturnType<typeof c
   const open = rows.some((r) => r.stage === "plan" || r.stage === "image" || r.stage === "review");
   useEffect(() => {
     if (!open) return;
-    const h = setInterval(() => setT((n) => n + 1), 30_000);
+    const h = setInterval(() => setT((n) => n + 1), 60_000);
     return () => clearInterval(h);
   }, [open]);
   if (!rows.length) return null;
