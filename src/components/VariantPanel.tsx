@@ -114,7 +114,8 @@ export default function VariantPanel() {
   const [libId, setLibId] = useState("");
   const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; recheck?: { ok: boolean; notes: RecheckNote[]; solved?: string } | null; auto?: AutoState | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; prevAnswer?: string | null; prevSolution?: string | null; recheck?: { ok: boolean; notes: RecheckNote[] } | null } | null }[]>([]);
   const [libFilter, setLibFilter] = useState<"all" | "flag" | "fixed">("all");
-  const [manual, setManual] = useState(false);
+  // 수동 도구는 자동 검수로 합쳤다(2026-10-19, 사용자 — "따로 빼지 말고 위랑 합병"). 예전 기록(variantFix/variantRecheck)도 variantAuto 로 옮겼다.
+  const manual = false as boolean;
   const [autoFilter, setAutoFilter] = useState<"all" | AutoState["status"] | "none">("all");
   const [autoBusy, setAutoBusy] = useState(false);
   const [libTick, setLibTick] = useState(0);
@@ -758,9 +759,6 @@ export default function VariantPanel() {
                 </button>
                 <button className="underline text-red-600" onClick={() => void deleteFolder(libId)}>
                   폴더 지우기
-                </button>
-                <button className="underline" onClick={() => setManual((v) => !v)}>
-                  {manual ? "수동 도구 숨기기" : "수동 도구 보기"}
                 </button>
                 {manual && libRows.some((x) => x.review?.fixSuggestion) && (
                   <button
