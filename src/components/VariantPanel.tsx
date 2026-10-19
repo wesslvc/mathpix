@@ -112,7 +112,7 @@ export default function VariantPanel() {
   const [newFolder, setNewFolder] = useState("");
   const [tab, setTab] = useState<"make" | "library">("make");
   const [libId, setLibId] = useState("");
-  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; recheck?: { ok: boolean; notes: RecheckNote[]; solved?: string } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; recheck?: { ok: boolean; notes: RecheckNote[] } | null } | null }[]>([]);
+  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; recheck?: { ok: boolean; notes: RecheckNote[]; solved?: string } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; prevAnswer?: string | null; prevSolution?: string | null; recheck?: { ok: boolean; notes: RecheckNote[] } | null } | null }[]>([]);
   const [libFilter, setLibFilter] = useState<"all" | "flag" | "fixed">("all");
   const [libFix, setLibFix] = useState<Record<string, "busy" | "done" | string>>({});
   const [recheckBusy, setRecheckBusy] = useState<Record<string, boolean>>({});
@@ -133,6 +133,49 @@ export default function VariantPanel() {
     return fixes.length ? `${fixes.map((f, i) => `${i + 1}. ${f}`).join("\n")}\nkeep everything else exactly as in the picture.` : "";
   };
   const [reDraft, setReDraft] = useState<Record<string, string>>({});
+  const [designNote, setDesignNote] = useState<Record<string, string>>({});
+  const [designState, setDesignState] = useState<Record<string, "busy" | "done" | string>>({});
+  /** 그림 편집으로는 못 고치는 설계 문제들(재검수의 fix 없는 지적 + 처음 검수의 함정·설정 지적). */
+  const designIssues = (x: (typeof libRows)[number]): string[] => [
+    ...(badNotes(x) ?? []).map(notePart).filter((n) => !n.fix.trim()).map((n) => n.problem),
+    ...((x.review?.issues ?? []).filter((i) => i.kind === "trap" || i.kind === "settings").map((i) => `${i.where}: ${i.problem}`)),
+  ];
+  async function redesignRow(id: string) {
+    const row = libRows.find((x) => x.id === id);
+    if (!row) return;
+    const issues = designIssues(row);
+    const instruction = (designNote[id] ?? "").trim();
+    if (!issues.length && !instruction) return;
+    setDesignState((m) => ({ ...m, [id]: "busy" }));
+    try {
+      const out = await runAiTask<{ imagePath: string; newAnswer?: string | null; summary?: string }>("variantRedesign", { label: "변형 설계 고치기", params: { problemId: id, issues, instruction } });
+      setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: out.result.imagePath, answer: out.result.newAnswer ?? x.answer, recheck: null, review: null, fix: { at: new Date().toISOString(), prevImagePath: x.image_path, prevAnswer: x.answer, instruction: `[설계 고치기] ${out.result.summary ?? ""}`, recheck: null } } : x)));
+      setDesignState((m) => ({ ...m, [id]: "done" }));
+    } catch (err) {
+      setDesignState((m) => ({ ...m, [id]: err instanceof Error ? err.message : "설계 고치기에 실패했어요." }));
+    }
+  }
+  const designBox = (r: (typeof libRows)[number]) => {
+    const issues = designIssues(r);
+    if (!issues.length) return null;
+    return (
+      <div className="mt-1 rounded border border-violet-300 bg-violet-50 p-1 text-[11px] text-violet-900">
+        <b>설계 문제 {issues.length}건 — 그림 편집만으로는 못 고쳐요</b>
+        <p>sol 이 문제 자체를 고쳐(값·선지·정답·해설) 구체적인 편집 행동을 만들어 그림에 반영해요.</p>
+        <textarea
+          className="mt-1 w-full rounded border border-violet-300 bg-white p-1 text-slate-800"
+          rows={2}
+          placeholder="추가 지시(선택) — 예: 방향 전환 함정은 빼고 계산 단계만 늘려줘"
+          value={designNote[r.id] ?? ""}
+          onChange={(e) => setDesignNote((m) => ({ ...m, [r.id]: e.target.value }))}
+        />
+        <button className="mt-1 rounded bg-violet-600 px-2 py-0.5 text-white disabled:opacity-50" disabled={designState[r.id] === "busy"} onClick={() => void redesignRow(r.id)}>
+          {designState[r.id] === "busy" ? "고치는 중… (2~4분)" : "sol 이 문제를 고쳐서 반영"}
+        </button>
+        {designState[r.id] && designState[r.id] !== "busy" && designState[r.id] !== "done" && <p className="text-red-600">{designState[r.id]}</p>}
+      </div>
+    );
+  };
   /** 재검수(따로 돌린 것)나 수정 직후 재검수에서 남은 문제점 — 없으면 null. */
   const badNotes = (x: (typeof libRows)[number]): RecheckNote[] | null => {
     // 따로 돌린 재검수가 있으면 그것이 판단한다(수정 직후 자동 재검수는 더 엄격해 오탐이 있었다).
@@ -555,11 +598,16 @@ export default function VariantPanel() {
     const { data } = await supabase.from("problems").select("box_range").eq("id", id).maybeSingle();
     const br = { ...((data?.box_range as Record<string, unknown>) ?? {}) } as Record<string, unknown> & { figures?: Record<string, unknown>[] };
     const figures = Array.isArray(br.figures) ? br.figures.map((f, i) => (i === 0 ? { ...f, markup: `<img src="${cardUrl(prev)}" alt="" />` } : f)) : br.figures;
+    const pf = row.fix as { prevAnswer?: string | null; prevSolution?: string | null };
     delete br.variantFix;
-    const { error: e } = await supabase.from("problems").update({ image_path: prev, box_range: { ...br, figures } }).eq("id", id);
+    if (pf.prevSolution !== undefined) {
+      if (pf.prevSolution) (br as Record<string, unknown>).solution = pf.prevSolution;
+      else delete (br as Record<string, unknown>).solution;
+    }
+    const { error: e } = await supabase.from("problems").update({ image_path: prev, ...(pf.prevAnswer !== undefined ? { answer: pf.prevAnswer } : {}), box_range: { ...br, figures } }).eq("id", id);
     if (e) return setError(e.message);
     await removeBlobs([row.image_path]).catch(() => {});
-    setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: prev, fix: null } : x)));
+    setLibRows((rows) => rows.map((x) => (x.id === id ? { ...x, image_path: prev, answer: row.fix?.prevAnswer !== undefined ? row.fix.prevAnswer : x.answer, fix: null } : x)));
   }
   async function renameFolder(id: string) {
     const cur = cats.find((c) => c.id === id)?.source ?? "";
@@ -727,6 +775,7 @@ export default function VariantPanel() {
                             {libFix[r.id] === "busy" ? "수정 중…" : "이 내용만 수정해서 붙이기"}
                           </button>
                           {libFix[r.id] && libFix[r.id] !== "busy" && libFix[r.id] !== "done" && <p className="text-red-600">{libFix[r.id]}</p>}
+                          {designBox(r)}
                         </div>
                       ))}
                     </div>
@@ -795,6 +844,7 @@ export default function VariantPanel() {
                           </button>
                         )}
                         {libFix[r.id] && libFix[r.id] !== "busy" && libFix[r.id] !== "done" && <p className="text-red-600">{libFix[r.id]}</p>}
+                        {designBox(r)}
                       </div>
                     ) : libFix[r.id] === "done" ? (
                       <p className="text-xs text-emerald-700">수정했어요</p>

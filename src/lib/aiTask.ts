@@ -31,6 +31,7 @@ export type AiTaskKind =
   | "variant"
   | "variantFix"
   | "variantRecheck"
+  | "variantRedesign"
   | "unitLabel";
 
 export class AiTaskError extends Error {

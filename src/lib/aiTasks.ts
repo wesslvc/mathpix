@@ -91,6 +91,7 @@ export type TaskKind =
   | "variant"
   | "variantFix"
   | "variantRecheck"
+  | "variantRedesign"
   | "unitLabel";
 
 export const TASK_KINDS: readonly TaskKind[] = [
@@ -109,6 +110,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
   "variant",
   "variantFix",
   "variantRecheck",
+  "variantRedesign",
   "unitLabel",
 ];
 
@@ -1161,6 +1163,115 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         result: { problemId, recheck, ...(ctx.unlimited || ctx.byok ? { estKrw: spent } : {}) },
         estKrw: spent > 0 ? spent : undefined,
         note: recheck.ok ? "재검수 통과" : `재검수 ${notes.length}건`,
+      };
+    },
+  },
+
+
+  // **변형문제 설계 고치기**: 재검수가 "그림 편집으로는 못 고친다"고 한 설계 문제(함정·난이도·정답·선지 불일치)를 sol 이 **문제 자체를 고쳐서** 풀고,
+  // 그림 편집기에게 줄 구체적 행동(위치 + 현재 → 바꿀 값)과 새 정답·해설을 만든다. 그 행동으로 그림을 부분 수정하고 정답·해설도 함께 바꾼다.
+  variantRedesign: {
+    deposit: () => 0,
+    flat: true,
+    needsOpenAI: true,
+    unlimitedOnly: true,
+    images: { min: 0, max: 0 },
+    name: "변형문제 설계 고치기",
+    async run(ctx) {
+      const t0 = Date.now();
+      const problemId = str(ctx.params.problemId, 60);
+      if (!/^[0-9a-f-]{36}$/i.test(problemId)) return { ok: false, error: "문제가 정해지지 않았어요." };
+      const issues = Array.isArray(ctx.params.issues) ? (ctx.params.issues as unknown[]).map((x) => str(x, 400)).filter(Boolean).slice(0, 10) : [];
+      const userNote = str(ctx.params.instruction, 1500);
+      if (!issues.length && !userNote.trim()) return { ok: false, error: "고칠 내용이 비어 있어요." };
+      const { data: prob } = await ctx.admin.from("problems").select("id,category_id,image_path,answer,answer_type,box_range").eq("id", problemId).eq("user_id", ctx.userId).maybeSingle();
+      if (!prob?.image_path) return { ok: false, error: "문제를 찾지 못했어요." };
+      const br = ((prob.box_range ?? {}) as Record<string, unknown>) || {};
+      const vo = (br.variantOf ?? {}) as { path?: string };
+      const base = await loadAsDataUrl(ctx.admin, prob.image_path as string);
+      if (!base) return { ok: false, error: "문제 그림을 읽지 못했어요." };
+      const orig = typeof vo.path === "string" && vo.path ? await loadAsDataUrl(ctx.admin, vo.path) : null;
+      const curSol = typeof br.solution === "string" ? br.solution.slice(0, 3000) : "";
+      const ask = await askSol(
+        `task: you are a Korean exam writer. ${orig ? "image 1 = the ORIGINAL question, image 2 = a VARIANT of it" : "the image = a VARIANT question"}. the variant has DESIGN problems listed after the images (things a picture edit alone cannot fix: the intended trap/difficulty/novelty is missing, the answer or choices are inconsistent, etc.). REVISE THE VARIANT so every listed problem is solved, changing as LITTLE as possible: keep the unit/course, the solution logic type, layout and numbering; you may change values, conditions, statements (<보기> ㄱㄴㄷ) and choices. SOLVE the revised problem yourself, make exactly one choice ①–⑤ correct, recompute ALL five choices. then write "edits": a numbered list of concrete actions for an image editor that sees only the current variant picture — each item = location (e.g. '<보기> ㄴ 줄', '표 (가) B행 연령 칸', '선지 ③') + the exact current text/value → the exact new text/value; include every changed statement, value, figure/table cell and ALL changed choices; no reasoning, no vague wishes. reply ONLY JSON: {"summary":"한국어 1~2문장: 무엇을 어떻게 고쳤나","new_answer":"새 정답(①~⑤ 한 개 또는 숫자)","solution":"새 해설(Mathpix 마크다운, 한국어 문장 + $수식$, 분수는 \\frac, 소수 지양, 6~14문단, 끝줄 정답)","edits":"번호 목록 전체"}`,
+        orig ? [orig, base] : [base],
+        { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(150_000, ctx.deadlineMs - (Date.now() - t0) - 90_000), tag: ctx.tag },
+        "변형 설계 고치기",
+        { effort: "medium", cacheKey: "reprint-variant-redesign", tail: `\n\nDESIGN PROBLEMS\n${issues.map((x, i) => `${i + 1}. ${x}`).join("\n")}${userNote.trim() ? `\n\nUSER NOTE (must follow)\n${userNote}` : ""}\n\nCURRENT REGISTERED ANSWER: ${String(prob.answer ?? "")}\nCURRENT SOLUTION\n${curSol}` },
+      );
+      let spent = ask.krw;
+      if (ask.krw > 0 && !ctx.byok) {
+        await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "sol 변형 설계 고치기", krw: ask.krw, tokens: solTokens(ask.usage) });
+      }
+      const plan = ask.text ? (parseJsonObject(ask.text) as { summary?: string; new_answer?: string; solution?: string; edits?: string } | null) : null;
+      const edits = str(plan?.edits, 5000);
+      if (!plan || edits.length < 10) return { ok: false, error: ask.fail || "고칠 계획을 읽지 못했어요.", estKrw: spent || undefined };
+      const gen = await runFigureGeneration({
+        image: base,
+        mode: "problem",
+        korean: false,
+        patchNote: `${edits}\nkeep everything else exactly as in the picture.`,
+        patchStrong: true,
+        modelIds: figureImageModelIds(),
+        byokApiKey: ctx.byokApiKey,
+        deadlineMs: ctx.deadlineMs - (Date.now() - t0) - 10_000,
+        tag: ctx.tag,
+        quality: "medium",
+      });
+      if (!gen.ok) return { ok: false, error: gen.error, estKrw: spent || undefined };
+      if (gen.usage) {
+        spent += gen.usage.estKrw;
+        if (!ctx.byok) await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "그림 변형 설계 고치기", krw: gen.usage.estKrw, usd: gen.usage.estUsd, tokens: imageTokens(gen.usage) });
+      }
+      let outUrl = gen.dataUrl;
+      try {
+        const b = splitDataUrl(base);
+        const e = splitDataUrl(gen.dataUrl);
+        const comp = b && e ? await compositePatch(b.bytes, e.bytes) : null;
+        if (comp) outUrl = `data:${comp.mime};base64,${comp.bytes.toString("base64")}`;
+      } catch {
+        /* 합성 실패 — 편집 결과를 그대로 쓴다 */
+      }
+      const parts = splitDataUrl(outUrl);
+      if (!parts) return { ok: false, error: "고친 그림을 읽지 못했어요.", estKrw: spent || undefined };
+      const ext = parts.mime.includes("jpeg") ? "jpg" : "png";
+      const path = `${ctx.userId}/${prob.category_id}/${crypto.randomUUID()}.${ext}`;
+      if (!(await storeBytes(ctx.admin, path, parts.bytes, parts.mime))) return { ok: false, error: "그림을 저장하지 못했어요.", estKrw: spent || undefined };
+      const figures = Array.isArray(br.figures) ? (br.figures as Record<string, unknown>[]) : [];
+      const nextFigures = figures.length ? figures.map((f, i) => (i === 0 ? { ...f, markup: `<img src="${cardUrl(path)}" alt="" />` } : f)) : figures;
+      const { answer, type } = answerOf(String(plan.new_answer ?? ""));
+      const newSolution = typeof plan.solution === "string" && plan.solution.trim() ? plan.solution.trim().slice(0, 6000) : curSol;
+      const olderPrev = (br.variantFix as { prevImagePath?: string } | undefined)?.prevImagePath;
+      const { error: upErr } = await ctx.admin
+        .from("problems")
+        .update({
+          image_path: path,
+          answer: answer ?? prob.answer,
+          answer_type: answer ? type : prob.answer_type,
+          box_range: {
+            ...br,
+            figures: nextFigures,
+            solution: newSolution,
+            variantReview: undefined,
+            variantRecheck: undefined,
+            // 되돌릴 때 그림·정답·해설을 함께 돌려놓도록 이전 값을 보관한다.
+            variantFix: { at: new Date().toISOString(), instruction: `[설계 고치기] ${str(plan.summary, 300)}\n${edits.slice(0, 900)}`, prevImagePath: prob.image_path, prevAnswer: prob.answer ?? null, prevSolution: curSol || null, redesign: true },
+          },
+        })
+        .eq("id", problemId)
+        .eq("user_id", ctx.userId);
+      if (upErr) {
+        await removeStored(ctx.admin, [path]);
+        return { ok: false, error: `저장하지 못했어요: ${upErr.message}`, estKrw: spent || undefined };
+      }
+      if (olderPrev && olderPrev !== prob.image_path) await removeStored(ctx.admin, [olderPrev]);
+      spent = Math.round(spent * 10) / 10;
+      return {
+        ok: true,
+        result: { problemId, imagePath: path, summary: str(plan.summary, 300), newAnswer: answer, ...(ctx.unlimited || ctx.byok ? { estKrw: spent } : {}) },
+        estKrw: spent > 0 ? spent : undefined,
+        model: gen.modelId,
+        note: `설계 고침 · 새 정답 ${answer ?? "?"}`,
       };
     },
   },
