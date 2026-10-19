@@ -6532,3 +6532,21 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 재검수에서야 "판정 불가"가 나왔다(카드 찍기·재검수 원가가 헛돈다). 이제 조판 프롬프트가 답하기 전에 **자기가 쓴 글·그림만 보고 선지 ①~⑤를
 하나씩 참/거짓으로 판정**(`check`)해 정답이 정확히 하나인지 확인하게 하고, 안 되면 `unique:false` + `why` 를 낸다 → 그때는 카드를 찍지 않고
 이유를 달아 승인 대기로 되돌린다. sol 이 스스로 확인하는 것이라 재검수는 그대로 남는다. 검증: `tsc` 까지.
+
+#### 변형문제는 전부 batch · 1차는 그림 편집 · 2차부터 sol 의 SVG 덮개 (2026-10-19)
+
+사용자 — "변형문제 관련 모든 사항은 전부 batch, 1차 수정정도는 이미지생성, 2차부터는 sol이 부분적으로 svg생성시 더 이득일 부분만 생성해서 덮어, 최초오류가 너무 많아 sol 은 high (검수는 med)".
+앞 절의 "에러난 변형은 조판으로 고치기"(`runTypesetFix`)는 **쓰지 않는다**(코드·`variantTypesetApply.ts` 는 남아 있다). 실시간 `variantAuto` 작업(`runCheckStep`·`runFixStep`)도 아무도 안 부른다.
+
+- **표 `variant_ops`**(마이그레이션 `0046`, 적용됨): 문제 하나에 대한 작업 하나. `step` = 지금 batch 로 걸려야 할 단계(`check` → 재검수, `draw` → 1차 수정, `overlay` → 2차 이후). 같은 줄이 단계가 끝나면 `check` 로 넘어가고, 재검수가 통과하거나 지적이 남아 승인 대기로 돌아가면 `done`. 같은 문제에 끝나지 않은 줄이 있으면 새로 안 만든다(`enqueueOp`).
+  `kick_variant_batches` 가 걸 것이 있는 줄(`batch_id` 빈 것)도 본다. 공통 도구는 `variantBatchCore.ts`, 단계 처리는 `variantOps.ts`(`submitOps`·`handleOpBatch`), `submitReady`/`pollBatches` 가 이어 부른다(`openai_batches.stage` 가 `op:<step>`).
+- **승인이 draw/overlay 를 만든다**(`/api/variant-auto`): 승인 대기의 `round` 가 0 이면 `draw`(지적의 `fix` 문장, 없으면 `problem` 문장을 번호 목록으로 `patchPrompt` → 안 바뀐 곳은 `compositePatch` 로 지금 그림 픽셀 그대로), 1 이상이면 `overlay`.
+  수정이 반영되면 `round+1`·`checking` 으로 바뀌고 처음 상태(`baseImagePath`)·원본만 남기고 중간 그림은 지운다. **승인 없이는 수정이 돌지 않고 바퀴 수 제한은 없다.**
+- **overlay**(`svgOverlay.ts`, `OVERLAY_PROMPT`): sol(high, `VARIANT_OVERLAY_EFFORT`)이 원본·지금 변형·정답·해설·남은 지적을 보고 **SVG 로 다시 그리는 편이 믿을 만한 곳만** 네모(그림 대비 0~1)로 골라 `shapes`(`<text>` 없는 도형)와 `labels`(글자)를 낸다. 서버가 글자를 **fontkit 으로 글꼴 윤곽 경로로 바꿔**(서버리스에 한글 글꼴이 없어 `<text>` 는 네모로 나온다 — `public/fonts/solution-serif.ttf`, `next.config` 의 `outputFileTracingIncludes` 로 번들에 싣는다) 넣고 sharp 로 그려 그 네모를 **통째로 덮는다**. 정답은 바꾸지 않는다(해설 계산 오류일 때만 `solution` 수정 허용).
+  script·image·use·foreignObject·style·text·a 가 든 도형은 거부, 네모가 그림의 75% 넘으면 거부. 글꼴에 없는 글자(√ ≤ ≥ π ∠ …)는 건너뛰고 로그만 남긴다 — 프롬프트가 그 기호를 쓰지 말라고 한다.
+  시험: 합성 그림에 도형+한글 라벨+√ 를 덮어 실제로 그려 봤다(한글 정상, √ 만 빠짐, `<script>` 거부).
+- **강도**: 최초 설계(plan)는 `high`(화면 `SOL_EFFORT`·서버 기본 모두), 검수는 최초 생성의 review 도 `medium`(`VARIANT_RECHECK_EFFORT` 로 바꾼다). 예전에 medium 검수가 75~220토큰으로 통과시킨 적이 있어(위 기록) 통과 판정이 얕아지는지 **장부(`ai_cost_log`)의 출력 토큰과 통과율을 며칠 보고** 정할 것.
+- 화면: "Batch 로 만들기" 체크를 없앴다(늘 batch). 조판 카드 찍기 효과를 걷었다. 승인 안내 문구를 새 흐름으로 바꿨다.
+- **최초 생성 저장은 문제마다 바로**다(`handleLine` → `saveProblem`, 20개씩 끊은 batch 마다) — 전부 끝나길 기다리지 않는다.
+- 비용: 재검수·설계·1차 그림 수정은 실시간 단가의 절반(batch). 장부 이름 `sol 변형 재검수 (batch)` · `그림 변형 1차 수정 (batch)` · `sol 변형 SVG 덮개 설계 (batch)`.
+- 검증: `tsc`·`build`, overlay 렌더 시험. **batch 로 걸고 받아 오는 전 과정(check → draw → check, overlay)을 실제 문제로 돌려 본 것은 아직 없다** — 배포 뒤 승인 대기 문제로 확인할 것. 확인 못 한 것: 이미지 편집 batch 가 부분 수정 프롬프트에서 지적한 곳만 얼마나 고치는지, sol 이 네모 좌표를 얼마나 정확히 짚는지, Vercel 에서 폰트 파일이 실제로 번들되는지(`outputFileTracingIncludes` 가 안 먹으면 덮개가 "그리지 못했어요"로 실패한다).

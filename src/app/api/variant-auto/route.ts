@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { redirectBase } from "@/app/auth/redirectBase";
 import { requireFontAdmin } from "../admin/kice-font/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { kickWorker } from "@/lib/figureJobsServer";
 import { removeStored } from "@/lib/figureRun";
-import { enqueueAutoStep, type VariantAutoState } from "@/lib/variantAuto";
+import type { VariantAutoState } from "@/lib/variantAuto";
+import { enqueueOp } from "@/lib/variantOps";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,8 +12,9 @@ export const dynamic = "force-dynamic";
 /**
  * **변형문제 자동 검수·수정의 손잡이**(무제한 계정 전용, `variantAuto.ts`).
  *
+ * 전부 OpenAI Batch 로 돈다(`variantOps.ts`) — 여기서는 작업(`variant_ops`)만 넣고, pg_cron 이 1분 안에 깨워 batch 로 건다.
  * - `{action:"start", ids}`   재검수를 건다(진행 중·통과한 것은 건너뛴다, `force` 면 통과한 것도).
- * - `{action:"approve", ids}` 승인 대기인 것을 승인 → 수정 단계를 건다(끝나면 저절로 재검수).
+ * - `{action:"approve", ids}` 승인 대기인 것을 승인 → 1차 수정은 그림 편집(draw), 2차부터는 sol 의 SVG 덮개(overlay). 끝나면 저절로 재검수.
  * - `{action:"accept", ids}`  지적이 있어도 지금 그대로 확정(통과로 적고 보관하던 이전 그림을 지운다).
  */
 export async function POST(req: NextRequest) {
@@ -52,14 +52,16 @@ export async function POST(req: NextRequest) {
     if (action === "start") {
       if (st?.status === "checking" || st?.status === "fixing" || st?.status === "rendering") continue;
       if (st?.status === "passed" && body.force !== true) continue;
+      if (!(await enqueueOp(admin, user.id, row.id, "check"))) continue;
       const next: VariantAutoState = { ...(st ?? { round: 0 }), round: st?.round ?? 0, status: "checking", notes: undefined, message: undefined, at: now };
       await admin.from("problems").update({ box_range: { ...br, variantAuto: next } }).eq("id", row.id).eq("user_id", user.id);
-      await enqueueAutoStep(admin, user.id, row.id, "check", "자동 재검수");
       done++;
     } else if (action === "approve") {
       if (st?.status !== "needs_approval" || !st.notes?.length) continue;
+      // 1차 수정(round 0)은 그림 편집, 2차부터는 sol 이 SVG 로 덮어 그린다.
+      const step = (st.round ?? 0) === 0 ? "draw" : "overlay";
+      if (!(await enqueueOp(admin, user.id, row.id, step, { notes: st.notes, ...(st.lastFail ? { lastFail: st.lastFail } : {}) }))) continue;
       await admin.from("problems").update({ box_range: { ...br, variantAuto: { ...st, status: "fixing", at: now } } }).eq("id", row.id).eq("user_id", user.id);
-      await enqueueAutoStep(admin, user.id, row.id, "fix", `자동 수정 ${st.round + 1}차`);
       done++;
     } else {
       if (st?.status === "checking" || st?.status === "fixing") continue;
@@ -82,6 +84,5 @@ export async function POST(req: NextRequest) {
       done++;
     }
   }
-  if (done && action !== "accept") await kickWorker(admin, redirectBase(req), user.id);
   return NextResponse.json({ ok: true, done });
 }

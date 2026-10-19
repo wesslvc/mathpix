@@ -73,8 +73,8 @@ type Run = {
 };
 
 const KIND_LABEL: Record<string, string> = { comparison: "대소 비교형", computation: "계산형", concept: "개념형" };
-/** 변형 생성은 고정이다(사용자 — "med auto 로 고정"): sol 설계 강도 medium, 그림 품질 auto(= 모델 기본, 서버에는 빈 값). */
-const SOL_EFFORT = "medium";
+/** 변형 생성은 고정이다: sol 설계 강도 high(최초 오류가 너무 많아 올렸다 — 2026-10-19), 그림 품질 auto(= 모델 기본, 서버에는 빈 값). 검수는 서버가 medium 으로 돌린다. */
+const SOL_EFFORT = "high";
 
 type UnitRow = { id: string; catId: string; image_path: string; no: number | null; unit: string | null };
 /** 검색용 정규화 — 공백·가운뎃점·화살표·하이픈을 없애고 소문자로. */
@@ -247,8 +247,6 @@ export default function VariantPanel() {
     }
   }
   const [busy, setBusy] = useState(false);
-  /** 최초 생성을 OpenAI Batch 로(반값, 결과는 몇 분~최대 24시간 뒤). 끄면 예전처럼 곧바로 돈다. */
-  const [useBatch, setUseBatch] = useState(true);
   const [batchTick, setBatchTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -567,75 +565,8 @@ export default function VariantPanel() {
     setBatchTick((n) => n + 1);
   }
 
-  async function start() {
-    if (useBatch) return startBatch();
-    if (!items.length) return;
-    setError(null);
-    setBusy(true);
-    const all: Run[] = [];
-    for (const it of items) for (const v of variantList) all.push({ key: `${it.key}#${v.n}`, label: it.label, copy: v.n, opt: v.opt, stage: "prep" });
-    setRuns(all);
-    try {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth.user?.id;
-      if (!uid) throw new Error("로그인이 필요해요.");
-      const targetId = await ensureTarget(uid);
-      // 원본 준비(줄이기)는 4개씩, 서버에 넣는 건 곧바로 — 이후는 서버 대기열이 돌린다(창을 닫아도 계속).
-      const queue = [...items];
-      await Promise.all(
-        Array.from({ length: Math.min(4, queue.length) }, async () => {
-          for (let it = queue.shift(); it; it = queue.shift()) {
-            const item = it;
-            let original: string;
-            let size: { width: number; height: number } | null = null;
-            try {
-              original = await prepareProblemForModel(await ensureDataUrl(item.src));
-              size = await imageSizeOf(original);
-            } catch (err) {
-              for (const v of variantList) {
-                patch(`${item.key}#${v.n}`, { stage: "error", error: err instanceof Error ? err.message : "원본을 열지 못했어요." });
-              }
-              continue;
-            }
-            for (const v of variantList) patch(`${item.key}#${v.n}`, { original, stage: "queued" });
-            void Promise.all(
-              variantList.map(async (v) => {
-                const key = `${item.key}#${v.n}`;
-                const t0 = Date.now();
-                try {
-                  const out = await runAiTask<VariantResult>("variant", {
-                    label: `변형 · ${item.label}${variantList.length > 1 ? ` (${v.n}/${variantList.length})` : ""}`,
-                    images: [original],
-                    params: {
-                      effort: SOL_EFFORT,
-                      quality: "",
-                      level: v.level,
-                      novelty: v.novelty,
-                      copies: variantList.length,
-                      copy: v.n,
-                      categoryId: targetId,
-                      no: item.no ?? null,
-                      srcKey: item.key,
-                      srcLabel: item.label,
-                      width: size?.width,
-                      height: size?.height,
-                    },
-                  });
-                  patch(key, { stage: "done", result: out.result, ms: Date.now() - t0 });
-                } catch (err) {
-                  patch(key, { stage: "error", error: err instanceof Error ? err.message : "실패했습니다.", ms: Date.now() - t0 });
-                }
-              }),
-            );
-          }
-        }),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : (err as { message?: string })?.message ?? "시작하지 못했어요.");
-    }
-    // 화면은 결과를 기다리지만, 서버 작업은 이 화면을 닫아도 계속 돌아 폴더에 저장된다.
-    setBusy(false);
-  }
+  /** 변형문제는 전부 OpenAI Batch 로 돈다(설계 → 그림 → 검수 → 이후 수정·재검수까지, 2026-10-19). */
+  const start = startBatch;
 
   const stageText: Record<Run["stage"], string> = {
     prep: "준비 중",
@@ -663,38 +594,6 @@ export default function VariantPanel() {
   }, [libId, tab, supabase, libTick]);
   // 검수·수정이 도는 동안은 30초마다 다시 읽는다(서버가 단계마다 상태를 바꾼다).
   const autoRunning = libRows.some((x) => ["checking", "fixing", "rendering", "rendered"].includes(x.auto?.status ?? ""));
-  // **조판으로 고친 변형을 카드로 찍는다** — 서버가 글·SVG 를 써 두면(`rendering`) 이 화면이 카드 PNG 를 그려 저장하고 재검수를 건다.
-  // 폴더와 상관없이 내 것 전부를 본다(화면이 열려 있는 동안 1분마다).
-  const renderingRef = useRef(false);
-  const [renderTick, setRenderTick] = useState(0);
-  useEffect(() => {
-    if (renderingRef.current) return;
-    renderingRef.current = true;
-    void (async () => {
-      try {
-        const { data } = await supabase.from("problems").select("id").eq("box_range->variantAuto->>status", "rendering").limit(30);
-        const ids = (data ?? []).map((r) => r.id as string);
-        if (!ids.length) return;
-        const { applyVariantTypeset } = await import("@/lib/variantTypesetApply");
-        let saved = 0;
-        for (const id of ids) {
-          try {
-            if ((await applyVariantTypeset(id)) === "saved") saved++;
-          } catch (err) {
-            console.warn("[variants] 조판 카드 찍기 실패", id, err);
-          }
-        }
-        // 하나라도 저장했을 때만 다시 읽는다(실패가 되풀이되면 무한히 돌지 않게 — 다음 시도는 1분 뒤).
-        if (saved) setLibTick((n) => n + 1);
-      } finally {
-        renderingRef.current = false;
-      }
-    })();
-  }, [supabase, renderTick]);
-  useEffect(() => {
-    const h = setInterval(() => setRenderTick((n) => n + 1), 60_000);
-    return () => clearInterval(h);
-  }, []);
   useEffect(() => {
     if (!autoRunning || tab !== "library") return;
     const h = setInterval(() => setLibTick((n) => n + 1), 30_000);
@@ -1324,15 +1223,11 @@ export default function VariantPanel() {
             placeholder="묶음 이름 (비우면 날짜·시간)"
           />
         )}
-        <label className="flex items-center gap-1.5 text-sm text-slate-700">
-          <input type="checkbox" checked={useBatch} onChange={(e) => setUseBatch(e.target.checked)} />
-          Batch 로 만들기 (반값 · 몇 분~최대 24시간)
-        </label>
         <Button onClick={() => void start()} disabled={busy || items.length === 0 || totalJobs > 100}>
           {busy ? "서버에 넣는 중…" : `변형문제 만들기 (${totalJobs}개)`}
         </Button>
         <p className="w-full text-xs text-slate-500">
-          서버 대기열에서 돌아요(수정하기와 같은 부분 수정 방식 — 창을 닫아도 끝까지 가서 고른 묶음 하나에 모두 저장돼요(원본 실모별로 나누지 않아요)). 한 번에 최대 100개. 토큰은 안 떼고 원가만 보여요(시험 중).
+          전부 OpenAI Batch 로 돌아요(반값 · 단계마다 몇 분~최대 24시간, sol 설계는 high). 창을 닫아도 서버가 끝까지 가서 고른 묶음 하나에 모두 저장돼요(원본 실모별로 나누지 않아요). 먼저 끝난 것부터 바로 묶음에 쌓여요. 한 번에 최대 100개. 토큰은 안 떼요.
           {totalJobs > 100 && <b className="text-red-600"> 지금 {totalJobs}개라 너무 많아요.</b>}
         </p>
         {runs.length > 0 && (
@@ -1484,7 +1379,7 @@ const AUTO_LABEL: Record<AutoState["status"] | "none", string> = {
   none: "아직 검수 안 함",
   checking: "sol 재검수 중",
   needs_approval: "승인 대기",
-  fixing: "sol 이 조판 중",
+  fixing: "수정 중 (batch)",
   rendering: "카드 찍는 중",
   rendered: "재검수 대기",
   passed: "통과 · 확정",
@@ -1595,11 +1490,11 @@ function AutoCard({ auto, busy, onAction }: { auto: AutoState | null; busy: bool
               <li key={i}>
                 <span>{n.problem}</span>
                 <br />
-                <span className="text-slate-700">→ {n.fix ? `그림 수정: ${n.fix}` : "설계 문제 — sol 이 다시 설계해 원본에서 새로 생성"}</span>
+                <span className="text-slate-700">→ {n.fix ? `그림 수정: ${n.fix}` : "그림 편집으로는 어려운 지적 — 2차 수정에서 sol 이 SVG 로 덮어 그릴 후보"}</span>
               </li>
             ))}
           </ol>
-          <p className="mt-1 font-medium text-violet-800">승인하면 조판으로 고쳐요: sol 이 문제를 바로잡아 글 + 계산한 값 그대로 그린 그림(SVG)으로 다시 쓰고, 카드로 찍은 뒤 재검수해요. (카드 찍기는 이 화면이 열려 있을 때 돼요)</p>
+          <p className="mt-1 font-medium text-violet-800">승인하면 batch 로 고쳐요: 1차는 지적한 곳만 그림 편집(안 바뀐 곳은 원본 픽셀 그대로), 2차부터는 sol 이 SVG 로 덮어 그리는 편이 나은 부분만 다시 그려 덮어요. 끝나면 저절로 재검수해요.</p>
           <div className="mt-1 flex flex-wrap gap-2">
             <button className="rounded bg-amber-600 px-2 py-0.5 text-white disabled:opacity-50" disabled={busy} onClick={() => onAction("approve")}>
               승인 — 이대로 고치기
@@ -1646,7 +1541,7 @@ function BatchProgress({ supabase, tick, cats }: { supabase: ReturnType<typeof c
   return (
     <section className={cn(cardClass, "flex flex-col gap-2 p-4 text-xs")}>
       <h3 className="text-sm font-semibold text-ink">Batch 진행 (최근 3일)</h3>
-      <p className="text-slate-500">설계 → 그림 → 검수 순서로 단계마다 OpenAI Batch 로 돌아요. 단계 하나가 보통 몇 분~몇십 분, 길면 24시간. 창을 닫아도 서버가 이어 가고, 끝나면 묶음에 저장돼 자동 검수 상태(통과·승인 대기)로 들어가요.</p>
+      <p className="text-slate-500">설계 → 그림 → 검수 순서로 단계마다 OpenAI Batch 로 돌아요(이후 승인하면 1차 그림 수정 → 재검수, 2차부터 sol 의 SVG 덮개 → 재검수). 단계 하나가 보통 몇 분~몇십 분, 길면 24시간. 창을 닫아도 서버가 이어 가고, 끝나면 묶음에 저장돼 자동 검수 상태(통과·승인 대기)로 들어가요.</p>
       {[...groups.entries()].map(([g, list]) => {
         const by = (k: string) => list.filter((x) => x.stage === k).length;
         const cat = cats.find((c) => c.id === list[0].category_id);

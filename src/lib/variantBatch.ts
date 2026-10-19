@@ -19,19 +19,14 @@ import { loadAsDataUrl, removeStored, splitDataUrl, storeBytes } from "./figureR
 import { compositePatch } from "./patchComposite";
 import { cardUrl } from "./cardUrl";
 import { logAiCost } from "./costLog";
-import { gradingEstKrw } from "./tokens";
 import { VARIANT_PROMPT, answerOf, parseVariantPlan, readLevel, readNovelty, settingsTail, type VariantPlan } from "./variantPlan";
 import { RECHECK_PROMPT, readNotes } from "./variantAuto";
 import { parseJsonObject } from "./problemCompare";
+import { BATCH_DISCOUNT, CHUNK, OPENAI, TERMINAL, createBatch, key, lineError, logSolCost as logSol, readFile, s, solBody, uploadJsonl, type OutLine } from "./variantBatchCore";
+import { enqueueOp, handleOpBatch, submitOps } from "./variantOps";
 import { cleanAnswerText } from "./variantOf";
 import { toStoredFigures } from "./storedFigures";
 import { DEFAULT_FONT_PT } from "./fontSize";
-
-const OPENAI = "https://api.openai.com/v1";
-/** 한 batch 에 담는 줄 수 — 그림 단계 결과(줄마다 그림 1장)를 한 번에 받아 처리할 수 있는 크기. */
-const CHUNK = 20;
-const BATCH_DISCOUNT = 0.5;
-const TERMINAL = new Set(["completed", "failed", "expired", "cancelled"]);
 
 export type BatchStage = "plan" | "image" | "review";
 type Item = {
@@ -48,55 +43,9 @@ type Item = {
   cost_krw: number;
 };
 
-const key = () => {
-  const k = process.env.OPENAI_API_KEY;
-  if (!k) throw new Error("OPENAI_API_KEY 가 없어요.");
-  return k;
-};
-const s = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
-
 /** 원본을 `_origins/` 에 한 번 둔다(같은 원본의 변형들이 나눠 쓰고, 내보내기의 "원본" 그림도 이것이다). */
 export function originPathFor(userId: string, srcKey: string) {
   return `${userId}/_origins/${createHash("sha1").update(srcKey).digest("hex").slice(0, 24)}.jpg`;
-}
-
-async function uploadJsonl(text: string): Promise<string> {
-  const form = new FormData();
-  form.append("purpose", "batch");
-  form.append("file", new Blob([text], { type: "application/jsonl" }), "variant.jsonl");
-  const res = await fetch(`${OPENAI}/files`, { method: "POST", headers: { Authorization: `Bearer ${key()}` }, body: form });
-  const body = (await res.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
-  if (!res.ok || !body.id) throw new Error(`batch 파일을 올리지 못했어요 (HTTP ${res.status}) ${body.error?.message ?? ""}`);
-  return body.id;
-}
-
-async function createBatch(fileId: string, endpoint: string): Promise<string> {
-  const res = await fetch(`${OPENAI}/batches`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ input_file_id: fileId, endpoint, completion_window: "24h" }),
-  });
-  const body = (await res.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
-  if (!res.ok || !body.id) throw new Error(`batch 를 걸지 못했어요 (HTTP ${res.status}) ${body.error?.message ?? ""}`);
-  return body.id;
-}
-
-function solBody(prompt: string, images: string[], tail: string, effort: string) {
-  return {
-    model: OPENAI_TEXT_MODEL,
-    input: [
-      {
-        role: "user",
-        content: [
-          { type: "input_text", text: prompt },
-          ...images.map((url) => ({ type: "input_image", image_url: url, detail: "high" })),
-          { type: "input_text", text: tail },
-        ],
-      },
-    ],
-    text: { format: { type: "json_object" } },
-    reasoning: { effort },
-  };
 }
 
 /** 한 번 부를 동안 같은 원본을 R2 에서 여러 번 읽지 않게 들고 있는다(같은 원본의 변형이 여럿이다). */
@@ -118,7 +67,7 @@ async function buildLine(admin: SupabaseClient, it: Item, cache: SrcCache): Prom
   if (it.stage === "plan") {
     const copies = Math.min(25, Math.max(1, Math.round(Number(p.copies) || 1)));
     const copy = Math.min(copies, Math.max(1, Math.round(Number(p.copy) || 1)));
-    const effort = ["low", "medium", "high"].includes(String(p.effort)) ? String(p.effort) : "medium";
+    const effort = ["low", "medium", "high"].includes(String(p.effort)) ? String(p.effort) : "high";
     return { body: solBody(VARIANT_PROMPT, [src], settingsTail(readLevel(p.level), readNovelty(p.novelty), copy, copies), effort) };
   }
   if (it.stage === "image") {
@@ -145,7 +94,7 @@ async function buildLine(admin: SupabaseClient, it: Item, cache: SrcCache): Prom
     if (!it.draft_path) return { error: "변형 그림이 없어요." };
     const draft = await loadAsDataUrl(admin, it.draft_path);
     if (!draft) return { error: "변형 그림을 읽지 못했어요." };
-    const effort = process.env.VARIANT_RECHECK_EFFORT?.trim() || "high";
+    const effort = process.env.VARIANT_RECHECK_EFFORT?.trim() || "medium";
     return {
       body: solBody(RECHECK_PROMPT(true), [src, draft], `\n\nREGISTERED ANSWER: ${s(it.plan?.newAnswer, 100)}\nSOLUTION\n${s(it.plan?.solution, 3000)}`, effort),
     };
@@ -204,51 +153,8 @@ export async function submitReady(admin: SupabaseClient, deadline: number): Prom
       }
     }
   }
+  submitted += await submitOps(admin, deadline);
   return submitted;
-}
-
-type OutLine = { custom_id?: string; response?: { status_code?: number; body?: Record<string, unknown> } | null; error?: { message?: string } | null };
-
-async function readFile(fileId: unknown): Promise<OutLine[]> {
-  if (typeof fileId !== "string") return [];
-  const res = await fetch(`${OPENAI}/files/${encodeURIComponent(fileId)}/content`, { headers: { Authorization: `Bearer ${key()}` } });
-  if (!res.ok) throw new Error(`batch 결과를 받지 못했어요 (HTTP ${res.status})`);
-  const out: OutLine[] = [];
-  for (const l of (await res.text()).split("\n")) {
-    if (!l.trim()) continue;
-    try {
-      out.push(JSON.parse(l) as OutLine);
-    } catch {
-      /* 깨진 줄은 건너뛴다 */
-    }
-  }
-  return out;
-}
-
-function lineError(line: OutLine | undefined): string | null {
-  if (!line) return "batch 결과에 이 줄이 없어요.";
-  if (line.error) return line.error.message ?? "실패";
-  const code = line.response?.status_code ?? 0;
-  if (code !== 200) {
-    const m = (line.response?.body?.error as { message?: string } | undefined)?.message;
-    return `HTTP ${code} ${m ?? ""}`.trim();
-  }
-  return null;
-}
-
-function solUsage(body: Record<string, unknown>) {
-  const u = body.usage as { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } } | undefined;
-  if (!u) return undefined;
-  return { inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0, cachedInputTokens: u.input_tokens_details?.cached_tokens ?? 0 };
-}
-
-async function logSolCost(admin: SupabaseClient, it: Item, what: string, body: Record<string, unknown>) {
-  const usage = solUsage(body);
-  const krw = usage ? (gradingEstKrw(usage, String(body.model ?? OPENAI_TEXT_MODEL)) ?? 0) * BATCH_DISCOUNT : 0;
-  if (krw > 0) {
-    await logAiCost(admin, { userId: it.user_id, jobId: it.id, kind: "problem", what, krw, tokens: usage ? { input: usage.inputTokens, cached: usage.cachedInputTokens, output: usage.outputTokens } : undefined });
-  }
-  return krw;
 }
 
 /** 단계 하나가 끝난 변형 한 줄을 처리한다. */
@@ -259,7 +165,7 @@ async function handleLine(admin: SupabaseClient, it: Item, line: OutLine | undef
   const now = new Date().toISOString();
 
   if (it.stage === "plan") {
-    const krw = await logSolCost(admin, it, "sol 변형 설계 (batch)", body);
+    const krw = await logSol(admin, { userId: it.user_id, jobId: it.id }, "sol 변형 설계 (batch)", body);
     let plan: VariantPlan;
     try {
       plan = parseVariantPlan(harvest(body));
@@ -301,7 +207,7 @@ async function handleLine(admin: SupabaseClient, it: Item, line: OutLine | undef
   }
 
   if (it.stage === "review") {
-    const krw = await logSolCost(admin, it, "sol 변형 자동 재검수 (batch)", body);
+    const krw = await logSol(admin, { userId: it.user_id, jobId: it.id }, "sol 변형 자동 재검수 (batch)", body);
     const obj = parseJsonObject(harvest(body)) as { notes?: unknown; solved_answer?: unknown } | null;
     const notes = obj ? readNotes(obj.notes) : null;
     await saveProblem(admin, it, notes, s(obj?.solved_answer, 60), krw);
@@ -367,8 +273,7 @@ async function saveProblem(admin: SupabaseClient, it: Item, notes: ReturnType<ty
   if (numErr) console.warn("[variant-batch] 번호 매기기 실패:", numErr.message);
   await admin.from("variant_batch_items").update({ stage: "done", problem_id: row.id, batch_id: null, cost_krw: it.cost_krw + krw, error: null, updated_at: at }).eq("id", it.id);
   if (notes === null) {
-    const { enqueueAutoStep } = await import("./variantAuto");
-    await enqueueAutoStep(admin, it.user_id, row.id, "check", "자동 재검수");
+    await enqueueOp(admin, it.user_id, row.id, "check");
   }
 }
 
@@ -395,6 +300,18 @@ export async function pollBatches(admin: SupabaseClient, deadline: number): Prom
     // 처리 중에 다른 poll 이 같은 batch 를 집지 않게 먼저 찜한다.
     const { data: claimed } = await admin.from("openai_batches").update({ done_at: new Date().toISOString() }).eq("id", b.id).is("done_at", null).select("id").maybeSingle();
     if (!claimed) continue;
+    if (String(b.stage).startsWith("op:")) {
+      try {
+        const lines = [...(await readFile(info.output_file_id)), ...(await readFile(info.error_file_id))];
+        await handleOpBatch(admin, b.id, status, new Map(lines.map((l) => [l.custom_id ?? "", l])));
+      } catch (err) {
+        await admin.from("openai_batches").update({ done_at: null }).eq("id", b.id);
+        console.warn("[variant-ops] 결과 받기 실패:", err instanceof Error ? err.message : err);
+        continue;
+      }
+      finished++;
+      continue;
+    }
     const { data: rows } = await admin
       .from("variant_batch_items")
       .select("id,user_id,group_id,category_id,src_path,params,stage,batch_id,plan,draft_path,cost_krw")
