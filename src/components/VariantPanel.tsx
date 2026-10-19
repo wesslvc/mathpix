@@ -732,16 +732,28 @@ export default function VariantPanel() {
                     남은 문제 없는 {libRows.filter((x) => x.fix?.prevImagePath && !badNotes(x)).length}개 모두 확정
                   </button>
                 )}
+                {libRows.some((x) => designIssues(x).length > 0) && (
+                  <button
+                    className="rounded bg-violet-600 px-2 py-0.5 text-white"
+                    onClick={() => {
+                      const list = libRows.filter((x) => designIssues(x).length > 0 && designState[x.id] !== "busy");
+                      if (!window.confirm(`설계 문제가 있는 ${list.length}개를 sol 이 문제를 고쳐서 반영할까요? 정답·해설이 바뀌고, 문제당 약 90원이 들어요. (되돌리기 가능)`)) return;
+                      list.forEach((x) => void redesignRow(x.id));
+                    }}
+                  >
+                    설계 문제 {libRows.filter((x) => designIssues(x).length > 0).length}개 sol 이 고치기
+                  </button>
+                )}
                 {libRows.some((x) => badNotes(x)) && (
                   <button
                     className="rounded bg-amber-600 px-2 py-0.5 text-white"
                     onClick={() => {
-                      const list = libRows.filter((x) => badNotes(x) && libFix[x.id] !== "busy");
+                      const list = libRows.filter((x) => (badNotes(x) ?? []).some((n) => notePart(n).fix.trim()) && libFix[x.id] !== "busy");
                       if (!window.confirm(`재검수에서 잡힌 ${list.length}개를 지적된 내용만 일부 수정할까요? (문제당 그림 1번 + sol 재검수, 약 70원)`)) return;
                       list.forEach((x) => void fixFromRecheck(x.id));
                     }}
                   >
-                    잡힌 {libRows.filter((x) => badNotes(x)).length}개 모두 일부 수정
+                    그림 수정 가능한 {libRows.filter((x) => (badNotes(x) ?? []).some((n) => notePart(n).fix.trim())).length}개 모두 일부 수정
                   </button>
                 )}
                 <span className="text-slate-500">확인 대기 중: 재검수 통과 {libRows.filter((x) => x.fix?.prevImagePath && !badNotes(x) && (x.recheck?.ok || x.fix?.recheck?.ok)).length} · 남은 문제 {libRows.filter((x) => x.fix?.prevImagePath && badNotes(x)).length} · 아직 안 함 {libRows.filter((x) => x.fix?.prevImagePath && !x.recheck && !x.fix?.recheck).length}</span>
