@@ -73,6 +73,7 @@ import { figureImageModelIds } from "./figureImageGen";
 import { cardUrl } from "./cardUrl";
 import { toStoredFigures } from "./storedFigures";
 import { compositePatch } from "./patchComposite";
+import { enqueueAutoStep, runCheckStep, runFixStep } from "./variantAuto";
 import { DEFAULT_FONT_PT } from "./fontSize";
 
 export type TaskKind =
@@ -92,6 +93,7 @@ export type TaskKind =
   | "variantFix"
   | "variantRecheck"
   | "variantRedesign"
+  | "variantAuto"
   | "unitLabel";
 
 export const TASK_KINDS: readonly TaskKind[] = [
@@ -111,6 +113,7 @@ export const TASK_KINDS: readonly TaskKind[] = [
   "variantFix",
   "variantRecheck",
   "variantRedesign",
+  "variantAuto",
   "unitLabel",
 ];
 
@@ -820,7 +823,8 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           }
           const fixNote = review.issues.length ? reviewFixInstruction(review) : "";
           const fLeft = ctx.deadlineMs - (Date.now() - t0);
-          if (fixNote && fLeft >= 60_000) {
+          // 만들 때 저절로 고치던 것은 끈다 — 이제 오류는 사용자 승인을 받고 고친다(`variantAuto.ts`). 되살리려면 VARIANT_AUTOFIX=1.
+          if (fixNote && fLeft >= 60_000 && process.env.VARIANT_AUTOFIX === "1") {
             const fix = await runFigureGeneration({
               image: outUrl,
               mode: "problem",
@@ -910,6 +914,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
           };
         }
       }
+      const autoClean = !!review && !review.skipped && review.issues.length === 0;
       const { data: row, error: insErr } = await ctx.admin
         .from("problems")
         .insert({
@@ -934,6 +939,10 @@ export const TASKS: Record<TaskKind, TaskDef> = {
             ]),
             ...(plan.solution ? { solution: plan.solution } : {}),
             ...(variantOf ? { variantOf } : {}),
+            // 자동 검수 흐름: 제작 검수가 깨끗하면 곧바로 확정, 아니면 재검수(구체적 편집 행동을 뽑는다) → 사용자 승인으로 간다.
+            variantAuto: autoClean
+              ? { status: "passed", round: 0, at: new Date().toISOString(), message: "제작 검수 통과" }
+              : { status: "checking", round: 0, at: new Date().toISOString() },
             // 검수에서 남은 지적을 저장해 둔다 — 모아보기에서 지적된 것만 모아 고칠 수 있다.
             ...(review && review.issues.length
               ? {
@@ -955,6 +964,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       // 묶음 안에서 1번부터 차례로 번호를 매긴다(원래 번호는 variantOf.no 에 남는다) — 같은 번호가 여럿 뜨면 구분이 안 된다.
       const { error: numErr } = await ctx.admin.rpc("assign_variant_number", { p_problem: row.id });
       if (numErr) console.warn(`${ctx.tag} 변형 번호 매기기 실패:`, numErr.message);
+      if (!autoClean) await enqueueAutoStep(ctx.admin, ctx.userId, row.id, "check", "자동 재검수");
       return {
         ok: true,
         result: {
@@ -1276,6 +1286,32 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     },
   },
 
+
+  // **변형문제 자동 검수·수정**(`variantAuto.ts`): 재검수(check) → 오류면 사용자 승인 대기 → 승인되면 수정(fix) → 다시 재검수 … 통과면 확정.
+  // 단계마다 작업 하나(한 작업 300초 한도) — 다음 단계는 그 단계가 스스로 대기열에 넣는다.
+  variantAuto: {
+    deposit: () => 0,
+    flat: true,
+    needsOpenAI: true,
+    unlimitedOnly: true,
+    images: { min: 0, max: 0 },
+    name: "변형문제 자동 검수",
+    async run(ctx) {
+      const t0 = Date.now();
+      const problemId = str(ctx.params.problemId, 60);
+      if (!/^[0-9a-f-]{36}$/i.test(problemId)) return { ok: false, error: "문제가 정해지지 않았어요." };
+      const step = ctx.params.step === "fix" ? "fix" : "check";
+      const actx = { admin: ctx.admin, userId: ctx.userId, jobId: ctx.jobId, byok: ctx.byok, byokApiKey: ctx.byokApiKey, deadlineMs: ctx.deadlineMs, tag: ctx.tag };
+      if (step === "check") {
+        const r = await runCheckStep(actx, problemId, t0);
+        if (!r.ok) return { ok: false, error: r.error, estKrw: r.krw || undefined };
+        return { ok: true, result: { problemId, passed: r.passed }, estKrw: r.krw || undefined, note: r.passed ? "통과 · 확정" : `오류 ${r.notes.length}건 · 승인 대기` };
+      }
+      const r = await runFixStep(actx, problemId, t0);
+      if (!r.ok) return { ok: false, error: r.error };
+      return { ok: true, result: { problemId, saved: r.saved }, estKrw: r.krw || undefined, note: r.saved ? "수정 반영 · 재검수로" : `수정 안 됨 — ${r.lastFail.slice(0, 80)}` };
+    },
+  },
 };
 
 /** 한 대화에서 오갈 수 있는 말 수(사용자 + sol). 끝없이 늘어 요금이 커지는 것을 막는다. */

@@ -82,6 +82,7 @@ const TASK_RUNNING: Record<string, string> = {
   variantFix: "그림 모델이 검수 지적대로 고치는 중",
   variantRecheck: "sol 이 변형문제를 다시 검수하는 중",
   variantRedesign: "sol 이 문제를 고치고 그림에 반영하는 중",
+  variantAuto: "sol 이 변형문제를 자동 검수·수정하는 중",
 };
 /** 짧은 작업의 남은 시간 어림(초). */
 const TASK_SECONDS: Record<string, number> = {
@@ -101,6 +102,7 @@ const TASK_SECONDS: Record<string, number> = {
   variantFix: 90,
   variantRecheck: 60,
   variantRedesign: 200,
+  variantAuto: 120,
 };
 
 function statusText(j: FigureJob, top: string): string {

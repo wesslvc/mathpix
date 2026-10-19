@@ -112,8 +112,26 @@ export default function VariantPanel() {
   const [newFolder, setNewFolder] = useState("");
   const [tab, setTab] = useState<"make" | "library">("make");
   const [libId, setLibId] = useState("");
-  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; recheck?: { ok: boolean; notes: RecheckNote[]; solved?: string } | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; prevAnswer?: string | null; prevSolution?: string | null; recheck?: { ok: boolean; notes: RecheckNote[] } | null } | null }[]>([]);
+  const [libRows, setLibRows] = useState<{ id: string; image_path: string; answer: string | null; no: number | null; solution: string | null; review?: { fixSuggestion?: string; issues?: { kind: string; where: string; problem: string }[] } | null; recheck?: { ok: boolean; notes: RecheckNote[]; solved?: string } | null; auto?: AutoState | null; fix?: { at?: string; instruction?: string; prevImagePath?: string; prevAnswer?: string | null; prevSolution?: string | null; recheck?: { ok: boolean; notes: RecheckNote[] } | null } | null }[]>([]);
   const [libFilter, setLibFilter] = useState<"all" | "flag" | "fixed">("all");
+  const [manual, setManual] = useState(false);
+  const [autoFilter, setAutoFilter] = useState<"all" | AutoState["status"] | "none">("all");
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [libTick, setLibTick] = useState(0);
+  const autoOf = (x: (typeof libRows)[number]): AutoState["status"] | "none" => x.auto?.status ?? "none";
+  /** 자동 검수 손잡이 — 서버가 대기열에 넣고 단계마다 스스로 이어 간다. */
+  async function autoAction(action: "start" | "approve" | "accept", ids: string[], force = false) {
+    if (!ids.length) return;
+    setAutoBusy(true);
+    try {
+      const res = await fetch("/api/variant-auto", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ids, force }) });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) setError(j.error ?? "요청이 실패했어요.");
+    } finally {
+      setAutoBusy(false);
+      setLibTick((n) => n + 1);
+    }
+  }
   const [libFix, setLibFix] = useState<Record<string, "busy" | "done" | string>>({});
   const [recheckBusy, setRecheckBusy] = useState<Record<string, boolean>>({});
   async function recheckRow(id: string) {
@@ -571,12 +589,19 @@ export default function VariantPanel() {
     void (async () => {
       const { data } = await supabase
         .from("problems")
-        .select("id,image_path,answer,no:box_range->number,solution:box_range->>solution,review:box_range->variantReview,fix:box_range->variantFix,recheck:box_range->variantRecheck")
+        .select("id,image_path,answer,no:box_range->number,solution:box_range->>solution,review:box_range->variantReview,fix:box_range->variantFix,recheck:box_range->variantRecheck,auto:box_range->variantAuto")
         .eq("category_id", libId)
         .order("sort_order", { ascending: true });
       setLibRows((data as unknown as typeof libRows) ?? []);
     })();
-  }, [libId, tab, supabase]);
+  }, [libId, tab, supabase, libTick]);
+  // 검수·수정이 도는 동안은 12초마다 다시 읽는다(서버가 단계마다 상태를 바꾼다).
+  const autoRunning = libRows.some((x) => x.auto?.status === "checking" || x.auto?.status === "fixing");
+  useEffect(() => {
+    if (!autoRunning || tab !== "library") return;
+    const h = setInterval(() => setLibTick((n) => n + 1), 12_000);
+    return () => clearInterval(h);
+  }, [autoRunning, tab]);
 
   /** 수정 결과 확정: 보관해 둔 이전 그림을 지우고 수정 기록을 뗀다. */
   async function confirmFix(id: string) {
@@ -669,7 +694,10 @@ export default function VariantPanel() {
                 <button className="underline text-red-600" onClick={() => void deleteFolder(libId)}>
                   폴더 지우기
                 </button>
-                {libRows.some((x) => x.review?.fixSuggestion) && (
+                <button className="underline" onClick={() => setManual((v) => !v)}>
+                  {manual ? "수동 도구 숨기기" : "수동 도구 보기"}
+                </button>
+                {manual && libRows.some((x) => x.review?.fixSuggestion) && (
                   <button
                     className="rounded border border-amber-400 bg-amber-50 px-2 py-0.5 font-medium text-amber-800"
                     onClick={() => {
@@ -687,6 +715,8 @@ export default function VariantPanel() {
                   실모처럼 열어 수정
                 </a>
               </div>
+              <AutoBar rows={libRows} autoOf={autoOf} busy={autoBusy} filter={autoFilter} setFilter={setAutoFilter} onAction={autoAction} />
+              {manual && (<>
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 {(["all", "flag", "fixed"] as const).map((k) => {
                   const n = k === "all" ? libRows.length : k === "flag" ? libRows.filter((x) => x.review?.fixSuggestion).length : libRows.filter((x) => x.fix?.prevImagePath).length;
@@ -758,11 +788,16 @@ export default function VariantPanel() {
                 )}
                 <span className="text-slate-500">확인 대기 중: 재검수 통과 {libRows.filter((x) => x.fix?.prevImagePath && !badNotes(x) && (x.recheck?.ok || x.fix?.recheck?.ok)).length} · 남은 문제 {libRows.filter((x) => x.fix?.prevImagePath && badNotes(x)).length} · 아직 안 함 {libRows.filter((x) => x.fix?.prevImagePath && !x.recheck && !x.fix?.recheck).length}</span>
               </div>
+              </>)}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {libRows.filter((x) => (libFilter === "all" ? true : libFilter === "flag" ? !!x.review?.fixSuggestion : !!x.fix?.prevImagePath)).map((r) => (
+                {libRows
+                  .filter((x) => (manual ? (libFilter === "all" ? true : libFilter === "flag" ? !!x.review?.fixSuggestion : !!x.fix?.prevImagePath) : autoFilter === "all" || autoOf(x) === autoFilter))
+                  .map((r) => (
                   <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-slate-200 p-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={cardUrl(r.image_path)} alt="" className="w-full rounded" loading="lazy" />
+                    <AutoCard auto={r.auto ?? null} busy={autoBusy} onAction={(a, force) => void autoAction(a, [r.id], force)} />
+                    {manual && (<>
                     <div className="text-xs">
                       <button className="rounded border border-slate-300 px-2 py-0.5 disabled:opacity-50" disabled={recheckBusy[r.id]} onClick={() => void recheckRow(r.id)}>
                         {recheckBusy[r.id] ? "재검수 중…" : "sol 재검수"}
@@ -828,6 +863,7 @@ export default function VariantPanel() {
                         </div>
                       </div>
                     )}
+                    </>)}
                     <div className="flex items-center justify-between text-xs text-slate-600">
                       <span>
                         {r.no != null ? `${r.no}번 · ` : ""}정답 {r.answer ?? "?"}
@@ -836,7 +872,7 @@ export default function VariantPanel() {
                         지우기
                       </button>
                     </div>
-                    {r.review?.issues?.length ? (
+                    {manual && r.review?.issues?.length ? (
                       <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
                         <b>검수 지적 {r.review.issues.length}건</b>
                         <ul className="list-disc pl-4">
@@ -1329,6 +1365,145 @@ export default function VariantPanel() {
         </section>
       ))}
       </>)}
+    </div>
+  );
+}
+
+type AutoState = {
+  status: "checking" | "needs_approval" | "fixing" | "passed" | "error";
+  round: number;
+  notes?: { problem: string; fix: string }[];
+  message?: string;
+  lastFail?: string;
+  solved?: string;
+  at: string;
+};
+
+const AUTO_LABEL: Record<AutoState["status"] | "none", string> = {
+  none: "아직 검수 안 함",
+  checking: "sol 재검수 중",
+  needs_approval: "승인 대기",
+  fixing: "수정 중",
+  passed: "통과 · 확정",
+  error: "실패",
+};
+const AUTO_TONE: Record<AutoState["status"] | "none", string> = {
+  none: "border-slate-200 text-slate-600",
+  checking: "border-blue-300 bg-blue-50 text-blue-700",
+  needs_approval: "border-amber-400 bg-amber-50 text-amber-800",
+  fixing: "border-blue-300 bg-blue-50 text-blue-700",
+  passed: "border-emerald-300 bg-emerald-50 text-emerald-700",
+  error: "border-red-300 bg-red-50 text-red-700",
+};
+
+/** 폴더 위 한 줄: 상태별 개수(눌러서 거르기) + 전체 검수 시작 + 승인 대기 모두 승인. */
+function AutoBar<R extends { id: string }>({
+  rows,
+  autoOf,
+  busy,
+  filter,
+  setFilter,
+  onAction,
+}: {
+  rows: R[];
+  autoOf: (r: R) => AutoState["status"] | "none";
+  busy: boolean;
+  filter: "all" | AutoState["status"] | "none";
+  setFilter: (f: "all" | AutoState["status"] | "none") => void;
+  onAction: (a: "start" | "approve" | "accept", ids: string[], force?: boolean) => Promise<void> | void;
+}) {
+  const by = (k: AutoState["status"] | "none") => rows.filter((r) => autoOf(r) === k);
+  const startable = rows.filter((r) => ["none", "error"].includes(autoOf(r)) || autoOf(r) === "needs_approval");
+  const waiting = by("needs_approval");
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <b className="mr-1 text-slate-700">자동 검수</b>
+        <button onClick={() => setFilter("all")} className={cn("rounded-full border px-2.5 py-0.5", filter === "all" ? "border-slate-700 bg-white font-medium" : "border-slate-200")}>
+          전체 {rows.length}
+        </button>
+        {(["needs_approval", "checking", "fixing", "error", "none", "passed"] as const).map((k) =>
+          by(k).length ? (
+            <button key={k} onClick={() => setFilter(k)} className={cn("rounded-full border px-2.5 py-0.5", AUTO_TONE[k], filter === k && "ring-2 ring-slate-400")}>
+              {AUTO_LABEL[k]} {by(k).length}
+            </button>
+          ) : null,
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          className="rounded bg-slate-800 px-2.5 py-1 font-medium text-white disabled:opacity-50"
+          disabled={busy || startable.length === 0}
+          onClick={() => {
+            if (!window.confirm(`${startable.length}개를 sol 이 재검수할까요? 통과하면 저절로 확정되고, 오류가 있으면 "승인 대기"로 멈춰 승인을 기다려요.`)) return;
+            void onAction("start", startable.map((r) => r.id));
+          }}
+        >
+          검수 안 된 {startable.length}개 자동 검수 시작
+        </button>
+        {waiting.length > 0 && (
+          <button
+            className="rounded bg-amber-600 px-2.5 py-1 font-medium text-white disabled:opacity-50"
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm(`승인 대기 ${waiting.length}개를 적힌 행동대로 고칠까요? 고친 뒤 sol 이 다시 검수해서 통과면 확정, 아니면 다시 승인 대기로 와요.`)) return;
+              void onAction("approve", waiting.map((r) => r.id));
+            }}
+          >
+            승인 대기 {waiting.length}개 모두 승인
+          </button>
+        )}
+        <span className="text-slate-500">진행 중인 동안 12초마다 새로 읽어요. 창을 닫아도 서버에서 계속 돌아요.</span>
+      </div>
+    </div>
+  );
+}
+
+/** 문제 카드 안: 자동 검수 상태와 승인 단추. */
+function AutoCard({ auto, busy, onAction }: { auto: AutoState | null; busy: boolean; onAction: (a: "start" | "approve" | "accept", force?: boolean) => void }) {
+  const k = auto?.status ?? "none";
+  return (
+    <div className={cn("rounded border p-1.5 text-xs", AUTO_TONE[k])}>
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <b>
+          {AUTO_LABEL[k]}
+          {auto && auto.round > 0 ? ` · 수정 ${auto.round}회` : ""}
+          {auto?.solved ? ` · sol 정답 ${auto.solved}` : ""}
+        </b>
+        {(k === "none" || k === "error") && (
+          <button className="rounded border border-current px-2 py-0.5" disabled={busy} onClick={() => onAction("start")}>
+            검수
+          </button>
+        )}
+        {k === "passed" && (
+          <button className="underline opacity-70" disabled={busy} onClick={() => onAction("start", true)}>
+            다시 검수
+          </button>
+        )}
+      </div>
+      {auto?.message && k !== "passed" && <p className="mt-0.5">{auto.message}</p>}
+      {auto?.lastFail && k === "needs_approval" && <p className="mt-0.5 text-red-700">직전 수정이 반영되지 않아 저장하지 않았어요: {auto.lastFail}</p>}
+      {k === "needs_approval" && auto?.notes?.length ? (
+        <>
+          <ol className="mt-1 list-decimal space-y-1 pl-4 text-amber-900">
+            {auto.notes.map((n, i) => (
+              <li key={i}>
+                <span>{n.problem}</span>
+                <br />
+                <span className="text-slate-700">→ {n.fix ? `그림 수정: ${n.fix}` : "sol 이 문제 설계를 고친 뒤 그림·정답·해설에 반영"}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <button className="rounded bg-amber-600 px-2 py-0.5 text-white disabled:opacity-50" disabled={busy} onClick={() => onAction("approve")}>
+              승인 — 이대로 고치기
+            </button>
+            <button className="rounded border border-emerald-500 px-2 py-0.5 text-emerald-700 disabled:opacity-50" disabled={busy} onClick={() => onAction("accept")}>
+              무시하고 그대로 확정
+            </button>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
