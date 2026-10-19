@@ -1563,7 +1563,7 @@ function AutoCard({ auto, busy, onAction }: { auto: AutoState | null; busy: bool
               </li>
             ))}
           </ol>
-          {auto.notes.some((n) => !n.fix) && <p className="mt-1 font-medium text-violet-800">설계 문제가 있어 승인하면 재설계 → 원본에서 새로 생성 → 재검수로 가요(그림 부분 수정은 하지 않아요).</p>}
+          <p className="mt-1 font-medium text-violet-800">승인하면 sol 이 그림대로 다시 풀어 정답·해설을 그림에 맞춰요(그림은 그대로, 깨진 글자만 고침). 그림대로는 문제가 안 되면 재설계 → 원본에서 새로 생성. 끝나면 재검수.</p>
           <div className="mt-1 flex flex-wrap gap-2">
             <button className="rounded bg-amber-600 px-2 py-0.5 text-white disabled:opacity-50" disabled={busy} onClick={() => onAction("approve")}>
               승인 — 이대로 고치기
