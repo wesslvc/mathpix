@@ -20,7 +20,7 @@ import { compositePatch } from "./patchComposite";
 import { cardUrl } from "./cardUrl";
 import { imageTokens, logAiCost, solTokens } from "./costLog";
 import { parseJsonObject } from "./problemCompare";
-import { answerOf } from "./variantPlan";
+import { VARIANT_PROMPT, answerOf, parseVariantPlan, settingsTail } from "./variantPlan";
 
 export type AutoNote = { problem: string; fix: string };
 export type VariantAutoState = {
@@ -206,7 +206,7 @@ async function fixCheck(ctx: Ctx, before: string, after: string, instruction: st
   return { problems, krw: rv.krw };
 }
 
-/** **수정 단계**(승인 뒤): 편집 행동이 있으면 그림 부분 수정, 설계 문제만 남았으면 설계 고치기. 반영 검사를 통과해야 저장한다. 끝나면 재검수를 넣는다. */
+/** **수정 단계**(승인 뒤): 설계 문제가 있으면 재설계 → 원본에서 새로 생성(재검수가 이어서 본다), 아니면 그림 부분 수정(반영 검사 통과해야 저장). 반영 검사를 통과해야 저장한다. 끝나면 재검수를 넣는다. */
 export async function runFixStep(ctx: Ctx, problemId: string, t0: number) {
   const { data: prob } = await ctx.admin.from("problems").select("id,category_id,image_path,answer,answer_type,box_range").eq("id", problemId).eq("user_id", ctx.userId).maybeSingle();
   if (!prob?.image_path) return { ok: false as const, error: "문제를 찾지 못했어요." };
@@ -225,7 +225,71 @@ export async function runFixStep(ctx: Ctx, problemId: string, t0: number) {
   let update: Record<string, unknown> = {};
   let newBox: Record<string, unknown> = {};
 
-  if (fixes.length) {
+  const vo0 = (br.variantOf ?? {}) as { path?: string };
+  const orig0 = design.length && typeof vo0.path === "string" && vo0.path ? await loadAsDataUrl(ctx.admin, vo0.path) : null;
+
+  if (design.length && orig0) {
+    // **설계가 잘못된 문제는 재설계 → 원본에서 새로 생성 → 재검수**(사용자 — "문제 자체가 잘못 설계된 경우 재설계 후 생성 후 검증").
+    // 지금 그림 위에 덧칠하지 않는다: sol 이 원본을 보고 지적을 피한 변형을 처음부터 다시 설계하고, 원본을 그 계획대로 편집한다.
+    // 반영 검사는 하지 않는다 — 곧바로 이어지는 재검수가 문제 전체를 본다.
+    const curSol = typeof br.solution === "string" ? br.solution.slice(0, 2500) : "";
+    const allNotes = notes.map((n, i) => `${i + 1}. ${n.problem}${n.fix ? ` (picture fix that was suggested: ${n.fix})` : ""}`).join("\n");
+    const ask = await askSol(
+      VARIANT_PROMPT,
+      [orig0],
+      { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(150_000, left() - 100_000), tag: ctx.tag },
+      "변형 자동 재설계",
+      {
+        effort: "medium",
+        cacheKey: "reprint-variant",
+        tail: `${settingsTail("similar", "slight", 1, 1)}\n\nREDESIGN: a previous variant made from this original was rejected by the checker. design a NEW variant that avoids EVERY problem below (do not repeat its mistakes; fix the design itself, not just wording).\nPROBLEMS OF THE PREVIOUS VARIANT\n${allNotes}\nPREVIOUS VARIANT'S REGISTERED ANSWER: ${String(prob.answer ?? "")}\nPREVIOUS VARIANT'S SOLUTION\n${curSol}`,
+      },
+    );
+    await logSol(ctx, "sol 변형 자동 재설계", ask);
+    krw += ask.krw;
+    let plan: ReturnType<typeof parseVariantPlan> | null = null;
+    try {
+      if (ask.text) plan = parseVariantPlan(ask.text);
+    } catch {
+      plan = null;
+    }
+    if (!plan) lastFail = `재설계를 못 만듦: ${ask.fail || "응답을 읽지 못함"}`;
+    else if (left() < 50_000) lastFail = "재설계에 시간이 너무 걸려 그림을 못 그림";
+    else {
+      const gen = await runFigureGeneration({
+        image: orig0,
+        mode: "problem",
+        korean: false,
+        ...(plan.kind === "concept" ? { variantNote: plan.edits } : { patchNote: plan.edits, patchStrong: true }),
+        modelIds: figureImageModelIds(),
+        byokApiKey: ctx.byokApiKey,
+        deadlineMs: left() - 10_000,
+        tag: ctx.tag,
+        quality: process.env.VARIANT_IMAGE_QUALITY || "medium",
+      });
+      if (!gen.ok) lastFail = `재설계 그림 생성 실패: ${gen.error}`;
+      else {
+        const gk = gen.usage?.estKrw ?? 0;
+        krw += gk;
+        if (gen.usage && !ctx.byok) await logAiCost(ctx.admin, { userId: ctx.userId, jobId: ctx.jobId, kind: "problem", what: "그림 변형 자동 재설계", krw: gk, usd: gen.usage.estUsd, tokens: imageTokens(gen.usage) });
+        let url = gen.dataUrl;
+        if (plan.kind !== "concept") {
+          try {
+            const b = splitDataUrl(orig0);
+            const e = splitDataUrl(gen.dataUrl);
+            const comp = b && e ? await compositePatch(b.bytes, e.bytes) : null;
+            if (comp) url = `data:${comp.mime};base64,${comp.bytes.toString("base64")}`;
+          } catch {
+            /* 편집 결과 그대로 */
+          }
+        }
+        const { answer, type } = answerOf(plan.newAnswer);
+        saved = true;
+        update = answer ? { answer, answer_type: type } : {};
+        newBox = { url, solution: plan.solution ? plan.solution.slice(0, 6000) : undefined };
+      }
+    }
+  } else if (fixes.length) {
     const instruction = `${fixes.map((f, i) => `${i + 1}. ${f}`).join("\n")}${retry}\nkeep everything else exactly as in the picture.`;
     const p = await patch(ctx, base, instruction, left() - 70_000);
     krw += p.krw;

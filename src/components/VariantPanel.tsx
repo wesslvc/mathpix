@@ -1559,10 +1559,11 @@ function AutoCard({ auto, busy, onAction }: { auto: AutoState | null; busy: bool
               <li key={i}>
                 <span>{n.problem}</span>
                 <br />
-                <span className="text-slate-700">→ {n.fix ? `그림 수정: ${n.fix}` : "sol 이 문제 설계를 고친 뒤 그림·정답·해설에 반영"}</span>
+                <span className="text-slate-700">→ {n.fix ? `그림 수정: ${n.fix}` : "설계 문제 — sol 이 다시 설계해 원본에서 새로 생성"}</span>
               </li>
             ))}
           </ol>
+          {auto.notes.some((n) => !n.fix) && <p className="mt-1 font-medium text-violet-800">설계 문제가 있어 승인하면 재설계 → 원본에서 새로 생성 → 재검수로 가요(그림 부분 수정은 하지 않아요).</p>}
           <div className="mt-1 flex flex-wrap gap-2">
             <button className="rounded bg-amber-600 px-2 py-0.5 text-white disabled:opacity-50" disabled={busy} onClick={() => onAction("approve")}>
               승인 — 이대로 고치기
