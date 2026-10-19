@@ -49,9 +49,13 @@ type Ctx = {
 const s = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
 
 export const RECHECK_PROMPT = (hasOrig: boolean) =>
-  `task: re-check a GENERATED VARIANT of a Korean exam question picture. ${hasOrig ? "image 1 = the ORIGINAL question, image 2 = the VARIANT." : "the only image = the VARIANT."} after the images you get the variant's registered answer and its solution. check, reading character by character: (1) broken, misspelled or missing glyphs/words/numbers/units in the stem, the <보기> box, the table and the labels; (2) all five choices ①–⑤ present, none left over from the original that contradicts the new problem, and exactly the registered answer is correct (solve the variant yourself and compare with the solution); (3) values/figure/table in the picture agree with the solution's numbers (a figure still showing the original's values is a defect); (4) leftover original wording that no longer fits. report only real, clearly visible defects — when in doubt, say nothing. for EACH problem give a concrete image-editor action. reply ONLY JSON: {"notes":[{"problem":"문제점(한국어, 어디가 어떻게)","fix":"그림 편집기에게 줄 구체적 행동 한 문장(한국어) — 반드시 '위치(예: <보기> ㄱ 둘째 줄) + 현재 글/값 → 바꿀 글/값' 꼴. 그림 편집으로 고칠 수 없는 것(문제 설계·난이도·함정이 안 된 것, 정답 값 자체가 틀린 것)이면 빈 문자열"}],"solved_answer":"푼 정답"}. never describe your reasoning in fix; empty notes if nothing is wrong.`;
+  `task: re-check a GENERATED VARIANT of a Korean exam question picture. ${hasOrig ? "image 1 = the ORIGINAL question, image 2 = the VARIANT." : "the only image = the VARIANT."} after the images you get the variant's registered answer and its solution. check, reading character by character: (1) broken, misspelled or missing glyphs/words/numbers/units in the stem, the <보기> box, the table and the labels; (2) all five choices ①–⑤ present, none left over from the original that contradicts the new problem, and exactly the registered answer is correct (solve the variant yourself and compare with the solution); (3) values/figure/table in the picture agree with the solution's numbers (a figure still showing the original's values is a defect); (4) leftover original wording that no longer fits. report only real, clearly visible defects — when in doubt, say nothing. for EACH problem give a concrete image-editor action. reply ONLY JSON: {"notes":[{"problem":"문제점(한국어, 어디가 어떻게)","fix":"그림 편집기에게 줄 구체적 행동 한 문장(한국어) — 반드시 '위치(예: <보기> ㄱ 둘째 줄) + 현재 글/값 → 바꿀 글/값' 꼴. 글자·숫자·기호·이름표를 바꾸거나 깨진 글자를 고치는 것만 적는다. 점·선·띠·곡선·도형의 위치나 모양을 옮기거나 다시 그리는 것(좌표 이동, 재배치), 문제 설계·난이도·함정, 정답·해설과 그림의 불일치는 그림 편집으로 정확히 못 고치므로 빈 문자열"}],"solved_answer":"푼 정답"}. never describe your reasoning in fix; empty notes if nothing is wrong.`;
 
 export const FIXCHECK_PROMPT = `task: check a PARTIAL EDIT of a Korean exam question picture. image 1 = BEFORE, image 2 = AFTER. the edit instruction is given after the images. for EACH numbered item decide whether image 2 now matches the instruction (read the text carefully, character by character). STRICT RULES to avoid false alarms: mark done:false ONLY when you can SEE in image 2 that the requested change is clearly not there or is wrong; if an item cannot be verified from the picture at all treat it as done:true. list a collateral change ONLY when something clearly visible in image 1 (text, numbers, choices, figure parts, labels) is clearly missing, garbled or altered in image 2 and was NOT named in the instruction; tiny pixel differences, slight shifts and equivalent re-typesetting are NOT changes. when in doubt, say nothing. reply ONLY JSON: {"items":[{"item":"짧은 한국어 설명","done":true|false,"note":"안 됐으면 무엇이 어떻게 다른지(한국어)"}],"collateral":["의도하지 않은 변경(한국어)"]}`;
+
+/** **그림 기준으로 다시 풀기**: 그림을 정답으로 보고 그려진 그대로 풀어 정답·해설을 맞춘다(그림 모델은 위치를 정확히 못 옮긴다). */
+export const ALIGN_PROMPT = (hasOrig: boolean) =>
+  `task: you are a Korean exam writer fixing a GENERATED VARIANT question. ${hasOrig ? "image 1 = the ORIGINAL question (reference only), image 2 = the VARIANT picture." : "the image = the VARIANT picture."} a checker listed problems (after the images); most are mismatches between the drawn figure and the registered solution. RULE: THE VARIANT PICTURE IS THE TRUTH — an image editor cannot move points, lines, bands or curves precisely, so we change the answer and the solution to fit what is drawn. read every value, label, scale tick and position from the variant picture carefully (estimate positions from the axes/grid), then SOLVE the variant exactly as drawn. decide: sound = the drawn problem is well-defined and EXACTLY ONE choice ①–⑤ is correct. only small TEXT defects may be fixed in the picture (broken/missing glyphs, a wrong number or label text that makes the problem unsound); never ask to move or redraw graphics. reply ONLY JSON: {"sound":true|false,"reason":"한국어 한 문장","new_answer":"①~⑤ 한 개 또는 숫자","solution":"그림대로 푼 새 해설(Mathpix 마크다운, 한국어 문장 + $수식$, 분수는 \\frac, 소수 지양, 6~14문단, 그림에서 읽은 값을 그대로 쓰고 끝줄 정답)","text_edits":["위치 + 현재 글 → 바꿀 글 (글자만, 꼭 필요할 때만)"]}. if not sound, still fill reason.`;
 
 export const REDESIGN_PROMPT = (hasOrig: boolean) =>
   `task: you are a Korean exam writer. ${hasOrig ? "image 1 = the ORIGINAL question, image 2 = a VARIANT of it" : "the image = a VARIANT question"}. the variant has DESIGN problems listed after the images (things a picture edit alone cannot fix: the intended trap/difficulty/novelty is missing, the answer or choices are inconsistent, etc.). REVISE THE VARIANT so every listed problem is solved, changing as LITTLE as possible: keep the unit/course, the solution logic type, layout and numbering; you may change values, conditions, statements (<보기> ㄱㄴㄷ) and choices. SOLVE the revised problem yourself, make exactly one choice ①–⑤ correct, recompute ALL five choices. then write "edits": a numbered list of concrete actions for an image editor that sees only the current variant picture — each item = location (e.g. '<보기> ㄴ 줄', '표 (가) B행 연령 칸', '선지 ③') + the exact current text/value → the exact new text/value; include every changed statement, value, figure/table cell and ALL changed choices; no reasoning, no vague wishes. reply ONLY JSON: {"summary":"한국어 1~2문장: 무엇을 어떻게 고쳤나","new_answer":"새 정답(①~⑤ 한 개 또는 숫자)","solution":"새 해설(Mathpix 마크다운, 한국어 문장 + $수식$, 분수는 \\frac, 소수 지양, 6~14문단, 끝줄 정답)","edits":"번호 목록 전체"}`;
@@ -226,14 +230,63 @@ export async function runFixStep(ctx: Ctx, problemId: string, t0: number) {
   let newBox: Record<string, unknown> = {};
 
   const vo0 = (br.variantOf ?? {}) as { path?: string };
-  const orig0 = design.length && typeof vo0.path === "string" && vo0.path ? await loadAsDataUrl(ctx.admin, vo0.path) : null;
+  const orig0 = typeof vo0.path === "string" && vo0.path ? await loadAsDataUrl(ctx.admin, vo0.path) : null;
 
-  if (design.length && orig0) {
+  // ① 그림 기준으로 다시 풀기(그림은 그대로 두고 정답·해설을 그림에 맞춘다). 성립하지 않으면 ② 재설계로.
+  let unsound = "";
+  let aligned = false;
+  if (notes.length) {
+    const curSol = typeof br.solution === "string" ? br.solution.slice(0, 2500) : "";
+    const ask = await askSol(
+      ALIGN_PROMPT(!!orig0),
+      orig0 ? [orig0, base] : [base],
+      { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(150_000, left() - 100_000), tag: ctx.tag },
+      "변형 그림 기준 다시 풀기",
+      {
+        effort: "high",
+        cacheKey: "reprint-variant-align",
+        tail: `\n\nCHECKER PROBLEMS\n${notes.map((n, i) => `${i + 1}. ${n.problem}`).join("\n")}\n\nCURRENT REGISTERED ANSWER: ${String(prob.answer ?? "")}\nCURRENT SOLUTION\n${curSol}`,
+      },
+    );
+    await logSol(ctx, "sol 변형 그림 기준 다시 풀기", ask);
+    krw += ask.krw;
+    const a = ask.text ? (parseJsonObject(ask.text) as { sound?: unknown; reason?: unknown; new_answer?: unknown; solution?: unknown; text_edits?: unknown } | null) : null;
+    if (a && a.sound === true && typeof a.solution === "string" && a.solution.trim().length > 30) {
+      const { answer, type } = answerOf(s(a.new_answer, 100));
+      if (answer) {
+        aligned = true;
+        update = { answer, answer_type: type };
+        newBox = { solution: a.solution.trim().slice(0, 6000) };
+        const edits = Array.isArray(a.text_edits) ? a.text_edits.map((x) => s(x, 300).trim()).filter(Boolean).slice(0, 6) : [];
+        if (edits.length && left() > 90_000) {
+          const instruction = `${edits.map((f, i) => `${i + 1}. ${f}`).join("\n")}${retry}\nchange ONLY these texts; keep every graphic, position and all other text exactly as in the picture.`;
+          const p = await patch(ctx, base, instruction, left() - 50_000);
+          krw += p.krw;
+          if (!p.ok) lastFail = `글자 수정 실패: ${p.error}`;
+          else {
+            const chk = left() > 35_000 ? await fixCheck(ctx, base, p.url, instruction, Math.min(70_000, left() - 12_000)) : { problems: null, krw: 0 };
+            krw += chk.krw;
+            if (chk.problems && chk.problems.length) lastFail = `글자 수정이 반영되지 않음: ${chk.problems.join(" / ")}`.slice(0, 600);
+            else newBox = { ...newBox, url: p.url };
+          }
+        }
+        saved = true;
+      }
+    } else if (a && a.sound === false) {
+      unsound = s(a.reason, 300) || "그림대로는 문제가 성립하지 않음";
+    } else {
+      lastFail = `그림 기준 다시 풀기 실패: ${ask.fail || "응답을 읽지 못함"}`;
+    }
+  }
+
+  if (aligned) {
+    // 정답·해설(과 글자 수정)을 아래에서 저장한다.
+  } else if (unsound && orig0 && left() > 120_000) {
     // **설계가 잘못된 문제는 재설계 → 원본에서 새로 생성 → 재검수**(사용자 — "문제 자체가 잘못 설계된 경우 재설계 후 생성 후 검증").
     // 지금 그림 위에 덧칠하지 않는다: sol 이 원본을 보고 지적을 피한 변형을 처음부터 다시 설계하고, 원본을 그 계획대로 편집한다.
     // 반영 검사는 하지 않는다 — 곧바로 이어지는 재검수가 문제 전체를 본다.
     const curSol = typeof br.solution === "string" ? br.solution.slice(0, 2500) : "";
-    const allNotes = notes.map((n, i) => `${i + 1}. ${n.problem}${n.fix ? ` (picture fix that was suggested: ${n.fix})` : ""}`).join("\n");
+    const allNotes = [`the variant AS DRAWN is not a sound problem: ${unsound}`, ...notes.map((n, i) => `${i + 1}. ${n.problem}`)].join("\n");
     const ask = await askSol(
       VARIANT_PROMPT,
       [orig0],
@@ -289,7 +342,7 @@ export async function runFixStep(ctx: Ctx, problemId: string, t0: number) {
         newBox = { url, solution: plan.solution ? plan.solution.slice(0, 6000) : undefined };
       }
     }
-  } else if (fixes.length) {
+  } else if (!unsound && !lastFail && fixes.length) {
     const instruction = `${fixes.map((f, i) => `${i + 1}. ${f}`).join("\n")}${retry}\nkeep everything else exactly as in the picture.`;
     const p = await patch(ctx, base, instruction, left() - 70_000);
     krw += p.krw;
@@ -304,7 +357,7 @@ export async function runFixStep(ctx: Ctx, problemId: string, t0: number) {
         newBox = { url: p.url };
       }
     }
-  } else if (design.length) {
+  } else if (unsound || design.length) {
     const vo = (br.variantOf ?? {}) as { path?: string };
     const orig = typeof vo.path === "string" && vo.path ? await loadAsDataUrl(ctx.admin, vo.path) : null;
     const curSol = typeof br.solution === "string" ? br.solution.slice(0, 3000) : "";
@@ -363,14 +416,14 @@ export async function runFixStep(ctx: Ctx, problemId: string, t0: number) {
       return {
         ...b,
         ...(newPath ? { figures: figures.map((f, i) => (i === 0 ? { ...f, markup: `<img src="${cardUrl(newPath)}" alt="" />` } : f)) } : {}),
-        ...(newPath && typeof newBox.solution === "string" ? { solution: newBox.solution } : {}),
-        variantAuto: { ...(st ?? {}), round: (st?.round ?? 0) + 1, status: "checking", baseImagePath: basePath, lastFail: newPath ? undefined : lastFail || undefined, notes: undefined, at: new Date().toISOString() },
+        ...((newPath || aligned) && typeof newBox.solution === "string" ? { solution: newBox.solution } : {}),
+        variantAuto: { ...(st ?? {}), round: (st?.round ?? 0) + 1, status: "checking", baseImagePath: basePath, lastFail: lastFail || undefined, notes: undefined, at: new Date().toISOString() },
       };
     },
-    newPath ? { image_path: newPath, ...update } : undefined,
+    newPath ? { image_path: newPath, ...update } : aligned ? update : undefined,
   );
   // 중간 그림은 지운다(처음 상태는 통과할 때까지 남긴다).
   if (newPath && curPath !== basePath) await removeStored(ctx.admin, [curPath]);
   await enqueueAutoStep(ctx.admin, ctx.userId, problemId, "check", "자동 재검수");
-  return { ok: true as const, saved: !!newPath, lastFail, krw };
+  return { ok: true as const, saved: !!newPath || aligned, lastFail, krw };
 }
