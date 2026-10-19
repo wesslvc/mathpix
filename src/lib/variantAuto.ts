@@ -56,7 +56,7 @@ export const FIXCHECK_PROMPT = `task: check a PARTIAL EDIT of a Korean exam ques
 export const REDESIGN_PROMPT = (hasOrig: boolean) =>
   `task: you are a Korean exam writer. ${hasOrig ? "image 1 = the ORIGINAL question, image 2 = a VARIANT of it" : "the image = a VARIANT question"}. the variant has DESIGN problems listed after the images (things a picture edit alone cannot fix: the intended trap/difficulty/novelty is missing, the answer or choices are inconsistent, etc.). REVISE THE VARIANT so every listed problem is solved, changing as LITTLE as possible: keep the unit/course, the solution logic type, layout and numbering; you may change values, conditions, statements (<보기> ㄱㄴㄷ) and choices. SOLVE the revised problem yourself, make exactly one choice ①–⑤ correct, recompute ALL five choices. then write "edits": a numbered list of concrete actions for an image editor that sees only the current variant picture — each item = location (e.g. '<보기> ㄴ 줄', '표 (가) B행 연령 칸', '선지 ③') + the exact current text/value → the exact new text/value; include every changed statement, value, figure/table cell and ALL changed choices; no reasoning, no vague wishes. reply ONLY JSON: {"summary":"한국어 1~2문장: 무엇을 어떻게 고쳤나","new_answer":"새 정답(①~⑤ 한 개 또는 숫자)","solution":"새 해설(Mathpix 마크다운, 한국어 문장 + $수식$, 분수는 \\frac, 소수 지양, 6~14문단, 끝줄 정답)","edits":"번호 목록 전체"}`;
 
-function readNotes(raw: unknown): AutoNote[] {
+export function readNotes(raw: unknown): AutoNote[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter(Boolean)

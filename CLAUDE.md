@@ -6482,3 +6482,17 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 - 원가: 재검수 1회 ≈ sol 30원대, 수정 1회 ≈ 그림 medium 36원 + 반영 검사 sol(설계 고치기면 sol 하나 더).
 - 검증: `tsc`·`build`. 실제 문제 시험은 아래.
 - 시험(2026-10-19, 고지자기 변형문제 3개): 셋 다 15초 만에 통과, 한 건 12~14원 — 그런데 sol 출력이 75~220토큰뿐이라 직접 풀어 본 검수로 보기 어려웠다. 통과가 곧 확정이라 재검수 강도를 **high** 로 올렸다(`VARIANT_RECHECK_EFFORT`). 그 셋은 이미 `passed` 다(다시 보려면 카드의 "다시 검수").
+
+#### 변형문제 최초 생성은 OpenAI Batch 로 (2026-10-19)
+
+사용자 — "최초 변형생성은 batch 이용해서 만들자". Batch 는 같은 요청이 **반값**, 결과는 최대 24시간 뒤(프로브에서는 1분 남짓).
+- **프로브로 확인**(일꾼 `probe: "batch-start"` / `"batch-status"`): `/v1/responses`(gpt-6.1-sol)와 `/v1/images/edits`(gpt-image-2.5-sunburst, **JSON 몸통** —
+  `images:[{image_url: data URL}]`, `output_format`, `quality`, `size`)가 둘 다 batch 로 통했고 결과 줄은 `response.body` 에 실시간 응답과 같은 모양(`data[0].b64_json`)이다. 한 batch 는 endpoint 하나만 받는다.
+- 표 둘(마이그레이션 `0045`, 적용됨): `variant_batch_items`(변형 하나 = 한 줄, `stage` plan → image → review → done/error) · `openai_batches`(걸어 둔 batch). pg_cron `kick-variant-batches` 가
+  1분마다(열린 batch 가 있을 때만) `/api/variant-batch/poll` 을 깨워 `pollBatches`(끝난 batch 처리) → `submitReady`(다음 단계를 20줄씩 batch 로 건다) (`src/lib/variantBatch.ts`).
+- 단계: 설계(`VARIANT_PROMPT`, 화면이 고른 강도) → 그림(부분 수정/개념형은 통째 편집 프롬프트, 결과는 `compositePatch` 로 원본과 합쳐 묶음 경로에 바로 저장) → 검수(**자동 검수의 `RECHECK_PROMPT`, 강도 high**) →
+  문제로 저장하면서 `variantAuto` 를 정한다(지적 없음 = 확정, 지적 = 승인 대기, 검수를 못 읽음 = 실시간 자동 재검수로). 그 뒤는 위 자동 검수 흐름 그대로.
+- 원가는 실시간 단가 × 0.5 로 장부에 `… (batch)` 로 적는다.
+- 화면: 만들기의 "Batch 로 만들기 (반값 · 몇 분~최대 24시간)" 체크(기본 켜짐, 끄면 예전 즉시 생성) + "Batch 진행 (최근 3일)" 묶음별 단계 개수·실패 이유·원가(30초마다 갱신).
+  넣기는 `/api/variant-batch`(원본을 `_origins/` 로 옮기고 줄을 넣은 뒤 곧바로 설계 batch 를 건다).
+- 안 한 것: 프롬프트 캐시 필드는 batch 몸통에 안 넣었다(받는지 확인 안 함). 결과를 처리하다 함수가 죽으면 그 batch 는 `done_at` 이 찍힌 채 남는다(그 줄들은 batch_id 가 남아 멈춘다 — 드물지만 보이면 손으로 batch_id 를 비울 것).

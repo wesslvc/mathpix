@@ -256,7 +256,7 @@ export function applyDataKeys(slots: GradeSlot[], keys: GradeKeySource[] | undef
 }
 
 /** 응답에서 글자만 긁어모은다(Responses API 는 여러 조각으로 나눠 준다). */
-function harvest(json: unknown): string {
+export function harvest(json: unknown): string {
   const o = json as Record<string, unknown>;
   if (typeof o?.output_text === "string") return o.output_text;
   const out: string[] = [];

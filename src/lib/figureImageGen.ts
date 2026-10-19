@@ -288,7 +288,7 @@ export type FigureUsage = {
  * 어긋나고, 그러면 화면의 숫자와 로그의 숫자가 다른데 어느 쪽이 맞는지 알
  * 방법이 없어진다.
  */
-function readUsage(usage: ImageUsage | undefined): FigureUsage | undefined {
+export function readUsage(usage: ImageUsage | undefined): FigureUsage | undefined {
   if (!usage) return undefined;
   const d = usage.input_tokens_details;
   const inputText = d?.text_tokens ?? 0;
@@ -535,7 +535,7 @@ look: white bg, crisp black text, printed-workbook page. comfortable text size, 
  * 나중에 형식별로 세어 보면(우리가 방금 그렇게 원인을 찾았다) 통째로 틀린다.
  * 파라미터가 거부돼 PNG 로 돌아온 경우까지 여기서 저절로 맞는다.
  */
-function sniffImageMime(b64: string): string {
+export function sniffImageMime(b64: string): string {
   if (b64.startsWith("/9j/")) return "image/jpeg";
   if (b64.startsWith("iVBOR")) return "image/png";
   if (b64.startsWith("UklGR")) return "image/webp";

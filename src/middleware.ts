@@ -77,7 +77,7 @@ export async function middleware(request: NextRequest) {
   }
   // AI 그림 일꾼도 세션 없이 들어온다(pg_cron·앞선 일꾼이 부른다). 라우트가
   // DB 안의 비밀값으로 직접 인증하므로 로그인 가드를 태우지 않는다.
-  if (request.nextUrl.pathname === "/api/figure-jobs/run") {
+  if (request.nextUrl.pathname === "/api/figure-jobs/run" || request.nextUrl.pathname === "/api/variant-batch/poll") {
     return response;
   }
 

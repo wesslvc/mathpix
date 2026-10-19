@@ -1,6 +1,6 @@
 "use client";
 
-import { removeBlobs } from "@/lib/blobClient";
+import { putBlob, removeBlobs } from "@/lib/blobClient";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cardUrl } from "@/lib/cardUrl";
@@ -246,6 +246,9 @@ export default function VariantPanel() {
     }
   }
   const [busy, setBusy] = useState(false);
+  /** 최초 생성을 OpenAI Batch 로(반값, 결과는 몇 분~최대 24시간 뒤). 끄면 예전처럼 곧바로 돈다. */
+  const [useBatch, setUseBatch] = useState(true);
+  const [batchTick, setBatchTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -502,7 +505,69 @@ export default function VariantPanel() {
     return out;
   }, [levels, novelties, copies]);
 
+  /** Batch 로 넣기: 원본을 줄여 올리고 변형 설정을 서버에 넘긴다 — 이후 단계는 서버가 cron 으로 이어 간다. */
+  async function startBatch() {
+    if (!items.length) return;
+    setError(null);
+    setBusy(true);
+    setRuns([]);
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id;
+      if (!uid) throw new Error("로그인이 필요해요.");
+      const targetId = await ensureTarget(uid);
+      const out: { srcPath: string; params: Record<string, unknown> }[] = [];
+      const queue = [...items];
+      const failed: string[] = [];
+      await Promise.all(
+        Array.from({ length: Math.min(4, queue.length) }, async () => {
+          for (let it = queue.shift(); it; it = queue.shift()) {
+            try {
+              const original = await prepareProblemForModel(await ensureDataUrl(it.src));
+              const size = await imageSizeOf(original);
+              const blob = await (await fetch(original)).blob();
+              const path = `${uid}/_jobs/vbs-${crypto.randomUUID()}.jpg`;
+              const up = await putBlob(supabase, path, blob, blob.type || "image/jpeg");
+              if (!up.ok) throw new Error(up.error);
+              for (const v of variantList) {
+                out.push({
+                  srcPath: path,
+                  params: {
+                    effort: SOL_EFFORT,
+                    quality: "",
+                    level: v.level,
+                    novelty: v.novelty,
+                    copies: variantList.length,
+                    copy: v.n,
+                    categoryId: targetId,
+                    no: it.no ?? null,
+                    srcKey: it.key,
+                    srcLabel: it.label,
+                    width: size?.width,
+                    height: size?.height,
+                  },
+                });
+              }
+            } catch (err) {
+              failed.push(`${it.label}: ${err instanceof Error ? err.message : "원본을 열지 못했어요."}`);
+            }
+          }
+        }),
+      );
+      if (!out.length) throw new Error(failed.join(" / ") || "넣을 것이 없어요.");
+      const res = await fetch("/api/variant-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: out }) });
+      const j = (await res.json().catch(() => ({}))) as { error?: string; count?: number };
+      if (!res.ok) throw new Error(j.error ?? "Batch 에 넣지 못했어요.");
+      if (failed.length) setError(`일부 원본을 못 넣었어요: ${failed.join(" / ")}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (err as { message?: string })?.message ?? "시작하지 못했어요.");
+    }
+    setBusy(false);
+    setBatchTick((n) => n + 1);
+  }
+
   async function start() {
+    if (useBatch) return startBatch();
     if (!items.length) return;
     setError(null);
     setBusy(true);
@@ -1229,6 +1294,10 @@ export default function VariantPanel() {
             placeholder="묶음 이름 (비우면 날짜·시간)"
           />
         )}
+        <label className="flex items-center gap-1.5 text-sm text-slate-700">
+          <input type="checkbox" checked={useBatch} onChange={(e) => setUseBatch(e.target.checked)} />
+          Batch 로 만들기 (반값 · 몇 분~최대 24시간)
+        </label>
         <Button onClick={() => void start()} disabled={busy || items.length === 0 || totalJobs > 100}>
           {busy ? "서버에 넣는 중…" : `변형문제 만들기 (${totalJobs}개)`}
         </Button>
@@ -1244,6 +1313,8 @@ export default function VariantPanel() {
       </section>
 
       {error && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+      <BatchProgress supabase={supabase} tick={batchTick} cats={cats} />
 
       {runs.map((r) => (
         <section key={r.key} className={cn(cardClass, "flex flex-col gap-3 p-4 sm:p-5")}>
@@ -1505,5 +1576,67 @@ function AutoCard({ auto, busy, onAction }: { auto: AutoState | null; busy: bool
         </>
       ) : null}
     </div>
+  );
+}
+
+
+type BatchRow = { id: string; group_id: string; category_id: string; stage: string; error: string | null; cost_krw: number; created_at: string };
+const BATCH_STAGE: Record<string, string> = { plan: "설계", image: "그림", review: "검수", done: "저장됨", error: "실패" };
+
+/** Batch 로 넣은 변형들의 진행(최근 3일). 도는 것이 있으면 30초마다 다시 읽는다. */
+function BatchProgress({ supabase, tick, cats }: { supabase: ReturnType<typeof createClient>; tick: number; cats: { id: string; source: string }[] }) {
+  const [rows, setRows] = useState<BatchRow[]>([]);
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    void (async () => {
+      const since = new Date(Date.now() - 3 * 86400_000).toISOString();
+      const { data } = await supabase
+        .from("variant_batch_items")
+        .select("id,group_id,category_id,stage,error,cost_krw,created_at")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(600);
+      setRows((data as BatchRow[]) ?? []);
+    })();
+  }, [supabase, tick, t]);
+  const open = rows.some((r) => r.stage === "plan" || r.stage === "image" || r.stage === "review");
+  useEffect(() => {
+    if (!open) return;
+    const h = setInterval(() => setT((n) => n + 1), 30_000);
+    return () => clearInterval(h);
+  }, [open]);
+  if (!rows.length) return null;
+  const groups = new Map<string, BatchRow[]>();
+  for (const r of rows) groups.set(r.group_id, [...(groups.get(r.group_id) ?? []), r]);
+  return (
+    <section className={cn(cardClass, "flex flex-col gap-2 p-4 text-xs")}>
+      <h3 className="text-sm font-semibold text-ink">Batch 진행 (최근 3일)</h3>
+      <p className="text-slate-500">설계 → 그림 → 검수 순서로 단계마다 OpenAI Batch 로 돌아요. 단계 하나가 보통 몇 분~몇십 분, 길면 24시간. 창을 닫아도 서버가 이어 가고, 끝나면 묶음에 저장돼 자동 검수 상태(통과·승인 대기)로 들어가요.</p>
+      {[...groups.entries()].map(([g, list]) => {
+        const by = (k: string) => list.filter((x) => x.stage === k).length;
+        const cat = cats.find((c) => c.id === list[0].category_id);
+        const errs = list.filter((x) => x.stage === "error" && x.error).slice(0, 3);
+        const krw = list.reduce((a, x) => a + Number(x.cost_krw || 0), 0);
+        return (
+          <div key={g} className="rounded border border-slate-200 p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <b>{cat?.source ?? "묶음"}</b>
+              <span className="text-slate-500">{new Date(list[list.length - 1].created_at).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+              {(["plan", "image", "review", "done", "error"] as const).map((k) =>
+                by(k) ? (
+                  <span key={k} className={cn("rounded-full px-2 py-0.5", k === "done" ? "bg-emerald-50 text-emerald-700" : k === "error" ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700")}>
+                    {BATCH_STAGE[k]} {by(k)}
+                  </span>
+                ) : null,
+              )}
+              <span className="text-slate-500">/ {list.length}개 · 원가 {Math.round(krw)}원</span>
+            </div>
+            {errs.map((e) => (
+              <p key={e.id} className="mt-0.5 text-red-600">{e.error}</p>
+            ))}
+          </div>
+        );
+      })}
+    </section>
   );
 }
