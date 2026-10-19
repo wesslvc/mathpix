@@ -119,7 +119,8 @@ export async function runCheckStep(ctx: Ctx, problemId: string, t0: number) {
     orig ? [orig, cur] : [cur],
     { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: Math.min(180_000, ctx.deadlineMs - (Date.now() - t0) - 10_000), tag: ctx.tag },
     "변형 자동 재검수",
-    { effort: "medium", cacheKey: "reprint-variant-recheck", tail: `\n\nREGISTERED ANSWER: ${String(prob.answer ?? "")}\nSOLUTION\n${sol}` },
+    // 통과면 사람 확인 없이 확정되므로 깊게 본다 — medium 으로 시험했더니 출력 75~220토큰(직접 풀지 않은 수준)으로 통과시켰다.
+    { effort: process.env.VARIANT_RECHECK_EFFORT?.trim() || "high", cacheKey: "reprint-variant-recheck", tail: `\n\nREGISTERED ANSWER: ${String(prob.answer ?? "")}\nSOLUTION\n${sol}` },
   );
   await logSol(ctx, "sol 변형 자동 재검수", rv);
   const obj = rv.text ? (parseJsonObject(rv.text) as { notes?: unknown; solved_answer?: unknown } | null) : null;
