@@ -225,6 +225,59 @@ export async function POST(req: NextRequest) {
   // **백그라운드 호출 확인용**(비교 화면이 쓰는 길). 작은 그림 한 장으로 걸어
   // 보고(`bg-start`) id 로 물어본다(`bg-poll`). 모델이 background 를 안 받으면
   // 시작에서 바로 오류가 난다.
+  // **Batch API 확인용**(2026-10-19, 변형 최초 생성을 Batch 로 옮기기 전). 줄 둘(sol responses + 그림 images/edits JSON)을 담은 작은 batch 를 건다.
+  // `batch-status` + id 로 상태와 결과 줄(앞 600자씩)을 본다. 키는 내보내지 않는다.
+  if (probe === "batch-start" || probe === "batch-status") {
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) return NextResponse.json({ error: "no key" }, { status: 500 });
+    const H = { Authorization: `Bearer ${key}` };
+    if (probe === "batch-status") {
+      const r = await fetch(`https://api.openai.com/v1/batches/${encodeURIComponent(probeId)}`, { headers: H });
+      const b = (await r.json()) as Record<string, unknown>;
+      const lines: string[] = [];
+      for (const f of ["output_file_id", "error_file_id"] as const) {
+        if (typeof b[f] === "string") {
+          const c = await fetch(`https://api.openai.com/v1/files/${b[f]}/content`, { headers: H });
+          for (const l of (await c.text()).split("\n").filter(Boolean)) lines.push(`${f}: ${l.slice(0, 600)}`);
+        }
+      }
+      return NextResponse.json({ batch: b, lines });
+    }
+    let image = `data:image/png;base64,${PROBE_PNG}`;
+    if (probeId) {
+      const got = await loadAsDataUrl(createAdminClient(), probeId);
+      if (got) image = got;
+    }
+    const sol = probeModel || "gpt-6.1-sol";
+    const img = probePrompt || "gpt-image-2.5-sunburst";
+    const jsonl = [
+      { custom_id: "sol", method: "POST", url: "/v1/responses", body: { model: sol, input: [{ role: "user", content: [{ type: "input_text", text: 'reply ONLY JSON {"ok":true,"color":"<main color of the picture>"}' }, { type: "input_image", image_url: image, detail: "low" }] }], text: { format: { type: "json_object" } }, reasoning: { effort: "low" } } },
+      { custom_id: "img", method: "POST", url: "/v1/images/edits", body: { model: img, images: [{ image_url: image }], prompt: "draw a small black circle in the center, keep everything else", n: 1, size: "1024x1024", quality: "low", output_format: "jpeg", output_compression: 90 } },
+    ].map((x) => JSON.stringify(x)).join("\n");
+    const form = new FormData();
+    form.append("purpose", "batch");
+    form.append("file", new Blob([jsonl], { type: "application/jsonl" }), "probe.jsonl");
+    const up = await fetch("https://api.openai.com/v1/files", { method: "POST", headers: H, body: form });
+    const upBody = await up.json();
+    if (!up.ok) return NextResponse.json({ step: "file", status: up.status, body: upBody });
+    const out: Record<string, unknown> = {};
+    for (const ep of ["/v1/responses", "/v1/images/edits"]) {
+      // 한 batch 는 한 endpoint 만 받는다 — 줄을 나눠 따로 건다.
+      const only = jsonl.split("\n").filter((l) => l.includes(`"url":"${ep}"`)).join("\n");
+      const f2 = new FormData();
+      f2.append("purpose", "batch");
+      f2.append("file", new Blob([only], { type: "application/jsonl" }), "probe.jsonl");
+      const u2 = await fetch("https://api.openai.com/v1/files", { method: "POST", headers: H, body: f2 });
+      const u2b = (await u2.json()) as { id?: string };
+      const cr = await fetch("https://api.openai.com/v1/batches", {
+        method: "POST",
+        headers: { ...H, "Content-Type": "application/json" },
+        body: JSON.stringify({ input_file_id: u2b.id, endpoint: ep, completion_window: "24h" }),
+      });
+      out[ep] = { status: cr.status, body: await cr.json() };
+    }
+    return NextResponse.json(out);
+  }
   if (probe === "bg-start") {
     if (!/^gpt-[\w.-]+$/.test(probeModel)) {
       return NextResponse.json({ error: "model 이 필요합니다." }, { status: 400 });
