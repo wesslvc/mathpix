@@ -456,7 +456,8 @@ we will typeset it ourselves, so write the whole question (stem, conditions, tab
 ${MMD_RULES}
 figures (graphs, globes with latitude lines, magnetic stripe bands, diagrams, maps): put "[[FIG fN]]" as its own paragraph where the figure sits, and DRAW each figure as standalone SVG code in "figures". the SVG must be computed from the exact values in your solution: every point, line, band edge and tick at coordinates derived from those values with a consistent scale, so a reader measuring the figure gets exactly the numbers your solution uses. rules: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 W H"> with W 320–720; only black/white/grays (#000 #fff #444 #888 #bbb #ddd); stroke-width 1–2; labels as <text> with font-size 13–16 and font-family "Nanum Myeongjo, serif", Korean as needed; include axes, ticks, tick labels, legends (e.g. black = 정자극기, white = 역자극기) and point labels like the original layout; markers like ●/○/▲ drawn as shapes; no <image>, no external links, no scripts, no foreignObject, no CSS classes. if the information is really a table of numbers, use a markdown table instead of a figure. do not repeat a figure's internal labels in the text.
 
-reply ONLY JSON: {"text":"전체 문제 글(위 꼴)","figures":[{"id":"f1","svg":"<svg ...>...</svg>"}],"new_answer":"①~⑤ 한 개 또는 숫자","solution":"새 해설(Mathpix 마크다운, 한국어 문장 + $수식$, 분수는 \\frac, 소수 지양, 6~14문단, 그림의 값 그대로, 끝줄 정답)"}`;
+BEFORE ANSWERING, VERIFY: re-read your own "text" and figures as a student would (only what is written and drawn), judge EVERY choice ①–⑤ (and every <보기> statement) true/false from them alone, and confirm exactly one choice is correct and equals new_answer. if it is not exactly one, fix the question and verify again; if you still cannot make it sound, set "unique": false and say why.
+reply ONLY JSON: {"check":["① 참/거짓 + 근거 한 줄", "② …", "③ …", "④ …", "⑤ …"],"unique":true|false,"why":"unique 가 false 면 이유(한국어 한 문장)","text":"전체 문제 글(위 꼴)","figures":[{"id":"f1","svg":"<svg ...>...</svg>"}],"new_answer":"①~⑤ 한 개 또는 숫자","solution":"새 해설(Mathpix 마크다운, 한국어 문장 + $수식$, 분수는 \\frac, 소수 지양, 6~14문단, 그림의 값 그대로, 끝줄 정답)"}`;
 
 /** 모델이 준 SVG 를 카드에 넣어도 되는 모양으로만 받는다(이 문자열은 카드에 그대로 이어붙는다). */
 export function cleanSvg(raw: unknown): string | null {
@@ -540,9 +541,11 @@ export async function runTypesetFix(ctx: Ctx, problemId: string, t0: number) {
     await setAuto(ctx, problemId, (b) => ({ ...b, variantAuto: { ...(st ?? { round: 0 }), status: "needs_approval", typesetResp: undefined, lastFail: why.slice(0, 400), at } }));
     return { ok: true as const, saved: false, lastFail: why, krw: ask.krw };
   };
-  const obj = ask.text ? (parseJsonObject(ask.text) as { text?: unknown; figures?: unknown; new_answer?: unknown; solution?: unknown } | null) : null;
+  const obj = ask.text ? (parseJsonObject(ask.text) as { text?: unknown; figures?: unknown; new_answer?: unknown; solution?: unknown; unique?: unknown; why?: unknown } | null) : null;
   const text = obj && typeof obj.text === "string" ? obj.text.trim().slice(0, 8000) : "";
   if (!obj || text.length < 20) return back(`조판 글을 못 받음: ${ask.fail || "응답을 읽지 못함"}`);
+  // sol 스스로 정답이 하나로 정해지지 않는다고 했으면 카드를 찍어 봐야 재검수에서 또 '판정 불가'다 — 찍지 않고 승인 대기로.
+  if (obj.unique === false) return back(`sol 이 조판한 문제의 정답을 하나로 정하지 못함: ${s(obj.why, 300) || "이유 없음"}`);
   const figs: { id: string; svg: string }[] = [];
   for (const f of Array.isArray(obj.figures) ? (obj.figures as { id?: unknown; svg?: unknown }[]).slice(0, 6) : []) {
     const id = typeof f?.id === "string" && /^f\d{1,2}$/.test(f.id) ? f.id : "";
