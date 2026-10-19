@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     const br = ((row.box_range ?? {}) as Record<string, unknown>) || {};
     const st = br.variantAuto as VariantAutoState | undefined;
     if (action === "start") {
-      if (st?.status === "checking" || st?.status === "fixing") continue;
+      if (st?.status === "checking" || st?.status === "fixing" || st?.status === "rendering") continue;
       if (st?.status === "passed" && body.force !== true) continue;
       const next: VariantAutoState = { ...(st ?? { round: 0 }), round: st?.round ?? 0, status: "checking", notes: undefined, message: undefined, at: now };
       await admin.from("problems").update({ box_range: { ...br, variantAuto: next } }).eq("id", row.id).eq("user_id", user.id);

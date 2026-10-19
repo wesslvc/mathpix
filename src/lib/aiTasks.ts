@@ -73,7 +73,7 @@ import { figureImageModelIds } from "./figureImageGen";
 import { cardUrl } from "./cardUrl";
 import { toStoredFigures } from "./storedFigures";
 import { compositePatch } from "./patchComposite";
-import { enqueueAutoStep, runCheckStep, runFixStep } from "./variantAuto";
+import { enqueueAutoStep, runCheckStep, runTypesetFix } from "./variantAuto";
 import { DEFAULT_FONT_PT } from "./fontSize";
 
 export type TaskKind =
@@ -1307,9 +1307,10 @@ export const TASKS: Record<TaskKind, TaskDef> = {
         if (!r.ok) return { ok: false, error: r.error, estKrw: r.krw || undefined };
         return { ok: true, result: { problemId, passed: r.passed }, estKrw: r.krw || undefined, note: r.passed ? "통과 · 확정" : `오류 ${r.notes.length}건 · 승인 대기` };
       }
-      const r = await runFixStep(actx, problemId, t0);
+      // 에러난 변형은 조판으로 고친다(글 + 계산한 값 그대로 그린 SVG). 카드 PNG 는 브라우저가 그리고 재검수를 건다.
+      const r = await runTypesetFix(actx, problemId, t0);
       if (!r.ok) return { ok: false, error: r.error };
-      return { ok: true, result: { problemId, saved: r.saved }, estKrw: r.krw || undefined, note: r.saved ? "수정 반영 · 재검수로" : `수정 안 됨 — ${r.lastFail.slice(0, 80)}` };
+      return { ok: true, result: { problemId, saved: r.saved }, estKrw: r.krw || undefined, note: r.saved ? "조판 글·그림 완성 · 화면에서 카드로 찍는 중" : `조판 못 함 — ${r.lastFail.slice(0, 80)}` };
     },
   },
 };

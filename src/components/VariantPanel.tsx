@@ -662,7 +662,39 @@ export default function VariantPanel() {
     })();
   }, [libId, tab, supabase, libTick]);
   // 검수·수정이 도는 동안은 30초마다 다시 읽는다(서버가 단계마다 상태를 바꾼다).
-  const autoRunning = libRows.some((x) => x.auto?.status === "checking" || x.auto?.status === "fixing");
+  const autoRunning = libRows.some((x) => ["checking", "fixing", "rendering", "rendered"].includes(x.auto?.status ?? ""));
+  // **조판으로 고친 변형을 카드로 찍는다** — 서버가 글·SVG 를 써 두면(`rendering`) 이 화면이 카드 PNG 를 그려 저장하고 재검수를 건다.
+  // 폴더와 상관없이 내 것 전부를 본다(화면이 열려 있는 동안 1분마다).
+  const renderingRef = useRef(false);
+  const [renderTick, setRenderTick] = useState(0);
+  useEffect(() => {
+    if (renderingRef.current) return;
+    renderingRef.current = true;
+    void (async () => {
+      try {
+        const { data } = await supabase.from("problems").select("id").eq("box_range->variantAuto->>status", "rendering").limit(30);
+        const ids = (data ?? []).map((r) => r.id as string);
+        if (!ids.length) return;
+        const { applyVariantTypeset } = await import("@/lib/variantTypesetApply");
+        let saved = 0;
+        for (const id of ids) {
+          try {
+            if ((await applyVariantTypeset(id)) === "saved") saved++;
+          } catch (err) {
+            console.warn("[variants] 조판 카드 찍기 실패", id, err);
+          }
+        }
+        // 하나라도 저장했을 때만 다시 읽는다(실패가 되풀이되면 무한히 돌지 않게 — 다음 시도는 1분 뒤).
+        if (saved) setLibTick((n) => n + 1);
+      } finally {
+        renderingRef.current = false;
+      }
+    })();
+  }, [supabase, renderTick]);
+  useEffect(() => {
+    const h = setInterval(() => setRenderTick((n) => n + 1), 60_000);
+    return () => clearInterval(h);
+  }, []);
   useEffect(() => {
     if (!autoRunning || tab !== "library") return;
     const h = setInterval(() => setLibTick((n) => n + 1), 30_000);
@@ -1439,7 +1471,7 @@ export default function VariantPanel() {
 }
 
 type AutoState = {
-  status: "checking" | "needs_approval" | "fixing" | "passed" | "error";
+  status: "checking" | "needs_approval" | "fixing" | "rendering" | "rendered" | "passed" | "error";
   round: number;
   notes?: { problem: string; fix: string }[];
   message?: string;
@@ -1452,7 +1484,9 @@ const AUTO_LABEL: Record<AutoState["status"] | "none", string> = {
   none: "아직 검수 안 함",
   checking: "sol 재검수 중",
   needs_approval: "승인 대기",
-  fixing: "수정 중",
+  fixing: "sol 이 조판 중",
+  rendering: "카드 찍는 중",
+  rendered: "재검수 대기",
   passed: "통과 · 확정",
   error: "실패",
 };
@@ -1461,6 +1495,8 @@ const AUTO_TONE: Record<AutoState["status"] | "none", string> = {
   checking: "border-blue-300 bg-blue-50 text-blue-700",
   needs_approval: "border-amber-400 bg-amber-50 text-amber-800",
   fixing: "border-blue-300 bg-blue-50 text-blue-700",
+  rendering: "border-blue-300 bg-blue-50 text-blue-700",
+  rendered: "border-blue-300 bg-blue-50 text-blue-700",
   passed: "border-emerald-300 bg-emerald-50 text-emerald-700",
   error: "border-red-300 bg-red-50 text-red-700",
 };
@@ -1491,7 +1527,7 @@ function AutoBar<R extends { id: string }>({
         <button onClick={() => setFilter("all")} className={cn("rounded-full border px-2.5 py-0.5", filter === "all" ? "border-slate-700 bg-white font-medium" : "border-slate-200")}>
           전체 {rows.length}
         </button>
-        {(["needs_approval", "checking", "fixing", "error", "none", "passed"] as const).map((k) =>
+        {(["needs_approval", "checking", "fixing", "rendering", "rendered", "error", "none", "passed"] as const).map((k) =>
           by(k).length ? (
             <button key={k} onClick={() => setFilter(k)} className={cn("rounded-full border px-2.5 py-0.5", AUTO_TONE[k], filter === k && "ring-2 ring-slate-400")}>
               {AUTO_LABEL[k]} {by(k).length}
@@ -1563,7 +1599,7 @@ function AutoCard({ auto, busy, onAction }: { auto: AutoState | null; busy: bool
               </li>
             ))}
           </ol>
-          <p className="mt-1 font-medium text-violet-800">승인하면 sol 이 그림대로 다시 풀어 정답·해설을 그림에 맞춰요(그림은 그대로, 깨진 글자만 고침). 그림대로는 문제가 안 되면 재설계 → 원본에서 새로 생성. 끝나면 재검수.</p>
+          <p className="mt-1 font-medium text-violet-800">승인하면 조판으로 고쳐요: sol 이 문제를 바로잡아 글 + 계산한 값 그대로 그린 그림(SVG)으로 다시 쓰고, 카드로 찍은 뒤 재검수해요. (카드 찍기는 이 화면이 열려 있을 때 돼요)</p>
           <div className="mt-1 flex flex-wrap gap-2">
             <button className="rounded bg-amber-600 px-2 py-0.5 text-white disabled:opacity-50" disabled={busy} onClick={() => onAction("approve")}>
               승인 — 이대로 고치기

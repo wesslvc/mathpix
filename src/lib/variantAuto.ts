@@ -19,12 +19,12 @@ import { figureImageModelIds } from "./figureImageGen";
 import { compositePatch } from "./patchComposite";
 import { cardUrl } from "./cardUrl";
 import { imageTokens, logAiCost, solTokens } from "./costLog";
-import { parseJsonObject } from "./problemCompare";
+import { TYPESET_PROMPT, parseJsonObject } from "./problemCompare";
 import { VARIANT_PROMPT, answerOf, parseVariantPlan, settingsTail } from "./variantPlan";
 
 export type AutoNote = { problem: string; fix: string };
 export type VariantAutoState = {
-  status: "checking" | "needs_approval" | "fixing" | "passed" | "error";
+  status: "checking" | "needs_approval" | "fixing" | "rendering" | "rendered" | "passed" | "error";
   round: number;
   notes?: AutoNote[];
   message?: string;
@@ -143,6 +143,8 @@ export async function runCheckStep(ctx: Ctx, problemId: string, t0: number) {
       variantFix: undefined,
       variantRecheck: undefined,
       variantReview: undefined,
+      // 처음 그림을 지우므로 조판 전 상태(그 그림을 가리킨다)도 뗀다.
+      ...(old.length ? { preTypeset: undefined } : {}),
       variantAuto: { status: "passed", round, solved: s(obj.solved_answer, 60), at },
     }));
     if (old.length) await removeStored(ctx.admin, old);
@@ -426,4 +428,93 @@ export async function runFixStep(ctx: Ctx, problemId: string, t0: number) {
   if (newPath && curPath !== basePath) await removeStored(ctx.admin, [curPath]);
   await enqueueAutoStep(ctx.admin, ctx.userId, problemId, "check", "자동 재검수");
   return { ok: true as const, saved: !!newPath || aligned, lastFail, krw };
+}
+
+
+/* ───────────────────────── 조판으로 고치기 ───────────────────────── */
+
+/** 조판기(우리 renderMathText)가 읽는 글 꼴 — 옮겨 적기 프롬프트의 규칙을 그대로 빌린다(한 곳만 고치면 되게). */
+const MMD_RULES = TYPESET_PROMPT.slice(TYPESET_PROMPT.indexOf("output format for"), TYPESET_PROMPT.indexOf("figures: anything"));
+
+/**
+ * **에러난 변형은 조판으로 고친다**(2026-10-19, 사용자 — "처음부터 조판하지 말고 에러난 건 조판 돌리자").
+ * 그림 생성 모델은 점·선·띠를 정확한 좌표에 못 놓는다 — 그래서 sol 이 고친 문제를 **글(Mathpix 꼴) + 계산한 값 그대로 그린 SVG** 로
+ * 쓰고, 우리 조판기가 카드로 찍는다(카드 PNG 는 브라우저가 그린다 — `variantTypesetApply.ts`). 그림과 해설이 같은 숫자에서 나온다.
+ */
+export const TYPESET_FIX_PROMPT = (hasOrig: boolean) =>
+  `task: you are a Korean exam writer. ${hasOrig ? "image 1 = the ORIGINAL exam question (shows the intended layout and style), image 2 = our current VARIANT of it." : "the image = our current VARIANT question."} a checker found the problems listed after the images. REWRITE THE VARIANT AS A CORRECT, SOUND QUESTION: keep its unit, idea, difficulty and the solution logic, keep its numbering; fix every listed problem (you may change values, statements, <보기> items and choices). SOLVE your rewritten question yourself: exactly ONE choice ①–⑤ must be correct; recompute all five choices.
+
+we will typeset it ourselves, so write the whole question (stem, conditions, tables, <보기>, choices) as text in our format:
+${MMD_RULES}
+figures (graphs, globes with latitude lines, magnetic stripe bands, diagrams, maps): put "[[FIG fN]]" as its own paragraph where the figure sits, and DRAW each figure as standalone SVG code in "figures". the SVG must be computed from the exact values in your solution: every point, line, band edge and tick at coordinates derived from those values with a consistent scale, so a reader measuring the figure gets exactly the numbers your solution uses. rules: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 W H"> with W 320–720; only black/white/grays (#000 #fff #444 #888 #bbb #ddd); stroke-width 1–2; labels as <text> with font-size 13–16 and font-family "Nanum Myeongjo, serif", Korean as needed; include axes, ticks, tick labels, legends (e.g. black = 정자극기, white = 역자극기) and point labels like the original layout; markers like ●/○/▲ drawn as shapes; no <image>, no external links, no scripts, no foreignObject, no CSS classes. if the information is really a table of numbers, use a markdown table instead of a figure. do not repeat a figure's internal labels in the text.
+
+reply ONLY JSON: {"text":"전체 문제 글(위 꼴)","figures":[{"id":"f1","svg":"<svg ...>...</svg>"}],"new_answer":"①~⑤ 한 개 또는 숫자","solution":"새 해설(Mathpix 마크다운, 한국어 문장 + $수식$, 분수는 \\frac, 소수 지양, 6~14문단, 그림의 값 그대로, 끝줄 정답)"}`;
+
+/** 모델이 준 SVG 를 카드에 넣어도 되는 모양으로만 받는다(이 문자열은 카드에 그대로 이어붙는다). */
+export function cleanSvg(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  let v = raw.trim();
+  if (!/^<svg[\s>]/i.test(v) || !/<\/svg>\s*$/i.test(v) || v.length > 120_000) return null;
+  if (/<\s*(script|foreignObject|image|iframe|use)\b/i.test(v)) return null;
+  v = v.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*')/gi, "").replace(/(href|xlink:href)\s*=\s*("[^"]*"|'[^']*')/gi, "");
+  return v;
+}
+
+/** **조판 고치기 단계**(승인 뒤): sol 이 글 + SVG 로 다시 쓴다 → `rendering` 으로 두면 브라우저가 카드를 그려 저장하고 재검수를 건다. */
+export async function runTypesetFix(ctx: Ctx, problemId: string, t0: number) {
+  const { data: prob } = await ctx.admin.from("problems").select("id,image_path,answer,text_content,box_range").eq("id", problemId).eq("user_id", ctx.userId).maybeSingle();
+  if (!prob?.image_path) return { ok: false as const, error: "문제를 찾지 못했어요." };
+  const br = ((prob.box_range ?? {}) as Record<string, unknown>) || {};
+  const st = br.variantAuto as VariantAutoState | undefined;
+  const notes = st?.notes ?? [];
+  const base = await loadAsDataUrl(ctx.admin, prob.image_path as string);
+  if (!base) return { ok: false as const, error: "문제 그림을 읽지 못했어요." };
+  const vo = (br.variantOf ?? {}) as { path?: string };
+  const orig = typeof vo.path === "string" && vo.path ? await loadAsDataUrl(ctx.admin, vo.path) : null;
+  const curSol = typeof br.solution === "string" ? br.solution.slice(0, 2500) : "";
+  const curText = typeof prob.text_content === "string" && prob.text_content.trim() ? prob.text_content.slice(0, 4000) : "";
+  const ask = await askSol(
+    TYPESET_FIX_PROMPT(!!orig),
+    orig ? [orig, base] : [base],
+    { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: ctx.deadlineMs - (Date.now() - t0) - 15_000, tag: ctx.tag },
+    "변형 조판 고치기",
+    {
+      effort: "high",
+      cacheKey: "reprint-variant-typeset",
+      tail: `\n\nCHECKER PROBLEMS\n${notes.map((n, i) => `${i + 1}. ${n.problem}`).join("\n") || "(none listed — make it sound and consistent)"}${st?.lastFail ? `\nPREVIOUS FIX ATTEMPT FAILED: ${st.lastFail}` : ""}\n\nCURRENT REGISTERED ANSWER: ${String(prob.answer ?? "")}\nCURRENT SOLUTION\n${curSol}${curText ? `\n\nCURRENT TYPESET TEXT (edit this rather than starting over)\n${curText}` : ""}`,
+    },
+  );
+  await logSol(ctx, "sol 변형 조판 고치기", ask);
+  const at = new Date().toISOString();
+  const back = async (why: string) => {
+    await setAuto(ctx, problemId, (b) => ({ ...b, variantAuto: { ...(st ?? { round: 0 }), status: "needs_approval", lastFail: why.slice(0, 400), at } }));
+    return { ok: true as const, saved: false, lastFail: why, krw: ask.krw };
+  };
+  const obj = ask.text ? (parseJsonObject(ask.text) as { text?: unknown; figures?: unknown; new_answer?: unknown; solution?: unknown } | null) : null;
+  const text = obj && typeof obj.text === "string" ? obj.text.trim().slice(0, 8000) : "";
+  if (!obj || text.length < 20) return back(`조판 글을 못 받음: ${ask.fail || "응답을 읽지 못함"}`);
+  const figs: { id: string; svg: string }[] = [];
+  for (const f of Array.isArray(obj.figures) ? (obj.figures as { id?: unknown; svg?: unknown }[]).slice(0, 6) : []) {
+    const id = typeof f?.id === "string" && /^f\d{1,2}$/.test(f.id) ? f.id : "";
+    const svg = cleanSvg(f?.svg);
+    if (id && svg) figs.push({ id, svg });
+  }
+  const markers = [...text.matchAll(/\[\[FIG (f\d{1,2})\]\]/g)].map((m) => m[1]);
+  const missing = markers.filter((m) => !figs.some((f) => f.id === m));
+  if (missing.length) return back(`그림 ${missing.join(",")} 의 SVG 가 없거나 쓸 수 없음`);
+  const { answer, type } = answerOf(s(obj.new_answer, 100));
+  if (!answer) return back("새 정답을 못 받음");
+  const solution = typeof obj.solution === "string" && obj.solution.trim() ? obj.solution.trim().slice(0, 6000) : curSol;
+  await setAuto(
+    ctx,
+    problemId,
+    (b) => ({
+      ...b,
+      solution,
+      variantTypeset: { text, figures: figs, at },
+      variantAuto: { ...(st ?? {}), round: (st?.round ?? 0) + 1, status: "rendering", baseImagePath: st?.baseImagePath ?? (prob.image_path as string), notes: undefined, lastFail: undefined, at },
+    }),
+    { answer, answer_type: type },
+  );
+  return { ok: true as const, saved: true, lastFail: "", krw: ask.krw };
 }
