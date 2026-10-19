@@ -14,6 +14,8 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askSol } from "./problemLoopRun";
+import { GradeError, OPENAI_TEXT_MODEL, deleteVisionResponse, pollVisionBackground, startVisionBackground } from "./gradeExam";
+import { gradingEstKrw } from "./tokens";
 import { loadAsDataUrl, removeStored, runFigureGeneration, splitDataUrl, storeBytes } from "./figureRun";
 import { figureImageModelIds } from "./figureImageGen";
 import { compositePatch } from "./patchComposite";
@@ -34,7 +36,13 @@ export type VariantAutoState = {
   at: string;
   /** 처음 상태(되돌리기용) — 통과하면 지운다. */
   baseImagePath?: string;
+  /** 조판 고치기: 걸어 둔 sol 백그라운드 응답(작업 한도 300초를 넘겨도 다음 작업이 이어 묻는다). */
+  typesetResp?: { id: string; at: string };
 };
+
+/** 조판 sol 응답을 기다리는 최대 시간 — 넘으면 취소하고 승인 대기로 되돌린다. */
+const TYPESET_MAX_MS = 30 * 60_000;
+const TYPESET_EFFORT = process.env.VARIANT_TYPESET_EFFORT?.trim() || "high";
 
 type Ctx = {
   admin: SupabaseClient;
@@ -473,21 +481,63 @@ export async function runTypesetFix(ctx: Ctx, problemId: string, t0: number) {
   const orig = typeof vo.path === "string" && vo.path ? await loadAsDataUrl(ctx.admin, vo.path) : null;
   const curSol = typeof br.solution === "string" ? br.solution.slice(0, 2500) : "";
   const curText = typeof prob.text_content === "string" && prob.text_content.trim() ? prob.text_content.slice(0, 4000) : "";
-  const ask = await askSol(
-    TYPESET_FIX_PROMPT(!!orig),
-    orig ? [orig, base] : [base],
-    { byokApiKey: ctx.byokApiKey, modelIds: [], deadlineMs: ctx.deadlineMs - (Date.now() - t0) - 15_000, tag: ctx.tag },
-    "변형 조판 고치기",
-    {
-      effort: "high",
-      cacheKey: "reprint-variant-typeset",
-      tail: `\n\nCHECKER PROBLEMS\n${notes.map((n, i) => `${i + 1}. ${n.problem}`).join("\n") || "(none listed — make it sound and consistent)"}${st?.lastFail ? `\nPREVIOUS FIX ATTEMPT FAILED: ${st.lastFail}` : ""}\n\nCURRENT REGISTERED ANSWER: ${String(prob.answer ?? "")}\nCURRENT SOLUTION\n${curSol}${curText ? `\n\nCURRENT TYPESET TEXT (edit this rather than starting over)\n${curText}` : ""}`,
-    },
-  );
+  const at0 = new Date().toISOString();
+  const left = () => ctx.deadlineMs - (Date.now() - t0);
+  // sol(high)이 글 + SVG 를 7천 토큰 넘게 쓰면 작업 한도(300초)를 넘긴다 — 백그라운드로 걸어 두고, 이 작업에서 못 받으면
+  // 다음 작업이 같은 응답을 이어 묻는다(응답 id 를 variantAuto.typesetResp 에 둔다).
+  let resp = st?.typesetResp;
+  if (!resp) {
+    let id = "";
+    for (let attempt = 0; ; attempt++) {
+      try {
+        id = await startVisionBackground(TYPESET_FIX_PROMPT(!!orig), orig ? [orig, base] : [base], OPENAI_TEXT_MODEL, TYPESET_EFFORT, ctx.byokApiKey, {
+          cacheKey: "reprint-variant-typeset",
+          tail: `\n\nCHECKER PROBLEMS\n${notes.map((n, i) => `${i + 1}. ${n.problem}`).join("\n") || "(none listed — make it sound and consistent)"}${st?.lastFail ? `\nPREVIOUS FIX ATTEMPT FAILED: ${st.lastFail}` : ""}\n\nCURRENT REGISTERED ANSWER: ${String(prob.answer ?? "")}\nCURRENT SOLUTION\n${curSol}${curText ? `\n\nCURRENT TYPESET TEXT (edit this rather than starting over)\n${curText}` : ""}`,
+        });
+        break;
+      } catch (err) {
+        const limited = err instanceof GradeError && err.status === 429 && !/quota|billing|balance/i.test(err.message);
+        if (!limited || attempt >= 2) {
+          const why = err instanceof Error ? err.message : "sol 조판 시작 실패";
+          await setAuto(ctx, problemId, (b) => ({ ...b, variantAuto: { ...(st ?? { round: 0 }), status: "needs_approval", typesetResp: undefined, lastFail: `조판 시작 실패: ${why}`.slice(0, 400), at: at0 } }));
+          return { ok: true as const, saved: false, lastFail: why, krw: 0 };
+        }
+        await new Promise((r) => setTimeout(r, 6000 * (attempt + 1)));
+      }
+    }
+    resp = { id, at: at0 };
+    const r = resp;
+    await setAuto(ctx, problemId, (b) => ({ ...b, variantAuto: { ...((b.variantAuto as VariantAutoState | undefined) ?? st ?? { round: 0 }), status: "fixing", typesetResp: r, at: at0 } }));
+  }
+  const ask: { text: string | null; krw: number; fail: string; usage?: Parameters<typeof solTokens>[0] } = { text: null, krw: 0, fail: "" };
+  let finished = false;
+  while (left() > 25_000) {
+    const poll = await pollVisionBackground(resp.id, ctx.byokApiKey);
+    if (poll.status === "running") {
+      await new Promise((r) => setTimeout(r, 5000));
+      continue;
+    }
+    finished = true;
+    if (poll.status === "error") ask.fail = poll.message;
+    else {
+      ask.text = poll.text;
+      ask.usage = poll.usage;
+      ask.krw = poll.usage ? (gradingEstKrw(poll.usage, poll.model) ?? 0) : 0;
+    }
+    break;
+  }
+  if (!finished) {
+    if (Date.now() - Date.parse(resp.at) < TYPESET_MAX_MS) {
+      await enqueueAutoStep(ctx.admin, ctx.userId, problemId, "fix", "자동 수정 (조판 응답 기다리는 중)");
+      return { ok: true as const, saved: false, lastFail: "", krw: 0 };
+    }
+    await deleteVisionResponse(resp.id, ctx.byokApiKey, true);
+    ask.fail = "sol 조판이 30분 넘게 끝나지 않음";
+  } else await deleteVisionResponse(resp.id, ctx.byokApiKey, ask.fail !== "");
   await logSol(ctx, "sol 변형 조판 고치기", ask);
   const at = new Date().toISOString();
   const back = async (why: string) => {
-    await setAuto(ctx, problemId, (b) => ({ ...b, variantAuto: { ...(st ?? { round: 0 }), status: "needs_approval", lastFail: why.slice(0, 400), at } }));
+    await setAuto(ctx, problemId, (b) => ({ ...b, variantAuto: { ...(st ?? { round: 0 }), status: "needs_approval", typesetResp: undefined, lastFail: why.slice(0, 400), at } }));
     return { ok: true as const, saved: false, lastFail: why, krw: ask.krw };
   };
   const obj = ask.text ? (parseJsonObject(ask.text) as { text?: unknown; figures?: unknown; new_answer?: unknown; solution?: unknown } | null) : null;
@@ -512,7 +562,7 @@ export async function runTypesetFix(ctx: Ctx, problemId: string, t0: number) {
       ...b,
       solution,
       variantTypeset: { text, figures: figs, at },
-      variantAuto: { ...(st ?? {}), round: (st?.round ?? 0) + 1, status: "rendering", baseImagePath: st?.baseImagePath ?? (prob.image_path as string), notes: undefined, lastFail: undefined, at },
+      variantAuto: { ...(st ?? {}), round: (st?.round ?? 0) + 1, status: "rendering", baseImagePath: st?.baseImagePath ?? (prob.image_path as string), notes: undefined, lastFail: undefined, typesetResp: undefined, at },
     }),
     { answer, answer_type: type },
   );
