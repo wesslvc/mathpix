@@ -1494,7 +1494,7 @@ function AutoCard({ auto, busy, onAction }: { auto: AutoState | null; busy: bool
               </li>
             ))}
           </ol>
-          <p className="mt-1 font-medium text-violet-800">승인하면 batch 로 고쳐요: 1차는 지적한 곳만 그림 편집(안 바뀐 곳은 원본 픽셀 그대로), 2차부터는 sol 이 SVG 로 덮어 그리는 편이 나은 부분만 다시 그려 덮어요. 끝나면 저절로 재검수해요.</p>
+          <p className="mt-1 font-medium text-violet-800">승인하면 batch 로 고쳐요: 1차는 지적한 곳만 그림 편집(안 바뀐 곳은 원본 픽셀 그대로), 그 뒤 재검수에서 또 남으면 sol 이 SVG 로 덮어 그리는 편이 나은 부분만 다시 그려 덮는 것(최대 3번)은 승인 없이 서버가 알아서 이어서 해요. 끝나면 저절로 재검수해요.</p>
           <div className="mt-1 flex flex-wrap gap-2">
             <button className="rounded bg-amber-600 px-2 py-0.5 text-white disabled:opacity-50" disabled={busy} onClick={() => onAction("approve")}>
               승인 — 이대로 고치기

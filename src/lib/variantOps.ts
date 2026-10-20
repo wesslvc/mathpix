@@ -37,6 +37,11 @@ const COLS = "id,user_id,problem_id,step,batch_id,state,cost_krw";
 
 const RECHECK_EFFORT = () => process.env.VARIANT_RECHECK_EFFORT?.trim() || "medium";
 const OVERLAY_EFFORT = () => process.env.VARIANT_OVERLAY_EFFORT?.trim() || "high";
+/** 승인 없이 서버가 이어서 돌리는 SVG 덮개 수정의 최대 횟수(넘으면 승인 대기로 멈춘다). */
+const AUTO_OVERLAY_MAX = () => {
+  const n = Number(process.env.VARIANT_AUTO_OVERLAY_MAX);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 3;
+};
 const FIX_QUALITY = () => {
   const q = process.env.VARIANT_FIX_QUALITY?.trim() || "medium";
   return ["low", "medium", "high"].includes(q) ? q : "medium";
@@ -197,7 +202,7 @@ async function adoptImage(admin: SupabaseClient, op: Op, prob: Prob, bytes: Buff
         ...prob.box_range,
         ...(patchBr ?? {}),
         figures: toStoredFigures([{ id: crypto.randomUUID(), markup: `<img src="${cardUrl(path)}" alt="" />`, layout: { scale: 100, offsetX: 0, offsetY: 0 }, position: 0 }]),
-        variantAuto: { status: "checking", round: (prev?.round ?? 0) + 1, baseImagePath: base, at },
+        variantAuto: { status: "checking", round: (prev?.round ?? 0) + 1, baseImagePath: base, ...(prev?.autoOverlay ? { autoOverlay: prev.autoOverlay } : {}), at },
       },
     })
     .eq("id", prob.id)
@@ -228,9 +233,23 @@ async function handleCheck(admin: SupabaseClient, op: Op, body: Record<string, u
     }));
     if (old.length) await removeStored(admin, old);
   } else {
+    const base = prev?.baseImagePath ?? (prob.image_path as string);
+    const autoN = prev?.autoOverlay ?? 0;
+    // 2차(1차 그림 수정 뒤)부터의 SVG 덮개는 승인 없이 서버가 이어서 돌린다 — 정해진 횟수까지만, 그 뒤엔 승인을 받는다.
+    if (round >= 1 && autoN < AUTO_OVERLAY_MAX()) {
+      await setAuto(admin, op.user_id, op.problem_id, (br) => ({
+        ...br,
+        variantAuto: { status: "fixing", round, notes, solved, at, baseImagePath: base, autoOverlay: autoN + 1, message: `SVG 덮개 자동 수정 ${autoN + 1}차`, ...(prev?.lastFail ? { lastFail: prev.lastFail } : {}) },
+      }));
+      await admin
+        .from("variant_ops")
+        .update({ step: "overlay", batch_id: null, state: { notes, ...(prev?.lastFail ? { lastFail: prev.lastFail } : {}) }, cost_krw: op.cost_krw + krw, error: null, updated_at: at })
+        .eq("id", op.id);
+      return;
+    }
     await setAuto(admin, op.user_id, op.problem_id, (br) => ({
       ...br,
-      variantAuto: { status: "needs_approval", round, notes, solved, at, ...(prev?.lastFail ? { lastFail: prev.lastFail } : {}), baseImagePath: prev?.baseImagePath ?? (prob.image_path as string) },
+      variantAuto: { status: "needs_approval", round, notes, solved, at, ...(prev?.lastFail ? { lastFail: prev.lastFail } : {}), baseImagePath: base, ...(autoN ? { autoOverlay: autoN } : {}) },
     }));
   }
   await admin.from("variant_ops").update({ step: "done", batch_id: null, cost_krw: op.cost_krw + krw, error: null, updated_at: at }).eq("id", op.id);

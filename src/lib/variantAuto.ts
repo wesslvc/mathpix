@@ -36,6 +36,8 @@ export type VariantAutoState = {
   at: string;
   /** 처음 상태(되돌리기용) — 통과하면 지운다. */
   baseImagePath?: string;
+  /** 승인 없이 서버가 이어서 한 SVG 덮개 수정 횟수(승인하면 0으로 돌아간다). */
+  autoOverlay?: number;
   /** 조판 고치기: 걸어 둔 sol 백그라운드 응답(작업 한도 300초를 넘겨도 다음 작업이 이어 묻는다). */
   typesetResp?: { id: string; at: string };
 };
