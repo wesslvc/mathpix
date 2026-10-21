@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
       // 1차 수정(round 0)은 그림 편집, 2차부터는 sol 이 SVG 로 덮어 그린다.
       const step = (st.round ?? 0) === 0 ? "draw" : "overlay";
       if (!(await enqueueOp(admin, user.id, row.id, step, { notes: st.notes, ...(st.lastFail ? { lastFail: st.lastFail } : {}) }))) continue;
-      await admin.from("problems").update({ box_range: { ...br, variantAuto: { ...st, status: "fixing", autoOverlay: 0, at: now } } }).eq("id", row.id).eq("user_id", user.id);
+      await admin.from("problems").update({ box_range: { ...br, variantAuto: { ...st, status: "fixing", at: now } } }).eq("id", row.id).eq("user_id", user.id);
       done++;
     } else {
       if (st?.status === "checking" || st?.status === "fixing") continue;

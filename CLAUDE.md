@@ -6551,9 +6551,9 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 - 비용: 재검수·설계·1차 그림 수정은 실시간 단가의 절반(batch). 장부 이름 `sol 변형 재검수 (batch)` · `그림 변형 1차 수정 (batch)` · `sol 변형 SVG 덮개 설계 (batch)`.
 - 검증: `tsc`·`build`, overlay 렌더 시험. **batch 로 걸고 받아 오는 전 과정(check → draw → check, overlay)을 실제 문제로 돌려 본 것은 아직 없다** — 배포 뒤 승인 대기 문제로 확인할 것. 확인 못 한 것: 이미지 편집 batch 가 부분 수정 프롬프트에서 지적한 곳만 얼마나 고치는지, sol 이 네모 좌표를 얼마나 정확히 짚는지, Vercel 에서 폰트 파일이 실제로 번들되는지(`outputFileTracingIncludes` 가 안 먹으면 덮개가 "그리지 못했어요"로 실패한다).
 
-#### SVG 덮개는 서버가 승인 없이 이어서 돌린다 (2026-10-20)
+#### 승인 구조는 그대로, 일시 오류(과부하)만 서버가 알아서 다시 건다 (2026-10-21)
 
-사용자 — "svg덮는거 서버에서 알아서 다 처리하게 해". 해석: **1차 그림 수정(draw, round 0)만 승인**을 받고, 그 뒤 재검수에서 지적이 남으면 **2차부터의 SVG 덮개(overlay)는 사람 클릭 없이** 서버가 이어서 돈다.
-- `handleCheck`(variantOps.ts): `round >= 1` 이고 `variantAuto.autoOverlay < VARIANT_AUTO_OVERLAY_MAX`(기본 3)이면 `needs_approval` 로 멈추지 않고 같은 `variant_ops` 줄을 곧바로 `overlay` 로 넘긴다(상태 `fixing`, 메시지 "SVG 덮개 자동 수정 N차", `autoOverlay` +1). 횟수를 넘기면 예전처럼 승인 대기.
-- 덮개 단계가 실패하면(`failOp`) 지적을 살려 `needs_approval` 로 돌아온다 — 사람이 승인하면 `autoOverlay` 가 0 으로 초기화돼 다시 자동 라운드를 쓴다. 통과하면 확정. 자동 라운드 횟수는 `adoptImage` 가 `checking` 상태로 넘길 때 이어 실어 나른다.
-- 검증: `tsc` 만. **실제 batch 로 check → overlay → check 가 자동으로 이어지는지는 배포 뒤 승인 대기 문제로 봐야 한다.** 자동으로 도는 만큼 sol(high) 원가가 승인 없이 나가므로 상한(3)을 장부로 보며 조정할 것.
+사용자 — overlay 단계가 `HTTP 503 Our servers are currently overloaded` 로 실패해 승인 대기로 돌아오자 "svg조판도 서버에서 알아서 하란 거, 예전처럼 승인구조는 유지". 어제(10-20) **내가 "승인 없이 덮개를 자동 반복"으로 잘못 읽어** 넣었던 `autoOverlay`(자동 덮개 3차) 는 **철회**했다 — 승인(1차 draw → 승인 → 2차 overlay …)은 예전 그대로다.
+- 고친 것: `handleOpBatch`(variantOps.ts)가 batch 결과 줄의 오류가 **일시 오류**(429·5xx·overloaded·rate limit·timeout·capacity·unavailable, batch 가 expired)이면 `failOp` 로 닫지 않고 **같은 단계를 그대로 다시 건다**(`batch_id` 비움 + `state.tries`+1, 최대 6번 — `VARIANT_OP_RETRIES`). pg_cron 이 `updated_at` 30초 뒤부터 깨우므로 자연히 간격이 벌어진다. 모두 실패하면 예전처럼 지적을 살려 승인 대기(이유에 "N번 다시 시도함"). draw·check·overlay 셋 다 해당.
+- 안 한 것: 최초 생성(`variantBatch.ts` 의 plan·image·review 줄)의 일시 오류 재시도는 안 건드렸다 — 같은 증상이 나오면 같은 식으로 넣을 것.
+- 검증: `tsc` 만. 실제 503 으로 재시도가 이어지는지는 못 봤다.
