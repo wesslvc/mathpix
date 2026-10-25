@@ -126,6 +126,8 @@ export default function GradeExamFlow() {
   // 대신 시험지 여백 등에 문항 번호별로 손으로 적어 둔 가채점표로 채점한다 —
   // 마킹 격자를 찾는 OMR 인식과는 다른 프롬프트가 필요하다.
   const [formalExam, setFormalExam] = useState(false);
+  // 마킹(학생 답)은 사진으로 읽지 않고 검토 표에서 손으로 적는다 — 정답표만 인식한다.
+  const [manualMarks, setManualMarks] = useState(false);
 
   // 사진은 **고르는 그 자리에서** 바이트까지 읽어 둔다(PickedImage) —
   // 안드로이드에서 갤러리로 고른 파일은 접근 권한이 시간이 지나면 풀려서,
@@ -194,13 +196,14 @@ export default function GradeExamFlow() {
             ? Boolean(key1Label)
             : Boolean(key1Label && key2Label);
 
+  const hasOmr = manualMarks || Boolean(omrFile);
   const canGrade =
     electivePicked &&
     (subject === "elective"
       ? tamguSingle
-        ? Boolean(omrFile && (key1File || key1Loaded))
-        : Boolean(omrFile && (key1File || key1Loaded) && (key2File || key2Loaded))
-      : Boolean(omrFile && (keyFile || keyLoaded)));
+        ? Boolean(hasOmr && (key1File || key1Loaded))
+        : Boolean(hasOmr && (key1File || key1Loaded) && (key2File || key2Loaded))
+      : Boolean(hasOmr && (keyFile || keyLoaded)));
 
   function reset() {
     setStep("setup");
@@ -211,6 +214,7 @@ export default function GradeExamFlow() {
     setKoreanElective("");
     setTamguSingle(false);
     setFormalExam(false);
+    setManualMarks(false);
     setOmrFile(null);
     setKeyFile(null);
     setKey1File(null);
@@ -269,6 +273,50 @@ export default function GradeExamFlow() {
                 { slot: 2, label: key2Label || undefined, file: key2File, loaded: key2Loaded },
               ]
           : [{ file: keyFile, loaded: keyLoaded }];
+      if (manualMarks) {
+        // 마킹 수동 입력: OMR 은 안 읽는다. 정답표만 인식(불러온 표는 그대로)해서 학생 답이 빈 표를 만든다.
+        const keyPicks = picks.filter((k) => !k.loaded);
+        const budgetM = gradingImageBudget(Math.max(1, keyPicks.length));
+        let charged = 0;
+        const built: SlotDraft[] = [];
+        for (const k of picks) {
+          let keyItems: SavedKeySource["items"];
+          if (k.loaded) {
+            keyItems = k.loaded.items;
+          } else {
+            setBusyMessage(`${k.label ? `${k.label} ` : ""}정답표를 인식하는 중...`);
+            const img = await prepareGradingImage(k.file as PickedImage, budgetM);
+            const { result, chargedTokens: ct } = await runAiTask<{ items?: SavedKeySource["items"] }>("answerKey", {
+              label: "정답표 인식",
+              images: [img],
+              params: {},
+            });
+            keyItems = result.items ?? [];
+            charged += typeof ct === "number" ? ct : 0;
+          }
+          if (!keyItems || keyItems.length === 0) throw new Error("정답표에서 문항을 읽지 못했어요.");
+          built.push({
+            slot: k.slot,
+            label: k.label ?? electiveLabelFor(k.slot),
+            items: [...keyItems]
+              .sort((a, b) => a.no - b.no)
+              .map((it) => ({
+                no: it.no,
+                studentAnswer: null,
+                correctAnswer: it.answer,
+                ...(it.points != null ? { points: it.points } : {}),
+              })),
+            deductions: {},
+            examName: subject === "elective"
+              ? tamguSingle ? examName1 : k.slot === 1 ? examName1 : k.slot === 2 ? examName2 : undefined
+              : undefined,
+          });
+        }
+        setSlots(built);
+        setTokenNote(charged ? `${charged}토큰 사용` : null);
+        setStep("review");
+        return;
+      }
       const imageCount = 1 + picks.filter((k) => !k.loaded).length;
       const budget = gradingImageBudget(imageCount);
 
@@ -639,6 +687,21 @@ export default function GradeExamFlow() {
             </span>
           </label>
 
+          <label className="flex items-start gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={manualMarks}
+              onChange={(e) => setManualMarks(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              마킹은 직접 입력 (정답표만 인식)
+              <span className="block text-xs text-slate-400">
+                OMR·가채점표 사진을 올리지 않고, 정답표를 인식한 뒤 검토 화면에서 내 답을 적어요.
+              </span>
+            </span>
+          </label>
+
           <Button
             type="button"
             onClick={() => setStep("uploading")}
@@ -659,7 +722,13 @@ export default function GradeExamFlow() {
             {examName && ` · ${examName}`} · {takenAt}
           </p>
 
-          <FileField label={formalExam ? "가채점표" : "OMR 카드"} file={omrFile} onChange={setOmrFile} />
+          {manualMarks ? (
+            <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+              마킹은 사진으로 읽지 않아요. 정답표만 인식한 뒤, 다음 화면에서 문항별 내 답을 직접 입력해요.
+            </p>
+          ) : (
+            <FileField label={formalExam ? "가채점표" : "OMR 카드"} file={omrFile} onChange={setOmrFile} />
+          )}
 
           {subject === "elective" ? (
             tamguSingle ? (
