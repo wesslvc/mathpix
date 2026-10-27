@@ -6,6 +6,7 @@ import type { ExamScore } from "@/lib/supabase/types";
 import GradeDetailActions from "@/components/GradeDetailActions";
 import ExamNameEditor from "@/components/ExamNameEditor";
 import ExamDateEditor from "@/components/ExamDateEditor";
+import GradeItemsEditor from "@/components/GradeItemsEditor";
 import DeleteGradeButton from "@/components/DeleteGradeButton";
 import { normalizeElectiveLabel, SUBJECT_LABEL } from "@/lib/examSubjects";
 import { Card, cardClass } from "@/components/ui/card";
@@ -118,38 +119,7 @@ export default async function GradeDetailPage({
               : "예전 기록이라 문항별 상세가 없어요. 틀린 번호만 남아 있습니다."}
           </p>
         ) : (
-          <Card className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
-                  <th className="px-3 py-2">번호</th>
-                  <th className="px-3 py-2">학생답</th>
-                  <th className="px-3 py-2">정답</th>
-                  <th className="px-3 py-2">배점</th>
-                  <th className="px-3 py-2">정오</th>
-                </tr>
-              </thead>
-              <tbody>
-                {row.items.map((item) => {
-                  const isWrong = row.wrong_numbers.includes(item.no);
-                  return (
-                    <tr
-                      key={item.no}
-                      className={`border-b border-slate-100 last:border-0 ${isWrong ? "bg-red-50" : ""}`}
- >
-                      <td className="px-3 py-1.5">{item.no}</td>
-                      <td className="px-3 py-1.5">{item.studentAnswer ?? "—"}</td>
-                      <td className="px-3 py-1.5">{item.correctAnswer}</td>
-                      <td className="px-3 py-1.5">{item.points ?? "—"}</td>
-                      <td className={`px-3 py-1.5 ${isWrong ? "text-red-500" : "text-emerald-600"}`}>
-                        {isWrong ? "X" : "O"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Card>
+          <GradeItemsEditor examScoreId={row.id} items={row.items} score={row.score} />
         )}
       </section>
 
