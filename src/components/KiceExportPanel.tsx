@@ -316,7 +316,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
         | undefined;
       if (hasSolutions && (showSolutions || solutionsOnly)) {
         setProgress("수식 글꼴 준비 중...");
-        await warmSolutionFonts();
+        await warmSolutionFonts(items.map((it) => it.solution ?? ""));
         const idxs = (renum ? renum.order : items.map((_, i) => i)).filter((i) => (items[i].solution ?? "").trim() !== "");
         const metas = idxs.map((i, k) => {
           const label = renum ? `${renum.newNo.get(i)}번` : items[i].answerLabel;

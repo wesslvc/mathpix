@@ -1,4 +1,4 @@
-import { getFontEmbedCSS, toPng } from "html-to-image";
+import { toPng } from "html-to-image";
 import { CARD_CAPTURE_OPTIONS, waitForImages } from "./layout";
 import { renderMathTextWithInfo } from "./renderMathText";
 
@@ -16,25 +16,92 @@ const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt
 // 안 나온다. 첫 카드에서 한 번 만들어 다음 해설에 그대로 쓴다.
 let fontCssPromise: Promise<string> | null = null;
 
-/**
- * 수식 글꼴 CSS 를 **미리 한 번** 만들어 둔다(해설을 한 편씩 그리기 전에). 첫 해설이 글꼴 내려받기를 기다리다 시간 제한에
- * 걸려 연달아 실패하고 나머지가 `$…$` 글자 그대로 찍히던 문제를 막는다. 못 만들면(빈 값) 캐시하지 않아 다음에 다시 시도한다.
- */
-export async function warmSolutionFonts(): Promise<void> {
-  if (fontCssPromise) return;
-  const host = document.createElement("div");
-  host.style.cssText = "position:fixed;left:-100000px;top:0;z-index:-1;pointer-events:none";
-  const card = document.createElement("div");
-  card.className = "problem-surface bg-white font-serif text-ink";
-  card.innerHTML = renderMathTextWithInfo("$\\frac{a}{b}+\\sqrt{2}$ 가나다").html;
-  host.appendChild(card);
-  document.body.appendChild(host);
-  try {
-    const css = await Promise.race([getFontEmbedCSS(card), new Promise<string>((r) => setTimeout(() => r(""), 30_000))]).catch(() => "");
-    if (css) fontCssPromise = Promise.resolve(css);
-  } finally {
-    host.remove();
+/** `U+AC00-D7A3, U+0020` 같은 unicode-range 가 이 글자 집합과 겹치는지. 범위가 없으면 늘 겹친다. */
+function rangeHits(range: string, cps: Set<number>): boolean {
+  if (!range) return true;
+  for (const part of range.split(",")) {
+    const m = /U\+([0-9A-Fa-f?]+)(?:-([0-9A-Fa-f]+))?/.exec(part.trim());
+    if (!m) continue;
+    let lo: number;
+    let hi: number;
+    if (m[1].includes("?")) {
+      lo = parseInt(m[1].replace(/\?/g, "0"), 16);
+      hi = parseInt(m[1].replace(/\?/g, "F"), 16);
+    } else {
+      lo = parseInt(m[1], 16);
+      hi = m[2] ? parseInt(m[2], 16) : lo;
+    }
+    for (const c of cps) if (c >= lo && c <= hi) return true;
   }
+  return false;
+}
+
+const blobToDataUrl = (b: Blob) =>
+  new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(b);
+  });
+
+/**
+ * 해설 그림에 **실제로 쓰이는 글꼴만** 임베드 CSS 로 만든다(KaTeX + 나눔명조 중 이 글자들을 덮는 조각). html-to-image 의
+ * `getFontEmbedCSS` 는 페이지의 모든 글꼴(Pretendard·나눔명조 수십 조각 …)을 전부 내려받아 아이패드에서 끝나지 않았다.
+ */
+async function buildFontCss(texts: string[]): Promise<string> {
+  const cps = new Set<number>();
+  for (const t of texts) for (const ch of t) cps.add(ch.codePointAt(0)!);
+  for (const ch of "0123456789 가나다.,()+-=") cps.add(ch.codePointAt(0)!);
+  const wanted: { family: string; weight: string; style: string; url: string; fmt: string }[] = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue;
+    }
+    for (const rule of Array.from(rules)) {
+      if (rule.type !== CSSRule.FONT_FACE_RULE) continue;
+      const st = (rule as CSSFontFaceRule).style;
+      const family = st.getPropertyValue("font-family").replace(/["']/g, "").trim();
+      if (!(family.startsWith("KaTeX") || family === "Nanum Myeongjo")) continue;
+      if (family === "Nanum Myeongjo" && !rangeHits(st.getPropertyValue("unicode-range"), cps)) continue;
+      const src = st.getPropertyValue("src");
+      const urls = [...src.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)\s*(?:format\(\s*["']?([^"')]+)["']?\s*\))?/g)];
+      const pick = urls.find((u) => /woff2/.test(u[1] ?? u[0])) ?? urls[0];
+      if (!pick) continue;
+      wanted.push({
+        family,
+        weight: st.getPropertyValue("font-weight") || "normal",
+        style: st.getPropertyValue("font-style") || "normal",
+        url: new URL(pick[1], sheet.href ?? document.baseURI).href,
+        fmt: pick[2] ?? "woff2",
+      });
+    }
+  }
+  const faces = await Promise.all(
+    wanted.map(async (w) => {
+      try {
+        const res = await Promise.race([
+          fetch(w.url),
+          new Promise<Response>((_, rej) => setTimeout(() => rej(new Error("timeout")), 15_000)),
+        ]);
+        if (!res.ok) return "";
+        const data = await blobToDataUrl(await res.blob());
+        return `@font-face{font-family:"${w.family}";font-weight:${w.weight};font-style:${w.style};src:url(${data}) format("${w.fmt}")}`;
+      } catch {
+        return "";
+      }
+    }),
+  );
+  return faces.filter(Boolean).join("\n");
+}
+
+/** 해설 글꼴을 **미리 한 번** 만들어 둔다. 못 만들면(빈 값) 글꼴 없이 찍는다(페이지 글꼴이 그대로 쓰이는 기기도 있다). */
+export async function warmSolutionFonts(texts: string[] = []): Promise<void> {
+  if (fontCssPromise) return;
+  const css = await Promise.race([buildFontCss(texts), new Promise<string>((r) => setTimeout(() => r(""), 30_000))]).catch(() => "");
+  if (css) fontCssPromise = Promise.resolve(css);
 }
 
 type SolOpts = { heading: string; text: string; title?: string; no?: string; source?: string; answer?: string };
@@ -179,10 +246,7 @@ export async function renderSolutionPng(opts: { heading: string; text: string; t
     await waitForImages(card);
     // Safari(WebKit)는 첫 캡처가 비거나 던지는 일이 있어(글꼴·SVG foreignObject) 한 번 더 찍고, 실패하면 몇 번 다시 시도한다.
     const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Android/.test(navigator.userAgent);
-    const fontEmbedCSS = fontCssPromise
-      ? await fontCssPromise
-      : await Promise.race([getFontEmbedCSS(card), new Promise<string>((r) => setTimeout(() => r(""), 40_000))]).catch(() => "");
-    if (fontEmbedCSS && !fontCssPromise) fontCssPromise = Promise.resolve(fontEmbedCSS);
+    const fontEmbedCSS = fontCssPromise ? await fontCssPromise : "";
     let opts2 = fontEmbedCSS ? { ...CARD_CAPTURE_OPTIONS, fontEmbedCSS } : CARD_CAPTURE_OPTIONS;
     let url = "";
     let lastErr: unknown;
