@@ -30,11 +30,114 @@ export async function warmSolutionFonts(): Promise<void> {
   host.appendChild(card);
   document.body.appendChild(host);
   try {
-    const css = await Promise.race([getFontEmbedCSS(card), new Promise<string>((r) => setTimeout(() => r(""), 90_000))]).catch(() => "");
+    const css = await Promise.race([getFontEmbedCSS(card), new Promise<string>((r) => setTimeout(() => r(""), 30_000))]).catch(() => "");
     if (css) fontCssPromise = Promise.resolve(css);
   } finally {
     host.remove();
   }
+}
+
+type SolOpts = { heading: string; text: string; title?: string; no?: string; source?: string; answer?: string };
+
+function buildSolutionCard(opts: SolOpts): HTMLDivElement {
+  const card = document.createElement("div");
+  card.className = "problem-surface bg-white font-serif text-ink";
+  card.style.width = `${SOLUTION_CSS_WIDTH}px`;
+  card.style.padding = "2px 0 6px";
+  card.style.fontSize = `${SOLUTION_FONT_PX}px`;
+  card.style.lineHeight = "1.6";
+  const head =
+    opts.no
+      ? `<div style="display:flex;align-items:center;gap:8px;margin:${opts.title ? "0" : "4px"} 0 6px;padding-top:6px;border-top:1.5px solid #222">` +
+        `<span style="font-size:2.1em;font-weight:800;line-height:1;letter-spacing:-0.02em">${esc(opts.no)}</span>` +
+        `<span style="display:flex;flex-direction:column;gap:1px;min-width:0;flex:1">` +
+        (opts.source ? `<span style="font-size:0.72em;color:#777;line-height:1.2;word-break:keep-all">${esc(opts.source)}</span>` : "") +
+        `<span style="font-size:0.85em;font-weight:700;line-height:1.2">${opts.answer?.trim() ? `정답 ${esc(opts.answer.trim())}` : "&nbsp;"}</span>` +
+        `</span></div>`
+      : `<p style="font-weight:700;margin:0 0 3px">${esc(opts.heading)}</p>`;
+  card.innerHTML =
+    (opts.title ? `<p style="text-align:center;font-weight:700;font-size:1.25em;margin:0 0 10px">${esc(opts.title)}</p>` : "") +
+    head +
+    renderMathTextWithInfo(opts.text).html;
+  return card;
+}
+
+const dataUrlToBytes = (url: string) => {
+  const bin = atob(url.slice(url.indexOf(",") + 1));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+};
+
+/**
+ * 해설 여러 편을 **묶어서 한 번에** 찍고 편별로 잘라 낸다(`renderSolutionPng` 를 편마다 부르면 편마다 DOM 복제·글꼴·SVG 변환이
+ * 되풀이돼 몇십 편이면 몇 분이 걸린다). 묶음이 실패하면 그 묶음만 한 편씩 다시 찍는다. 편의 결과가 null 이면 못 만든 것이다.
+ */
+export async function renderSolutionPngs(
+  list: SolOpts[],
+  onProgress?: (done: number) => void,
+  chunk = 8,
+): Promise<(Uint8Array | null)[]> {
+  const out: (Uint8Array | null)[] = new Array(list.length).fill(null);
+  for (let a = 0; a < list.length; a += chunk) {
+    const part = list.slice(a, a + chunk);
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;left:-100000px;top:0;z-index:-1;pointer-events:none;background:#fff";
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `width:${SOLUTION_CSS_WIDTH}px;background:#fff`;
+    const cards = part.map((o) => buildSolutionCard(o));
+    cards.forEach((c) => wrap.appendChild(c));
+    host.appendChild(wrap);
+    document.body.appendChild(host);
+    try {
+      if (document.fonts?.ready) await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 2000))]);
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      await waitForImages(wrap);
+      const fontEmbedCSS = fontCssPromise ? await fontCssPromise : "";
+      const cap = fontEmbedCSS ? { ...CARD_CAPTURE_OPTIONS, fontEmbedCSS } : CARD_CAPTURE_OPTIONS;
+      const ratio = CARD_CAPTURE_OPTIONS.pixelRatio;
+      const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Android/.test(navigator.userAgent);
+      if (webkit) await toPng(wrap, cap).catch(() => "");
+      const url = await Promise.race([
+        toPng(wrap, cap),
+        new Promise<string>((_, rej) => setTimeout(() => rej(new Error("묶음 캡처 시간 초과")), 60_000)),
+      ]);
+      const img = new Image();
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res();
+        img.onerror = () => rej(new Error("묶음 그림을 읽지 못함"));
+        img.src = url;
+      });
+      const wrapTop = wrap.getBoundingClientRect().top;
+      for (let i = 0; i < cards.length; i++) {
+        const r = cards[i].getBoundingClientRect();
+        const y = Math.round((r.top - wrapTop) * ratio);
+        const h = Math.max(1, Math.round(r.height * ratio));
+        const cv = document.createElement("canvas");
+        cv.width = img.width;
+        cv.height = h;
+        const ctx = cv.getContext("2d");
+        if (!ctx) throw new Error("캔버스를 만들지 못함");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, cv.width, h);
+        ctx.drawImage(img, 0, y, img.width, h, 0, 0, img.width, h);
+        out[a + i] = dataUrlToBytes(cv.toDataURL("image/png"));
+      }
+    } catch {
+      // 이 묶음은 한 편씩 다시 찍는다.
+      for (let i = 0; i < part.length; i++) {
+        try {
+          out[a + i] = await renderSolutionPng(part[i]);
+        } catch {
+          out[a + i] = null;
+        }
+      }
+    } finally {
+      host.remove();
+    }
+    onProgress?.(Math.min(list.length, a + part.length));
+  }
+  return out;
 }
 
 export async function renderSolutionPng(opts: { heading: string; text: string; title?: string; no?: string; source?: string; answer?: string }): Promise<Uint8Array> {
