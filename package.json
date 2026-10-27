@@ -20,6 +20,7 @@
     "html-to-image": "^1.11.11",
     "jszip": "^3.10.1",
     "katex": "^0.16.11",
+    "mathjax-full": "^3.2.1",
     "next": "^14.2.5",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",

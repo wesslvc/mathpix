@@ -1182,8 +1182,9 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   };
   const solFontForText = (name: string, text: string) => fontForText(hasSolFont && name === BODY_FONT ? "해설" : name, text);
   const firstSolNo = firstAnswerNo + answerPages.length;
+  const useVec = !spec.answerPage && !!spec.solutions && spec.solutions.length > 0;
   const solutionPages: ReturnType<typeof flowBlocks>["results"][] = [];
-  if (!spec.answerPage && spec.solutions && spec.solutions.length > 0) {
+  if (!useVec && !spec.answerPage && spec.solutions && spec.solutions.length > 0) {
     const multi = new Set(spec.solutions.map((s) => (s.source ?? "").trim()).filter(Boolean)).size >= 2;
     let rest: RichBlock[] = [{ kind: "para", center: true, runs: [{ t: "해  설", b: true }] }];
     for (const s of spec.solutions) {
@@ -1203,7 +1204,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   // 해설이 수식 렌더러로 그린 그림이면 단에 위에서부터 쌓는다(한 단에 안 들어가면 다음 단·쪽). 그림은 미리 넣어 크기를 안다.
   type SolImg = { img: PDFImage; x: number; y: number; w: number; h: number };
   const solImagePages: SolImg[][] = [];
-  if (!spec.answerPage && spec.solutions && spec.solutions.length > 0 && spec.solutions.every((x) => x.png)) {
+  if (!useVec && !spec.answerPage && spec.solutions && spec.solutions.length > 0 && spec.solutions.every((x) => x.png)) {
     let k = 0;
     let colIdx = 0;
     let y = -1;
@@ -1236,8 +1237,73 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       y += h + 8;
     }
   }
+  // 해설을 **벡터로** 조판한다(수식은 MathJax 윤곽, 글은 해설 글꼴). 사진 찍기가 없어 수백 편도 몇 초다.
+  type VecPlaced =
+    | { t: "text"; x: number; y: number; text: string; size: number; bold?: boolean; gray?: number }
+    | { t: "math"; x: number; y: number; size: number; d: string }
+    | { t: "rule"; x: number; y: number; w: number };
+  const vecPages: VecPlaced[][] = [];
+  if (useVec) {
+    const { layoutSolutionText } = await import("./solutionLayout");
+    const S = solStyle.size;
+    const colW = LAYOUT.columnWidth;
+    let k = 0;
+    let colIdx = 0;
+    let cols = columnsOf(firstSolNo, [0, 1]);
+    let cur: VecPlaced[] = [];
+    vecPages.push(cur);
+    let y = cols[0].top;
+    const advance = () => {
+      colIdx++;
+      if (colIdx > 1) {
+        k++;
+        colIdx = 0;
+        cols = columnsOf(firstSolNo + k, [0, 1]);
+        cur = [];
+        vecPages.push(cur);
+      }
+      y = cols[colIdx].top;
+    };
+    // 첫 제목
+    const titleH = S * 2;
+    cur.push({ t: "text", x: cols[0].x + colW / 2 - measureSol("해 설", S * 1.3, true) / 2, y: y + S * 1.4, text: "해 설", size: S * 1.3, bold: true });
+    y += titleH + 4;
+    const multi = new Set(spec.solutions!.map((x) => (x.source ?? "").trim()).filter(Boolean)).size >= 2;
+    for (const sol of spec.solutions!) {
+      const no = (/\d+/.exec(sol.label) ?? [])[0];
+      const lines = layoutSolutionText(sol.text, colW, S, measureSol);
+      const headH = no ? S * 2.3 + 8 : S * 1.6 + 4;
+      const firstH = lines[0]?.h ?? 0;
+      if (y + headH + firstH > cols[colIdx].bottom && y > cols[colIdx].top) advance();
+      const x0 = cols[colIdx].x;
+      cur.push({ t: "rule", x: x0, y: y + 1, w: colW });
+      if (no) {
+        const big = S * 2.1;
+        cur.push({ t: "text", x: x0, y: y + 4 + big * 0.85, text: no, size: big, bold: true });
+        const nx = x0 + measureSol(no, big, true) + 8;
+        const src = multi ? (sol.source ?? "").trim() : (sol.source ?? "").trim();
+        if (src) cur.push({ t: "text", x: nx, y: y + 4 + S * 0.8, text: src, size: S * 0.72, gray: 0.45 });
+        cur.push({ t: "text", x: nx, y: y + 4 + big * 0.85, text: sol.answer?.trim() ? `정답 ${sol.answer.trim()}` : "", size: S * 0.95, bold: true });
+      } else {
+        cur.push({ t: "text", x: x0, y: y + 4 + S, text: `${sol.label}${sol.answer?.trim() ? `  ·  정답 ${sol.answer.trim()}` : ""}`, size: S, bold: true });
+      }
+      y += headH;
+      for (const line of lines) {
+        if (y + line.h > cols[colIdx].bottom) {
+          advance();
+        }
+        const lx = cols[colIdx].x;
+        for (const it of line.items) {
+          if (it.t === "text") cur.push({ t: "text", x: lx + it.x, y: y + it.base, text: it.text, size: S });
+          else cur.push({ t: "math", x: lx + it.x, y: y + it.base, size: S, d: it.box.d });
+        }
+        y += line.h;
+      }
+      y += 8;
+    }
+  }
   // 정답표·해설지도 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
-  const total = pages.length + answerPages.length + (solImagePages.length > 0 ? solImagePages.length : solutionPages.length);
+  const total = pages.length + answerPages.length + (useVec ? vecPages.length : solImagePages.length > 0 ? solImagePages.length : solutionPages.length);
 
   for (let n = 0; n < pages.length; n++) {
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
@@ -1344,6 +1410,24 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     await drawAnswers(page, frame, blocks, fontForText, flip);
   }
 
+  for (const [k, list] of vecPages.entries()) {
+    const pageNo = firstSolNo + k;
+    const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
+    await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo: pageNo - (spec.solutionsOnly ? 1 : 0), total });
+    for (const it of list) {
+      if (it.t === "rule") {
+        page.drawLine({ start: { x: it.x, y: flip(it.y) }, end: { x: it.x + it.w, y: flip(it.y) }, thickness: 0.9, color: rgb(0.13, 0.13, 0.13) });
+      } else if (it.t === "math") {
+        page.drawSvgPath(it.d, { x: it.x, y: flip(it.y), scale: it.size, color: rgb(0, 0, 0), borderWidth: 0 });
+      } else if (it.text.trim()) {
+        const f = await solFontForText(BODY_FONT, it.text);
+        const col = it.gray != null ? rgb(it.gray, it.gray, it.gray) : rgb(0, 0, 0);
+        for (const dx of it.bold ? [0, 0.3] : [0]) {
+          page.drawText(f.text, { x: it.x + dx, y: flip(it.y), size: it.size, font: f.font, color: col });
+        }
+      }
+    }
+  }
   for (const [k, list] of solImagePages.entries()) {
     const pageNo = firstSolNo + k;
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);

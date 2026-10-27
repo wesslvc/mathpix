@@ -1,6 +1,5 @@
 "use client";
 
-import { renderSolutionPng } from "@/lib/renderSolutionPng";
 import { useState } from "react";
 import { LAYOUT, type KiceSpec, type NumberCover } from "@/lib/kice/pdf";
 import { buildKicePdfOffThread } from "@/lib/kice/pdfOffThread";
@@ -20,23 +19,6 @@ import type { KoreanPassage, KoreanSetIn } from "@/lib/kice/koreanLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-
-/** 수식 그림을 못 만들었을 때 글로 넣을 해설 — `$…$`·LaTeX 를 읽을 수 있는 글로 바꾼다. */
-function plainSolution(t: string): string {
-  const rep: [RegExp, string][] = [
-    [/\\left|\\right/g, ""],
-    [/\\times/g, "×"], [/\\div/g, "÷"], [/\\cdot/g, "·"], [/\\pm/g, "±"],
-    [/\\le(?:q)?\b/g, "≤"], [/\\ge(?:q)?\b/g, "≥"], [/\\neq?\b/g, "≠"],
-    [/\\to\b|\\rightarrow/g, "→"], [/\\pi\b/g, "π"], [/\\angle/g, "∠"],
-    [/\\%/g, "%"], [/\\text\{([^}]*)\}/g, "$1"],
-  ];
-  let out = t;
-  for (let i = 0; i < 3; i++) {
-    out = out.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, "($1)/($2)").replace(/\\sqrt\{([^{}]*)\}/g, "√($1)");
-  }
-  for (const [re, to] of rep) out = out.replace(re, to);
-  return out.replace(/\$/g, "").replace(/[{}]/g, "").replace(/\^2/g, "²").replace(/\^\{?2\}?/g, "²");
-}
 
 /**
  * 평가원 문제지 양식으로 내보내기.
@@ -310,43 +292,18 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
 
       // 해설은 PDF 조립 전에 한 편씩(동시에 캡처하면 아이패드에서 멈춘다) 그림으로 만든다. 한 편이 25초 넘게 걸리거나 연달아 둘
       // 실패하면 나머지는 글로 넣는다.
-      let solFail: string | undefined;
       let solutionList:
         | { label: string; source?: string; answer?: string; text: string; png?: Uint8Array }[]
         | undefined;
       if (hasSolutions && (showSolutions || solutionsOnly)) {
         const idxs = (renum ? renum.order : items.map((_, i) => i)).filter((i) => (items[i].solution ?? "").trim() !== "");
-        solutionList = [];
-        let fails = 0;
-        for (let k = 0; k < idxs.length; k++) {
-          const i = idxs[k];
-          setProgress(`해설 그림 만드는 중 ${k + 1}/${idxs.length}`);
-          const label = renum ? `${renum.newNo.get(i)}번` : items[i].answerLabel;
-          const source = items[i].source;
-          const answer = items[i].answer;
-          const text = items[i].solution!.trim();
-          const multi = source ? `${source.trim()} ` : "";
-          let png: Uint8Array | undefined;
-          if (fails < 2) {
-            try {
-              png = await Promise.race([
-                renderSolutionPng({
-                  heading: `${multi}${label}${answer?.trim() ? `  ·  정답 ${answer.trim()}` : ""}`,
-                  no: (/\d+/.exec(label) ?? [])[0],
-                  source: source?.trim() || undefined,
-                  answer: answer ?? undefined,
-                  text,
-                  title: k === 0 ? "해  설" : undefined,
-                }),
-                new Promise<never>((_, rej) => setTimeout(() => rej(new Error("시간 초과(25초)")), 25_000)),
-              ]);
-            } catch (e) {
-              fails++;
-              solFail = solFail ?? (e instanceof Error ? e.message : String(e));
-            }
-          }
-          solutionList.push({ label, source, answer: answer ?? undefined, text: plainSolution(text), png });
-        }
+        // 수식은 PDF 쪽에서 벡터로 직접 그린다(사진 찍기 없음) — 원문(`$…$` 포함)을 그대로 넘긴다.
+        solutionList = idxs.map((i) => ({
+          label: renum ? `${renum.newNo.get(i)}번` : items[i].answerLabel,
+          source: items[i].source,
+          answer: items[i].answer ?? undefined,
+          text: items[i].solution!.trim(),
+        }));
       }
 
       setProgress("PDF 조립 중...");
@@ -407,9 +364,6 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
       link.download = `${name.replace(/[\\/:*?"<>|]/g, "_")}.pdf`;
       link.click();
       URL.revokeObjectURL(objectUrl);
-      if (solFail) {
-        setError(`해설을 수식 그림으로 만들지 못해 글로 넣었어요(수식 기호가 깨질 수 있음). 이유: ${solFail}`);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "PDF 만들기에 실패했습니다.");
     } finally {
