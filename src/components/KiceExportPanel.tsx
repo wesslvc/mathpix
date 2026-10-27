@@ -1,6 +1,6 @@
 "use client";
 
-import { renderSolutionPngs, warmSolutionFonts } from "@/lib/renderSolutionPng";
+import { renderSolutionPng } from "@/lib/renderSolutionPng";
 import { useState } from "react";
 import { LAYOUT, type KiceSpec, type NumberCover } from "@/lib/kice/pdf";
 import { buildKicePdfOffThread } from "@/lib/kice/pdfOffThread";
@@ -315,41 +315,38 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
         | { label: string; source?: string; answer?: string; text: string; png?: Uint8Array }[]
         | undefined;
       if (hasSolutions && (showSolutions || solutionsOnly)) {
-        setProgress("수식 글꼴 준비 중...");
-        await warmSolutionFonts(items.map((it) => it.solution ?? ""));
         const idxs = (renum ? renum.order : items.map((_, i) => i)).filter((i) => (items[i].solution ?? "").trim() !== "");
-        const metas = idxs.map((i, k) => {
+        solutionList = [];
+        let fails = 0;
+        for (let k = 0; k < idxs.length; k++) {
+          const i = idxs[k];
+          setProgress(`해설 그림 만드는 중 ${k + 1}/${idxs.length}`);
           const label = renum ? `${renum.newNo.get(i)}번` : items[i].answerLabel;
           const source = items[i].source;
           const answer = items[i].answer;
           const text = items[i].solution!.trim();
           const multi = source ? `${source.trim()} ` : "";
-          return {
-            label,
-            source,
-            answer,
-            text,
-            opts: {
-              heading: `${multi}${label}${answer?.trim() ? `  ·  정답 ${answer.trim()}` : ""}`,
-              no: (/\d+/.exec(label) ?? [])[0],
-              source: source?.trim() || undefined,
-              answer: answer ?? undefined,
-              text,
-              title: k === 0 ? "해  설" : undefined,
-            },
-          };
-        });
-        // 여러 편을 묶어 한 번에 찍는다(편마다 따로 찍으면 몇십 편에 몇 분이 걸린다).
-        setProgress(`해설 그림 만드는 중 0/${metas.length}`);
-        const pngsOut = await renderSolutionPngs(metas.map((m) => m.opts), (d) => setProgress(`해설 그림 만드는 중 ${d}/${metas.length}`));
-        if (pngsOut.some((x) => !x)) solFail = "일부 해설을 그림으로 만들지 못함";
-        solutionList = metas.map((m, k) => ({
-          label: m.label,
-          source: m.source,
-          answer: m.answer ?? undefined,
-          text: plainSolution(m.text),
-          png: pngsOut[k] ?? undefined,
-        }));
+          let png: Uint8Array | undefined;
+          if (fails < 2) {
+            try {
+              png = await Promise.race([
+                renderSolutionPng({
+                  heading: `${multi}${label}${answer?.trim() ? `  ·  정답 ${answer.trim()}` : ""}`,
+                  no: (/\d+/.exec(label) ?? [])[0],
+                  source: source?.trim() || undefined,
+                  answer: answer ?? undefined,
+                  text,
+                  title: k === 0 ? "해  설" : undefined,
+                }),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error("시간 초과(25초)")), 25_000)),
+              ]);
+            } catch (e) {
+              fails++;
+              solFail = solFail ?? (e instanceof Error ? e.message : String(e));
+            }
+          }
+          solutionList.push({ label, source, answer: answer ?? undefined, text: plainSolution(text), png });
+        }
       }
 
       setProgress("PDF 조립 중...");

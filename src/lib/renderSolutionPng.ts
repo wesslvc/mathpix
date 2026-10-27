@@ -1,4 +1,4 @@
-import { toPng } from "html-to-image";
+import { getFontEmbedCSS, toPng } from "html-to-image";
 import { CARD_CAPTURE_OPTIONS, waitForImages } from "./layout";
 import { renderMathTextWithInfo } from "./renderMathText";
 
@@ -15,205 +15,6 @@ const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt
 // 글꼴 임베드 CSS 는 해설마다 똑같다 — toPng 가 호출마다 글꼴 파일을 전부 다시 받아 base64 로 바꾸면(수십 개면 몇 분) PDF 가
 // 안 나온다. 첫 카드에서 한 번 만들어 다음 해설에 그대로 쓴다.
 let fontCssPromise: Promise<string> | null = null;
-
-/** `U+AC00-D7A3, U+0020` 같은 unicode-range 가 이 글자 집합과 겹치는지. 범위가 없으면 늘 겹친다. */
-function rangeHits(range: string, cps: Set<number>): boolean {
-  if (!range) return true;
-  for (const part of range.split(",")) {
-    const m = /U\+([0-9A-Fa-f?]+)(?:-([0-9A-Fa-f]+))?/.exec(part.trim());
-    if (!m) continue;
-    let lo: number;
-    let hi: number;
-    if (m[1].includes("?")) {
-      lo = parseInt(m[1].replace(/\?/g, "0"), 16);
-      hi = parseInt(m[1].replace(/\?/g, "F"), 16);
-    } else {
-      lo = parseInt(m[1], 16);
-      hi = m[2] ? parseInt(m[2], 16) : lo;
-    }
-    for (const c of cps) if (c >= lo && c <= hi) return true;
-  }
-  return false;
-}
-
-const blobToDataUrl = (b: Blob) =>
-  new Promise<string>((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(String(r.result));
-    r.onerror = () => rej(r.error);
-    r.readAsDataURL(b);
-  });
-
-/**
- * 해설 그림에 **실제로 쓰이는 글꼴만** 임베드 CSS 로 만든다(KaTeX + 나눔명조 중 이 글자들을 덮는 조각). html-to-image 의
- * `getFontEmbedCSS` 는 페이지의 모든 글꼴(Pretendard·나눔명조 수십 조각 …)을 전부 내려받아 아이패드에서 끝나지 않았다.
- */
-async function buildFontCss(texts: string[]): Promise<string> {
-  const cps = new Set<number>();
-  for (const t of texts) for (const ch of t) cps.add(ch.codePointAt(0)!);
-  for (const ch of "0123456789 가나다.,()+-=") cps.add(ch.codePointAt(0)!);
-  const wanted: { family: string; weight: string; style: string; url: string; fmt: string }[] = [];
-  for (const sheet of Array.from(document.styleSheets)) {
-    let rules: CSSRuleList;
-    try {
-      rules = sheet.cssRules;
-    } catch {
-      continue;
-    }
-    for (const rule of Array.from(rules)) {
-      if (rule.type !== CSSRule.FONT_FACE_RULE) continue;
-      const st = (rule as CSSFontFaceRule).style;
-      const family = st.getPropertyValue("font-family").replace(/["']/g, "").trim();
-      if (!(family.startsWith("KaTeX") || family === "Nanum Myeongjo")) continue;
-      if (family === "Nanum Myeongjo" && !rangeHits(st.getPropertyValue("unicode-range"), cps)) continue;
-      const src = st.getPropertyValue("src");
-      const urls = [...src.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)\s*(?:format\(\s*["']?([^"')]+)["']?\s*\))?/g)];
-      const pick = urls.find((u) => /woff2/.test(u[1] ?? u[0])) ?? urls[0];
-      if (!pick) continue;
-      wanted.push({
-        family,
-        weight: st.getPropertyValue("font-weight") || "normal",
-        style: st.getPropertyValue("font-style") || "normal",
-        url: new URL(pick[1], sheet.href ?? document.baseURI).href,
-        fmt: pick[2] ?? "woff2",
-      });
-    }
-  }
-  const faces = await Promise.all(
-    wanted.map(async (w) => {
-      try {
-        const res = await Promise.race([
-          fetch(w.url),
-          new Promise<Response>((_, rej) => setTimeout(() => rej(new Error("timeout")), 15_000)),
-        ]);
-        if (!res.ok) return "";
-        const data = await blobToDataUrl(await res.blob());
-        return `@font-face{font-family:"${w.family}";font-weight:${w.weight};font-style:${w.style};src:url(${data}) format("${w.fmt}")}`;
-      } catch {
-        return "";
-      }
-    }),
-  );
-  return faces.filter(Boolean).join("\n");
-}
-
-/** 해설 글꼴을 **미리 한 번** 만들어 둔다. 못 만들면(빈 값) 글꼴 없이 찍는다(페이지 글꼴이 그대로 쓰이는 기기도 있다). */
-export async function warmSolutionFonts(texts: string[] = []): Promise<void> {
-  if (fontCssPromise) return;
-  const css = await Promise.race([buildFontCss(texts), new Promise<string>((r) => setTimeout(() => r(""), 30_000))]).catch(() => "");
-  if (css) fontCssPromise = Promise.resolve(css);
-}
-
-type SolOpts = { heading: string; text: string; title?: string; no?: string; source?: string; answer?: string };
-
-function buildSolutionCard(opts: SolOpts): HTMLDivElement {
-  const card = document.createElement("div");
-  card.className = "problem-surface bg-white font-serif text-ink";
-  card.style.width = `${SOLUTION_CSS_WIDTH}px`;
-  card.style.padding = "2px 0 6px";
-  card.style.fontSize = `${SOLUTION_FONT_PX}px`;
-  card.style.lineHeight = "1.6";
-  const head =
-    opts.no
-      ? `<div style="display:flex;align-items:center;gap:8px;margin:${opts.title ? "0" : "4px"} 0 6px;padding-top:6px;border-top:1.5px solid #222">` +
-        `<span style="font-size:2.1em;font-weight:800;line-height:1;letter-spacing:-0.02em">${esc(opts.no)}</span>` +
-        `<span style="display:flex;flex-direction:column;gap:1px;min-width:0;flex:1">` +
-        (opts.source ? `<span style="font-size:0.72em;color:#777;line-height:1.2;word-break:keep-all">${esc(opts.source)}</span>` : "") +
-        `<span style="font-size:0.85em;font-weight:700;line-height:1.2">${opts.answer?.trim() ? `정답 ${esc(opts.answer.trim())}` : "&nbsp;"}</span>` +
-        `</span></div>`
-      : `<p style="font-weight:700;margin:0 0 3px">${esc(opts.heading)}</p>`;
-  card.innerHTML =
-    (opts.title ? `<p style="text-align:center;font-weight:700;font-size:1.25em;margin:0 0 10px">${esc(opts.title)}</p>` : "") +
-    head +
-    renderMathTextWithInfo(opts.text).html;
-  return card;
-}
-
-const dataUrlToBytes = (url: string) => {
-  const bin = atob(url.slice(url.indexOf(",") + 1));
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
-};
-
-/**
- * 해설 여러 편을 **묶어서 한 번에** 찍고 편별로 잘라 낸다(`renderSolutionPng` 를 편마다 부르면 편마다 DOM 복제·글꼴·SVG 변환이
- * 되풀이돼 몇십 편이면 몇 분이 걸린다). 묶음이 실패하면 그 묶음만 한 편씩 다시 찍는다. 편의 결과가 null 이면 못 만든 것이다.
- */
-export async function renderSolutionPngs(
-  list: SolOpts[],
-  onProgress?: (done: number) => void,
-  chunk = 16,
-): Promise<(Uint8Array | null)[]> {
-  const out: (Uint8Array | null)[] = new Array(list.length).fill(null);
-  let done = 0;
-  const starts: number[] = [];
-  for (let a = 0; a < list.length; a += chunk) starts.push(a);
-  const worker = async () => {
-    for (let a = starts.shift(); a !== undefined; a = starts.shift()) {
-    const part = list.slice(a, a + chunk);
-    const host = document.createElement("div");
-    host.style.cssText = "position:fixed;left:-100000px;top:0;z-index:-1;pointer-events:none;background:#fff";
-    const wrap = document.createElement("div");
-    wrap.style.cssText = `width:${SOLUTION_CSS_WIDTH}px;background:#fff`;
-    const cards = part.map((o) => buildSolutionCard(o));
-    cards.forEach((c) => wrap.appendChild(c));
-    host.appendChild(wrap);
-    document.body.appendChild(host);
-    try {
-      if (document.fonts?.ready) await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 2000))]);
-      await new Promise((r) => requestAnimationFrame(() => r(null)));
-      await waitForImages(wrap);
-      const fontEmbedCSS = fontCssPromise ? await fontCssPromise : "";
-      const cap = fontEmbedCSS ? { ...CARD_CAPTURE_OPTIONS, fontEmbedCSS } : CARD_CAPTURE_OPTIONS;
-      const ratio = CARD_CAPTURE_OPTIONS.pixelRatio;
-      const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Android/.test(navigator.userAgent);
-      if (webkit) await toPng(wrap, cap).catch(() => "");
-      const url = await Promise.race([
-        toPng(wrap, cap),
-        new Promise<string>((_, rej) => setTimeout(() => rej(new Error("묶음 캡처 시간 초과")), 60_000)),
-      ]);
-      const img = new Image();
-      await new Promise<void>((res, rej) => {
-        img.onload = () => res();
-        img.onerror = () => rej(new Error("묶음 그림을 읽지 못함"));
-        img.src = url;
-      });
-      const wrapTop = wrap.getBoundingClientRect().top;
-      for (let i = 0; i < cards.length; i++) {
-        const r = cards[i].getBoundingClientRect();
-        const y = Math.round((r.top - wrapTop) * ratio);
-        const h = Math.max(1, Math.round(r.height * ratio));
-        const cv = document.createElement("canvas");
-        cv.width = img.width;
-        cv.height = h;
-        const ctx = cv.getContext("2d");
-        if (!ctx) throw new Error("캔버스를 만들지 못함");
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, cv.width, h);
-        ctx.drawImage(img, 0, y, img.width, h, 0, 0, img.width, h);
-        out[a + i] = dataUrlToBytes(cv.toDataURL("image/png"));
-      }
-    } catch {
-      // 이 묶음은 한 편씩 다시 찍는다.
-      for (let i = 0; i < part.length; i++) {
-        try {
-          out[a + i] = await renderSolutionPng(part[i]);
-        } catch {
-          out[a + i] = null;
-        }
-      }
-    } finally {
-      host.remove();
-    }
-    done += part.length;
-    onProgress?.(Math.min(list.length, done));
-    }
-  };
-  // 묶음 둘을 동시에 찍는다(더 늘리면 아이패드에서 멈춘다).
-  await Promise.all([worker(), worker()]);
-  return out;
-}
 
 export async function renderSolutionPng(opts: { heading: string; text: string; title?: string; no?: string; source?: string; answer?: string }): Promise<Uint8Array> {
   const host = document.createElement("div");
@@ -246,8 +47,11 @@ export async function renderSolutionPng(opts: { heading: string; text: string; t
     await waitForImages(card);
     // Safari(WebKit)는 첫 캡처가 비거나 던지는 일이 있어(글꼴·SVG foreignObject) 한 번 더 찍고, 실패하면 몇 번 다시 시도한다.
     const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Android/.test(navigator.userAgent);
-    const fontEmbedCSS = fontCssPromise ? await fontCssPromise : "";
-    let opts2 = fontEmbedCSS ? { ...CARD_CAPTURE_OPTIONS, fontEmbedCSS } : CARD_CAPTURE_OPTIONS;
+    const fontEmbedCSS = await (fontCssPromise ??= Promise.race([
+      getFontEmbedCSS(card),
+      new Promise<string>((r) => setTimeout(() => r(""), 20_000)),
+    ]).catch(() => ""));
+    const opts2 = fontEmbedCSS ? { ...CARD_CAPTURE_OPTIONS, fontEmbedCSS } : CARD_CAPTURE_OPTIONS;
     let url = "";
     let lastErr: unknown;
     for (let attempt = 0; attempt < 3 && !url; attempt++) {
@@ -256,8 +60,6 @@ export async function renderSolutionPng(opts: { heading: string; text: string; t
         url = await toPng(card, opts2);
       } catch (e) {
         lastErr = e;
-        // 글꼴 임베드가 원인일 수 있어 다음 시도는 글꼴 CSS 없이(기본 옵션) 찍는다.
-        opts2 = CARD_CAPTURE_OPTIONS;
         await new Promise((r) => setTimeout(r, 300));
       }
     }
