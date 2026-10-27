@@ -677,6 +677,8 @@ export type KiceSpec = {
    * 이므로, 쪽번호를 2 이상으로 주어 본문 틀(even/odd)을 쓰게 한다.
    */
   answerPage?: { no: number; total: number };
+  /** 해설지만 뽑는다(문제·정답표 없이). 해설은 본문 틀 2쪽부터 놓되 쪽번호는 1부터 찍는다. */
+  solutionsOnly?: boolean;
   /**
    * **해설지.** 정답표 뒤에 두 단으로 흘려 붙인다(변형문제의 해설 텍스트). 비어 있으면 붙이지 않는다.
    * 글은 평문이고 줄 단위로 문단이 나뉜다. 정답표만 따로 뽑을 때(`answerPage`)는 쓰지 않는다.
@@ -1146,7 +1148,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
    * 자리를 재려면 틀이 필요하고 틀은 쪽번호로 고르는데, 첫 정답표 쪽 번호는
    * 전체 쪽수와 무관하게 정해지므로 순환이 생기지 않는다.
    */
-  const firstAnswerNo = spec.answerPage?.no ?? pages.length + 1;
+  const firstAnswerNo = spec.answerPage?.no ?? (spec.solutionsOnly ? 2 : pages.length + 1);
   const answerPages =
     answers.length > 0
       ? (() => {
@@ -1345,13 +1347,13 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   for (const [k, list] of solImagePages.entries()) {
     const pageNo = firstSolNo + k;
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
-    await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo, total });
+    await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo: pageNo - (spec.solutionsOnly ? 1 : 0), total });
     for (const it of list) page.drawImage(it.img, { x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h });
   }
   for (const [k, results] of (solImagePages.length > 0 ? [] : solutionPages).entries()) {
     const pageNo = firstSolNo + k;
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
-    await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo, total });
+    await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo: pageNo - (spec.solutionsOnly ? 1 : 0), total });
     for (const r of results) {
       await drawFlow(page, r.items, solFontForText, flip, new Map(), oldHangul);
     }

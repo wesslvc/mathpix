@@ -1,6 +1,6 @@
 "use client";
 
-import { renderSolutionPng } from "@/lib/renderSolutionPng";
+import { renderSolutionPng, warmSolutionFonts } from "@/lib/renderSolutionPng";
 import { useState } from "react";
 import { LAYOUT, type KiceSpec, type NumberCover } from "@/lib/kice/pdf";
 import { buildKicePdfOffThread } from "@/lib/kice/pdfOffThread";
@@ -273,7 +273,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
     return { order, covers, newNo, missed };
   }
 
-  async function generate() {
+  async function generate(solutionsOnly = false) {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -283,10 +283,10 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
       const frames = all[key];
       const [images, pngs] = await Promise.all([
         loadFrameImages(frames),
-        Promise.all(items.map((item) => loadPng(item.imageUrl))),
+        solutionsOnly ? Promise.resolve([] as Awaited<ReturnType<typeof loadPng>>[]) : Promise.all(items.map((item) => loadPng(item.imageUrl))),
       ]);
 
-      const renum = doRenumber ? await planRenumber(pngs) : null;
+      const renum = doRenumber && !solutionsOnly ? await planRenumber(pngs) : null;
       if (renum) {
         // 왜 못 덮었는지 갈라 알린다 — 셋은 고칠 길이 다르다.
         const { none, unsafe, error } = renum.missed;
@@ -314,7 +314,9 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
       let solutionList:
         | { label: string; source?: string; answer?: string; text: string; png?: Uint8Array }[]
         | undefined;
-      if (hasSolutions && showSolutions) {
+      if (hasSolutions && (showSolutions || solutionsOnly)) {
+        setProgress("수식 글꼴 준비 중...");
+        await warmSolutionFonts();
         const idxs = (renum ? renum.order : items.map((_, i) => i)).filter((i) => (items[i].solution ?? "").trim() !== "");
         solutionList = [];
         let fails = 0;
@@ -327,7 +329,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
           const text = items[i].solution!.trim();
           const multi = source ? `${source.trim()} ` : "";
           let png: Uint8Array | undefined;
-          if (fails < 2) {
+          if (fails < 3) {
             try {
               png = await Promise.race([
                 renderSolutionPng({
@@ -338,7 +340,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
                   text,
                   title: k === 0 ? "해  설" : undefined,
                 }),
-                new Promise<never>((_, rej) => setTimeout(() => rej(new Error("시간 초과(25초)")), 25_000)),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error("시간 초과(45초)")), 45_000)),
               ]);
             } catch (e) {
               fails++;
@@ -355,6 +357,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
         replace,
         fonts,
         images,
+        solutionsOnly,
         problems: pngs.map((png, i) => ({
           png,
           ...(renum?.covers.has(i) ? { cover: renum.covers.get(i)! } : {}),
@@ -373,7 +376,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
               : tamguPattern.map((s) => Number(s) || 0)
             : [...(LAYOUTS.find((l) => l.key === layoutKey) ?? LAYOUTS[0]).pattern],
         koreanSets: layoutKey === "korean" ? await buildKoreanSets(pngs) : undefined,
-        answers: !showAnswers
+        answers: solutionsOnly || !showAnswers
           ? []
           : renum
             ? // 새 번호 차례로 한 표에 — 출처별로 가르지 않고(번호가 이제 안 겹친다) 내가 고른 답도 뺀다.
@@ -402,7 +405,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectUrl;
-      const name = `${title || "오답모음"}${subject ? ` (${subject})` : ""}`;
+      const name = `${title || "오답모음"}${solutionsOnly ? " 해설지" : ""}${subject ? ` (${subject})` : ""}`;
       link.download = `${name.replace(/[\\/:*?"<>|]/g, "_")}.pdf`;
       link.click();
       URL.revokeObjectURL(objectUrl);
@@ -586,10 +589,20 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
       {error && <p className="text-sm text-red-600">{error}</p>}
       {notice && <p className="text-sm text-amber-700">{notice}</p>}
 
-      <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end gap-2">
+        {hasSolutions && (
+          <Button
+            type="button"
+            onClick={() => generate(true)}
+            disabled={busy || items.length === 0}
+            variant="outline" className="px-5 py-2.5 text-sm"
+          >
+            해설지만 내보내기
+          </Button>
+        )}
         <Button
           type="button"
-          onClick={generate}
+          onClick={() => generate()}
           disabled={busy || items.length === 0}
           variant="primary" className="px-5 py-2.5 text-sm"
  >

@@ -16,6 +16,27 @@ const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt
 // 안 나온다. 첫 카드에서 한 번 만들어 다음 해설에 그대로 쓴다.
 let fontCssPromise: Promise<string> | null = null;
 
+/**
+ * 수식 글꼴 CSS 를 **미리 한 번** 만들어 둔다(해설을 한 편씩 그리기 전에). 첫 해설이 글꼴 내려받기를 기다리다 시간 제한에
+ * 걸려 연달아 실패하고 나머지가 `$…$` 글자 그대로 찍히던 문제를 막는다. 못 만들면(빈 값) 캐시하지 않아 다음에 다시 시도한다.
+ */
+export async function warmSolutionFonts(): Promise<void> {
+  if (fontCssPromise) return;
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;left:-100000px;top:0;z-index:-1;pointer-events:none";
+  const card = document.createElement("div");
+  card.className = "problem-surface bg-white font-serif text-ink";
+  card.innerHTML = renderMathTextWithInfo("$\\frac{a}{b}+\\sqrt{2}$ 가나다").html;
+  host.appendChild(card);
+  document.body.appendChild(host);
+  try {
+    const css = await Promise.race([getFontEmbedCSS(card), new Promise<string>((r) => setTimeout(() => r(""), 90_000))]).catch(() => "");
+    if (css) fontCssPromise = Promise.resolve(css);
+  } finally {
+    host.remove();
+  }
+}
+
 export async function renderSolutionPng(opts: { heading: string; text: string; title?: string; no?: string; source?: string; answer?: string }): Promise<Uint8Array> {
   const host = document.createElement("div");
   host.style.cssText = "position:fixed;left:-100000px;top:0;z-index:-1;pointer-events:none";
@@ -47,11 +68,11 @@ export async function renderSolutionPng(opts: { heading: string; text: string; t
     await waitForImages(card);
     // Safari(WebKit)는 첫 캡처가 비거나 던지는 일이 있어(글꼴·SVG foreignObject) 한 번 더 찍고, 실패하면 몇 번 다시 시도한다.
     const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Android/.test(navigator.userAgent);
-    const fontEmbedCSS = await (fontCssPromise ??= Promise.race([
-      getFontEmbedCSS(card),
-      new Promise<string>((r) => setTimeout(() => r(""), 20_000)),
-    ]).catch(() => ""));
-    const opts2 = fontEmbedCSS ? { ...CARD_CAPTURE_OPTIONS, fontEmbedCSS } : CARD_CAPTURE_OPTIONS;
+    const fontEmbedCSS = fontCssPromise
+      ? await fontCssPromise
+      : await Promise.race([getFontEmbedCSS(card), new Promise<string>((r) => setTimeout(() => r(""), 40_000))]).catch(() => "");
+    if (fontEmbedCSS && !fontCssPromise) fontCssPromise = Promise.resolve(fontEmbedCSS);
+    let opts2 = fontEmbedCSS ? { ...CARD_CAPTURE_OPTIONS, fontEmbedCSS } : CARD_CAPTURE_OPTIONS;
     let url = "";
     let lastErr: unknown;
     for (let attempt = 0; attempt < 3 && !url; attempt++) {
@@ -60,6 +81,8 @@ export async function renderSolutionPng(opts: { heading: string; text: string; t
         url = await toPng(card, opts2);
       } catch (e) {
         lastErr = e;
+        // 글꼴 임베드가 원인일 수 있어 다음 시도는 글꼴 CSS 없이(기본 옵션) 찍는다.
+        opts2 = CARD_CAPTURE_OPTIONS;
         await new Promise((r) => setTimeout(r, 300));
       }
     }
