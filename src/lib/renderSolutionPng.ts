@@ -76,10 +76,14 @@ const dataUrlToBytes = (url: string) => {
 export async function renderSolutionPngs(
   list: SolOpts[],
   onProgress?: (done: number) => void,
-  chunk = 8,
+  chunk = 16,
 ): Promise<(Uint8Array | null)[]> {
   const out: (Uint8Array | null)[] = new Array(list.length).fill(null);
-  for (let a = 0; a < list.length; a += chunk) {
+  let done = 0;
+  const starts: number[] = [];
+  for (let a = 0; a < list.length; a += chunk) starts.push(a);
+  const worker = async () => {
+    for (let a = starts.shift(); a !== undefined; a = starts.shift()) {
     const part = list.slice(a, a + chunk);
     const host = document.createElement("div");
     host.style.cssText = "position:fixed;left:-100000px;top:0;z-index:-1;pointer-events:none;background:#fff";
@@ -135,8 +139,12 @@ export async function renderSolutionPngs(
     } finally {
       host.remove();
     }
-    onProgress?.(Math.min(list.length, a + part.length));
-  }
+    done += part.length;
+    onProgress?.(Math.min(list.length, done));
+    }
+  };
+  // 묶음 둘을 동시에 찍는다(더 늘리면 아이패드에서 멈춘다).
+  await Promise.all([worker(), worker()]);
   return out;
 }
 
