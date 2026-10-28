@@ -23,6 +23,7 @@ import { parseProblemNumber } from "@/lib/problemNumber";
 import { sortByProblemNumber } from "@/lib/problemOrder";
 import { readKoreanMeta, type KoreanMeta } from "@/lib/koreanSet";
 import { describeMarks, emptyMarkStats, readRichBlocks, type RichBlock } from "@/lib/kice/richText";
+import PassageTextEditor from "@/components/PassageTextEditor";
 import {
   attachPassageFigures,
   existingPassageFigures,
@@ -1622,12 +1623,21 @@ export default function ProblemGallery({ problems, unlimited = false }: Props) {
               <div className="flex flex-col gap-4">
                 {isImageOnly ? (
                   isPassage ? (
+                    <>
                     <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
                       이 행은 <strong>국어 지문</strong>입니다. 본문은 평가원
                       글꼴로 따로 조판되므로 본문 수정·조건 박스는 쓰지
                       않습니다. 인식이 잘못됐으면 아래 &ldquo;다시
                       인식하기&rdquo;로 사진에서 새로 읽을 수 있어요.
                     </p>
+                    {(editKoreanBlocks ?? editing?.korean?.blocks) ? (
+                      <PassageTextEditor blocks={(editKoreanBlocks ?? editing?.korean?.blocks) as RichBlock[]} onChange={(next) => setEditKoreanBlocks(next)} />
+                    ) : (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        아직 글자로 읽어 둔 지문이 없어요(사진으로만 저장됨). &ldquo;다시 인식하기&rdquo;로 글자를 읽으면 여기서 보고 고칠 수 있어요.
+                      </p>
+                    )}
+                    </>
                   ) : (
                     <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
                       이 문제는 AI가 통째로 다시 그린 <strong>이미지</strong>
