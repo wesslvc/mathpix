@@ -26,6 +26,9 @@ export function plainMath(t: string): string {
   return out.replace(/[{}]/g, "").replace(/\^2/g, "²").replace(/\\,|\;|\\!/g, " ");
 }
 
+/** 인라인 수식 양옆 여백(글자 크기 대비) — 글에 붙어 꾸겨져 보이지 않게. */
+const MATH_PAD = 0.2;
+
 type Unit =
   | { k: "t"; text: string; w: number; brk: boolean; space: boolean }
   | { k: "m"; box: MathBox; w: number; brk: boolean };
@@ -95,10 +98,10 @@ export function layoutSolutionText(
       if (sg.kind === "t") {
         units.push(...textUnits(sg.s, size, measure, prevSpace));
       } else {
-        const box = texToMath(sg.tex, false);
+        const box = texToMath(sg.tex.replace(/\\frac(?![a-zA-Z])/g, "\\dfrac"), false);   // 분수는 크게(읽기 쉽게)
         if (box) {
           if (sg.display && segs.length === 1) displayOnly = box;
-          units.push({ k: "m", box, w: box.w * size, brk: true });
+          units.push({ k: "m", box, w: box.w * size + size * MATH_PAD * 2, brk: true });
         } else {
           units.push(...textUnits(plainMath(sg.tex), size, measure, prevSpace));
         }
@@ -119,12 +122,12 @@ export function layoutSolutionText(
           desc = Math.max(desc, u.box.desc * size);
         }
       }
-      const above = Math.max(size * 1.15, asc + 1.5);
-      const below = Math.max(size * 0.45, desc + 1.5);
+      const above = Math.max(size * 1.3, asc + size * 0.28) + (center ? size * 0.35 : 0);
+      const below = Math.max(size * 0.6, desc + size * 0.28) + (center ? size * 0.35 : 0);
       let x = center ? Math.max(0, (width - total) / 2) : 0;
       const items: SolItem[] = [];
       for (const u of row) {
-        if (u.k === "m") items.push({ t: "math", x, base: above, box: u.box });
+        if (u.k === "m") items.push({ t: "math", x: x + size * MATH_PAD, base: above, box: u.box });
         else if (!u.space) items.push({ t: "text", x, base: above, text: u.text });
         x += u.w;
       }
@@ -148,7 +151,7 @@ export function layoutSolutionText(
       }
       emit(row, false);
     }
-    if (lines.length) lines[lines.length - 1].h += size * 0.35;
+    if (lines.length) lines[lines.length - 1].h += size * 0.7;
   }
   return lines;
 }

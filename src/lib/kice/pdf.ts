@@ -1164,7 +1164,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
    * 해설지를 미리 흘려 본다 — 쪽수를 알아야 쪽번호 상자에 찍을 수 있다. 정답표 바로 뒤에서 시작한다.
    * 한 쪽도 못 채우는 단(진행이 없음)이면 멈춰서 무한 반복을 막는다.
    */
-  const solStyle = { ...DEFAULT_FLOW_STYLE, size: 9.2 };
+  const solStyle = { ...DEFAULT_FLOW_STYLE, size: 10.4 };
   // 해설은 본문 글꼴(신중명조)이 아니라 따로 받은 글꼴(나눔명조)로 — ×·÷ 같은 계산 기호가 있다. 못 받았으면 본문 글꼴.
   const hasSolFont = !!spec.fonts["해설"];
   const solFontObj = hasSolFont ? await fontFor("해설") : null;
@@ -1334,7 +1334,7 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
         for (const r of rows) {
           let ly = yy;
           const tx = bx + PAD + 4 + (r.tag ? TAGW : 0);
-          if (r.tag) cur.push({ t: "text", x: bx + PAD + 4, y: ly + (r.lines[0]?.h ?? S) * 0.78, text: r.tag, size: S * 0.78, bold: true, gray: 0.3 });
+          if (r.tag) cur.push({ t: "text", x: bx + PAD + 4, y: ly + (r.lines[0]?.items[0]?.base ?? S), text: r.tag, size: S * 0.78, bold: true, gray: 0.3 });
           for (const l of r.lines) {
             for (const it of l.items) {
               if (it.t === "text") cur.push({ t: "text", x: tx + it.x, y: ly + it.base, text: it.text, size: S * 0.92, ...(r.tag ? {} : { gray: 0.25 }) });
