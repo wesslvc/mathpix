@@ -738,7 +738,7 @@ changes to apply (these were worked out by a reviewer who solved the question; f
 """
 ${edits.trim()}
 """
-rules: every printed character the changes name must be exactly what they say (digits especially, choices ①–⑤ with their new values). figures, graphs, tables, tick labels, point labels and diagrams must be REDRAWN to match the new values — do NOT copy the original figure unchanged, but keep its style, line weights and labels. erase any handwriting (restore the printed content under it). choices ①–⑤ keep the original's arrangement (same rows/columns and alignment), evenly spaced, never overlapping, never wrapped in the middle of a choice. do not add a solution, an answer, or any new text that is not listed. circled markers (㉠ ① ⓐ) not listed stay exactly as they are. output = the whole question image, ready to print.`;
+rules: every printed character the changes name must be exactly what they say (digits especially, choices ①–⑤ with their new values). figures, graphs, tables, tick labels, point labels and diagrams must be REDRAWN to match the new values — do NOT copy the original figure unchanged, but keep its style, line weights and labels. erase any handwriting (restore the printed content under it). choices ①–⑤ keep the original's arrangement (same rows/columns and alignment) and canonical order (letters inside a choice ascending ㄱ, ㄴ, ㄷ — never ㄴ, ㄱ), evenly spaced, never overlapping, never wrapped in the middle of a choice. do not add a solution, an answer, or any new text that is not listed. circled markers (㉠ ① ⓐ) not listed stay exactly as they are. output = the whole question image, ready to print.`;
 }
 
 function withInstruction(prompt: string, instruction?: string): string {
