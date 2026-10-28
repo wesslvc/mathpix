@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  *
  * 전부 OpenAI Batch 로 돈다(`variantOps.ts`) — 여기서는 작업(`variant_ops`)만 넣고, pg_cron 이 1분 안에 깨워 batch 로 건다.
  * - `{action:"start", ids}`   재검수를 건다(진행 중·통과한 것은 건너뛴다, `force` 면 통과한 것도).
- * - `{action:"approve", ids}` 승인 대기인 것을 승인 → 1차 수정은 그림 편집(draw), 2차부터는 sol 의 SVG 덮개(overlay). 끝나면 저절로 재검수.
+ * - `{action:"approve", ids}` 승인 대기인 것을 승인 → 그림 편집(draw)으로 끝까지 수정(high). 끝나면 저절로 재검수.
  * - `{action:"accept", ids}`  지적이 있어도 지금 그대로 확정(통과로 적고 보관하던 이전 그림을 지운다).
  */
 export async function POST(req: NextRequest) {
@@ -58,9 +58,9 @@ export async function POST(req: NextRequest) {
       done++;
     } else if (action === "approve") {
       if (st?.status !== "needs_approval" || !st.notes?.length) continue;
-      // 1차 수정(round 0)은 그림 편집, 2차부터는 sol 이 SVG 로 덮어 그린다.
-      const step = (st.round ?? 0) === 0 ? "draw" : "overlay";
-      if (!(await enqueueOp(admin, user.id, row.id, step, { notes: st.notes, ...(st.lastFail ? { lastFail: st.lastFail } : {}) }))) continue;
+      // 수정은 늘 그림 편집으로 끝까지 간다(SVG 덮개는 쓰지 않는다). 처음 만들 때(medium) 한 번에 안 된 것이니 고칠 때는 high.
+      const quality = "high";
+      if (!(await enqueueOp(admin, user.id, row.id, "draw", { notes: st.notes, quality, ...(st.lastFail ? { lastFail: st.lastFail } : {}) }))) continue;
       await admin.from("problems").update({ box_range: { ...br, variantAuto: { ...st, status: "fixing", at: now } } }).eq("id", row.id).eq("user_id", user.id);
       done++;
     } else {

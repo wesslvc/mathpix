@@ -29,7 +29,7 @@ export type Op = {
   problem_id: string;
   step: OpStep | "done" | "error";
   batch_id: string | null;
-  state: { notes?: AutoNote[]; lastFail?: string; tries?: number };
+  state: { notes?: AutoNote[]; lastFail?: string; tries?: number; quality?: string };
   cost_krw: number;
 };
 type Prob = { id: string; image_path: string | null; answer: string | null; box_range: Record<string, unknown> };
@@ -127,7 +127,7 @@ async function buildLine(admin: SupabaseClient, op: Op, c: Cache): Promise<{ url
         prompt: patchPrompt(numbered(notes) + failNote, true),
         n: 1,
         size: pickOutputSize(meta?.width, meta?.height) ?? "auto",
-        quality: FIX_QUALITY(),
+        quality: ["low", "medium", "high"].includes(String(op.state.quality)) ? String(op.state.quality) : FIX_QUALITY(),
         output_format: "jpeg",
         output_compression: 90,
       },

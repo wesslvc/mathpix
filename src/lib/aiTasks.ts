@@ -712,7 +712,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
     async run(ctx) {
       const t0 = Date.now();
       const effortRaw = str(ctx.params.effort, 12);
-      const effort = ["low", "medium", "high"].includes(effortRaw) ? effortRaw : "medium";
+      const effort = ["low", "medium", "high", "xhigh"].includes(effortRaw) ? effortRaw : "medium";
       const qRaw = str(ctx.params.quality, 12);
       const quality = ["low", "medium", "high", "xhigh", "max"].includes(qRaw) ? qRaw : (process.env.VARIANT_IMAGE_QUALITY || "medium");
       const copies = Math.min(5, Math.max(1, Math.round(Number(ctx.params.copies) || 1)));

@@ -67,7 +67,7 @@ async function buildLine(admin: SupabaseClient, it: Item, cache: SrcCache): Prom
   if (it.stage === "plan") {
     const copies = Math.min(25, Math.max(1, Math.round(Number(p.copies) || 1)));
     const copy = Math.min(copies, Math.max(1, Math.round(Number(p.copy) || 1)));
-    const effort = ["low", "medium", "high"].includes(String(p.effort)) ? String(p.effort) : "high";
+    const effort = ["low", "medium", "high", "xhigh", "max"].includes(String(p.effort)) ? String(p.effort) : process.env.VARIANT_PLAN_EFFORT?.trim() || "xhigh";
     return { body: solBody(VARIANT_PROMPT, [src], settingsTail(readLevel(p.level), readNovelty(p.novelty), copy, copies), effort) };
   }
   if (it.stage === "image") {
@@ -160,6 +160,12 @@ export async function submitReady(admin: SupabaseClient, deadline: number): Prom
 /** 단계 하나가 끝난 변형 한 줄을 처리한다. */
 async function handleLine(admin: SupabaseClient, it: Item, line: OutLine | undefined, cache: SrcCache) {
   const err = lineError(line);
+  // 설계 강도(xhigh)를 이 모델이 안 받으면 high 로 낮춰 같은 단계를 다시 건다.
+  if (err && it.stage === "plan" && /reasoning|effort|unsupported|invalid.*value/i.test(err) && String(it.params.effort ?? "xhigh") !== "high") {
+    console.warn("[variant-batch] 설계 강도를 못 받아 high 로 낮춰 다시 건다:", err.slice(0, 160));
+    await admin.from("variant_batch_items").update({ params: { ...it.params, effort: "high" }, batch_id: null, error: null, updated_at: new Date().toISOString() }).eq("id", it.id);
+    return;
+  }
   if (err) return failItems(admin, [it.id], `${it.stage} 단계 실패: ${err}`, [it.draft_path]);
   const body = (line!.response!.body ?? {}) as Record<string, unknown>;
   const now = new Date().toISOString();
