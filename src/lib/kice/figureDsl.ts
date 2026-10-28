@@ -21,13 +21,13 @@ export type FigOp =
 export type FigureOps = { w: number; h: number; ops: FigOp[] };
 
 // ---------- 규격 상수(원본 사진에서 잰 값 — 가로 1000 기준) ----------
-const TH_THIN = 1.7;
-const TH_ZERO = 5.2;
-const TH_FRAME = 2.1;
-const DASH: [number, number] = [9, 6];
+const TH_THIN = 2.1;
+const TH_ZERO = 7.1;
+const TH_FRAME = 2.5;
+const DASH: [number, number] = [8, 7.1];
 const F_TICK = 29;
 const F_TITLE = 33;
-const F_LABEL = 30;
+const F_LABEL = 48;
 
 // ---------- 스펙 ----------
 export type Blob = {
