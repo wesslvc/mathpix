@@ -342,7 +342,8 @@ function bbox(pts: Pt[]) {
 }
 
 /** 무늬를 격자에 깔아 다각형으로 자른다(group clip 이 그린다). 격자는 도식 좌표에 고정이라 이웃 몸체와 이어진다. */
-export function patternOps(kind: PatternKind, pts: Pt[]): FigOp[] {
+export type PatternOpts = { sx?: number; sy?: number; size?: number; th?: number; jit?: number; r?: number; hgt?: number; wid?: number };
+export function patternOps(kind: PatternKind, pts: Pt[], o: PatternOpts = {}): FigOp[] {
   const b = bbox(pts);
   const ops: FigOp[] = [];
   const rnd = (i: number, j: number) => {
@@ -350,29 +351,32 @@ export function patternOps(kind: PatternKind, pts: Pt[]): FigOp[] {
     return s - Math.floor(s);
   };
   if (kind === "plus" || kind === "v") {
-    const sx = 74;
-    const sy = 62;
+    const sx = o.sx ?? 74;
+    const sy = o.sy ?? 62;
+    const sz = o.size ?? 9;
+    const th = o.th ?? 2;
+    const jit = o.jit ?? 1;
     for (let j = Math.floor(b.y0 / sy) - 1; j <= Math.ceil(b.y1 / sy) + 1; j++) {
       for (let i = Math.floor(b.x0 / sx) - 1; i <= Math.ceil(b.x1 / sx) + 1; i++) {
-        const x = i * sx + (j % 2 ? sx / 2 : 0) + (rnd(i, j) - 0.5) * 14;
-        const y = j * sy + (rnd(j, i) - 0.5) * 12;
+        const x = i * sx + (j % 2 ? sx / 2 : 0) + (rnd(i, j) - 0.5) * 14 * jit;
+        const y = j * sy + (rnd(j, i) - 0.5) * 12 * jit;
         if (kind === "plus") {
-          ops.push({ t: "line", pts: [[x - 9, y], [x + 9, y]], th: 2 }, { t: "line", pts: [[x, y - 9], [x, y + 9]], th: 2 });
+          ops.push({ t: "line", pts: [[x - sz, y], [x + sz, y]], th }, { t: "line", pts: [[x, y - sz], [x, y + sz]], th });
         } else {
-          ops.push({ t: "line", pts: [[x - 8, y - 6], [x, y + 6], [x + 8, y - 6]], th: 1.8 });
+          ops.push({ t: "line", pts: [[x - sz * 0.9, y - sz * 0.7], [x, y + sz * 0.7], [x + sz * 0.9, y - sz * 0.7]], th });
         }
       }
     }
   } else if (kind === "dots") {
-    const s = 21;
+    const s = o.sx ?? 21;
     for (let j = Math.floor(b.y0 / s) - 1; j <= Math.ceil(b.y1 / s) + 1; j++) {
       for (let i = Math.floor(b.x0 / s) - 1; i <= Math.ceil(b.x1 / s) + 1; i++) {
-        ops.push({ t: "ellipse", x: i * s + rnd(i, j) * s, y: j * s + rnd(j, i + 7) * s, rx: 2.7, ry: 2.7, fill: 0 });
+        ops.push({ t: "ellipse", x: i * s + rnd(i, j) * s, y: j * s + rnd(j, i + 7) * s, rx: o.r ?? 2.7, ry: o.r ?? 2.7, fill: 0 });
       }
     }
   } else if (kind === "brick") {
-    const hgt = 38;
-    const wid = 78;
+    const hgt = o.hgt ?? 38;
+    const wid = o.wid ?? 78;
     for (let j = Math.floor(b.y0 / hgt); j <= Math.ceil(b.y1 / hgt); j++) {
       ops.push({ t: "line", pts: [[b.x0 - 5, j * hgt], [b.x1 + 5, j * hgt]], th: 1.6 });
       for (let i = Math.floor(b.x0 / wid) - 1; i <= Math.ceil(b.x1 / wid) + 1; i++) {

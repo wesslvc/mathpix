@@ -7,7 +7,7 @@
  */
 import vm from "node:vm";
 import { contourLines } from "./contourField";
-import { clipHalf, patternOps, smooth, renderFigure, type FigOp, type FigureOps, type FigureSpec, type PatternKind, type Pt } from "./figureDsl";
+import { clipHalf, patternOps, type PatternOpts, smooth, renderFigure, type FigOp, type FigureOps, type FigureSpec, type PatternKind, type Pt } from "./figureDsl";
 
 const MAX_OPS = 60000;
 
@@ -54,9 +54,9 @@ export function runFigureScript(code: string, opts: { timeoutMs?: number } = {})
       push({ t: "group", clip: pts(poly), ops: inner });
     },
     /** 다각형을 무늬로 채운다(plus·v·dots·brick·hlines). */
-    pattern(kind: PatternKind, poly: Pt[]) {
+    pattern(kind: PatternKind, poly: Pt[], opts?: PatternOpts) {
       const p = pts(poly);
-      push({ t: "group", clip: p, ops: patternOps(kind, p) });
+      push({ t: "group", clip: p, ops: patternOps(kind, p, opts) });
     },
     /** 다각형을 직선 (a→b) 의 한쪽(+1 왼쪽/-1 오른쪽)으로 자른다. */
     clipPoly(poly: Pt[], a: Pt, b: Pt, side: 1 | -1) { return clipHalf(pts(poly), a, b, side); },
