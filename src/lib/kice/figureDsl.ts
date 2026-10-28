@@ -105,7 +105,27 @@ export type RowSpec = {
   legend?: { items: { kind: "solid" | "dashed"; text: string }[] };
   panels: ContourSpec[];
 };
-export type FigureSpec = ContourSpec | StrataSpec | RowSpec;
+/**
+ * **지질 단면 빌더** — sol 이 다각형 교점을 손으로 계산하지 않도록, 부정합·기울어진 지층·단층(낙차)·관입암을 높은 수준 값으로 받아
+ * `StrataSpec` 으로 풀어 준다. 좌표는 0~1(y 아래가 +).
+ */
+export type SectionSpec = {
+  type: "section";
+  aspect?: number;
+  /** 부정합면 높이(v)와 물결 크기. */
+  unconformity: { v: number; wave?: number };
+  /** 부정합 위 수평 지층 줄 수(가로줄 무늬). */
+  upperLines?: number;
+  /** 부정합 아래 지층들(위 → 아래). `h` 는 두께(그림 높이 비율). 기울기 `dip` 은 오른쪽 끝에서 얼마나 내려가는지(v). */
+  lower: { dip?: number; layers: { h: number; fill?: number; pattern?: PatternKind }[] };
+  /** 단층: 위→아래 두 점. `throw` 는 오른쪽 블록이 내려간 양(v). */
+  faults?: { from: Pt; to: Pt; throw?: number }[];
+  /** 관입암(암맥): 바닥 폭 [u0,u1] 와 꼭대기 폭 [u0,u1]. 꼭대기는 부정합면에서 멈춘다(`topV` 를 주면 그 높이). */
+  intrusions?: { bottom: [number, number]; top: [number, number]; pattern?: PatternKind; fill?: number; topV?: number }[];
+  trees?: number[];
+  labels?: StrataSpec["labels"];
+};
+export type FigureSpec = ContourSpec | StrataSpec | RowSpec | SectionSpec;
 
 const W = 1000;
 
@@ -391,8 +411,86 @@ function rowFigure(sp: RowSpec): FigureOps {
   return { w: total, h: top + Math.max(...parts.map((p) => p.h)), ops };
 }
 
+/** 다각형을 직선의 한쪽 반평면으로 자른다(Sutherland–Hodgman). `side` = 직선 (a→b) 의 왼쪽(+1)/오른쪽(−1). */
+function clipHalf(poly: Pt[], a: Pt, b: Pt, side: 1 | -1): Pt[] {
+  const sd = (p: Pt) => side * ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]));
+  const out: Pt[] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i];
+    const q = poly[(i + 1) % poly.length];
+    const dp = sd(p);
+    const dq = sd(q);
+    if (dp >= 0) out.push(p);
+    if ((dp >= 0) !== (dq >= 0)) {
+      const t = dp / (dp - dq);
+      out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+    }
+  }
+  return out;
+}
+
+function sectionToStrata(sp: SectionSpec): StrataSpec {
+  const N = 60;
+  const unc = (u: number) => sp.unconformity.v + (sp.unconformity.wave ?? 0.012) * Math.sin(u * 14);
+  const dip = sp.lower.dip ?? 0;
+  // 경계 k 의 기준 높이(왼쪽 끝에서): 부정합면 + 누적 두께(부정합보다 위로 올라간 부분은 잘려 나간다).
+  const bases: number[] = [];
+  let acc = sp.unconformity.v;
+  for (const l of sp.lower.layers) { bases.push(acc); acc += l.h; }
+  bases.push(1.6); // 맨 아래는 바닥 아래로
+  const bodies: StrataSpec["bodies"] = [];
+  const lines: NonNullable<StrataSpec["lines"]> = [];
+  const upperTop: Pt[] = Array.from({ length: N + 1 }, (_, i) => [i / N, 0] as Pt);
+  bodies.push({ pts: [...upperTop, ...Array.from({ length: N + 1 }, (_, i) => [1 - i / N, unc(1 - i / N)] as Pt)], fill: 1 });
+  // 부정합면 위 수평 지층: 곧은 가로줄(마지막 줄은 부정합면을 따라 굽는다).
+  const n = sp.upperLines ?? 0;
+  for (let k = 1; k <= n; k++) lines.push({ pts: [[0, (sp.unconformity.v * k) / (n + 1)], [1, (sp.unconformity.v * k) / (n + 1)]] });
+  const faults = sp.faults ?? [];
+  const f0 = faults[0];
+  const sides: ("L" | "R" | "ALL")[] = f0 ? ["L", "R"] : ["ALL"];
+  for (const side of sides) {
+    const off = side === "R" ? f0?.throw ?? 0 : 0;
+    const bv = (k: number, u: number) => Math.min(1, bases[k] + dip * u + off);
+    sp.lower.layers.forEach((layer, k) => {
+      // 맨 위 지층은 단층으로 내려앉은 쪽에서도 부정합면까지 올라온다(그 위 지층은 침식돼 없다).
+      const top = Array.from({ length: N + 1 }, (_, i) => [i / N, k === 0 ? unc(i / N) : Math.max(unc(i / N), bv(k, i / N))] as Pt);
+      const bot = Array.from({ length: N + 1 }, (_, i) => [1 - i / N, Math.max(unc(1 - i / N), bv(k + 1, 1 - i / N))] as Pt);
+      let poly = [...top, ...bot];
+      if (f0) poly = clipHalf(poly, f0.from, f0.to, side === "L" ? 1 : -1);
+      if (poly.length < 3) return;
+      bodies.push({ pts: poly, fill: layer.fill ?? 1, pattern: layer.pattern });
+      // 경계선(아래 경계)
+      const bl: Pt[] = Array.from({ length: N + 1 }, (_, i) => [i / N, bv(k + 1, i / N)] as Pt).filter((p) => p[1] > unc(p[0]) + 0.003 && p[1] < 1);
+      let seg: Pt[] = [];
+      const flush = () => { if (seg.length > 1) lines.push({ pts: seg }); seg = []; };
+      for (const p of bl) {
+        const sideOk = !f0 || (side === "L" ? sdist(p, f0) <= 0 : sdist(p, f0) >= 0);
+        if (sideOk) seg.push(p); else flush();
+      }
+      flush();
+    });
+  }
+  lines.push({ pts: Array.from({ length: N + 1 }, (_, i) => [i / N, unc(i / N)] as Pt) });
+  for (const f of faults) lines.push({ pts: [f.from, f.to], thick: true });
+  for (const it of sp.intrusions ?? []) {
+    const topY = (u: number) => it.topV ?? unc(u);
+    bodies.push({
+      pts: [[it.bottom[0], 1], [it.bottom[1], 1], [it.top[1], topY(it.top[1])], [it.top[0], topY(it.top[0])]],
+      fill: it.fill ?? 1,
+      pattern: it.pattern ?? "plus",
+      outline: true,
+    });
+  }
+  return { type: "strata", aspect: sp.aspect, bodies, lines, trees: sp.trees, labels: sp.labels };
+}
+/** 점 p 가 직선 (a→b) 의 왼쪽이면 음수(화면 좌표계에서 아래로 향하는 단층 기준: 왼쪽 블록 = 음수 쪽이 아니라 부호 규약을 맞춘다). */
+function sdist(p: Pt, f: { from: Pt; to: Pt }): number {
+  return -((f.to[0] - f.from[0]) * (p[1] - f.from[1]) - (f.to[1] - f.from[1]) * (p[0] - f.from[0]));
+}
+
 export function renderFigure(spec: FigureSpec): FigureOps {
   switch (spec.type) {
+    case "section": return strataFigure(sectionToStrata(spec));
     case "contour": return contourFigure(spec);
     case "strata": return strataFigure(spec);
     case "row": return rowFigure(spec);
