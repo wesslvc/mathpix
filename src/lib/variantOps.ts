@@ -4,9 +4,8 @@
  *
  * 문제 하나에 대한 작업 하나 = `variant_ops` 한 줄. `step` 은 지금 batch 로 걸려야 할 단계다:
  *   check    sol(medium)이 원본·변형·정답·해설을 견준다 → 지적 없음 = 확정(passed), 있음 = 승인 대기(needs_approval)
- *   draw     1차 수정: sunburst 가 지적 사항만 부분 편집(`patchPrompt`) → 안 바뀐 곳은 지금 그림 픽셀 그대로(`compositePatch`) → check
- *   overlay  2차 이후: sol(high)이 "SVG 로 덮어 그리는 편이 더 믿을 만한 부분"만 골라 덮개를 설계 → 서버가 그려 덮는다(`svgOverlay.ts`) → check
- * 승인(approve)이 draw/overlay 를 만든다 — 승인 없이 수정이 돌지 않는다. 수정이 끝나면 같은 줄이 check 로 넘어가 재검수한다. 바퀴 수 제한은 없다.
+ *   draw     수정: sunburst 가 지적 사항만 부분 편집(`patchPrompt`) → 안 바뀐 곳은 지금 그림 픽셀 그대로(`compositePatch`) → check
+ * 승인(approve)이 draw 를 만든다 — 승인 없이 수정이 돌지 않는다. 수정이 끝나면 같은 줄이 check 로 넘어가 재검수한다. 바퀴 수 제한은 없다.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { harvest } from "./gradeExam";
@@ -18,11 +17,10 @@ import { logAiCost } from "./costLog";
 import { parseJsonObject } from "./problemCompare";
 import { toStoredFigures } from "./storedFigures";
 import { RECHECK_PROMPT, readNotes, type AutoNote, type VariantAutoState } from "./variantAuto";
-import { OVERLAY_PROMPT, applyOverlays, parseOverlays } from "./svgOverlay";
 import { BATCH_DISCOUNT, CHUNK, createBatch, lineError, logSolCost, s, solBody, uploadJsonl, type OutLine } from "./variantBatchCore";
 import sharp from "sharp";
 
-export type OpStep = "check" | "draw" | "overlay";
+export type OpStep = "check" | "draw";
 export type Op = {
   id: string;
   user_id: string;
@@ -36,7 +34,6 @@ type Prob = { id: string; image_path: string | null; answer: string | null; box_
 const COLS = "id,user_id,problem_id,step,batch_id,state,cost_krw";
 
 const RECHECK_EFFORT = () => process.env.VARIANT_RECHECK_EFFORT?.trim() || "medium";
-const OVERLAY_EFFORT = () => process.env.VARIANT_OVERLAY_EFFORT?.trim() || "high";
 /** 일시적인 OpenAI 오류(과부하 503·429·5xx 등)는 승인 없이 서버가 알아서 다시 건다 — 이 횟수까지. */
 const MAX_TRANSIENT_RETRIES = () => {
   const n = Number(process.env.VARIANT_OP_RETRIES);
@@ -153,13 +150,6 @@ async function buildLine(admin: SupabaseClient, op: Op, c: Cache): Promise<{ url
       },
     };
   }
-  if (op.step === "overlay") {
-    if (!notes.length) return { error: "고칠 지적이 없어요." };
-    const parts = splitDataUrl(cur);
-    const meta = parts ? await sharp(parts.bytes).metadata() : null;
-    const tail = `\n\nIMAGE SIZE: ${meta?.width ?? "?"}x${meta?.height ?? "?"} px${reg}\nREMAINING PROBLEMS\n${notes.map((n, i) => `${i + 1}. ${n.problem}${n.fix ? ` (fix hint: ${n.fix})` : ""}`).join("\n")}${failNote}`;
-    return { url: "/v1/responses", body: solBody(OVERLAY_PROMPT(!!orig), orig ? [orig, cur] : [cur], tail, OVERLAY_EFFORT()) };
-  }
   return { error: "알 수 없는 단계" };
 }
 
@@ -167,7 +157,7 @@ async function buildLine(admin: SupabaseClient, op: Op, c: Cache): Promise<{ url
 export async function submitOps(admin: SupabaseClient, deadline: number): Promise<number> {
   let submitted = 0;
   const cache = newCache();
-  for (const step of ["check", "draw", "overlay"] as OpStep[]) {
+  for (const step of ["check", "draw"] as OpStep[]) {
     for (;;) {
       if (Date.now() > deadline) return submitted;
       const { data } = await admin.from("variant_ops").select(COLS).eq("step", step).is("batch_id", null).order("created_at").limit(CHUNK);
@@ -292,26 +282,6 @@ async function handleDraw(admin: SupabaseClient, op: Op, body: Record<string, un
   await toCheck(admin, op, krw);
 }
 
-async function handleOverlay(admin: SupabaseClient, op: Op, body: Record<string, unknown>, prob: Prob, c: Cache, krw: number) {
-  const obj = parseJsonObject(harvest(body)) as { overlays?: unknown; solution?: unknown; skipped?: unknown } | null;
-  if (!obj) return failOp(admin, op, "덮개 설계를 읽지 못했어요.");
-  const { overlays, dropped } = parseOverlays(obj.overlays);
-  const skipped = s(obj.skipped, 300);
-  if (!overlays.length) return failOp(admin, op, `sol 이 덮어 그릴 곳을 못 찾았어요.${skipped ? ` (${skipped})` : ""}${dropped.length ? ` ${dropped.join(" ")}` : ""}`.slice(0, 480));
-  const curUrl = await imgOf(admin, c, prob.image_path as string);
-  const parts = curUrl ? splitDataUrl(curUrl) : null;
-  if (!parts) return failOp(admin, op, "지금 그림을 읽지 못했어요.");
-  const res = await applyOverlays(parts.bytes, overlays);
-  if (!res) return failOp(admin, op, `덮개를 그리지 못했어요. ${dropped.join(" ")}`.slice(0, 480));
-  const sol = typeof obj.solution === "string" && obj.solution.trim().length > 20 ? obj.solution.trim().slice(0, 4000) : null;
-  if (!(await adoptImage(admin, op, prob, res.bytes, res.mime, sol ? { solution: sol } : undefined))) return failOp(admin, op, "수정한 그림을 저장하지 못했어요.");
-  await toCheck(admin, op, krw);
-  // 글꼴에 없어 못 그린 글자가 있으면 다음 재검수가 알아채도록 기록한다(승인 대기 화면의 안내용).
-  if (res.missingGlyphs.length || res.failed.length) {
-    console.warn("[variant-ops] 덮개 일부 못 그림:", res.missingGlyphs.join(""), res.failed.join(" "));
-  }
-}
-
 /** 끝난 batch 의 결과 줄들을 작업마다 처리한다. */
 export async function handleOpBatch(admin: SupabaseClient, batchId: string, status: string, byId: Map<string, OutLine>) {
   const { data } = await admin.from("variant_ops").select(COLS).eq("batch_id", batchId);
@@ -343,10 +313,8 @@ export async function handleOpBatch(admin: SupabaseClient, batchId: string, stat
       if (op.step === "draw") {
         await handleDraw(admin, op, body, prob, cache);
       } else {
-        const what = op.step === "check" ? "sol 변형 재검수 (batch)" : "sol 변형 SVG 덮개 설계 (batch)";
-        const krw = await logSolCost(admin, { userId: op.user_id, jobId: op.id }, what, body);
+        const krw = await logSolCost(admin, { userId: op.user_id, jobId: op.id }, "sol 변형 재검수 (batch)", body);
         if (op.step === "check") await handleCheck(admin, op, body, prob, krw);
-        else await handleOverlay(admin, op, body, prob, cache, krw);
       }
     } catch (err) {
       await failOp(admin, op, err instanceof Error ? err.message : "처리 실패").catch(() => undefined);
@@ -356,7 +324,7 @@ export async function handleOpBatch(admin: SupabaseClient, batchId: string, stat
 
 /** 작업 만들기(라우트·최초 생성이 쓴다). 같은 문제에 끝나지 않은 작업이 있으면 만들지 않는다. */
 export async function enqueueOp(admin: SupabaseClient, userId: string, problemId: string, step: OpStep, state: Op["state"] = {}): Promise<boolean> {
-  const { data: open } = await admin.from("variant_ops").select("id").eq("problem_id", problemId).in("step", ["check", "draw", "overlay"]).limit(1);
+  const { data: open } = await admin.from("variant_ops").select("id").eq("problem_id", problemId).in("step", ["check", "draw"]).limit(1);
   if (open?.length) return false;
   const { error } = await admin.from("variant_ops").insert({ user_id: userId, problem_id: problemId, step, state });
   return !error;

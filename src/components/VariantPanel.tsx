@@ -1544,7 +1544,7 @@ function BatchProgress({ supabase, tick, cats }: { supabase: ReturnType<typeof c
   return (
     <section className={cn(cardClass, "flex flex-col gap-2 p-4 text-xs")}>
       <h3 className="text-sm font-semibold text-ink">Batch 진행 (최근 3일)</h3>
-      <p className="text-slate-500">설계 → 그림 → 검수 순서로 단계마다 OpenAI Batch 로 돌아요(이후 승인하면 1차 그림 수정 → 재검수, 2차부터 sol 의 SVG 덮개 → 재검수). 단계 하나가 보통 몇 분~몇십 분, 길면 24시간. 창을 닫아도 서버가 이어 가고, 끝나면 묶음에 저장돼 자동 검수 상태(통과·승인 대기)로 들어가요.</p>
+      <p className="text-slate-500">설계 → 그림 → 검수 순서로 단계마다 OpenAI Batch 로 돌아요(이후 승인하면 첫 수정은 원본에서 완전히 새로 그리고, 그다음부터는 high 로 일부분만 고쳐 → 재검수). 단계 하나가 보통 몇 분~몇십 분, 길면 24시간. 창을 닫아도 서버가 이어 가고, 끝나면 묶음에 저장돼 자동 검수 상태(통과·승인 대기)로 들어가요.</p>
       {[...groups.entries()].map(([g, list]) => {
         const by = (k: string) => list.filter((x) => x.stage === k).length;
         const cat = cats.find((c) => c.id === list[0].category_id);

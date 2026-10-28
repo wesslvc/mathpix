@@ -26,8 +26,6 @@ const nextConfig = {
   env: { NEXT_PUBLIC_APP_VERSION: buildVersion() },
   experimental: {
     serverComponentsExternalPackages: ["sharp"],
-    // 변형문제 SVG 덮개(`svgOverlay.ts`)가 서버에서 파일로 읽는 글꼴 — 서버리스 번들에 실리게 명시한다.
-    outputFileTracingIncludes: { "/api/variant-batch/poll": ["./public/fonts/solution-serif.ttf"] },
     /**
      * **뒤로 갈 때마다 다시 불러오던 것을 멈춘다.**
      *
