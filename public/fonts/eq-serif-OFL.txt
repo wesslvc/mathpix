@@ -1,0 +1,1 @@
+eq-serif.ttf / eq-serif-italic.ttf = Liberation Serif (SIL Open Font License 1.1, (c) Red Hat, Inc.). https://github.com/liberationfonts/liberation-fonts

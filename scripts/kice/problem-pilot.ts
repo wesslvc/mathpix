@@ -1,80 +1,123 @@
 /**
  * 파일럿 — 평가원 문항(지구과학Ⅰ 20번·13번)을 **글꼴 + 벡터**로 조판한다(사진 없음).
  * 실행: OUT=결과.pdf npx tsx scripts/kice/problem-pilot.ts
- * 글꼴은 저장소에 있는 나눔명조(해설용 서브셋)로 시험한다 — 실제 평가원 글꼴((한)신중명조 등)은 로그인 버킷에 있다.
+ * 글꼴: 한글은 나눔명조(해설용 서브셋), 영문·숫자·수식은 Times 계열(Liberation Serif — 평가원 본문의 영문·수식이 Times 계열이다).
+ * 실제 평가원 글꼴((한)신중명조 등)은 로그인 버킷에 있어 이 시험에서는 못 쓴다.
  */
-import { PDFDocument, PDFFont, PDFPage, rgb, pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath } from "pdf-lib";
+import { PDFDocument, PDFFont, PDFPage, rgb, pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, concatTransformationMatrix } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import fs from "fs";
-import { texToMath } from "../../src/lib/kice/solutionMath";
+import { typesetEq, type EqBox } from "../../src/lib/kice/eqTypeset";
 
 const BLACK = rgb(0, 0, 0);
 type Piece =
   | { t: "text"; s: string }
-  | { t: "math"; tex: string }
+  | { t: "eq"; tex: string }
   | { t: "frac"; top: string; bot: string }
   | { t: "circ"; s: string };
-type Unit = Piece[]; // 한 어절(띄어쓰기 없이 붙은 조각들)
+type Unit = Piece[];
 
-const S = 9.6; // 본문 글자 크기(pt)
-const PITCH = 15.2; // 줄 간격
+// 평가원 본문 치수(원본 사진에서 잰 값: 단 폭 326.84pt 기준)
+const S = 10.8; // 글자 크기
+const PITCH = 17.4; // 줄 간격
+const HSCALE = 0.98; // 장평(한글)
+const LATIN = 1.07; // 영문·숫자는 Times 라 한글과 높이를 맞추려 조금 키운다
+const BOX_TH = 0.45; // 보기 상자 선
+const TABLE_TH = 0.5;
 
 export async function build() {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const font = await pdf.embedFont(fs.readFileSync("public/fonts/solution-serif.ttf"), { subset: false });
   const digits = await pdf.embedFont(fs.readFileSync("public/fonts/number-digits.ttf"), { subset: false });
+  const lat = await pdf.embedFont(fs.readFileSync("public/fonts/eq-serif.ttf"), { subset: false });
+  const latI = await pdf.embedFont(fs.readFileSync("public/fonts/eq-serif-italic.ttf"), { subset: false });
 
-  const W = (t: string, size = S) => {
-    let w = 0;
-    for (const c of t) {
-      try { w += font.widthOfTextAtSize(c, size); } catch { w += size * 0.5; }
-    }
-    return w;
+  const isLatin = (c: string) => /[\u0020-\u007e\u00b0-\u00ff\u2032\u2212\u00d7\u00f7\u2264\u2265\u2260\u2192\u03b1-\u03c9\u0391-\u03a9]/.test(c);
+  const wc = (c: string, size: number, italic = false) => {
+    try {
+      if (isLatin(c)) return (italic ? latI : lat).widthOfTextAtSize(c, size * LATIN) ;
+      return font.widthOfTextAtSize(c, size) * HSCALE;
+    } catch { return size * 0.5; }
   };
-  const text = (page: PDFPage, s: string, x: number, y: number, size = S, bold = false, f: PDFFont = font) => {
-    if (!s) return;
-    for (const dx of bold ? [0, 0.35] : [0]) page.drawText(s, { x: x + dx, y, size, font: f, color: BLACK });
+  /** 한 줄 글자를 한글/영문으로 나눠 폭을 잰다. */
+  const W = (t: string, size = S, italic = false) => [...t].reduce((a, c) => a + wc(c, size, italic), 0);
+
+  const withScale = (page: PDFPage, x: number, y: number, sx: number, fn: () => void) => {
+    page.pushOperators(pushGraphicsState(), concatTransformationMatrix(sx, 0, 0, 1, x, y));
+    fn();
+    page.pushOperators(popGraphicsState());
+  };
+  /** 글자 하나(한글은 장평 적용)를 그린다. */
+  const drawChar = (page: PDFPage, c: string, x: number, y: number, size: number, bold: boolean, italic = false) => {
+    for (const dx of bold ? [0, 0.3] : [0]) {
+      if (isLatin(c)) page.drawText(c, { x: x + dx, y, size: size * LATIN, font: italic ? latI : lat, color: BLACK });
+      else withScale(page, x + dx, y, HSCALE, () => page.drawText(c, { x: 0, y: 0, size, font, color: BLACK }));
+    }
+  };
+  const text = (page: PDFPage, s: string, x: number, y: number, size = S, bold = false, italic = false) => {
+    let cx = x;
+    for (const c of s) {
+      drawChar(page, c, cx, y, size, bold, italic);
+      cx += wc(c, size, italic);
+    }
+  };
+  const textNum = (page: PDFPage, s: string, x: number, y: number, size: number) => {
+    for (const dx of [0, 0.45]) page.drawText(s, { x: x + dx, y, size, font: digits, color: BLACK });
   };
   const hline = (page: PDFPage, x1: number, y1: number, x2: number, y2: number, th = 0.6, dash?: number[]) =>
     page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness: th, color: BLACK, ...(dash ? { dashArray: dash } : {}) });
 
-  // ---- 한 조각의 폭/그리기 ----
-  const circDigit = new Set("①②③④⑤");
+  // ---- 수식 ----
+  const eqMetric = (s: string, size: number, style: "r" | "i") => W(s, size, style === "i");
+  const eqCache = new Map<string, EqBox | null>();
+  const eqOf = (tex: string): EqBox | null => {
+    if (!eqCache.has(tex)) eqCache.set(tex, typesetEq(tex, S, eqMetric));
+    return eqCache.get(tex)!;
+  };
+  const drawEq = (page: PDFPage, b: EqBox, x: number, base: number) => {
+    for (const o of b.ops) {
+      if (o.t === "text") text(page, o.s, x + o.x, base + o.y, o.size, false, o.style === "i");
+      else hline(page, x + o.x1, base + o.y1, x + o.x2, base + o.y2, o.th);
+    }
+  };
+
   const pieceW = (p: Piece): number => {
     if (p.t === "text") return W(p.s);
-    if (p.t === "math") { const b = texToMath(p.tex); return b ? b.w * S : W(p.tex); }
+    if (p.t === "eq") return eqOf(p.tex)?.w ?? W(p.tex);
     if (p.t === "frac") return Math.max(W(p.top), W(p.bot)) + 3;
-    return S * 1.05;
+    return S * 1.08;
   };
+  const circDigit = new Set("①②③④⑤");
   const drawPiece = (page: PDFPage, p: Piece, x: number, base: number) => {
     if (p.t === "text") text(page, p.s, x, base);
-    else if (p.t === "math") {
-      const b = texToMath(p.tex);
-      if (b) page.drawSvgPath(b.d, { x, y: base, scale: S, color: BLACK, borderWidth: 0 });
+    else if (p.t === "eq") {
+      const b = eqOf(p.tex);
+      if (b) drawEq(page, b, x, base);
       else text(page, p.tex, x, base);
     } else if (p.t === "frac") {
       const w = pieceW(p);
-      const tw = W(p.top);
-      const bw = W(p.bot);
-      text(page, p.top, x + (w - tw) / 2, base + S * 0.95);
-      text(page, p.bot, x + (w - bw) / 2, base - S * 0.78);
-      hline(page, x, base + S * 0.32, x + w, base + S * 0.32, 0.5);
+      text(page, p.top, x + (w - W(p.top)) / 2, base + S * 1.0);
+      text(page, p.bot, x + (w - W(p.bot)) / 2, base - S * 0.82);
+      hline(page, x, base + S * 0.33, x + w, base + S * 0.33, 0.5);
+    } else if (circDigit.has(p.s)) {
+      const d = S * 1.02;
+      page.drawCircle({ x: x + d / 2 + 0.3, y: base + S * 0.34, size: d / 2, borderWidth: 0.5, borderColor: BLACK });
+      const n = String("①②③④⑤".indexOf(p.s) + 1);
+      page.drawText(n, { x: x + d / 2 + 0.3 - lat.widthOfTextAtSize(n, S * 0.78) / 2, y: base + S * 0.34 - S * 0.26, size: S * 0.78, font: lat, color: BLACK });
     } else {
-      // 원문자: ㉠ ㉡ 은 글꼴 글리프, ①~⑤ 는 동그라미 + 숫자를 직접 그린다.
-      if (circDigit.has(p.s)) {
-        const d = S * 0.98;
-        page.drawCircle({ x: x + d / 2 + 0.2, y: base + S * 0.33, size: d / 2, borderWidth: 0.55, borderColor: BLACK });
-        const n = String("①②③④⑤".indexOf(p.s) + 1);
-        text(page, n, x + d / 2 + 0.2 - digits.widthOfTextAtSize(n, S * 0.72) / 2, base + S * 0.33 - S * 0.25, S * 0.72, false, digits);
-      } else text(page, p.s, x, base, S * 1.05);
+      // ㉠ ㉡: 동그라미 + 자모(글꼴의 원문자 글리프는 획이 가늘고 작다)
+      const d = S * 1.02;
+      page.drawCircle({ x: x + d / 2 + 0.3, y: base + S * 0.34, size: d / 2, borderWidth: 0.5, borderColor: BLACK });
+      const jm = "㉠㉡㉢㉣".indexOf(p.s) >= 0 ? "ㄱㄴㄷㄹ"["㉠㉡㉢㉣".indexOf(p.s)] : p.s;
+      withScale(page, x + d / 2 + 0.3 - font.widthOfTextAtSize(jm, S * 0.74) * 0.5 * HSCALE, base + S * 0.34 - S * 0.25, HSCALE, () => page.drawText(jm, { x: 0, y: 0, size: S * 0.74, font, color: BLACK }));
     }
   };
 
   // ---- 문단: 어절 단위 줄바꿈 + 양쪽 맞춤 ----
-  const GAP = S * 0.3; // 어절 사이 기본 간격
+  const GAP = S * 0.3;
   const unitW = (u: Unit) => u.reduce((a, p) => a + pieceW(p), 0);
-  /** 한 문단을 그린다. `first`=첫 줄 들여쓰기, `hang`=둘째 줄부터 들여쓰기. 새 y(아래쪽 끝)를 돌려준다. */
+  /** 문단을 그린다. `first`=첫 줄 들여쓰기. 마지막 줄 **아래 끝** y 를 돌려준다(줄 중심 = top + PITCH/2). */
   function paragraph(page: PDFPage, units: Unit[], x: number, top: number, width: number, opt: { first?: number; hang?: number; justify?: boolean } = {}) {
     const first = opt.first ?? 0;
     const hang = opt.hang ?? 0;
@@ -98,8 +141,9 @@ export async function build() {
     let y = top;
     for (const ln of lines) {
       const hasFrac = ln.units.some((u) => u.some((p) => p.t === "frac"));
-      if (hasFrac) y += S * 0.55;
-      const base = y + S * 1.05;
+      const extra = hasFrac ? S * 0.7 : 0;
+      y += extra;
+      const base = y + PITCH / 2 + S * 0.32; // 줄 중심에서 글자 기준선
       const natural = ln.units.reduce((a, u) => a + unitW(u), 0) + GAP * (ln.units.length - 1);
       const avail = width - ln.indent;
       const justify = (opt.justify ?? true) && !ln.last && ln.units.length > 1;
@@ -112,19 +156,17 @@ export async function build() {
         }
         cx += gap;
       }
-      y += PITCH + (hasFrac ? S * 0.55 : 0);
+      y += PITCH + extra;
     }
     return y;
   }
   const toUnits = (src: (string | Piece)[]): Unit[] => {
-    // 문자열은 공백으로 어절을 나누고, Piece 는 앞뒤 어절에 붙인다(공백 문자 "_" 로 구분하려면 " " 를 직접 넣는다).
     const units: Unit[] = [];
     let cur: Unit = [];
     const push = () => { if (cur.length) { units.push(cur); cur = []; } };
     for (const item of src) {
       if (typeof item !== "string") { cur.push(item); continue; }
-      const parts = item.split(/( )/);
-      for (const part of parts) {
+      for (const part of item.split(/( )/)) {
         if (part === " ") push();
         else if (part) cur.push({ t: "text", s: part });
       }
@@ -133,81 +175,117 @@ export async function build() {
     return units;
   };
 
-  const PAGE_W = 380;
+  const TW = 326.84;
+  const PAGE_W = TW + 60;
   const PAGE_H = 560;
-  const X0 = 26;
-  const TW = 327;
-
-  // 좌표 변환용: 위에서 아래로 재는 y 를 pdf y 로.
+  const X0 = 30;
   const fy = (page: PDFPage, y: number) => page.getHeight() - y;
+
+  /** 문항 머리: 번호는 왼쪽 여백으로 조금 나오고 본문 첫 줄이 번호 뒤에서 시작한다. */
+  function header(page: PDFPage, no: string, top: number, body: Unit[]) {
+    const base = top + PITCH / 2 + S * 0.32;
+    textNum(page, no.replace(".", ""), X0 - 11, fy(page, base), 15.5);
+    for (const dx of [0, 0.45]) page.drawText(".", { x: X0 - 11 + digits.widthOfTextAtSize(no.replace(".", ""), 15.5) + 0.5 + dx, y: fy(page, base), size: 15.5, font: lat, color: BLACK });
+    return paragraph(page, body, X0, top, TW, { first: 16 });
+  }
+
+  /** <보 기> 상자 — 제목이 윗선을 끊고 얹힌다. 항목 `[라벨, 단위들]`. 상자 아래 끝 y 를 돌려준다. */
+  function boguBox(page: PDFPage, top: number, items: { label: string; units: Unit[] }[]) {
+    let by = top + 9.5;
+    for (const it of items) {
+      text(page, it.label, X0 + 11.4, fy(page, by + PITCH / 2 + S * 0.32), S);
+      by = paragraph(page, it.units, X0 + 29.7, by, TW - 29.7 - 11, { first: 0, hang: 0 });
+    }
+    const bot = by + 9.5;
+    const L = X0;
+    const R = X0 + TW;
+    const title = "<보  기>";
+    const tw = W(title, S * 1.06) + 4;
+    const cx = (L + R) / 2;
+    const ty = fy(page, top);
+    hline(page, L, ty, cx - tw / 2, ty, BOX_TH);
+    hline(page, cx + tw / 2, ty, R, ty, BOX_TH);
+    hline(page, L, ty, L, fy(page, bot), BOX_TH);
+    hline(page, R, ty, R, fy(page, bot), BOX_TH);
+    hline(page, L, fy(page, bot), R, fy(page, bot), BOX_TH);
+    text(page, title, cx - tw / 2 + 2, ty - S * 0.34, S * 1.06);
+    return bot;
+  }
+  function choices(page: PDFPage, y: number, ch: string[]) {
+    const xs = [0, 65.9, 131.3, 196.6, 262];
+    ch.forEach((c, i) => {
+      drawPiece(page, { t: "circ", s: "①②③④⑤"[i] }, X0 + xs[i], fy(page, y + S * 0.32));
+      text(page, c, X0 + xs[i] + S * 1.75, fy(page, y + S * 0.32), S);
+    });
+  }
 
   // ================= 20번 =================
   {
     const page = pdf.addPage([PAGE_W, PAGE_H]);
-    let y = 30;
-    // 번호
-    text(page, "20.", X0, fy(page, y + 12), 15, true, digits);
-    const NX = X0 + 28;
-    y = paragraph(
+    let y = 24;
+    y = header(
       page,
+      "20.",
+      y,
       toUnits([
-        "그림은 어느 지역의 지질 단면을, 표는 방사성 원소 ", { t: "text", s: "Y" }, "의 함량(%)에 대한 방사성 원소 X의 함량(%)과 Y의 함량(%)에 대한 Y의 자원소 함량(%)을 시기별로 나타낸 것이다. 화성암 A는 X와 Y를 모두 포함하며, 현재 A에 포함된 X의 함량은 처음 양의 26%이다. 화성암 B의 절대 연령은 1억 년이다.",
+        "그림은 어느 지역의 지질 단면을, 표는 방사성 원소 Y의 함량(%)에 대한 방사성 원소 X의 함량(%)과 Y의 함량(%)에 대한 Y의 자원소 함량(%)을 시기별로 나타낸 것이다. 화성암 A는 X와 Y를 모두 포함하며, 현재 A에 포함된 X의 함량은 처음 양의 26%이다. 화성암 B의 절대 연령은 1억 년이다.",
       ]),
-      NX, y - 2, TW - 28, { first: 0, hang: 0 },
     );
-    // 번호 줄 이후 문단은 번호 너비만큼 들여쓰기한 채로 흐른다 — 위 문단에서 이미 NX 기준.
-    y += 10;
-    const figTop = y;
-    const figW = 150;
-    const figH = 105;
-    drawGeoSection(page, X0 + 2, figTop, figW, figH);
-    // 표
-    const tx = X0 + figW + 14;
-    const tw = TW - figW - 14 + 6;
-    const colA = tw * 0.56;
-    const colB = (tw - colA) / 2;
-    const r1 = 22;
-    const r2 = 38;
-    const ty = figTop + 2;
-    const tb = ty + r1 + r2 * 2;
-    page.drawRectangle({ x: tx, y: fy(page, tb), width: tw, height: tb - ty, borderColor: BLACK, borderWidth: 0.7 });
-    hline(page, tx, fy(page, ty + r1), tx + tw, fy(page, ty + r1), 0.7);
-    hline(page, tx, fy(page, ty + r1 + r2), tx + tw, fy(page, ty + r1 + r2), 0.7);
-    hline(page, tx + colA, fy(page, ty), tx + colA, fy(page, tb), 0.7);
-    hline(page, tx + colA + colB, fy(page, ty), tx + colA + colB, fy(page, tb), 0.7);
-    const sz = 7.2;
+    const figTop = y - PITCH / 2 + 20.5;
+    const figW = 106;
+    const figH = 75;
+    drawGeoSection(page, X0 + 0.5, figTop, figW, figH);
+    // 표(원본 비율: 폭 199pt, 행 16.4 / 35 / 34pt, 열 114 / 42 / 43pt)
+    const tx = X0 + figW + 19.5;
+    const tw = 199;
+    const cols = [114, 42, 43];
+    const rows = [16.4, 35, 34.6];
+    const ty = figTop + 2.5;
+    const tb = ty + rows.reduce((a, b) => a + b, 0);
+    page.drawRectangle({ x: tx, y: fy(page, tb), width: tw, height: tb - ty, borderColor: BLACK, borderWidth: TABLE_TH });
+    let acc = ty;
+    for (const r of rows.slice(0, -1)) { acc += r; hline(page, tx, fy(page, acc), tx + tw, fy(page, acc), TABLE_TH); }
+    let cx0 = tx;
+    for (const c of cols.slice(0, -1)) { cx0 += c; hline(page, cx0, fy(page, ty), cx0, fy(page, tb), TABLE_TH); }
+    const sz = 8.1;
     const cen = (s: string, cx: number, base: number, size = sz) => text(page, s, cx - W(s, size) / 2, base, size);
-    cen("암석 생성 이후 경과 시간", tx + colA / 2, fy(page, ty + r1 / 2 + 3));
-    cen("2억 년", tx + colA + colB / 2, fy(page, ty + r1 / 2 + 3));
-    cen("3억 년", tx + colA + colB * 1.5, fy(page, ty + r1 / 2 + 3));
-    const fracCell = (top: string, bot: string, cx: number, mid: number, w: number) => {
-      cen(top, cx, fy(page, mid - 3));
-      cen(bot, cx, fy(page, mid + 9.5));
-      hline(page, cx - w / 2, fy(page, mid), cx + w / 2, fy(page, mid), 0.5);
+    const mid = (r: number) => ty + rows.slice(0, r).reduce((a, b) => a + b, 0) + rows[r] / 2;
+    cen("암석 생성 이후 경과 시간", tx + cols[0] / 2, fy(page, mid(0) + 2.7));
+    cen("2억 년", tx + cols[0] + cols[1] / 2, fy(page, mid(0) + 2.7));
+    cen("3억 년", tx + cols[0] + cols[1] + cols[2] / 2, fy(page, mid(0) + 2.7));
+    const fracCell = (top: string, bot: string, cx: number, m: number) => {
+      const w = Math.max(W(top, sz), W(bot, sz)) + 6;
+      cen(top, cx, fy(page, m - 3.3));
+      cen(bot, cx, fy(page, m + 9.2));
+      hline(page, cx - w / 2, fy(page, m), cx + w / 2, fy(page, m), 0.5);
     };
-    fracCell("X의 함량(%)", "Y의 함량(%)", tx + colA / 2, ty + r1 + r2 / 2, W("X의 함량(%)", sz) + 6);
-    fracCell("Y의 자원소 함량(%)", "Y의 함량(%)", tx + colA / 2, ty + r1 + r2 + r2 / 2, W("Y의 자원소 함량(%)", sz) + 6);
-    // 1/2, 1
-    const midX = tx + colA + colB / 2;
-    cen("1", midX, fy(page, ty + r1 + r2 / 2 - 3), 8.6);
-    cen("2", midX, fy(page, ty + r1 + r2 / 2 + 9.5), 8.6);
-    hline(page, midX - 5, fy(page, ty + r1 + r2 / 2), midX + 5, fy(page, ty + r1 + r2 / 2), 0.5);
-    cen("1", midX, fy(page, ty + r1 + r2 + r2 / 2 + 3), 8.6);
-    const c3 = tx + colA + colB * 1.5;
-    cen("( ㉠ )", c3, fy(page, ty + r1 + r2 / 2 + 3), 8.6);
-    cen("( ㉡ )", c3, fy(page, ty + r1 + r2 + r2 / 2 + 3), 8.6);
+    fracCell("X의 함량(%)", "Y의 함량(%)", tx + cols[0] / 2, mid(1));
+    fracCell("Y의 자원소 함량(%)", "Y의 함량(%)", tx + cols[0] / 2, mid(2));
+    const c2 = tx + cols[0] + cols[1] / 2;
+    cen("1", c2, fy(page, mid(1) - 3.3), 8.6);
+    cen("2", c2, fy(page, mid(1) + 9.2), 8.6);
+    hline(page, c2 - 5, fy(page, mid(1)), c2 + 5, fy(page, mid(1)), 0.5);
+    cen("1", c2, fy(page, mid(2) + 3), 8.6);
+    const c3 = tx + cols[0] + cols[1] + cols[2] / 2;
+    const circCell = (jm: string, cx: number, m: number) => {
+      text(page, "(", cx - 11, fy(page, m + 3), 8.6);
+      drawPiece(page, { t: "circ", s: jm }, cx - S * 0.5, fy(page, m + 3));
+      text(page, ")", cx + 7.5, fy(page, m + 3), 8.6);
+    };
+    circCell("㉠", c3, mid(1));
+    circCell("㉡", c3, mid(2));
 
-    y = Math.max(figTop + figH, tb) + 14;
+    const figBottom = Math.max(figTop + figH, tb);
     y = paragraph(
       page,
       toUnits(["이 자료에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은? (단, X의 자원소는 X가, Y의 자원소는 Y가 붕괴하여 생성되었으며, 자원소 함량(%)은 붕괴한 방사성 원소 함량과 같다. 방사성 원소의 함량(%)은 처음 양에 대한 남아 있는 양의 비율이다.) [3점]"]),
-      X0, y, TW, { first: S * 1.0, hang: 0 },
+      X0,
+      figBottom + 19.4 - PITCH / 2,
+      TW,
+      { first: 16 },
     );
-    y += 12;
-    // 보기 상자
-    const boxTop = y + 6;
-    const items: { label: string; units: Unit[] }[] = [
-      { label: "ㄱ.", units: toUnits(["단층 ", { t: "math", tex: "f\\!-\\!f'" }, "은 고생대에 형성되었다."]) },
+    const bot = boguBox(page, y - PITCH / 2 + 24, [
+      { label: "ㄱ.", units: toUnits(["단층 ", { t: "eq", tex: "f\\!-\\!f'" }, "은 고생대에 형성되었다."]) },
       { label: "ㄴ.", units: toUnits([{ t: "circ", s: "㉡" }, "은 ", { t: "circ", s: "㉠" }, "의 5배보다 크다."]) },
       {
         label: "ㄷ.",
@@ -217,84 +295,24 @@ export async function build() {
           "은 1.2보다 작다.",
         ]),
       },
-    ];
-    let by = boxTop + 11;
-    for (const it of items) {
-      text(page, it.label, X0 + 12, fy(page, by + S * 1.05), S);
-      by = paragraph(page, it.units, X0 + 12 + 22, by, TW - 24 - 22, { first: 0, hang: 0 });
-    }
-    const boxBot = by + 4;
-    const boxL = X0;
-    const boxR = X0 + TW;
-    const title = "<보 기>";
-    const tW = W(title, S * 1.05) + 6;
-    const cx = (boxL + boxR) / 2;
-    hline(page, boxL, fy(page, boxTop), cx - tW / 2, fy(page, boxTop), 0.7);
-    hline(page, cx + tW / 2, fy(page, boxTop), boxR, fy(page, boxTop), 0.7);
-    hline(page, boxL, fy(page, boxTop), boxL, fy(page, boxBot), 0.7);
-    hline(page, boxR, fy(page, boxTop), boxR, fy(page, boxBot), 0.7);
-    hline(page, boxL, fy(page, boxBot), boxR, fy(page, boxBot), 0.7);
-    text(page, title, cx - tW / 2 + 3, fy(page, boxTop + 3.2), S * 1.05);
-    // 선지
-    const ch = ["ㄱ", "ㄴ", "ㄷ", "ㄱ, ㄴ", "ㄴ, ㄷ"];
-    const cy = boxBot + 24;
-    const xs = [X0, X0 + 64, X0 + 129, X0 + 194, X0 + 259];
-    ch.forEach((c, i) => {
-      drawPiece(page, { t: "circ", s: "①②③④⑤"[i] }, xs[i], fy(page, cy));
-      text(page, c, xs[i] + S * 1.5, fy(page, cy), S);
-    });
+    ]);
+    choices(page, bot + 11.4, ["ㄱ", "ㄴ", "ㄷ", "ㄱ, ㄴ", "ㄴ, ㄷ"]);
   }
 
   // ================= 13번 =================
   {
     const page = pdf.addPage([PAGE_W, PAGE_H]);
-    let y = 30;
-    text(page, "13.", X0, fy(page, y + 12), 15, true, digits);
-    const NX = X0 + 28;
-    y = paragraph(
-      page,
-      toUnits(["그림은 A와 B 시기에 지표로부터 1.5km 부근에서 대기 대순환에 의해 부는 바람의 남북 방향의 평균 풍속을 나타낸 것이다."]),
-      NX, y - 2, TW - 28, { first: 0, hang: 0 },
-    );
-    y += 14;
-    drawWindPanels(page, X0, y, TW);
-    y += 128;
-    y = paragraph(
-      page,
-      toUnits(["이 자료에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은? [3점]"]),
-      X0, y, TW, { first: S * 1.0, hang: 0 },
-    );
-    y += 12;
-    const boxTop = y + 6;
-    const items: { label: string; units: Unit[] }[] = [
+    let y = 24;
+    y = header(page, "13.", y, toUnits(["그림은 A와 B 시기에 지표로부터 1.5km 부근에서 대기 대순환에 의해 부는 바람의 남북 방향의 평균 풍속을 나타낸 것이다."]));
+    const figTop = y - PITCH / 2 + 27;
+    drawWindPanels(page, X0, figTop, TW);
+    y = paragraph(page, toUnits(["이 자료에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은? [3점]"]), X0, figTop + 118 + 16, TW, { first: 16 });
+    const bot = boguBox(page, y - PITCH / 2 + 24, [
       { label: "ㄱ.", units: toUnits([{ t: "circ", s: "㉠" }, "의 지표 부근에서는 대기 대순환에 의한 공기의 발산이 나타난다."]) },
       { label: "ㄴ.", units: toUnits([{ t: "circ", s: "㉡" }, "의 해역에서 표층 해류의 아열대 순환은 시계 반대 방향으로 나타난다."]) },
       { label: "ㄷ.", units: toUnits(["지표 부근에서 해들리 순환의 상승 기류는 A가 B보다 저위도에서 나타난다."]) },
-    ];
-    let by = boxTop + 11;
-    for (const it of items) {
-      text(page, it.label, X0 + 12, fy(page, by + S * 1.05), S);
-      by = paragraph(page, it.units, X0 + 12 + 22, by, TW - 24 - 22, { first: 0, hang: 0 });
-    }
-    const boxBot = by + 4;
-    const boxL = X0;
-    const boxR = X0 + TW;
-    const title = "<보 기>";
-    const tW = W(title, S * 1.05) + 6;
-    const cx = (boxL + boxR) / 2;
-    hline(page, boxL, fy(page, boxTop), cx - tW / 2, fy(page, boxTop), 0.7);
-    hline(page, cx + tW / 2, fy(page, boxTop), boxR, fy(page, boxTop), 0.7);
-    hline(page, boxL, fy(page, boxTop), boxL, fy(page, boxBot), 0.7);
-    hline(page, boxR, fy(page, boxTop), boxR, fy(page, boxBot), 0.7);
-    hline(page, boxL, fy(page, boxBot), boxR, fy(page, boxBot), 0.7);
-    text(page, title, cx - tW / 2 + 3, fy(page, boxTop + 3.2), S * 1.05);
-    const ch = ["ㄱ", "ㄷ", "ㄱ, ㄴ", "ㄴ, ㄷ", "ㄱ, ㄴ, ㄷ"];
-    const cy = boxBot + 24;
-    const xs = [X0, X0 + 64, X0 + 129, X0 + 194, X0 + 259];
-    ch.forEach((c, i) => {
-      drawPiece(page, { t: "circ", s: "①②③④⑤"[i] }, xs[i], fy(page, cy));
-      text(page, c, xs[i] + S * 1.5, fy(page, cy), S);
-    });
+    ]);
+    choices(page, bot + 11.4, ["ㄱ", "ㄷ", "ㄱ, ㄴ", "ㄴ, ㄷ", "ㄱ, ㄴ, ㄷ"]);
   }
 
   // ----------- 도식 20: 지질 단면 -----------
@@ -337,8 +355,8 @@ export async function build() {
     poly2([[292, 86], [358, 86], [275, 330], [190, 330]], [0.78, 0.78, 0.78]);
     // 단층 f-f′
     hline(page, ...P(95, 84), ...P(420, 330), 2.2);
-    text(page, "f", ox + 90 * sx, fy(page, oy + 76 * sy + 0), 8, false);
-    text(page, "f′", ox + 420 * sx, fy(page, oy + 345 * sy), 8);
+    text(page, "f", ox + 90 * sx, fy(page, oy + 76 * sy + 0), 8, false, true);
+    text(page, "f′", ox + 420 * sx, fy(page, oy + 345 * sy), 8, false, true);
     text(page, "A", ox + 165 * sx, fy(page, oy + 215 * sy), 10);
     text(page, "B", ox + 305 * sx, fy(page, oy + 200 * sy), 10);
     // 나무
