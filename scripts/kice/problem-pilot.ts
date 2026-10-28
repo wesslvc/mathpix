@@ -4,10 +4,12 @@
  * 글꼴: 한글은 나눔명조(해설용 서브셋), 영문·숫자·수식은 Times 계열(Liberation Serif — 평가원 본문의 영문·수식이 Times 계열이다).
  * 실제 평가원 글꼴((한)신중명조 등)은 로그인 버킷에 있어 이 시험에서는 못 쓴다.
  */
-import { PDFDocument, PDFFont, PDFPage, rgb, pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, concatTransformationMatrix } from "pdf-lib";
+import { PDFDocument, PDFFont, PDFPage, PDFOperator, setFillingGrayscaleColor, rgb, pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, concatTransformationMatrix } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import fs from "fs";
 import { typesetEq, type EqBox } from "../../src/lib/kice/eqTypeset";
+import { traceLayers, type TracedLayers } from "../../src/lib/kice/traceFigure";
+import sharp from "sharp";
 
 const BLACK = rgb(0, 0, 0);
 type Piece =
@@ -25,7 +27,38 @@ const LATIN = 1.07; // 영문·숫자는 Times 라 한글과 높이를 맞추려
 const BOX_TH = 0.45; // 보기 상자 선
 const TABLE_TH = 0.5;
 
+
+/** 도식 사진(스캔)을 벡터로 딴다 — 회색 층 4단(흰 바탕 · 연한 회색 · 중간 · 짙은 회색 · 검정 잉크). */
+async function loadTrace(path: string, maxW = 2600): Promise<TracedLayers> {
+  const img = sharp(path).greyscale();
+  const meta = await img.metadata();
+  const scale = Math.min(1, maxW / (meta.width ?? maxW));
+  const { data, info } = await img.resize(Math.round((meta.width ?? maxW) * scale)).raw().toBuffer({ resolveWithObject: true });
+  return traceLayers(new Uint8Array(data), info.width, info.height, [
+    { th: 238, gray: 0.9 },
+    { th: 214, gray: 0.78 },
+    { th: 188, gray: 0.68 },
+    { th: 135, gray: 0 },
+  ], { blur: 0, tol: 0.5 });
+}
+function drawTrace(page: PDFPage, fig: TracedLayers, x: number, top: number, width: number) {
+  const k = width / fig.w;
+  const H = page.getHeight();
+  for (const layer of fig.layers) {
+    const ops = [pushGraphicsState(), setFillingGrayscaleColor(layer.gray)];
+    for (const p of layer.paths) {
+      p.forEach(([px, py], i) => ops.push(i ? lineTo(x + px * k, H - (top + py * k)) : moveTo(x + px * k, H - (top + py * k))));
+      ops.push(closePath());
+    }
+    ops.push(PDFOperator.of("f*" as never), popGraphicsState());
+    page.pushOperators(...ops);
+  }
+  return fig.h * k;
+}
+
 export async function build() {
+  const trace20 = process.env.FIG20 ? await loadTrace(process.env.FIG20) : null;
+  const trace13 = process.env.FIG13 ? await loadTrace(process.env.FIG13) : null;
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const font = await pdf.embedFont(fs.readFileSync("public/fonts/solution-serif.ttf"), { subset: false });
@@ -234,7 +267,8 @@ export async function build() {
     const figTop = y - PITCH / 2 + 20.5;
     const figW = 106;
     const figH = 75;
-    drawGeoSection(page, X0 + 0.5, figTop, figW, figH);
+    if (trace20) drawTrace(page, trace20, X0 + 0.5, figTop, figW);
+    else drawGeoSection(page, X0 + 0.5, figTop, figW, figH);
     // 표(원본 비율: 폭 199pt, 행 16.4 / 35 / 34pt, 열 114 / 42 / 43pt)
     const tx = X0 + figW + 19.5;
     const tw = 199;
@@ -305,8 +339,10 @@ export async function build() {
     let y = 24;
     y = header(page, "13.", y, toUnits(["그림은 A와 B 시기에 지표로부터 1.5km 부근에서 대기 대순환에 의해 부는 바람의 남북 방향의 평균 풍속을 나타낸 것이다."]));
     const figTop = y - PITCH / 2 + 27;
-    drawWindPanels(page, X0, figTop, TW);
-    y = paragraph(page, toUnits(["이 자료에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은? [3점]"]), X0, figTop + 118 + 16, TW, { first: 16 });
+    let figH13 = 118;
+    if (trace13) figH13 = drawTrace(page, trace13, X0 + 2, figTop - 6, TW - 4);
+    else drawWindPanels(page, X0, figTop, TW);
+    y = paragraph(page, toUnits(["이 자료에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은? [3점]"]), X0, figTop + figH13 + 10, TW, { first: 16 });
     const bot = boguBox(page, y - PITCH / 2 + 24, [
       { label: "ㄱ.", units: toUnits([{ t: "circ", s: "㉠" }, "의 지표 부근에서는 대기 대순환에 의한 공기의 발산이 나타난다."]) },
       { label: "ㄴ.", units: toUnits([{ t: "circ", s: "㉡" }, "의 해역에서 표층 해류의 아열대 순환은 시계 반대 방향으로 나타난다."]) },
