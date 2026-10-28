@@ -67,7 +67,7 @@ async function buildLine(admin: SupabaseClient, it: Item, cache: SrcCache): Prom
   if (it.stage === "plan") {
     const copies = Math.min(25, Math.max(1, Math.round(Number(p.copies) || 1)));
     const copy = Math.min(copies, Math.max(1, Math.round(Number(p.copy) || 1)));
-    const effort = ["low", "medium", "high", "xhigh", "max"].includes(String(p.effort)) ? String(p.effort) : process.env.VARIANT_PLAN_EFFORT?.trim() || "xhigh";
+    const effort = ["low", "medium", "high", "xhigh", "max"].includes(String(p.effort)) ? String(p.effort) : process.env.VARIANT_PLAN_EFFORT?.trim() || "high";
     return { body: solBody(VARIANT_PROMPT, [src], settingsTail(readLevel(p.level), readNovelty(p.novelty), copy, copies), effort) };
   }
   if (it.stage === "image") {

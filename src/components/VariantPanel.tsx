@@ -74,7 +74,7 @@ type Run = {
 
 const KIND_LABEL: Record<string, string> = { comparison: "대소 비교형", computation: "계산형", concept: "개념형" };
 /** 변형 생성은 고정이다: sol 설계 강도 high(최초 오류가 너무 많아 올렸다 — 2026-10-19), 그림 품질 auto(= 모델 기본, 서버에는 빈 값). 검수는 서버가 medium 으로 돌린다. */
-const SOL_EFFORT = "xhigh";
+const SOL_EFFORT = "high";
 
 type UnitRow = { id: string; catId: string; image_path: string; no: number | null; unit: string | null };
 /** 검색용 정규화 — 공백·가운뎃점·화살표·하이픈을 없애고 소문자로. */
