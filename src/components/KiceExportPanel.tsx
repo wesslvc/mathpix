@@ -13,6 +13,7 @@ import {
 } from "@/lib/kice/frames";
 import { loadKiceFonts } from "@/lib/kice/fonts";
 import { loadPng } from "@/lib/kice/loadPng";
+import { compactDiff } from "@/lib/variantOf";
 import { KICE_AREAS, KICE_SUBJECTS } from "@/lib/kiceSubjects";
 import { groupKoreanSets, type KoreanMeta } from "@/lib/koreanSet";
 import type { KoreanPassage, KoreanSetIn } from "@/lib/kice/koreanLayout";
@@ -315,7 +316,7 @@ export default function KiceExportPanel({ title, items, variantSet = false, auto
           source: items[i].source,
           answer: items[i].answer ?? undefined,
           text: items[i].solution!.trim(),
-          ...(items[i].diff ? { diff: items[i].diff } : {}),
+          ...(items[i].diff ? { diff: compactDiff(items[i].diff!) } : {}),
         }));
       }
 

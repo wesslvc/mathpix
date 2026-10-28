@@ -24,6 +24,35 @@ export type VariantDiff = {
   kept: string[];
 };
 
+/** 해설지에 싣기 좋게 **줄인다**: 첫 문장만, 길이 제한, 바뀐 값은 "원래 → 새" 만(이유는 뺀다). 저장된 긴 설명도 같이 짧아진다. */
+export function compactDiff(d: VariantDiff): VariantDiff {
+  const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trim()}…` : t);
+  const first = (t: string, n: number) => {
+    const s = t.replace(/\s+/g, " ").trim();
+    const m = /^(.+?[.。다요])(\s|$)/.exec(s);
+    let one = (m ? m[1] : s).replace(/[.。]$/, "");
+    if (one.length > n) {
+      const c = one.slice(0, n).lastIndexOf(","); // 쉼표에서 자연스럽게 끊는다
+      one = c > n * 0.5 ? one.slice(0, c) : one;
+    }
+    return cut(one, n);
+  };
+  const split = (t: string): [string, string] => {
+    const i = t.indexOf(": ");
+    return i > 0 && i < 24 ? [t.slice(0, i), t.slice(i + 2)] : ["", t];
+  };
+  return {
+    ...(d.summary ? { summary: first(d.summary.replace(/^.*?(?:하되|유지하고|그대로이고),\s*/, ""), 60) } : {}),
+    added: d.added.slice(0, 3).map((t) => first(t, 52)),
+    changes: d.changes.slice(0, 4).map((c) => {
+      const [lf, vf] = split(c.from);
+      const [lt, vt] = split(c.to);
+      return lf && lf === lt ? { from: cut(`${lf}: ${vf}`, 30), to: cut(vt, 16), why: "" } : { from: cut(c.from, 26), to: cut(c.to, 26), why: "" };
+    }),
+    kept: d.kept.slice(0, 2).map((t) => first(t, 40)),
+  };
+}
+
 const dstr = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
 export function readVariantDiff(raw: unknown): VariantDiff | undefined {
   if (!raw || typeof raw !== "object") return undefined;
