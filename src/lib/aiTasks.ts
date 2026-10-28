@@ -899,7 +899,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
       const { answer, type } = answerOf(plan.newAnswer);
       // **원본 사본**: 내보낼 때 "원본 → 변형들" 순서로 싣기 위해 원본 그림을 한 번 저장해 두고(같은 원본의 변형들이 나눠 쓴다)
       // 각 변형 행이 `box_range.variantOf` 로 가리킨다. 저장에 실패하면 변형은 그대로 두고 원본 연결만 없다.
-      let variantOf: { key: string; label: string; path: string; no?: number; answer?: string } | undefined;
+      let variantOf: { key: string; label: string; path: string; no?: number; answer?: string; diff?: unknown } | undefined;
       const srcKey = str(ctx.params.srcKey, 200);
       const srcParts = srcKey ? splitDataUrl(ctx.images[0]) : null;
       if (srcKey && srcParts) {
@@ -911,6 +911,7 @@ export const TASKS: Record<TaskKind, TaskDef> = {
             path: originPath,
             ...(Number.isFinite(no) && no > 0 ? { no } : {}),
             ...(plan.originalAnswer ? { answer: cleanAnswerText(String(plan.originalAnswer)) } : {}),
+            diff: { summary: plan.summary, added: plan.added, changes: plan.changes, kept: plan.traps },
           };
         }
       }

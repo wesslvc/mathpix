@@ -702,6 +702,9 @@ export default function VariantPanel() {
                     지적된 {libRows.filter((x) => x.review?.fixSuggestion).length}개 모두 수정
                   </button>
                 )}
+                <a className="rounded border border-slate-900 bg-slate-900 px-2 py-0.5 font-medium text-white no-underline" href={`/export?ids=${libId}&auto=solutions`}>
+                  해설지 PDF 바로 받기
+                </a>
                 <a className="underline" href={`/export?ids=${libId}`}>
                   PDF 내보내기 (해설 포함)
                 </a>

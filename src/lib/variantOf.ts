@@ -13,7 +13,33 @@ export type VariantOfInfo = {
   no?: number;
   /** 원본의 정답(sol 이 푼 것) — 없을 수 있다. */
   answer?: string;
+  /** 원본과 달라진 점(설계 때 sol 이 적은 것) — 해설지에 "원본과의 차이"로 싣는다. */
+  diff?: VariantDiff;
 };
+export type VariantDiff = {
+  summary?: string;
+  added: string[];
+  changes: { from: string; to: string; why: string }[];
+  /** 원본에서 그대로 살린 함정·틀. */
+  kept: string[];
+};
+
+const dstr = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
+export function readVariantDiff(raw: unknown): VariantDiff | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const d = raw as Record<string, unknown>;
+  const list = (v: unknown, n: number, len: number) => (Array.isArray(v) ? v.slice(0, n).map((x) => dstr(x, len)).filter(Boolean) : []);
+  const changes = Array.isArray(d.changes)
+    ? d.changes.slice(0, 20).map((c) => {
+        const r = (c ?? {}) as Record<string, unknown>;
+        return { from: dstr(r.from, 160), to: dstr(r.to, 160), why: dstr(r.why, 260) };
+      }).filter((c) => c.from || c.to)
+    : [];
+  const out: VariantDiff = { added: list(d.added, 8, 260), changes, kept: list(d.kept, 8, 260) };
+  const summary = dstr(d.summary, 400);
+  if (summary) out.summary = summary;
+  return out.added.length || out.changes.length || out.kept.length || out.summary ? out : undefined;
+}
 
 /**
  * 정답 칸에는 "③" · "③ ㄱ, ㄴ" · "⑤ (ㄱ, ㄷ)" 처럼 **고른 답만** 둔다. sol 이 뒤에 설명 문장을 붙여 오는 일이 있어(저장된 옛 값도 있다)
@@ -36,5 +62,6 @@ export function readVariantOf(raw: unknown): VariantOfInfo | null {
     imageUrl: cardUrl(v.path),
     ...(typeof v.no === "number" && v.no > 0 ? { no: v.no } : {}),
     ...(typeof v.answer === "string" && v.answer.trim() ? { answer: cleanAnswerText(v.answer) } : {}),
+    ...(readVariantDiff(v.diff) ? { diff: readVariantDiff(v.diff) } : {}),
   };
 }

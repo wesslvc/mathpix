@@ -266,6 +266,7 @@ async function saveProblem(admin: SupabaseClient, it: Item, notes: ReturnType<ty
                 path: it.src_path,
                 ...(Number.isFinite(no) && no > 0 ? { no } : {}),
                 ...(plan.originalAnswer ? { answer: cleanAnswerText(String(plan.originalAnswer)) } : {}),
+                diff: { summary: plan.summary, added: plan.added, changes: plan.changes, kept: plan.traps },
                 planEdits: plan.edits,
                 planKind: plan.kind,
               },

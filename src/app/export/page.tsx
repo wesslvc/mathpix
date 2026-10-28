@@ -68,9 +68,9 @@ type ExportRow = {
 export default async function ExportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ids?: string }>;
+  searchParams: Promise<{ ids?: string; auto?: string }>;
 }) {
-  const { ids } = await searchParams;
+  const { ids, auto } = await searchParams;
   const idList = (ids ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -283,6 +283,7 @@ export default async function ExportPage({
           examDate={examDate}
           problems={composerProblems}
           variantSet={(categories ?? []).some((c) => (c as { is_variant?: boolean }).is_variant)}
+          autoSolutions={auto === "solutions"}
         />
       )}
     </main>

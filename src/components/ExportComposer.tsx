@@ -90,6 +90,8 @@ type Props = {
   problems: ComposerProblem[];
   /** 변형문제 묶음을 내보내는 중 — 실모가 하나여도 번호를 새로 매기는 칸을 보인다. */
   variantSet?: boolean;
+  /** 열자마자 해설지 PDF 를 만들어 내려받는다(`/export?ids=…&auto=solutions`). */
+  autoSolutions?: boolean;
 };
 
 function formatDate(iso: string): string {
@@ -104,6 +106,7 @@ export default function ExportComposer({
   examDate,
   problems,
   variantSet = false,
+  autoSolutions = false,
 }: Props) {
   const [title, setTitle] = useState(defaultTitle);
   const [order, setOrder] = useState<ComposerProblem[]>(problems);
@@ -407,6 +410,7 @@ export default function ExportComposer({
 
       <KiceExportPanel
         variantSet={variantSet}
+        autoSolutions={autoSolutions}
         title={title}
         items={printList.map((problem, index) => ({
           id: problem.id,
@@ -420,6 +424,7 @@ export default function ExportComposer({
           source: problem.source,
           korean: problem.korean ?? null,
           solution: problem.solution,
+          diff: problem.original ? undefined : problem.variantOf?.diff,
         }))}
       />
     </div>

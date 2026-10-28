@@ -683,7 +683,7 @@ export type KiceSpec = {
    * **해설지.** 정답표 뒤에 두 단으로 흘려 붙인다(변형문제의 해설 텍스트). 비어 있으면 붙이지 않는다.
    * 글은 평문이고 줄 단위로 문단이 나뉜다. 정답표만 따로 뽑을 때(`answerPage`)는 쓰지 않는다.
    */
-  solutions?: { label: string; source?: string; answer?: string; text: string; /** 수식 렌더러로 그린 해설 그림(PNG). 있으면 글 대신 이걸 놓는다. */ png?: Uint8Array }[];
+  solutions?: { label: string; source?: string; answer?: string; text: string; /** 원본과 달라진 점(변형문제) — 해설 위에 상자로 싣는다. */ diff?: { summary?: string; added: string[]; changes: { from: string; to: string; why: string }[]; kept: string[] }; /** 수식 렌더러로 그린 해설 그림(PNG). 있으면 글 대신 이걸 놓는다. */ png?: Uint8Array }[];
   /**
    * 그리다 생긴 문제를 알린다(글꼴에 없는 글자 등). 던지지 않는 이유는
    * **나머지는 멀쩡히 나오기 때문**이다 — PDF 는 주되 무엇이 어긋났는지
@@ -1239,9 +1239,11 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
   }
   // 해설을 **벡터로** 조판한다(수식은 MathJax 윤곽, 글은 해설 글꼴). 사진 찍기가 없어 수백 편도 몇 초다.
   type VecPlaced =
-    | { t: "text"; x: number; y: number; text: string; size: number; bold?: boolean; gray?: number }
+    | { t: "text"; x: number; y: number; text: string; size: number; bold?: boolean; gray?: number; white?: boolean }
     | { t: "math"; x: number; y: number; size: number; d: string }
-    | { t: "rule"; x: number; y: number; w: number };
+    | { t: "rule"; x: number; y: number; w: number; thick?: number; gray?: number }
+    | { t: "rrect"; x: number; y: number; w: number; h: number; r: number; fill?: number; stroke?: number }
+    | { t: "bar"; x: number; y: number; w: number; h: number; gray: number };
   const vecPages: VecPlaced[][] = [];
   if (useVec) {
     const { layoutSolutionText } = await import("./solutionLayout");
@@ -1264,30 +1266,94 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       }
       y = cols[colIdx].top;
     };
-    // 첫 제목
-    const titleH = S * 2;
-    cur.push({ t: "text", x: cols[0].x + colW / 2 - measureSol("해 설", S * 1.3, true) / 2, y: y + S * 1.4, text: "해 설", size: S * 1.3, bold: true });
-    y += titleH + 4;
+    // 첫 제목 — 가운데 글씨 + 위아래 가는 선
+    const tw = measureSol("해 설", S * 1.5, true);
+    cur.push({ t: "rule", x: cols[0].x, y: y + 1, w: colW, thick: 1.6, gray: 0.13 });
+    cur.push({ t: "text", x: cols[0].x + colW / 2 - tw / 2, y: y + S * 2.1, text: "해 설", size: S * 1.5, bold: true });
+    cur.push({ t: "rule", x: cols[0].x, y: y + S * 2.9, w: colW, thick: 0.5, gray: 0.5 });
+    y += S * 3.6;
     const multi = new Set(spec.solutions!.map((x) => (x.source ?? "").trim()).filter(Boolean)).size >= 2;
+    const PAD = 7;
     for (const sol of spec.solutions!) {
       const no = (/\d+/.exec(sol.label) ?? [])[0];
+      const isOrig = /원본/.test(sol.label);
       const lines = layoutSolutionText(sol.text, colW, S, measureSol);
-      const headH = no ? S * 2.3 + 8 : S * 1.6 + 4;
+      // 원본과의 차이 상자(문장은 줄바꿈해 높이를 먼저 잰다)
+      type DiffRow = { tag: string; lines: ReturnType<typeof layoutSolutionText> };
+      const rows: DiffRow[] = [];
+      const TAGW = S * 2.6;
+      const bodyW = colW - PAD * 2 - 4 - TAGW;
+      const d = sol.diff;
+      if (d) {
+        if (d.summary) rows.push({ tag: "", lines: layoutSolutionText(d.summary, colW - PAD * 2 - 4, S * 0.92, measureSol) });
+        for (const t of d.added) rows.push({ tag: "추가", lines: layoutSolutionText(t, bodyW, S * 0.92, measureSol) });
+        for (const c of d.changes) {
+          const txt = `${c.from && c.to ? `${c.from} → ${c.to}` : c.from || c.to}${c.why ? ` — ${c.why}` : ""}`;
+          rows.push({ tag: "변경", lines: layoutSolutionText(txt, bodyW, S * 0.92, measureSol) });
+        }
+        for (const t of d.kept) rows.push({ tag: "유지", lines: layoutSolutionText(t, bodyW, S * 0.92, measureSol) });
+      }
+      const rowH = (r: DiffRow) => r.lines.reduce((a, l) => a + l.h, 0) + 2.5;
+      const diffH = rows.length ? PAD * 2 + S * 1.5 + rows.reduce((a, r) => a + rowH(r), 0) : 0;
+      const BADGE = S * 2.5;
+      const headH = BADGE + 9;
       const firstH = lines[0]?.h ?? 0;
-      if (y + headH + firstH > cols[colIdx].bottom && y > cols[colIdx].top) advance();
-      const x0 = cols[colIdx].x;
-      cur.push({ t: "rule", x: x0, y: y + 1, w: colW });
-      if (no) {
-        const big = S * 2.1;
-        cur.push({ t: "text", x: x0, y: y + 4 + big * 0.85, text: no, size: big, bold: true });
-        const nx = x0 + measureSol(no, big, true) + 8;
-        const src = multi ? (sol.source ?? "").trim() : (sol.source ?? "").trim();
-        if (src) cur.push({ t: "text", x: nx, y: y + 4 + S * 0.8, text: src, size: S * 0.72, gray: 0.45 });
-        cur.push({ t: "text", x: nx, y: y + 4 + big * 0.85, text: sol.answer?.trim() ? `정답 ${sol.answer.trim()}` : "", size: S * 0.95, bold: true });
+      const colH = cols[colIdx].bottom - cols[colIdx].top;
+      const need = headH + Math.min(diffH, colH * 0.7) + S * 1.6 + firstH;
+      if (y + need > cols[colIdx].bottom && y > cols[colIdx].top) advance();
+      let x0 = cols[colIdx].x;
+      // 머리: 번호 배지(검정 둥근 네모 + 흰 숫자) · 출처 · 정답 알약
+      const label = no ?? "";
+      const bw = Math.max(BADGE, measureSol(label, S * 1.45, true) + 12);
+      if (isOrig) {
+        cur.push({ t: "rrect", x: x0, y, w: BADGE + 16, h: BADGE, r: 4, stroke: 1 });
+        cur.push({ t: "text", x: x0 + 8 + (BADGE - measureSol("원본", S * 0.95, true)) / 2, y: y + BADGE * 0.66, text: "원본", size: S * 0.95, bold: true });
       } else {
-        cur.push({ t: "text", x: x0, y: y + 4 + S, text: `${sol.label}${sol.answer?.trim() ? `  ·  정답 ${sol.answer.trim()}` : ""}`, size: S, bold: true });
+        cur.push({ t: "rrect", x: x0, y, w: bw, h: BADGE, r: 4, fill: 0.12 });
+        cur.push({ t: "text", x: x0 + (bw - measureSol(label, S * 1.45, true)) / 2, y: y + BADGE * 0.72, text: label, size: S * 1.45, bold: true, white: true });
+      }
+      const src = (sol.source ?? "").trim();
+      const nx = x0 + (isOrig ? BADGE + 16 : bw) + 8;
+      if (src) cur.push({ t: "text", x: nx, y: y + BADGE * 0.66, text: src, size: S * 0.78, gray: 0.42 });
+      const ans = sol.answer?.trim() ? `정답  ${sol.answer.trim()}` : "";
+      if (ans) {
+        const aw = measureSol(ans, S * 1.0, true) + 16;
+        cur.push({ t: "rrect", x: x0 + colW - aw, y: y + BADGE * 0.12, w: aw, h: BADGE * 0.76, r: BADGE * 0.38, stroke: 1.1 });
+        cur.push({ t: "text", x: x0 + colW - aw + 8, y: y + BADGE * 0.66, text: ans, size: S * 1.0, bold: true });
       }
       y += headH;
+      // 원본과의 차이
+      if (rows.length) {
+        const bx = x0;
+        const top = y;
+        let yy = y + PAD + S * 0.95;
+        cur.push({ t: "bar", x: bx, y: top, w: colW, h: diffH, gray: 0.95 });
+        cur.push({ t: "bar", x: bx, y: top, w: 2.6, h: diffH, gray: 0.15 });
+        cur.push({ t: "text", x: bx + PAD + 3, y: yy, text: "원본과의 차이", size: S * 0.95, bold: true });
+        yy += S * 0.65;
+        for (const r of rows) {
+          let ly = yy;
+          const tx = bx + PAD + 4 + (r.tag ? TAGW : 0);
+          if (r.tag) cur.push({ t: "text", x: bx + PAD + 4, y: ly + (r.lines[0]?.h ?? S) * 0.78, text: r.tag, size: S * 0.78, bold: true, gray: 0.3 });
+          for (const l of r.lines) {
+            for (const it of l.items) {
+              if (it.t === "text") cur.push({ t: "text", x: tx + it.x, y: ly + it.base, text: it.text, size: S * 0.92, ...(r.tag ? {} : { gray: 0.25 }) });
+              else cur.push({ t: "math", x: tx + it.x, y: ly + it.base, size: S * 0.92, d: it.box.d });
+            }
+            ly += l.h;
+          }
+          yy += rowH(r);
+        }
+        y = top + diffH + 9;
+      }
+      // 풀이
+      if (lines.length) {
+        if (y + S * 1.6 + firstH > cols[colIdx].bottom) advance();
+        x0 = cols[colIdx].x;
+        cur.push({ t: "text", x: x0, y: y + S * 0.9, text: "풀이", size: S * 0.8, bold: true, gray: 0.42 });
+        cur.push({ t: "rule", x: x0 + measureSol("풀이", S * 0.8, true) + 6, y: y + S * 0.62, w: colW - measureSol("풀이", S * 0.8, true) - 6, thick: 0.4, gray: 0.7 });
+        y += S * 1.5;
+      }
       for (const line of lines) {
         if (y + line.h > cols[colIdx].bottom) {
           advance();
@@ -1299,7 +1365,9 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
         }
         y += line.h;
       }
-      y += 8;
+      y += 7;
+      if (y < cols[colIdx].bottom - 6) cur.push({ t: "rule", x: cols[colIdx].x, y: y, w: colW, thick: 0.35, gray: 0.8 });
+      y += 11;
     }
   }
   // 정답표·해설지도 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
@@ -1416,12 +1484,26 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     await drawFrame(page, frameFor(spec.frames, pageNo), { pageNo: pageNo - (spec.solutionsOnly ? 1 : 0), total });
     for (const it of list) {
       if (it.t === "rule") {
-        page.drawLine({ start: { x: it.x, y: flip(it.y) }, end: { x: it.x + it.w, y: flip(it.y) }, thickness: 0.9, color: rgb(0.13, 0.13, 0.13) });
+        const g = it.gray ?? 0.13;
+        page.drawLine({ start: { x: it.x, y: flip(it.y) }, end: { x: it.x + it.w, y: flip(it.y) }, thickness: it.thick ?? 0.9, color: rgb(g, g, g) });
+      } else if (it.t === "bar") {
+        page.drawRectangle({ x: it.x, y: flip(it.y + it.h), width: it.w, height: it.h, color: rgb(it.gray, it.gray, it.gray) });
+      } else if (it.t === "rrect") {
+        const r = Math.min(it.r, it.w / 2, it.h / 2);
+        const k = r * 0.5523;
+        const { w, h } = it;
+        const path = `M ${r} 0 L ${w - r} 0 C ${w - r + k} 0 ${w} ${r - k} ${w} ${r} L ${w} ${h - r} C ${w} ${h - r + k} ${w - r + k} ${h} ${w - r} ${h} L ${r} ${h} C ${r - k} ${h} 0 ${h - r + k} 0 ${h - r} L 0 ${r} C 0 ${r - k} ${r - k} 0 ${r} 0 Z`;
+        page.drawSvgPath(path, {
+          x: it.x,
+          y: flip(it.y),
+          ...(it.fill != null ? { color: rgb(it.fill, it.fill, it.fill) } : { color: undefined }),
+          ...(it.stroke ? { borderColor: rgb(0.13, 0.13, 0.13), borderWidth: it.stroke } : { borderWidth: 0 }),
+        });
       } else if (it.t === "math") {
         page.drawSvgPath(it.d, { x: it.x, y: flip(it.y), scale: it.size, color: rgb(0, 0, 0), borderWidth: 0 });
       } else if (it.text.trim()) {
         const f = await solFontForText(BODY_FONT, it.text);
-        const col = it.gray != null ? rgb(it.gray, it.gray, it.gray) : rgb(0, 0, 0);
+        const col = it.white ? rgb(1, 1, 1) : it.gray != null ? rgb(it.gray, it.gray, it.gray) : rgb(0, 0, 0);
         for (const dx of it.bold ? [0, 0.3] : [0]) {
           page.drawText(f.text, { x: it.x + dx, y: flip(it.y), size: it.size, font: f.font, color: col });
         }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LAYOUT, type KiceSpec, type NumberCover } from "@/lib/kice/pdf";
 import { buildKicePdfOffThread } from "@/lib/kice/pdfOffThread";
 import { findNumberBox, type NumberMiss } from "@/lib/kice/numberCover";
@@ -94,6 +94,8 @@ export type KiceItem = {
   korean?: KoreanMeta | null;
   /** 변형문제 해설(텍스트). */
   solution?: string;
+  /** 원본과 달라진 점 — 해설지에 상자로 싣는다. */
+  diff?: import("@/lib/variantOf").VariantDiff;
 };
 
 type Props = {
@@ -101,9 +103,11 @@ type Props = {
   items: KiceItem[];
   /** 변형문제 묶음이면 실모가 하나여도 번호 새로 매기기를 보인다(기본 켜짐). */
   variantSet?: boolean;
+  /** 열자마자 해설지 PDF 를 한 번 만들어 내려받는다. */
+  autoSolutions?: boolean;
 };
 
-export default function KiceExportPanel({ title, items, variantSet = false }: Props) {
+export default function KiceExportPanel({ title, items, variantSet = false, autoSolutions = false }: Props) {
   // 국어 세트로 넣은 문제가 있으면 국어로 뽑으려는 것이 분명하다.
   const hasKorean = items.some((it) => it.korean);
   const [area, setArea] = useState<KiceArea>(hasKorean ? "국어" : "사회탐구");
@@ -255,6 +259,14 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
     return { order, covers, newNo, missed };
   }
 
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (!autoSolutions || autoRan.current || !hasSolutions) return;
+    autoRan.current = true;
+    void generate(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSolutions, hasSolutions]);
+
   async function generate(solutionsOnly = false) {
     setBusy(true);
     setError(null);
@@ -293,7 +305,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
       // 해설은 PDF 조립 전에 한 편씩(동시에 캡처하면 아이패드에서 멈춘다) 그림으로 만든다. 한 편이 25초 넘게 걸리거나 연달아 둘
       // 실패하면 나머지는 글로 넣는다.
       let solutionList:
-        | { label: string; source?: string; answer?: string; text: string; png?: Uint8Array }[]
+        | { label: string; source?: string; answer?: string; text: string; png?: Uint8Array; diff?: import("@/lib/variantOf").VariantDiff }[]
         | undefined;
       if (hasSolutions && (showSolutions || solutionsOnly)) {
         const idxs = (renum ? renum.order : items.map((_, i) => i)).filter((i) => (items[i].solution ?? "").trim() !== "");
@@ -303,6 +315,7 @@ export default function KiceExportPanel({ title, items, variantSet = false }: Pr
           source: items[i].source,
           answer: items[i].answer ?? undefined,
           text: items[i].solution!.trim(),
+          ...(items[i].diff ? { diff: items[i].diff } : {}),
         }));
       }
 
