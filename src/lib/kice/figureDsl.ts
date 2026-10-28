@@ -44,13 +44,32 @@ export type Blob = {
   /** 모서리 날카로움 지수(2=가우스, 클수록 평평한 꼭대기·가파른 옆면). */
   p?: number;
 };
+/**
+ * 띠 영역 — 영(0)선으로 갈린 한 구간. 왼쪽·오른쪽 경계를 곡선(아래→위 점들 `[u,v]`)으로 주고 크기 `a`(부호 = 남풍 + / 북풍 −)를 주면, 경계에서
+ * 0 이고 구간 가운데로 갈수록 커지는 장이 되어 **경계를 따라 겹겹이 도는 등치선**이 나온다(실제 등속선 단면의 모양).
+ */
+export type Region = {
+  left: Pt[];
+  right: Pt[];
+  a: number;
+  /** 이 높이(v)에서 장이 0 으로 사라진다(기본 1.15). */
+  vtop?: number;
+  /** 가로 방향 프로필 지수(작을수록 평평한 가운데·가파른 가장자리, 기본 0.8). */
+  q?: number;
+  /** 세로 감쇠 지수(기본 0.7). */
+  r?: number;
+  /** 가장 센 곳의 가로 위치(0=왼쪽 경계, 1=오른쪽 경계, 기본 0.5). */
+  peak?: number;
+};
 export type ContourSpec = {
   type: "contour";
+  /** 띠 영역(경계 곡선 방식). `blobs` 와 함께 쓸 수 있다. */
+  regions?: Region[];
   /** 가로:세로 비. 기본 2.65. */
   aspect?: number;
   /** 등치선 간격과 범위(예: step 1, min −5, max 3). 0 선은 늘 굵게. */
   levels: { step: number; min: number; max: number };
-  blobs: Blob[];
+  blobs?: Blob[];
   /** 영(0) 라벨 위치(흰 바탕 숫자). 안 주면 굵은 선에 자동으로 몇 개. */
   zeroLabels?: [number, number][];
   /** 값 라벨(예: 극값 근처 "2"). */
@@ -134,13 +153,56 @@ function contourFigure(sp: ContourSpec, K = 1): FigureOps {
     ops.push({ t: "rect", x: X(s.u0), y: Y(1), w: (s.u1 - s.u0) * pwi, h: ph, fill: 0.8 });
   }
   // 장
-  const f = (u: number, v: number) =>
-    sp.blobs.reduce((acc, b) => {
-      const du = (u - b.u - (b.lean ?? 0) * (v - b.v)) / b.su;
-      const dv = (v - b.v) / b.sv;
-      const e = b.p ?? 2;
-      return acc + b.a * Math.exp(-(Math.abs(du) ** e) - Math.abs(dv) ** 2);
-    }, 0);
+  const NX = 320;
+  const NY = 130;
+  const curveAt = (c: Pt[], v: number): number => {
+    // c: 아래→위(v 증가) 점들. v 에서 u 를 선형 보간한다(범위 밖은 끝값).
+    if (v <= c[0][1]) return c[0][0];
+    for (let i = 1; i < c.length; i++) {
+      if (v <= c[i][1]) {
+        const [u0, v0] = c[i - 1];
+        const [u1, v1] = c[i];
+        return v1 === v0 ? u1 : u0 + ((u1 - u0) * (v - v0)) / (v1 - v0);
+      }
+    }
+    return c[c.length - 1][0];
+  };
+  const grid = new Float32Array((NX + 1) * (NY + 1));
+  const blobs = sp.blobs ?? [];
+  const regions = sp.regions ?? [];
+  const rInfo = regions.map((r) => {
+    let hw = 0;
+    for (let j = 0; j <= 40; j++) hw = Math.max(hw, (curveAt(r.right, j / 40) - curveAt(r.left, j / 40)) / 2);
+    return hw || 0.01;
+  });
+  for (let j = 0; j <= NY; j++) {
+    const v = j / NY;
+    for (let i = 0; i <= NX; i++) {
+      const u = i / NX;
+      let val = 0;
+      for (const b of blobs) {
+        const du = (u - b.u - (b.lean ?? 0) * (v - b.v)) / b.su;
+        const dv = (v - b.v) / b.sv;
+        val += b.a * Math.exp(-(Math.abs(du) ** (b.p ?? 2)) - Math.abs(dv) ** 2);
+      }
+      regions.forEach((r, k) => {
+        const L = curveAt(r.left, v);
+        const R = curveAt(r.right, v);
+        if (u <= L || u >= R) return;
+        const width = R - L;
+        const t = (u - L) / width; // 0..1
+        const pk = r.peak ?? 0.5;
+        const shape = t < pk ? t / pk : (1 - t) / (1 - pk);
+        const prof = Math.pow(Math.max(0, shape), r.q ?? 0.8) * Math.min(1, width / (2 * rInfo[k]));
+        const vt = r.vtop ?? 1.15;
+        // 바닥값을 둬서 높은 곳에서도 부호가 유지되게 한다(0 이 되면 가짜 영(0)선이 가로로 생긴다).
+        const vert = 0.03 + 0.97 * Math.pow(Math.max(0, 1 - v / vt), r.r ?? 0.7);
+        val += r.a * prof * vert;
+      });
+      grid[j * (NX + 1) + i] = val;
+    }
+  }
+  const f = (u: number, v: number) => grid[Math.round(v * NY) * (NX + 1) + Math.round(u * NX)];
   const levels: number[] = [];
   for (let L = sp.levels.min; L <= sp.levels.max + 1e-9; L += sp.levels.step) levels.push(Math.round(L * 1e6) / 1e6);
   // contourLines 의 두 번째 좌표는 아래→위(v) 로 읽는다 — 격자 행 j 가 v = j/ny.
@@ -148,7 +210,7 @@ function contourFigure(sp: ContourSpec, K = 1): FigureOps {
   const lineOps: FigOp[] = [];
   const zeroPaths: Poly[] = [];
   for (const L of levels) {
-    for (const line of contourLines(f, L, 320, 130)) {
+    for (const line of contourLines(f, L, NX, NY)) {
       const pts = smooth(line, 1).map(([u, v]) => [X(u), Y(v)] as Pt);
       if (L === 0) {
         lineOps.push({ t: "line", pts, th: (TH_ZERO * K) });
