@@ -141,7 +141,7 @@ const shift = (ops: FigOp[], dx: number, dy: number): FigOp[] =>
   });
 
 /** 폴리라인을 부드럽게(Chaikin 한 번) 만든다. */
-const smooth = (p: Poly, n = 1): Poly => {
+export const smooth = (p: Poly, n = 1): Poly => {
   let cur = p;
   for (let k = 0; k < n; k++) {
     const out: Poly = [];
@@ -342,7 +342,7 @@ function bbox(pts: Pt[]) {
 }
 
 /** 무늬를 격자에 깔아 다각형으로 자른다(group clip 이 그린다). 격자는 도식 좌표에 고정이라 이웃 몸체와 이어진다. */
-function patternOps(kind: PatternKind, pts: Pt[]): FigOp[] {
+export function patternOps(kind: PatternKind, pts: Pt[]): FigOp[] {
   const b = bbox(pts);
   const ops: FigOp[] = [];
   const rnd = (i: number, j: number) => {
@@ -412,7 +412,7 @@ function rowFigure(sp: RowSpec): FigureOps {
 }
 
 /** 다각형을 직선의 한쪽 반평면으로 자른다(Sutherland–Hodgman). `side` = 직선 (a→b) 의 왼쪽(+1)/오른쪽(−1). */
-function clipHalf(poly: Pt[], a: Pt, b: Pt, side: 1 | -1): Pt[] {
+export function clipHalf(poly: Pt[], a: Pt, b: Pt, side: 1 | -1): Pt[] {
   const sd = (p: Pt) => side * ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]));
   const out: Pt[] = [];
   for (let i = 0; i < poly.length; i++) {

@@ -6,11 +6,13 @@ import { PDFDocument, PDFPage, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import fs from "fs";
 import { renderFigure, type FigureSpec } from "../../src/lib/kice/figureDsl";
+import { runFigureScript } from "../../src/lib/kice/figureScript";
 import { drawFigure, type FigText } from "../../src/lib/kice/figureDraw";
 
 (async () => {
-  const spec = JSON.parse(fs.readFileSync(process.env.SPEC!, "utf8")) as FigureSpec;
-  const fig = renderFigure(spec);
+  const fig = process.env.SCRIPT
+    ? runFigureScript(fs.readFileSync(process.env.SCRIPT, "utf8"))
+    : renderFigure(JSON.parse(fs.readFileSync(process.env.SPEC!, "utf8")) as FigureSpec);
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   const font = await pdf.embedFont(fs.readFileSync("public/fonts/solution-serif.ttf"), { subset: false });
