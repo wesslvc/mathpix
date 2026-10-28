@@ -10,7 +10,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { harvest } from "./gradeExam";
-import { figureImageModelIds, patchPrompt, pickOutputSize, readUsage, sniffImageMime } from "./figureImageGen";
+import { figureImageModelIds, patchPrompt, variantPrompt, pickOutputSize, readUsage, sniffImageMime } from "./figureImageGen";
 import { loadAsDataUrl, removeStored, splitDataUrl, storeBytes } from "./figureRun";
 import { compositePatch } from "./patchComposite";
 import { cardUrl } from "./cardUrl";
@@ -29,7 +29,7 @@ export type Op = {
   problem_id: string;
   step: OpStep | "done" | "error";
   batch_id: string | null;
-  state: { notes?: AutoNote[]; lastFail?: string; tries?: number; quality?: string };
+  state: { notes?: AutoNote[]; lastFail?: string; tries?: number; quality?: string; mode?: "regen" | "patch" };
   cost_krw: number;
 };
 type Prob = { id: string; image_path: string | null; answer: string | null; box_range: Record<string, unknown> };
@@ -103,7 +103,7 @@ async function buildLine(admin: SupabaseClient, op: Op, c: Cache): Promise<{ url
   const cur = await imgOf(admin, c, prob.image_path);
   if (!cur) return { error: "문제 그림을 읽지 못했어요." };
   const br = prob.box_range;
-  const vo = (br.variantOf ?? {}) as { path?: string };
+  const vo = (br.variantOf ?? {}) as { path?: string; planEdits?: string };
   const orig = typeof vo.path === "string" && vo.path ? await imgOf(admin, c, vo.path) : null;
   const sol = typeof br.solution === "string" ? br.solution.slice(0, 3000) : "";
   const reg = `\n\nREGISTERED ANSWER: ${String(prob.answer ?? "")}\nSOLUTION\n${sol}`;
@@ -117,6 +117,26 @@ async function buildLine(admin: SupabaseClient, op: Op, c: Cache): Promise<{ url
     if (!notes.length) return { error: "고칠 지적이 없어요." };
     const model = figureImageModelIds()[0];
     if (!model) return { error: "그림 모델이 없어요." };
+    const quality = ["low", "medium", "high"].includes(String(op.state.quality)) ? String(op.state.quality) : FIX_QUALITY();
+    const planEdits = typeof (vo as { planEdits?: string }).planEdits === "string" ? (vo as { planEdits?: string }).planEdits! : "";
+    if (op.state.mode === "regen" && orig && planEdits) {
+      // 완전 새로 만들기: 원본 + 설계 편집 지시 + 앞 시도의 지적(되풀이하지 말 것)
+      const oparts = splitDataUrl(orig);
+      const ometa = oparts ? await sharp(oparts.bytes).metadata() : null;
+      return {
+        url: "/v1/images/edits",
+        body: {
+          model,
+          images: [{ image_url: orig }],
+          prompt: variantPrompt(`${planEdits}\n\nA PREVIOUS ATTEMPT OF THIS SAME EDIT HAD THESE DEFECTS — do them right this time:\n${numbered(notes)}${failNote}`),
+          n: 1,
+          size: pickOutputSize(ometa?.width, ometa?.height) ?? "auto",
+          quality,
+          output_format: "jpeg",
+          output_compression: 90,
+        },
+      };
+    }
     const parts = splitDataUrl(cur);
     const meta = parts ? await sharp(parts.bytes).metadata() : null;
     return {
@@ -127,7 +147,7 @@ async function buildLine(admin: SupabaseClient, op: Op, c: Cache): Promise<{ url
         prompt: patchPrompt(numbered(notes) + failNote, true),
         n: 1,
         size: pickOutputSize(meta?.width, meta?.height) ?? "auto",
-        quality: ["low", "medium", "high"].includes(String(op.state.quality)) ? String(op.state.quality) : FIX_QUALITY(),
+        quality,
         output_format: "jpeg",
         output_compression: 90,
       },
@@ -256,7 +276,8 @@ async function handleDraw(admin: SupabaseClient, op: Op, body: Record<string, un
   if (!b64) return failOp(admin, op, "그림 결과가 비어 있어요.");
   let bytes: Buffer = Buffer.from(b64, "base64");
   let mime = sniffImageMime(b64);
-  try {
+  const regen = op.state.mode === "regen";
+  if (!regen) try {
     const curUrl = await imgOf(admin, c, prob.image_path as string);
     const parts = curUrl ? splitDataUrl(curUrl) : null;
     const comp = parts ? await compositePatch(parts.bytes, bytes) : null;
@@ -267,7 +288,7 @@ async function handleDraw(admin: SupabaseClient, op: Op, body: Record<string, un
   } catch {
     /* 합성 실패 — 편집 결과 그대로 */
   }
-  if (!(await adoptImage(admin, op, prob, bytes, mime))) return failOp(admin, op, "수정한 그림을 저장하지 못했어요.");
+  if (!(await adoptImage(admin, op, prob, bytes, mime, regen ? { variantOf: { ...((prob.box_range.variantOf ?? {}) as object), regen: true } } : undefined))) return failOp(admin, op, "수정한 그림을 저장하지 못했어요.");
   await toCheck(admin, op, krw);
 }
 

@@ -59,8 +59,11 @@ export async function POST(req: NextRequest) {
     } else if (action === "approve") {
       if (st?.status !== "needs_approval" || !st.notes?.length) continue;
       // 수정은 늘 그림 편집으로 끝까지 간다(SVG 덮개는 쓰지 않는다). 처음 만들 때(medium) 한 번에 안 된 것이니 고칠 때는 high.
+      // 첫 수정은 원본에서 설계대로 **완전히 새로 만든다**(+지적 사항 회피). 그다음부터는 지금 그림에 high 로 일부분만 고친다.
+      const vo = (br.variantOf ?? {}) as { path?: string; planEdits?: string; regen?: boolean };
+      const mode = vo.path && vo.planEdits && !vo.regen ? "regen" : "patch";
       const quality = "high";
-      if (!(await enqueueOp(admin, user.id, row.id, "draw", { notes: st.notes, quality, ...(st.lastFail ? { lastFail: st.lastFail } : {}) }))) continue;
+      if (!(await enqueueOp(admin, user.id, row.id, "draw", { notes: st.notes, quality, mode, ...(st.lastFail ? { lastFail: st.lastFail } : {}) }))) continue;
       await admin.from("problems").update({ box_range: { ...br, variantAuto: { ...st, status: "fixing", at: now } } }).eq("id", row.id).eq("user_id", user.id);
       done++;
     } else {
