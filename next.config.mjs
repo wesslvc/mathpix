@@ -46,7 +46,10 @@ const nextConfig = {
   // `subset-font`(글꼴 올리기 관리자 페이지가 서버에서 쓴다)가 harfbuzz의
   // WASM 빌드를 불러온다. webpack5는 기본으로 WASM을 못 읽어서 켜 준다 —
   // 서버 전용 라우트에서만 쓰이므로 브라우저 번들에는 영향이 없다.
-  webpack: (config) => {
+  webpack: (config, { webpack }) => {
+    // mathjax-full 의 version.js 는 PACKAGE_VERSION 이 없으면 eval("require") 로 package.json 을 읽는다 — 브라우저·워커에서
+    // "require is not defined" 로 죽어 해설 수식(PDF)이 통째로 안 나왔다. 값을 박아 그 길을 아예 안 탄다.
+    config.plugins.push(new webpack.DefinePlugin({ PACKAGE_VERSION: JSON.stringify("3.2.1") }));
     config.experiments = { ...config.experiments, asyncWebAssembly: true };
     // pdfjs-dist 가 Node 용으로 불러 보는 선택 의존성 — 브라우저 번들에는 필요 없다.
     config.resolve.alias = { ...config.resolve.alias, canvas: false };
