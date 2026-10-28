@@ -1197,7 +1197,7 @@ export default function VariantPanel() {
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">
           문제당 {variantList.length}개 ({levels.length}×{novelties.length}옵션 × {copies}개)
         </span>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">sol 설계 medium · 그림 medium (고정)</span>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">sol 설계 high · 최초 그림 medium · 수정 high (고정)</span>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           저장할 묶음
           <input
