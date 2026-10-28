@@ -10,6 +10,8 @@ import fs from "fs";
 import { typesetEq, type EqBox } from "../../src/lib/kice/eqTypeset";
 import { traceLayers, type TracedLayers } from "../../src/lib/kice/traceFigure";
 import sharp from "sharp";
+import { renderFigure, type FigureSpec } from "../../src/lib/kice/figureDsl";
+import { drawFigure, type FigText } from "../../src/lib/kice/figureDraw";
 
 const BLACK = rgb(0, 0, 0);
 type Piece =
@@ -58,6 +60,8 @@ function drawTrace(page: PDFPage, fig: TracedLayers, x: number, top: number, wid
 
 export async function build() {
   const trace20 = process.env.FIG20 ? await loadTrace(process.env.FIG20) : null;
+  const dsl20 = process.env.SPEC20 ? (JSON.parse(fs.readFileSync(process.env.SPEC20, "utf8")) as FigureSpec) : null;
+  const dsl13 = process.env.SPEC13 ? (JSON.parse(fs.readFileSync(process.env.SPEC13, "utf8")) as FigureSpec) : null;
   const trace13 = process.env.FIG13 ? await loadTrace(process.env.FIG13) : null;
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
@@ -66,7 +70,7 @@ export async function build() {
   const lat = await pdf.embedFont(fs.readFileSync("public/fonts/eq-serif.ttf"), { subset: false });
   const latI = await pdf.embedFont(fs.readFileSync("public/fonts/eq-serif-italic.ttf"), { subset: false });
 
-  const isLatin = (c: string) => /[\u0020-\u007e\u00b0-\u00ff\u2032\u2212\u00d7\u00f7\u2264\u2265\u2260\u2192\u03b1-\u03c9\u0391-\u03a9]/.test(c);
+  const isLatin = (c: string) => /[\u0020-\u007e\u00b0-\u00ff\u2032\u2191\u2212\u00d7\u00f7\u2264\u2265\u2260\u2192\u03b1-\u03c9\u0391-\u03a9]/.test(c);
   const wc = (c: string, size: number, italic = false) => {
     try {
       if (isLatin(c)) return (italic ? latI : lat).widthOfTextAtSize(c, size * LATIN) ;
@@ -145,6 +149,24 @@ export async function build() {
       const jm = "㉠㉡㉢㉣".indexOf(p.s) >= 0 ? "ㄱㄴㄷㄹ"["㉠㉡㉢㉣".indexOf(p.s)] : p.s;
       withScale(page, x + d / 2 + 0.3 - font.widthOfTextAtSize(jm, S * 0.74) * 0.5 * HSCALE, base + S * 0.34 - S * 0.25, HSCALE, () => page.drawText(jm, { x: 0, y: 0, size: S * 0.74, font, color: BLACK }));
     }
+  };
+
+  // 도식 DSL 의 글자·원문자를 이 파일의 글꼴로 그린다.
+  const figText: FigText = {
+    text(page, s, x, y, size, o) {
+      if (o.vertical) {
+        let cy = y + (s.length * size * 1.1) / 2;
+        for (const c of s) { text(page, c, x - wc(c, size) / 2, cy - size, size); cy -= size * 1.12; }
+        return;
+      }
+      const w = W(s, size, o.italic);
+      text(page, s, o.anchor === "c" ? x - w / 2 : o.anchor === "r" ? x - w : x, y, size, o.bold, o.italic);
+    },
+    circ(page, ch, cx, cy, size) {
+      page.drawCircle({ x: cx, y: cy, size: size * 0.55, borderWidth: Math.max(0.35, size * 0.05), borderColor: BLACK });
+      const jm = "㉠㉡㉢㉣".indexOf(ch) >= 0 ? "ㄱㄴㄷㄹ"["㉠㉡㉢㉣".indexOf(ch)] : ch;
+      withScale(page, cx - font.widthOfTextAtSize(jm, size * 0.72) * 0.5 * HSCALE, cy - size * 0.26, HSCALE, () => page.drawText(jm, { x: 0, y: 0, size: size * 0.72, font, color: BLACK }));
+    },
   };
 
   // ---- 문단: 어절 단위 줄바꿈 + 양쪽 맞춤 ----
@@ -267,7 +289,8 @@ export async function build() {
     const figTop = y - PITCH / 2 + 20.5;
     const figW = 106;
     const figH = 75;
-    if (trace20) drawTrace(page, trace20, X0 + 0.5, figTop, figW);
+    if (dsl20) drawFigure(page, renderFigure(dsl20), X0 + 0.5, figTop, figW + 8, figText);
+    else if (trace20) drawTrace(page, trace20, X0 + 0.5, figTop, figW);
     else drawGeoSection(page, X0 + 0.5, figTop, figW, figH);
     // 표(원본 비율: 폭 199pt, 행 16.4 / 35 / 34pt, 열 114 / 42 / 43pt)
     const tx = X0 + figW + 19.5;
@@ -340,7 +363,8 @@ export async function build() {
     y = header(page, "13.", y, toUnits(["그림은 A와 B 시기에 지표로부터 1.5km 부근에서 대기 대순환에 의해 부는 바람의 남북 방향의 평균 풍속을 나타낸 것이다."]));
     const figTop = y - PITCH / 2 + 27;
     let figH13 = 118;
-    if (trace13) figH13 = drawTrace(page, trace13, X0 + 2, figTop - 6, TW - 4);
+    if (dsl13) figH13 = drawFigure(page, renderFigure(dsl13), X0 + 2, figTop - 6, TW - 4, figText);
+    else if (trace13) figH13 = drawTrace(page, trace13, X0 + 2, figTop - 6, TW - 4);
     else drawWindPanels(page, X0, figTop, TW);
     y = paragraph(page, toUnits(["이 자료에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은? [3점]"]), X0, figTop + figH13 + 10, TW, { first: 16 });
     const bot = boguBox(page, y - PITCH / 2 + 24, [
