@@ -1293,8 +1293,8 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
         }
         for (const t of d.kept) rows.push({ tag: "유지", lines: layoutSolutionText(t, bodyW, S * 0.92, measureSol) });
       }
-      const rowH = (r: DiffRow) => r.lines.reduce((a, l) => a + l.h, 0) + 2.5;
-      const diffH = rows.length ? PAD * 2 + S * 1.5 + rows.reduce((a, r) => a + rowH(r), 0) : 0;
+      const rowH = (r: DiffRow) => r.lines.reduce((a, l, i) => a + l.h - (i === r.lines.length - 1 ? S * 0.92 * 0.7 : 0), 0) + 4;
+      const diffH = rows.length ? PAD * 2 + S * 1.25 + rows.reduce((a, r) => a + rowH(r), 0) - 2 : 0;
       const BADGE = S * 2.5;
       const headH = BADGE + 9;
       const firstH = lines[0]?.h ?? 0;
@@ -1307,19 +1307,19 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
       const bw = Math.max(BADGE, measureSol(label, S * 1.45, true) + 12);
       if (isOrig) {
         cur.push({ t: "rrect", x: x0, y, w: BADGE + 16, h: BADGE, r: 4, stroke: 1 });
-        cur.push({ t: "text", x: x0 + 8 + (BADGE - measureSol("원본", S * 0.95, true)) / 2, y: y + BADGE * 0.66, text: "원본", size: S * 0.95, bold: true });
+        cur.push({ t: "text", x: x0 + 8 + (BADGE - measureSol("원본", S * 0.95, true)) / 2, y: y + BADGE / 2 + S * 0.95 * 0.34, text: "원본", size: S * 0.95, bold: true });
       } else {
         cur.push({ t: "rrect", x: x0, y, w: bw, h: BADGE, r: 4, fill: 0.12 });
-        cur.push({ t: "text", x: x0 + (bw - measureSol(label, S * 1.45, true)) / 2, y: y + BADGE * 0.72, text: label, size: S * 1.45, bold: true, white: true });
+        cur.push({ t: "text", x: x0 + (bw - measureSol(label, S * 1.45, true)) / 2, y: y + BADGE / 2 + S * 1.45 * 0.35, text: label, size: S * 1.45, bold: true, white: true });
       }
       const src = (sol.source ?? "").trim();
       const nx = x0 + (isOrig ? BADGE + 16 : bw) + 8;
-      if (src) cur.push({ t: "text", x: nx, y: y + BADGE * 0.66, text: src, size: S * 0.78, gray: 0.42 });
+      if (src) cur.push({ t: "text", x: nx, y: y + BADGE / 2 + S * 0.78 * 0.34, text: src, size: S * 0.78, gray: 0.42 });
       const ans = sol.answer?.trim() ? `정답  ${sol.answer.trim()}` : "";
       if (ans) {
         const aw = measureSol(ans, S * 1.0, true) + 16;
         cur.push({ t: "rrect", x: x0 + colW - aw, y: y + BADGE * 0.12, w: aw, h: BADGE * 0.76, r: BADGE * 0.38, stroke: 1.1 });
-        cur.push({ t: "text", x: x0 + colW - aw + 8, y: y + BADGE * 0.66, text: ans, size: S * 1.0, bold: true });
+        cur.push({ t: "text", x: x0 + colW - aw + 8, y: y + BADGE / 2 + S * 1.0 * 0.34, text: ans, size: S * 1.0, bold: true });
       }
       y += headH;
       // 원본과의 차이

@@ -127,7 +127,7 @@ export function layoutSolutionText(
       let x = center ? Math.max(0, (width - total) / 2) : 0;
       const items: SolItem[] = [];
       for (const u of row) {
-        if (u.k === "m") items.push({ t: "math", x: x + size * MATH_PAD, base: above, box: u.box });
+        if (u.k === "m") items.push({ t: "math", x: x + (items.length ? size * MATH_PAD : 0), base: above, box: u.box });
         else if (!u.space) items.push({ t: "text", x, base: above, text: u.text });
         x += u.w;
       }
