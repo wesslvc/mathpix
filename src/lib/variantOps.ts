@@ -20,14 +20,14 @@ import { RECHECK_PROMPT, readNotes, type AutoNote, type VariantAutoState } from 
 import { BATCH_DISCOUNT, CHUNK, createBatch, lineError, logSolCost, s, solBody, uploadJsonl, type OutLine } from "./variantBatchCore";
 import sharp from "sharp";
 
-export type OpStep = "check" | "draw";
+export type OpStep = "check" | "draw" | "align";
 export type Op = {
   id: string;
   user_id: string;
   problem_id: string;
   step: OpStep | "done" | "error";
   batch_id: string | null;
-  state: { notes?: AutoNote[]; lastFail?: string; tries?: number; quality?: string; mode?: "regen" | "patch" };
+  state: { notes?: AutoNote[]; lastFail?: string; tries?: number; quality?: string; mode?: "regen" | "patch"; /** 정답 위치를 옮길 때: 지금 그림의 정답 번호 → 목표 번호. */ align?: { from: number; to: number } };
   cost_krw: number;
 };
 type Prob = { id: string; image_path: string | null; answer: string | null; box_range: Record<string, unknown> };
@@ -44,6 +44,10 @@ const FIX_QUALITY = () => {
   const q = process.env.VARIANT_FIX_QUALITY?.trim() || "medium";
   return ["low", "medium", "high"].includes(q) ? q : "medium";
 };
+
+/** **정답 맞추기(align)**: 수정 전에 sol 이 지금 그림을 직접 풀어 정답을 확인하고, 정답이 목표 번호에 오도록 선지를 정확히 재배치하는 지시를 만든다. */
+const ALIGN_PROMPT = `task: you are a Korean exam editor. the image is a printed multiple-choice exam question (a variant). (1) read the printed choices ①–⑤ EXACTLY (every character). (2) SOLVE the question yourself from the picture and decide which printed choice is correct and whether exactly one is. (3) the correct choice must end up at the TARGET circled number given after the image: move the correct choice's text there and shift the other choices' texts so that every other choice keeps its relative order (a rotation: the correct text takes the target slot; texts between the target slot and the old slot move one place toward the old slot; the rest stay). do NOT change any choice's wording, the <보기> statements, the stem or the figure. (4) write "edits" as a numbered list for an image editor that sees only this picture: one item per circled position that changes, exactly: "선지 ② 자리: 현재 'ㄴ' → 새로 'ㄱ, ㄷ'" (all five positions that change; say "나머지 선지는 그대로"). also say that the five choices stay on one line in order without overlapping.
+reply ONLY JSON: {"printed_choices":["① …","② …","③ …","④ …","⑤ …"],"solved_answer":"푼 정답 번호(① 형태)","unique":true|false,"matches_registered":true|false,"note":"한국어 한 문장 — 푼 정답이 등록된 정답과 다르거나 정답이 유일하지 않으면 무엇이 문제인지, 아니면 빈 문자열","edits":"번호 목록 전체(한국어)"}`;
 
 type Cache = { probs: Map<string, Promise<Prob | null>>; imgs: Map<string, Promise<string | null>> };
 const newCache = (): Cache => ({ probs: new Map(), imgs: new Map() });
@@ -107,6 +111,13 @@ async function buildLine(admin: SupabaseClient, op: Op, c: Cache): Promise<{ url
   const notes = op.state.notes ?? [];
   const failNote = op.state.lastFail ? `\nPREVIOUS ATTEMPT FAILED: ${op.state.lastFail}` : "";
 
+  if (op.step === "align") {
+    const al = op.state.align;
+    if (!al) return { error: "정답 위치 정보가 없어요." };
+    const circ = ["①", "②", "③", "④", "⑤"];
+    const tail = `\n\nREGISTERED ANSWER OF THE PICTURE AS IT IS NOW: ${circ[al.from - 1] ?? al.from}\nTARGET CIRCLED NUMBER FOR THE CORRECT CHOICE: ${circ[al.to - 1] ?? al.to}\nSOLUTION\n${sol}`;
+    return { url: "/v1/responses", body: solBody(ALIGN_PROMPT, [cur], tail, "high") };
+  }
   if (op.step === "check") {
     return { url: "/v1/responses", body: solBody(RECHECK_PROMPT(!!orig), orig ? [orig, cur] : [cur], reg, RECHECK_EFFORT()) };
   }
@@ -157,7 +168,7 @@ async function buildLine(admin: SupabaseClient, op: Op, c: Cache): Promise<{ url
 export async function submitOps(admin: SupabaseClient, deadline: number): Promise<number> {
   let submitted = 0;
   const cache = newCache();
-  for (const step of ["check", "draw"] as OpStep[]) {
+  for (const step of ["check", "draw", "align"] as OpStep[]) {
     for (;;) {
       if (Date.now() > deadline) return submitted;
       const { data } = await admin.from("variant_ops").select(COLS).eq("step", step).is("batch_id", null).order("created_at").limit(CHUNK);
@@ -282,6 +293,24 @@ async function handleDraw(admin: SupabaseClient, op: Op, body: Record<string, un
   await toCheck(admin, op, krw);
 }
 
+/** 정답 맞추기 결과 → 정확한 선지 재배치 지시를 지적 목록에 넣고 곧바로 수정(draw)으로 넘어간다. */
+async function handleAlign(admin: SupabaseClient, op: Op, body: Record<string, unknown>, krw: number) {
+  const obj = parseJsonObject(harvest(body)) as { solved_answer?: unknown; unique?: unknown; matches_registered?: unknown; note?: unknown; edits?: unknown } | null;
+  const al = op.state.align;
+  const edits = s(obj?.edits, 3000);
+  if (!obj || !al || edits.length < 10) return failOp(admin, op, "정답 맞추기 결과를 읽지 못했어요.");
+  const note = s(obj.note, 300);
+  const base = (op.state.notes ?? []).filter((n) => !/정답 위치를 ①|정답이 .* 쏠려/.test(`${n.problem} ${n.fix}`));
+  const notes: AutoNote[] = [...base];
+  if (obj.unique === false || obj.matches_registered === false) notes.push({ problem: `sol 이 직접 푼 결과: ${s(obj.solved_answer, 20)}${note ? ` — ${note}` : ""}`.slice(0, 300), fix: "" });
+  if (al.from !== al.to) notes.push({ problem: `정답 위치를 ${["①", "②", "③", "④", "⑤"][al.to - 1] ?? al.to}로 조정`, fix: edits });
+  await admin
+    .from("variant_ops")
+    .update({ step: "draw", batch_id: null, state: { ...op.state, notes, align: undefined, tries: 0 }, cost_krw: op.cost_krw + krw, error: null, updated_at: new Date().toISOString() })
+    .eq("id", op.id);
+  await setAuto(admin, op.user_id, op.problem_id, (br) => ({ ...br, variantAuto: { ...(autoOf(br) ?? { round: 0 }), status: "fixing", notes, at: new Date().toISOString() } }));
+}
+
 /** 끝난 batch 의 결과 줄들을 작업마다 처리한다. */
 export async function handleOpBatch(admin: SupabaseClient, batchId: string, status: string, byId: Map<string, OutLine>) {
   const { data } = await admin.from("variant_ops").select(COLS).eq("batch_id", batchId);
@@ -313,8 +342,9 @@ export async function handleOpBatch(admin: SupabaseClient, batchId: string, stat
       if (op.step === "draw") {
         await handleDraw(admin, op, body, prob, cache);
       } else {
-        const krw = await logSolCost(admin, { userId: op.user_id, jobId: op.id }, "sol 변형 재검수 (batch)", body);
+        const krw = await logSolCost(admin, { userId: op.user_id, jobId: op.id }, op.step === "align" ? "sol 변형 정답 맞추기 (batch)" : "sol 변형 재검수 (batch)", body);
         if (op.step === "check") await handleCheck(admin, op, body, prob, krw);
+        else if (op.step === "align") await handleAlign(admin, op, body, krw);
       }
     } catch (err) {
       await failOp(admin, op, err instanceof Error ? err.message : "처리 실패").catch(() => undefined);
@@ -324,7 +354,7 @@ export async function handleOpBatch(admin: SupabaseClient, batchId: string, stat
 
 /** 작업 만들기(라우트·최초 생성이 쓴다). 같은 문제에 끝나지 않은 작업이 있으면 만들지 않는다. */
 export async function enqueueOp(admin: SupabaseClient, userId: string, problemId: string, step: OpStep, state: Op["state"] = {}): Promise<boolean> {
-  const { data: open } = await admin.from("variant_ops").select("id").eq("problem_id", problemId).in("step", ["check", "draw"]).limit(1);
+  const { data: open } = await admin.from("variant_ops").select("id").eq("problem_id", problemId).in("step", ["check", "draw", "align"]).limit(1);
   if (open?.length) return false;
   const { error } = await admin.from("variant_ops").insert({ user_id: userId, problem_id: problemId, step, state });
   return !error;
