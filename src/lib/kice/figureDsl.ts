@@ -89,9 +89,9 @@ export type StrataSpec = {
   type: "strata";
   aspect?: number;
   /** 층·암체 다각형(0~1 좌표, y 아래가 +). 그리는 순서대로 덮는다. */
-  bodies: { pts: Pt[]; fill?: number; pattern?: PatternKind; outline?: boolean }[];
+  bodies: { pts: Pt[]; fill?: number; pattern?: PatternKind; outline?: boolean; over?: boolean }[];
   /** 선(지층 경계·단층 등). `thick` 은 단층 같은 굵은 선. */
-  lines?: { pts: Pt[]; thick?: boolean; dashed?: boolean }[];
+  lines?: { pts: Pt[]; thick?: boolean; dashed?: boolean; over?: boolean }[];
   /** 위쪽 지표 기호. */
   trees?: number[];
   /** 라벨(이탤릭이면 변수 f·f′). */
@@ -121,7 +121,7 @@ export type SectionSpec = {
   /** 단층: 위→아래 두 점. `throw` 는 오른쪽 블록이 내려간 양(v). */
   faults?: { from: Pt; to: Pt; throw?: number }[];
   /** 관입암(암맥): 바닥 폭 [u0,u1] 와 꼭대기 폭 [u0,u1]. 꼭대기는 부정합면에서 멈춘다(`topV` 를 주면 그 높이). */
-  intrusions?: { bottom: [number, number]; top: [number, number]; pattern?: PatternKind; fill?: number; topV?: number }[];
+  intrusions?: { bottom?: [number, number]; top?: [number, number]; pts?: Pt[]; pattern?: PatternKind; fill?: number; topV?: number }[];
   trees?: number[];
   labels?: StrataSpec["labels"];
 };
@@ -255,7 +255,7 @@ function contourFigure(sp: ContourSpec, K = 1): FigureOps {
   ops.push({ t: "poly", pts: [[X(0), Y(1)], [X(1), Y(1)], [X(1), Y(0)], [X(0), Y(0)]], stroke: (TH_FRAME * K), close: true });
   // 단위 상자
   if (sp.unitBox) {
-    const bw = (sp.unitBox.length * 24 + 24) * K;
+    const bw = (sp.unitBox.length * 17 + 26) * K;
     ops.push({ t: "rect", x: X(0), y: Y(1), w: bw, h: 56 * K, fill: 1, stroke: 1.8 * K });
     ops.push({ t: "text", x: X(0) + 12 * K, y: Y(1) + 40 * K, s: sp.unitBox, size: 32 * K });
   }
@@ -305,20 +305,20 @@ function strataFigure(sp: StrataSpec): FigureOps {
   const pad = { t: 70, b: 120 };
   const P = (p: Pt): Pt => [p[0] * w, pad.t + p[1] * h];
   const ops: FigOp[] = [];
-  const bodyOps: FigOp[] = [];
   const frame: Pt[] = [[0, pad.t], [w, pad.t], [w, pad.t + h], [0, pad.t + h]];
-  for (const b of sp.bodies) {
-    const pts = b.pts.map(P);
-    bodyOps.push({ t: "poly", pts, fill: b.fill ?? 1, stroke: b.outline ? 1.6 : undefined, close: true });
-    if (b.pattern && b.pattern !== "none") {
-      const inner = patternOps(b.pattern, pts);
-      bodyOps.push({ t: "group", clip: pts, ops: inner });
+  const bodyOps = (over: boolean): FigOp[] => {
+    const out: FigOp[] = [];
+    for (const b of sp.bodies.filter((x) => !!x.over === over)) {
+      const pts = b.pts.map(P);
+      out.push({ t: "poly", pts, fill: b.fill ?? 1, stroke: b.outline ? 1.6 : undefined, close: true });
+      if (b.pattern && b.pattern !== "none") out.push({ t: "group", clip: pts, ops: patternOps(b.pattern, pts) });
     }
-  }
-  ops.push({ t: "group", clip: frame, ops: bodyOps });
-  const lineOps: FigOp[] = [];
-  for (const l of sp.lines ?? []) lineOps.push({ t: "line", pts: smooth(l.pts.map(P), 0), th: l.thick ? 6.5 : 1.7, ...(l.dashed ? { dash: DASH } : {}) });
-  ops.push({ t: "group", clip: frame, ops: lineOps });
+    return out;
+  };
+  const lineOps = (over: boolean): FigOp[] =>
+    (sp.lines ?? []).filter((l) => !!l.over === over).map((l): FigOp => ({ t: "line", pts: smooth(l.pts.map(P), 0), th: l.thick ? 6.5 : 1.7, ...(l.dashed ? { dash: DASH } : {}) }));
+  // 그리는 차례: 아래 몸체 → 아래 선(지층 경계) → 위 몸체(관입암) → 위 선(단층 등)
+  ops.push({ t: "group", clip: frame, ops: [...bodyOps(false), ...lineOps(false), ...bodyOps(true), ...lineOps(true)] });
   for (const t of sp.trees ?? []) {
     const x = t * w;
     const y = pad.t - 6;
@@ -471,14 +471,19 @@ function sectionToStrata(sp: SectionSpec): StrataSpec {
     });
   }
   lines.push({ pts: Array.from({ length: N + 1 }, (_, i) => [i / N, unc(i / N)] as Pt) });
-  for (const f of faults) lines.push({ pts: [f.from, f.to], thick: true });
+  for (const f of faults) lines.push({ pts: [f.from, f.to], thick: true, over: true });
   for (const it of sp.intrusions ?? []) {
     const topY = (u: number) => it.topV ?? unc(u);
+    // `pts` 가 있으면 그 다각형(덩어리 관입암), 없으면 바닥 폭·꼭대기 폭의 암맥.
+    const pts: Pt[] =
+      it.pts ??
+      [[it.bottom![0], 1], [it.bottom![1], 1], [it.top![1], topY(it.top![1])], [it.top![0], topY(it.top![0])]];
     bodies.push({
-      pts: [[it.bottom[0], 1], [it.bottom[1], 1], [it.top[1], topY(it.top[1])], [it.top[0], topY(it.top[0])]],
+      pts,
       fill: it.fill ?? 1,
       pattern: it.pattern ?? "plus",
       outline: true,
+      over: true,
     });
   }
   return { type: "strata", aspect: sp.aspect, bodies, lines, trees: sp.trees, labels: sp.labels };
