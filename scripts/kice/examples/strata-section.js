@@ -15,9 +15,9 @@ const shapes = [];                                   // 아래→위 그리기 �
 const rect = (y0, y1) => [[-400, y0], [1300, y0], [1300, y1], [-400, y1]];
 const add = (poly, fill, pat, po) => shapes.push({ poly: poly.map(P), fill, pat, po });
 // 1) 퇴적: 아래가 오래된 층 (지층 누중의 법칙) — 벽돌(석회암) → 밝은 회색 → 점(사암) → 짙은 회색(셰일)
-add(rect(588, 900), 1, "brick", { hgt: 40.27, wid: 92 });
+add(rect(588, 900), 1, "limestone");
 add(rect(455, 588), 0.9);
-add(rect(340, 455), 1, "dots", { sx: 27, r: 2.4 });
+add(rect(340, 455), 1, "dots", { sx: 25.8, r: 2.4 });
 add(rect(-100, 340), 0.7);
 // 2) 관입: 퇴적층을 뚫고 올라온 A (관입 관계의 법칙 — 층보다 젊다)
 add([[186, 589], [190, 560], [197, 510], [203, 470], [208, 440], [215, 410], [225, 380], [238, 355], [250, 332], [262, 312], [278, 296], [308, 257], [321, 238], [345, 222], [400, 198], [470, 188], [540, 203], [600, 248], [630, 300], [630, 360], [610, 420], [580, 455], [588, 480], [596, 520], [604, 555], [612, 572], [626, 589], [626, 700], [186, 700]], 1, "plus", { sx: 54, sy: 48, size: 11.5, th: 2.7, jit: 0.6 });
@@ -39,16 +39,22 @@ const slip = 150, ux = -0.8 * slip, uy = -0.6 * slip;   // 단층면과 나란�
 const B0 = [[542, 159], [530, 200], [520, 230], [500, 250], [497, 270], [480, 300], [450, 350], [430, 380], [400, 430], [390, 470], [375, 530], [350, 565], [340, 589], [487, 589], [497, 550], [505, 530], [510, 500], [520, 475], [530, 450], [537, 430], [550, 410], [575, 365], [590, 325], [600, 300], [625, 250], [645, 190], [662, 152], [620, 167], [580, 166]];
 const faultLine = [P(FA), P(FB)];
 fig.clip(frame, () => {
-  const draw = sh => { fig.poly(sh.poly, { fill: sh.fill }); if (sh.pat) fig.pattern(sh.pat, sh.poly, sh.po); fig.poly(sh.poly, { stroke: 1.7 }); };
+  const draw = sh => { fig.poly(sh.poly, { fill: sh.fill }); if (sh.pat === "limestone") {
+      // 석회암: 층리(가로 줄눈) 세 켜 + 켜마다 어긋난 세로 줄눈 (쌓은 위치 = 오른쪽 블록의 맨 위 498)
+      fig.clip(sh.poly, () => {
+        for (const y of [522, 560]) fig.line([P([-50, y]), P([900, y])], { th: 1.5 });
+        [[498, 522, [654, 730, 807]], [522, 560, [692, 769]], [560, 589, [731, 807]]].forEach(([y0, y1, js]) => js.forEach(x => fig.line([P([x, y0]), P([x, y1])], { th: 1.5 })));
+      });
+    } else if (sh.pat) fig.pattern(sh.pat, sh.poly, sh.po); fig.poly(sh.poly, { stroke: 1.7 }); };
   shapes.forEach(draw);
   fig.line(faultLine, { th: 7.2 });                  // 단층선(암맥보다 오래되었다)
   const B = B0.map(P);
-  fig.poly(B, { fill: 0.78 }); fig.pattern("v", B, { sx: 52, sy: 46, size: 8, th: 2, jit: 0.8 }); fig.poly(B, { stroke: 1.8 });
+  fig.poly(B, { fill: 0.78 }); fig.pattern("v", B, { sx: 40, sy: 38, size: 8, th: 2, jit: 0.8 }); fig.poly(B, { stroke: 1.8 });
   // 5) 침식 → 부정합면 위에 수평 퇴적(부정합의 법칙: 아래 지층·관입암·단층·암맥을 모두 덮는다)
   const hz = [...XS.map(x => P([x, surf(x)])), ...XS.slice().reverse().map(x => P([x, unc(x)]))];
   fig.poly([...XS.map(x => P([x, -60])), ...XS.slice().reverse().map(x => P([x, surf(x) - 0.5]))], { fill: 1 });   // 지표 위는 비운다
   fig.poly(hz, { fill: 1 });
-  fig.clip(hz, () => { for (let k = 0; k < 9; k++) fig.line([P([0, 67 + 10.6 * k]), P([900, 67 + 10.6 * k])], { th: 1.5 }); });
+  fig.clip(hz, () => { for (let k = 0; k < 9; k++) fig.line([P([0, 67.5 + 10.9 * k]), P([900, 67.5 + 10.9 * k])], { th: 1.5 }); });
   fig.line(XS.map(x => P([x, unc(x)])), { th: 1.9 });
 });
 fig.line([P([14, 57]), P([14, 589]), P([842, 589]), P([842, 58])], { th: 3.2 });
@@ -66,6 +72,7 @@ for (const [x, h] of [[44, 44], [272, 44], [382, 34], [516, 28], [550, 40], [704
 // 라벨 (흰 후광)
 const halo = (x, y, w, h) => fig.rect(...P([x - w / 2, y - h / 2]), w * S, h * S, { fill: 1 });
 halo(190, 118, 44, 76); fig.text(...P([190, 135]), "f", { size: 92, italic: true, anchor: "c" });
-fig.text(...P([764, 655]), "f′", { size: 86, italic: true, anchor: "c" });
+fig.text(...P([764, 655]), "f", { size: 86, italic: true, anchor: "c" });
+fig.line([P([783, 618]), P([779, 633])], { th: 4.5 });   // 프라임(′) 부호
 fig.text(...P([330, 424]), "A", { size: 112, anchor: "c" });
 halo(513, 346, 60, 70); fig.text(...P([513, 372]), "B", { size: 112, anchor: "c" });
