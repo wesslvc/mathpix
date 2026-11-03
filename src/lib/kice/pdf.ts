@@ -679,6 +679,8 @@ export type KiceSpec = {
   answerPage?: { no: number; total: number };
   /** 해설지만 뽑는다(문제·정답표 없이). 해설은 본문 틀 2쪽부터 놓되 쪽번호는 1부터 찍는다. */
   solutionsOnly?: boolean;
+  /** 쪽수가 홀수면 맨 뒤에 빈 쪽(틀만) 하나를 더해 **전체 쪽수를 짝수로** 맞춘다(양면 인쇄용). 국어는 계획이 알아서 짝홀을 맞추므로 쓰지 않는다. */
+  evenPages?: boolean;
   /**
    * **해설지.** 정답표 뒤에 두 단으로 흘려 붙인다(변형문제의 해설 텍스트). 비어 있으면 붙이지 않는다.
    * 글은 평문이고 줄 단위로 문단이 나뉜다. 정답표만 따로 뽑을 때(`answerPage`)는 쓰지 않는다.
@@ -1371,7 +1373,9 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     }
   }
   // 정답표·해설지도 쪽을 차지하므로 전체 쪽수에 넣는다(쪽번호 상자에 찍힌다).
-  const total = pages.length + answerPages.length + (useVec ? vecPages.length : solImagePages.length > 0 ? solImagePages.length : solutionPages.length);
+  const rawTotal = pages.length + answerPages.length + (useVec ? vecPages.length : solImagePages.length > 0 ? solImagePages.length : solutionPages.length);
+  const evenPad = spec.evenPages && !spec.answerPage && !spec.solutionsOnly && !spec.koreanPlan && !spec.koreanSets && rawTotal % 2 === 1 ? 1 : 0;
+  const total = rawTotal + evenPad;
 
   for (let n = 0; n < pages.length; n++) {
     const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
@@ -1523,6 +1527,11 @@ export async function buildKicePdf(spec: KiceSpec): Promise<Uint8Array> {
     for (const r of results) {
       await drawFlow(page, r.items, solFontForText, flip, new Map(), oldHangul);
     }
+  }
+
+  if (evenPad) {
+    const page = pdf.addPage([LAYOUT.pageWidth, LAYOUT.pageHeight]);
+    await drawFrame(page, frameFor(spec.frames, rawTotal + 1), { pageNo: rawTotal + 1, total });
   }
 
   if (spec.onWarn && (missing.size > 0 || swappedFont.size > 0)) {

@@ -119,6 +119,8 @@ export default function KiceExportPanel({ title, items, variantSet = false, auto
   const [showSource, setShowSource] = useState(false);
   /** 맨 뒤에 정답표를 붙일지. 오답프린트라 기본은 켜짐이다. */
   const [showAnswers, setShowAnswers] = useState(true);
+  /** 쪽수가 홀수면 빈 쪽을 더해 전체 쪽수를 짝수로(양면 인쇄). 국어는 배치가 알아서 맞춘다. */
+  const [evenPages, setEvenPages] = useState(true);
   /** 정답표 뒤에 해설지를 붙일지(해설이 저장된 변형문제가 있을 때만 뜬다). 기본은 켜짐. */
   const hasSolutions = items.some((it) => (it.solution ?? "").trim() !== "");
   const [showSolutions, setShowSolutions] = useState(true);
@@ -327,6 +329,7 @@ export default function KiceExportPanel({ title, items, variantSet = false, auto
         fonts,
         images,
         solutionsOnly,
+        evenPages: !solutionsOnly && layoutKey !== "korean" && evenPages,
         problems: pngs.map((png, i) => ({
           png,
           ...(renum?.covers.has(i) ? { cover: renum.covers.get(i)! } : {}),
@@ -517,6 +520,14 @@ export default function KiceExportPanel({ title, items, variantSet = false, auto
           />
           정답표 뒤에 해설지 붙이기
           <span className="text-xs text-slate-400">변형문제에 저장해 둔 해설을 텍스트로 조판합니다.</span>
+        </label>
+      )}
+
+      {layoutKey !== "korean" && (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={evenPages} onChange={(e) => setEvenPages(e.target.checked)} className="h-4 w-4" />
+          쪽수를 짝수로 맞추기
+          <span className="text-xs text-slate-400">전체 쪽수가 홀수면 맨 뒤에 빈 쪽을 하나 더해요(양면 인쇄용).</span>
         </label>
       )}
 
