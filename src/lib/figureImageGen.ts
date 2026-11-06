@@ -32,7 +32,7 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
  */
 /**
  * **2.5 세대에는 "gpt-image-2.5" 라는 맨 이름이 없다.** 계정의 모델 목록에는
- * `gpt-image-2.5-flare` 와 `gpt-image-2.6-sunburst`(각각 `-2026-09-08` 날짜
+ * `gpt-image-2.5-flare` 와 `gpt-image-2.5-sunburst`(각각 `-2026-09-08` 날짜
  * 별칭도 함께)만 있다 — 맨 이름을 적으면 404 다.
  *
  * 둘 중 **`sunburst`** 를 쓴다(2026-09-16, 사용자 결정 — "flare 말고 상위모델인
