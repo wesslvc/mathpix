@@ -249,7 +249,7 @@ export async function POST(req: NextRequest) {
       if (got) image = got;
     }
     const sol = probeModel || "gpt-6.1-sol";
-    const img = probePrompt || "gpt-image-2.5-sunburst";
+    const img = probePrompt || "gpt-image-2.6-sunburst";
     const jsonl = [
       { custom_id: "sol", method: "POST", url: "/v1/responses", body: { model: sol, input: [{ role: "user", content: [{ type: "input_text", text: 'reply ONLY JSON {"ok":true,"color":"<main color of the picture>"}' }, { type: "input_image", image_url: image, detail: "low" }] }], text: { format: { type: "json_object" } }, reasoning: { effort: "low" } } },
       { custom_id: "img", method: "POST", url: "/v1/images/edits", body: { model: img, images: [{ image_url: image }], prompt: "draw a small black circle in the center, keep everything else", n: 1, size: "1024x1024", quality: "low", output_format: "jpeg", output_compression: 90 } },
