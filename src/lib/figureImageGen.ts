@@ -32,7 +32,7 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
  */
 /**
  * **2.5 세대에는 "gpt-image-2.5" 라는 맨 이름이 없다.** 계정의 모델 목록에는
- * `gpt-image-2.5-flare` 와 `gpt-image-2.5-sunburst`(각각 `-2026-09-08` 날짜
+ * `gpt-image-2.5-flare` 와 `gpt-image-2.6-sunburst`(각각 `-2026-09-08` 날짜
  * 별칭도 함께)만 있다 — 맨 이름을 적으면 404 다.
  *
  * 둘 중 **`sunburst`** 를 쓴다(2026-09-16, 사용자 결정 — "flare 말고 상위모델인
@@ -43,7 +43,7 @@ const ENDPOINT = "https://api.openai.com/v1/images/edits";
  *
  * 되돌리거나 다시 견주려면 `OPENAI_FIGURE_IMAGE_MODELS` 로 **재배포 없이** 바꾼다.
  */
-const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.5-sunburst"];
+const DEFAULT_IMAGE_MODEL_IDS = ["gpt-image-2.6-sunburst"];
 
 /**
  * **캐시 키에 넣으려고 export한다.** 화면(`FigureJobsProvider`)의 캐시는
@@ -91,7 +91,7 @@ export function figureImageModelIds(): string[] {
  * 캐스케이드로 조용히 갈아탈 필요가 없다).
  */
 export const BYOK_IMAGE_MODEL_CHOICES = [
-  "gpt-image-2.5-sunburst",
+  "gpt-image-2.6-sunburst",
   "gpt-image-2.5-flare",
   "gpt-image-1.5",
   "gpt-image-1",
@@ -221,7 +221,7 @@ export function pickOutputSize(width?: number, height?: number): string | null {
  * 않은 6일 전부 일치). 요금이 바뀌면 여기만 고치면 된다.
  *
  * **`gpt-image-2.5` 도 단가가 같다**(2026-09-16, 사용자 확인). 그래서 모델을
- * 2.5-sunburst 로 올린 뒤에도 이 표를 그대로 쓴다 — 갈아 끼울 숫자가 없다
+ * 2.6-sunburst 로 올린 뒤에도 이 표를 그대로 쓴다 — 갈아 끼울 숫자가 없다
  * (flare·sunburst 도 서로 같다).
  * 다만 **센트 단위까지 청구액과 맞춰 본 것은 `gpt-image-2` 때다.** 2.5 로
  * 며칠 돌린 뒤 청구서와 한 번 대조해 보면 좋다(대조는 하되, 어긋나더라도
