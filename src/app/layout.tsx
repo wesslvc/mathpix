@@ -6,6 +6,7 @@ import AppNav from "@/components/AppNav";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import NepicaFooter from "@/components/NepicaFooter";
+import ArchiveBanner from "@/components/ArchiveBanner";
 
 /**
  * 검색·공유에 쓰이는 대표 주소.
@@ -117,6 +118,7 @@ export default async function RootLayout({
 }) {
   // 변형문제 탭은 시험 중이라 무제한 계정에만 보인다. 실패하면 그냥 감춘다.
   let showVariants = false;
+  let loggedIn = false;
   try {
     if (isSupabaseConfigured()) {
       const supabase = await createClient();
@@ -124,6 +126,7 @@ export default async function RootLayout({
         data: { user },
       } = await supabase.auth.getUser();
       if (user) {
+        loggedIn = true;
         const { data: ent } = await supabase.from("entitlements").select("unlimited").eq("user_id", user.id).maybeSingle();
         showVariants = ent?.unlimited === true;
       }
@@ -161,6 +164,7 @@ export default async function RootLayout({
               있었다(다섯 곳). 그래서 지금 어디에 있는지·어디로 갈 수 있는지가
               화면을 옮길 때마다 달라졌다. */}
           <AppNav showVariants={showVariants} />
+          {loggedIn && <ArchiveBanner />}
           <div className="flex-1">{children}</div>
           {/* 브랜드 표기는 화면마다 달지 않고 여기 한 번만 둔다 — 어느 화면을
               보고 있든 맨 밑에 같은 자리에 있어야 한다. 형제 사이트(VDIC·지오글)의

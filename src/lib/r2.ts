@@ -228,3 +228,50 @@ export async function r2PutBucketCors(origins: string[]): Promise<{ status: numb
   });
   return { status: res.status, body: await res.text() };
 }
+
+/**
+ * **큰 파일을 조각내 올린다(multipart).** 한 번에 PUT 하려면 파일 전체를 메모리에 들고 있어야 하는데,
+ * 기존 데이터 받기 ZIP 은 수백 MB 가 될 수 있다. 조각(마지막 빼고 5MB 이상)을 차례로 올리고 끝에 합친다.
+ */
+export async function r2MultipartCreate(path: string, contentType: string): Promise<string> {
+  const res = await aws().fetch(`${r2ObjectUrl(path)}?uploads=`, { method: "POST", headers: { "Content-Type": contentType } });
+  const text = await res.text();
+  const id = /<UploadId>([^<]+)<\/UploadId>/.exec(text)?.[1];
+  if (!res.ok || !id) throw new Error(`R2 조각 올리기 시작 실패 (${res.status}) ${text.slice(0, 200)}`);
+  return id;
+}
+
+export async function r2MultipartPart(path: string, uploadId: string, partNumber: number, bytes: Uint8Array): Promise<string> {
+  const url = `${r2ObjectUrl(path)}?partNumber=${partNumber}&uploadId=${encodeURIComponent(uploadId)}`;
+  const res = await aws().fetch(url, {
+    method: "PUT",
+    body: bytes as unknown as BodyInit,
+    headers: { "Content-Length": String(bytes.byteLength) },
+  });
+  const etag = res.headers.get("etag");
+  if (!res.ok || !etag) throw new Error(`R2 조각 ${partNumber} 올리기 실패 (${res.status}) ${(await res.text()).slice(0, 200)}`);
+  return etag;
+}
+
+export async function r2MultipartComplete(path: string, uploadId: string, parts: { n: number; etag: string }[]): Promise<void> {
+  const body = `<CompleteMultipartUpload>${parts.map((p) => `<Part><PartNumber>${p.n}</PartNumber><ETag>${p.etag}</ETag></Part>`).join("")}</CompleteMultipartUpload>`;
+  const res = await aws().fetch(`${r2ObjectUrl(path)}?uploadId=${encodeURIComponent(uploadId)}`, {
+    method: "POST",
+    body,
+    headers: { "Content-Type": "application/xml", "Content-Length": String(new TextEncoder().encode(body).byteLength) },
+  });
+  if (!res.ok) throw new Error(`R2 조각 합치기 실패 (${res.status}) ${(await res.text()).slice(0, 200)}`);
+}
+
+export async function r2MultipartAbort(path: string, uploadId: string): Promise<void> {
+  await aws().fetch(`${r2ObjectUrl(path)}?uploadId=${encodeURIComponent(uploadId)}`, { method: "DELETE" }).catch(() => undefined);
+}
+
+/** 내려받기용 서명 주소 — 브라우저가 R2 에서 바로 받고(Vercel 을 안 지난다) 파일 이름으로 저장된다. 이름에 공백을 쓰지 말 것. */
+export async function r2PresignDownload(path: string, filename: string, expiresS = 7 * 24 * 3600): Promise<string> {
+  const url = new URL(r2ObjectUrl(path));
+  url.searchParams.set("X-Amz-Expires", String(expiresS));
+  url.searchParams.set("response-content-disposition", `attachment;filename=${filename}`);
+  const signed = await aws().sign(url.toString(), { method: "GET", aws: { signQuery: true } });
+  return signed.url;
+}
