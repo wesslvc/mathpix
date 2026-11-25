@@ -1,6 +1,6 @@
 /**
  * **백지도 그림**(지리 문항용). 지도 자료는 geogl3(wesslvc/seji)의 백지도에서 뽑아 `public/maps/*.json` 에 두었다
- * (`scripts/maps/extract-geogl3.py`). 세계는 등장방형(x=(경도+180)/360·2754, y=(90-위도)/180·1398),
+ * (`scripts/maps/extract-geogl3.py`; 세계는 이제 Natural Earth 를 메르카토르로 투영한 것 — `build-world-mercator.py`),
  * 대한민국은 시도 경계(좌표가 위경도가 아니라 그림 좌표다).
  * 이 파일은 순수 함수뿐이다 — 설정(MapSpec)을 평가원풍 흑백 SVG 문자열로 바꾼다.
  */
@@ -13,7 +13,7 @@ export const SHADES = ["#ffffff", "#e3e3e3", "#b5b5b5", "#7a7a7a", "#2b2b2b"] as
 export const SHADE_LABELS = ["흰색", "연회색", "회색", "진회색", "검정", "빗금"] as const;
 
 export type MapMarker = {
-  /** 그림 좌표(세계는 2754×1398, 한국은 509×716). */
+  /** 그림 좌표(세계는 메르카토르 2754×1950, 한국은 509×716). */
   x: number;
   y: number;
   label: string;
@@ -32,6 +32,8 @@ export type MapSpec = {
   grid: number;
   /** 손으로 그은 선(이동 경로·하천)·영역(문화권 범위). */
   paths?: MapPath[];
+  /** 세계 지도 좌표의 도법. 없으면 옛 로빈슨 좌표라 읽을 때 메르카토르로 옮긴다. */
+  proj?: "mercator";
   /** 나라(시도) 경계선을 그릴지 — 없으면 해안선만(평가원 세계 지도처럼). 기본: 세계는 끔, 대한민국은 켬. */
   borders?: boolean;
   /** 육지를 옅은 회색으로(평가원 지도처럼, 기본 켬). 끄면 흰 육지. */
@@ -56,17 +58,40 @@ export type MapPath = {
 
 export type MapData = { viewBox: number[]; shapes: Record<string, string[]> };
 
-export const MAP_SIZE: Record<MapKind, [number, number]> = { world: [2754, 1398], korea: [509, 716.105] };
+export const MAP_SIZE: Record<MapKind, [number, number]> = { world: [2754, 1949.729], korea: [509, 716.105] };
 
 /*
- * 세계 백지도(Wikimedia BlankMap 계열)는 등장방형이 아니라 **로빈슨 도법, 중심 경도 10°E** 다.
+ * **세계 백지도는 메르카토르 도법**이다(2026-11-25 교체, 사용자 지시). 원자료는 Natural Earth 1:50m(퍼블릭 도메인)이고
+ * scripts/maps/build-world-mercator.py 가 아래와 **같은 식**으로 투영해 public/maps/world.json 을 만든다(중심 경도 0°, 85°N~60°S).
+ */
+const MERC_W = 2754;
+const mercM = (lat: number) => Math.log(Math.tan(Math.PI / 4 + (Math.max(-85, Math.min(85, lat)) * Math.PI) / 360));
+const MERC_TOP = mercM(85);
+const MERC_K = MERC_W / (2 * Math.PI);
+export const WORLD_H = (MERC_TOP - mercM(-60)) * MERC_K;
+export function lonLatToXY(lon: number, lat: number): [number, number] {
+  return [((lon + 180) / 360) * MERC_W, (MERC_TOP - mercM(lat)) * MERC_K];
+}
+export function xyToLonLat(x: number, y: number): [number, number] {
+  const m = MERC_TOP - y / MERC_K;
+  return [(x / MERC_W) * 360 - 180, ((2 * Math.atan(Math.exp(m)) - Math.PI / 2) * 180) / Math.PI];
+}
+/** 경위도 범위를 덮는 그림 좌표 상자(메르카토르라 네 귀퉁이면 된다). */
+export function lonLatBox(lon: [number, number], lat: [number, number]): [number, number, number, number] {
+  const [x0, y0] = lonLatToXY(Math.min(...lon), Math.max(...lat));
+  const [x1, y1] = lonLatToXY(Math.max(...lon), Math.min(...lat));
+  return [x0, y0, x1 - x0, y1 - y0];
+}
+
+/*
+ * (옛 지도) 세계 백지도(Wikimedia BlankMap 계열)는 등장방형이 아니라 **로빈슨 도법, 중심 경도 10°E** 다.
  * 나라 외곽 상자로 맞춰 봤다(2026-11-25): 세로는 y = 699 − 697.4·Y(위도) 로 1~2px 안, 가로는 x = 1377 + 438.3·X(위도)·(경도−10°)[라디안]
  * 로 평균 3px 안이다. 그래서 경도 −170° 가 왼쪽 끝, 190°(=−170°) 가 오른쪽 끝이다.
  */
 const ROB_LAT = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90];
 const ROB_X = [1, 0.9986, 0.9954, 0.99, 0.9822, 0.973, 0.96, 0.9427, 0.9216, 0.8962, 0.8679, 0.835, 0.7986, 0.7597, 0.7186, 0.6732, 0.6213, 0.5722, 0.5322];
 const ROB_Y = [0, 0.062, 0.124, 0.186, 0.248, 0.31, 0.372, 0.434, 0.4958, 0.5571, 0.6176, 0.6769, 0.7346, 0.7903, 0.8435, 0.8936, 0.9394, 0.9761, 1];
-export const WORLD_LON0 = 10.2;
+const ROB_LON0 = 10.2;
 const CX = 1377;
 const SX = 2754 / (2 * Math.PI);
 const CY = 699;
@@ -77,54 +102,29 @@ function interp(xs: number[], ys: number[], v: number) {
   return ys[ys.length - 1];
 }
 /** 경도를 중심 경도 기준 −180~180 으로 접는다(`center` 를 주면 그 근처로 이어 붙인다). */
-export function relLon(lon: number, center = 0) {
-  let d = lon - WORLD_LON0;
+function robRel(lon: number, center = 0) {
+  let d = lon - ROB_LON0;
   while (d - center > 180) d -= 360;
   while (d - center < -180) d += 360;
   return d;
 }
-export function lonLatToXY(lon: number, lat: number, center = 0): [number, number] {
+function robLonLatToXY(lon: number, lat: number, center = 0): [number, number] {
   const a = Math.min(90, Math.abs(lat));
-  const x = CX + SX * interp(ROB_LAT, ROB_X, a) * ((relLon(lon, center) * Math.PI) / 180);
+  const x = CX + SX * interp(ROB_LAT, ROB_X, a) * ((robRel(lon, center) * Math.PI) / 180);
   const y = CY - Math.sign(lat) * SY * interp(ROB_LAT, ROB_Y, a);
   return [x, y];
 }
-export function xyToLonLat(x: number, y: number): [number, number] {
+function robXyToLonLat(x: number, y: number): [number, number] {
   const yy = Math.max(-1, Math.min(1, (CY - y) / SY));
   const lat = Math.sign(yy) * interp(ROB_Y, ROB_LAT, Math.abs(yy));
-  const lon = ((x - CX) / (SX * interp(ROB_LAT, ROB_X, Math.abs(lat)))) * (180 / Math.PI) + WORLD_LON0;
+  const lon = ((x - CX) / (SX * interp(ROB_LAT, ROB_X, Math.abs(lat)))) * (180 / Math.PI) + ROB_LON0;
   return [lon > 180 ? lon - 360 : lon < -180 ? lon + 360 : lon, lat];
 }
-/** 경위도 범위를 덮는 그림 좌표 상자(로빈슨이라 네 귀퉁이만으로는 모자라 가장자리를 훑는다). */
-export function lonLatBox(lon: [number, number], lat: [number, number]): [number, number, number, number] {
-  const [lo0, lo1] = [Math.min(...lon), Math.max(...lon)];
-  const [la0, la1] = [Math.min(...lat), Math.max(...lat)];
-  if (lo1 - lo0 >= 340) {
-    const [, y0] = lonLatToXY(0, la1);
-    const [, y1] = lonLatToXY(0, la0);
-    return [0, y0, 2754, y1 - y0];
-  }
-  const center = relLon((lo0 + lo1) / 2);
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-  for (let i = 0; i <= 24; i++) {
-    for (const [lo, la] of [
-      [lo0 + ((lo1 - lo0) * i) / 24, la0],
-      [lo0 + ((lo1 - lo0) * i) / 24, la1],
-      [lo0, la0 + ((la1 - la0) * i) / 24],
-      [lo1, la0 + ((la1 - la0) * i) / 24],
-    ]) {
-      const [x, y] = lonLatToXY(lo, la, center);
-      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
-    }
-  }
-  return [x0, y0, x1 - x0, y1 - y0];
-}
-
 export function defaultSpec(kind: MapKind): MapSpec {
   const [w, h] = MAP_SIZE[kind];
   if (kind === "world") {
     // 남극은 거의 안 쓴다 — 위도 85°N~60°S 만 보인다.
-    return { kind, view: lonLatBox([-180, 180], [-60, 85]), fills: {}, markers: [], grid: 0 };
+    return { kind, proj: "mercator", view: lonLatBox([-180, 180], [-60, 85]), fills: {}, markers: [], grid: 0 };
   }
   return { kind, view: [0, 0, w, h], fills: {}, markers: [], grid: 0 };
 }
@@ -160,7 +160,37 @@ export function readMapSpec(raw: unknown): MapSpec | null {
         return [{ pts, closed: q.closed === true, dash: q.dash === true, arrow: q.arrow === true, fill: f >= 1 && f <= 5 ? f : 0, smooth: q.smooth === true }];
       })
     : [];
-  return { kind: o.kind, view: v, fills, markers, grid, ...(paths.length ? { paths } : {}) };
+  const style = {
+    ...(typeof o.borders === "boolean" ? { borders: o.borders } : {}),
+    ...(o.landGray === false ? { landGray: false } : {}),
+    ...(o.dotStyle === "ring" || o.dotStyle === "solid" ? { dotStyle: o.dotStyle as "ring" | "solid" } : {}),
+  };
+  const spec: MapSpec = { kind: o.kind, view: v, fills, markers, grid, ...(paths.length ? { paths } : {}), ...style };
+  if (o.kind === "world" && o.proj !== "mercator") return migrateRobinson(spec);
+  return o.kind === "world" ? { ...spec, proj: "mercator" } : spec;
+}
+
+/** 옛(로빈슨) 세계 지도 설정 → 메르카토르: 표지·선·보이는 영역을 경위도를 거쳐 옮긴다. */
+function migrateRobinson(s: MapSpec): MapSpec {
+  const mv = ([x, y]: [number, number]): [number, number] => {
+    const [lon, lat] = robXyToLonLat(x, y);
+    return lonLatToXY(lon, lat);
+  };
+  const [vx, vy, vw, vh] = s.view;
+  const a = robXyToLonLat(vx, vy);
+  const b = robXyToLonLat(vx + vw, vy + vh);
+  const full = vw > 2000;
+  const view = full ? defaultSpec("world").view : lonLatBox([a[0], b[0]], [Math.max(-60, Math.min(a[1], b[1])), Math.min(85, Math.max(a[1], b[1]))]);
+  return {
+    ...s,
+    proj: "mercator",
+    view,
+    markers: s.markers.map((m) => {
+      const [x, y] = mv([m.x, m.y]);
+      return { ...m, x, y };
+    }),
+    ...(s.paths ? { paths: s.paths.map((p) => ({ ...p, pts: p.pts.map(mv) })) } : {}),
+  };
 }
 
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -217,22 +247,14 @@ export function buildMapSvg(spec: MapSpec, data: MapData, bboxes?: Map<string, [
   }
   if (spec.kind === "world" && spec.grid > 0) {
     const g: string[] = [];
-    // 로빈슨이라 경선은 곡선이다 — 위도를 2°씩 훑어 꺾은선으로 긋는다.
-    for (let lon = -180; lon < 180; lon += spec.grid) {
-      const pts: string[] = [];
-      for (let lat = -90; lat <= 90; lat += 2) {
-        const [x, y] = lonLatToXY(lon, lat);
-        pts.push(`${r(x)} ${r(y)}`);
-      }
-      g.push(`M${pts.join("L")}`);
+    // 메르카토르라 경선·위선이 모두 곧은 선이다.
+    for (let lon = -180; lon <= 180; lon += spec.grid) {
+      const [x] = lonLatToXY(lon, 0);
+      if (x >= vx && x <= vx + vw) g.push(`M${r(x)} ${r(vy)}V${r(vy + vh)}`);
     }
-    for (let lat = -90 + spec.grid; lat < 90; lat += spec.grid) {
+    for (let lat = -60; lat <= 80; lat += spec.grid) {
       const [, y] = lonLatToXY(0, lat);
-      if (y >= vy && y <= vy + vh) {
-        const [xl] = lonLatToXY(WORLD_LON0 - 180, lat, -180);
-        const [xr] = lonLatToXY(WORLD_LON0 + 180, lat, 180);
-        g.push(`M${r(xl)} ${r(y)}H${r(xr)}`);
-      }
+      if (y >= vy && y <= vy + vh) g.push(`M${r(vx)} ${r(y)}H${r(vx + vw)}`);
     }
     if (g.length) out.push(`<path fill="none" stroke="#000" stroke-width="${r(sw * 0.6)}" stroke-dasharray="${r(sw * 4)} ${r(sw * 3)}" d="${g.join("")}"/>`);
   }
