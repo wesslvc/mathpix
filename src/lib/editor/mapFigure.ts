@@ -34,15 +34,74 @@ export type MapData = { viewBox: number[]; shapes: Record<string, string[]> };
 
 export const MAP_SIZE: Record<MapKind, [number, number]> = { world: [2754, 1398], korea: [509, 716.105] };
 
-export function lonLatToXY(lon: number, lat: number): [number, number] {
-  return [((lon + 180) / 360) * 2754, ((90 - lat) / 180) * 1398];
+/*
+ * 세계 백지도(Wikimedia BlankMap 계열)는 등장방형이 아니라 **로빈슨 도법, 중심 경도 10°E** 다.
+ * 나라 외곽 상자로 맞춰 봤다(2026-11-25): 세로는 y = 699 − 697.4·Y(위도) 로 1~2px 안, 가로는 x = 1377 + 438.3·X(위도)·(경도−10°)[라디안]
+ * 로 평균 3px 안이다. 그래서 경도 −170° 가 왼쪽 끝, 190°(=−170°) 가 오른쪽 끝이다.
+ */
+const ROB_LAT = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90];
+const ROB_X = [1, 0.9986, 0.9954, 0.99, 0.9822, 0.973, 0.96, 0.9427, 0.9216, 0.8962, 0.8679, 0.835, 0.7986, 0.7597, 0.7186, 0.6732, 0.6213, 0.5722, 0.5322];
+const ROB_Y = [0, 0.062, 0.124, 0.186, 0.248, 0.31, 0.372, 0.434, 0.4958, 0.5571, 0.6176, 0.6769, 0.7346, 0.7903, 0.8435, 0.8936, 0.9394, 0.9761, 1];
+export const WORLD_LON0 = 10.2;
+const CX = 1377;
+const SX = 2754 / (2 * Math.PI);
+const CY = 699;
+const SY = 697.4;
+function interp(xs: number[], ys: number[], v: number) {
+  if (v <= xs[0]) return ys[0];
+  for (let i = 1; i < xs.length; i++) if (v <= xs[i]) return ys[i - 1] + ((ys[i] - ys[i - 1]) * (v - xs[i - 1])) / (xs[i] - xs[i - 1]);
+  return ys[ys.length - 1];
+}
+/** 경도를 중심 경도 기준 −180~180 으로 접는다(`center` 를 주면 그 근처로 이어 붙인다). */
+export function relLon(lon: number, center = 0) {
+  let d = lon - WORLD_LON0;
+  while (d - center > 180) d -= 360;
+  while (d - center < -180) d += 360;
+  return d;
+}
+export function lonLatToXY(lon: number, lat: number, center = 0): [number, number] {
+  const a = Math.min(90, Math.abs(lat));
+  const x = CX + SX * interp(ROB_LAT, ROB_X, a) * ((relLon(lon, center) * Math.PI) / 180);
+  const y = CY - Math.sign(lat) * SY * interp(ROB_LAT, ROB_Y, a);
+  return [x, y];
 }
 export function xyToLonLat(x: number, y: number): [number, number] {
-  return [(x / 2754) * 360 - 180, 90 - (y / 1398) * 180];
+  const yy = Math.max(-1, Math.min(1, (CY - y) / SY));
+  const lat = Math.sign(yy) * interp(ROB_Y, ROB_LAT, Math.abs(yy));
+  const lon = ((x - CX) / (SX * interp(ROB_LAT, ROB_X, Math.abs(lat)))) * (180 / Math.PI) + WORLD_LON0;
+  return [lon > 180 ? lon - 360 : lon < -180 ? lon + 360 : lon, lat];
+}
+/** 경위도 범위를 덮는 그림 좌표 상자(로빈슨이라 네 귀퉁이만으로는 모자라 가장자리를 훑는다). */
+export function lonLatBox(lon: [number, number], lat: [number, number]): [number, number, number, number] {
+  const [lo0, lo1] = [Math.min(...lon), Math.max(...lon)];
+  const [la0, la1] = [Math.min(...lat), Math.max(...lat)];
+  if (lo1 - lo0 >= 340) {
+    const [, y0] = lonLatToXY(0, la1);
+    const [, y1] = lonLatToXY(0, la0);
+    return [0, y0, 2754, y1 - y0];
+  }
+  const center = relLon((lo0 + lo1) / 2);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i <= 24; i++) {
+    for (const [lo, la] of [
+      [lo0 + ((lo1 - lo0) * i) / 24, la0],
+      [lo0 + ((lo1 - lo0) * i) / 24, la1],
+      [lo0, la0 + ((la1 - la0) * i) / 24],
+      [lo1, la0 + ((la1 - la0) * i) / 24],
+    ]) {
+      const [x, y] = lonLatToXY(lo, la, center);
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+  }
+  return [x0, y0, x1 - x0, y1 - y0];
 }
 
 export function defaultSpec(kind: MapKind): MapSpec {
   const [w, h] = MAP_SIZE[kind];
+  if (kind === "world") {
+    // 남극은 거의 안 쓴다 — 위도 85°N~60°S 만 보인다.
+    return { kind, view: lonLatBox([-180, 180], [-60, 85]), fills: {}, markers: [], grid: 0 };
+  }
   return { kind, view: [0, 0, w, h], fills: {}, markers: [], grid: 0 };
 }
 
@@ -93,17 +152,27 @@ export function buildMapSvg(spec: MapSpec, data: MapData, bboxes?: Map<string, [
     const fill = lv === 5 ? "url(#hatch)" : SHADES[Math.min(lv, 4)];
     const shown = ds.filter(vis);
     if (!shown.length) continue;
-    out.push(`<path fill="${fill}" d="${shown.join(" ")}"/>`);
+    // 경로를 이어 붙이면 안 된다 — 원본 경로가 소문자 m(상대)으로 시작해 앞 경로 끝에서 이어져 버린다.
+    out.push(shown.length === 1 ? `<path fill="${fill}" d="${shown[0]}"/>` : `<g fill="${fill}">${shown.map((d) => `<path d="${d}"/>`).join("")}</g>`);
   }
   if (spec.kind === "world" && spec.grid > 0) {
     const g: string[] = [];
-    for (let lon = -180; lon <= 180; lon += spec.grid) {
-      const [x] = lonLatToXY(lon, 0);
-      if (x >= vx && x <= vx + vw) g.push(`M${r(x)} ${r(vy)}V${r(vy + vh)}`);
+    // 로빈슨이라 경선은 곡선이다 — 위도를 2°씩 훑어 꺾은선으로 긋는다.
+    for (let lon = -180; lon < 180; lon += spec.grid) {
+      const pts: string[] = [];
+      for (let lat = -90; lat <= 90; lat += 2) {
+        const [x, y] = lonLatToXY(lon, lat);
+        pts.push(`${r(x)} ${r(y)}`);
+      }
+      g.push(`M${pts.join("L")}`);
     }
-    for (let lat = -90; lat <= 90; lat += spec.grid) {
+    for (let lat = -90 + spec.grid; lat < 90; lat += spec.grid) {
       const [, y] = lonLatToXY(0, lat);
-      if (y >= vy && y <= vy + vh) g.push(`M${r(vx)} ${r(y)}H${r(vx + vw)}`);
+      if (y >= vy && y <= vy + vh) {
+        const [xl] = lonLatToXY(WORLD_LON0 - 180, lat, -180);
+        const [xr] = lonLatToXY(WORLD_LON0 + 180, lat, 180);
+        g.push(`M${r(xl)} ${r(y)}H${r(xr)}`);
+      }
     }
     if (g.length) out.push(`<path fill="none" stroke="#000" stroke-width="${r(sw * 0.6)}" stroke-dasharray="${r(sw * 4)} ${r(sw * 3)}" d="${g.join("")}"/>`);
   }

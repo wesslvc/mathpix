@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   buildMapSvg,
   defaultSpec,
+  lonLatBox,
   lonLatToXY,
   SHADE_LABELS,
   SHADES,
@@ -50,7 +51,7 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
   const [spec, setSpec] = useState<MapSpec>(initial ?? defaultSpec("world"));
   const [data, setData] = useState<MapData | null>(null);
   const [bboxes, setBboxes] = useState<Map<string, [number, number, number, number]> | null>(null);
-  const [mode, setMode] = useState<"paint" | "mark">("paint");
+  const [mode, setMode] = useState<"paint" | "dot" | "mark">("paint");
   const [brush, setBrush] = useState(2);
   const [label, setLabel] = useState("A");
   const [query, setQuery] = useState("");
@@ -126,6 +127,11 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
   }
 
   function onMapClick(e: React.MouseEvent, code: string | null) {
+    if (mode === "dot") {
+      const p = toXY(e);
+      if (p) setSpec((s) => ({ ...s, markers: [...s.markers, { x: p[0], y: p[1], label: "", dot: true }] }));
+      return;
+    }
     if (mode === "mark") {
       const p = toXY(e);
       if (!p) return;
@@ -138,9 +144,7 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
 
   function applyView(lon: [number, number], lat: [number, number]) {
     if (spec.kind !== "world") return;
-    const [x1, y1] = lonLatToXY(Math.min(...lon), Math.max(...lat));
-    const [x2, y2] = lonLatToXY(Math.max(...lon), Math.min(...lat));
-    setSpec((s) => ({ ...s, view: [x1, y1, x2 - x1, y2 - y1] }));
+    setSpec((s) => ({ ...s, view: lonLatBox(lon, lat) }));
     setLonLat({ lon: [Math.min(...lon), Math.max(...lon)], lat: [Math.min(...lat), Math.max(...lat)] });
   }
 
@@ -175,10 +179,15 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
               <Button type="button" size="xs" variant={mode === "paint" ? "dark" : "outline"} onClick={() => setMode("paint")}>
                 칠하기
               </Button>
-              <Button type="button" size="xs" variant={mode === "mark" ? "dark" : "outline"} onClick={() => setMode("mark")}>
-                표지 찍기
+              <Button type="button" size="xs" variant={mode === "dot" ? "dark" : "outline"} onClick={() => setMode("dot")}>
+                점 찍기
               </Button>
-              {mode === "paint" ? (
+              <Button type="button" size="xs" variant={mode === "mark" ? "dark" : "outline"} onClick={() => setMode("mark")}>
+                표지 찍기 (점+글자)
+              </Button>
+              {mode === "dot" ? (
+                <span className="text-slate-500">지도를 누르면 그 자리에 점이 찍혀요(나라 위도 돼요). 글자는 아래 목록에서 붙일 수 있어요.</span>
+              ) : mode === "paint" ? (
                 SHADE_LABELS.slice(1).map((l, i) => (
                   <button
                     key={l}
@@ -206,15 +215,14 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
               {!data ? (
                 <p className="p-10 text-center text-sm text-slate-400">지도 불러오는 중…</p>
               ) : (
-                <svg ref={svgRef} viewBox={spec.view.join(" ")} className="block h-auto w-full cursor-crosshair select-none" onClick={(e) => mode === "mark" && onMapClick(e, null)}>
+                <svg ref={svgRef} viewBox={spec.view.join(" ")} className="block h-auto w-full cursor-crosshair select-none" onClick={(e) => mode !== "paint" && onMapClick(e, null)}>
                   {/* 화면용: 경로마다 눌러 칠할 수 있게 따로 그린다 */}
                   <rect x={spec.view[0]} y={spec.view[1]} width={spec.view[2]} height={spec.view[3]} fill="#fff" />
                   {Object.entries(data.shapes).map(([code, ds]) => {
                     const lv = spec.fills[code] ?? 0;
                     return (
-                      <path
+                      <g
                         key={code}
-                        d={ds.join(" ")}
                         fill={lv === 5 ? "#999" : SHADES[Math.min(lv, 4)]}
                         stroke="#000"
                         strokeWidth={sw}
@@ -227,7 +235,10 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
                         }}
                       >
                         <title>{nameOf(spec.kind, code)}</title>
-                      </path>
+                        {ds.map((d, k) => (
+                          <path key={k} d={d} />
+                        ))}
+                      </g>
                     );
                   })}
                   {spec.markers.map((m, i) => (
@@ -293,6 +304,10 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
                 </label>
               </div>
             )}
+            {spec.kind === "world" && <LonLatDot onAdd={(lon, lat, lb) => {
+              const [x, y] = lonLatToXY(lon, lat);
+              setSpec((s) => ({ ...s, markers: [...s.markers, { x, y, label: lb, dot: true }] }));
+            }} />}
             <div className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-slate-600">{spec.kind === "world" ? "나라 찾아 칠하기" : "시도 찾아 칠하기"}</span>
               <input className="rounded border border-slate-300 px-2 py-1" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={spec.kind === "world" ? "예: 브라질, 이집트" : "예: 강원"} />
@@ -369,3 +384,26 @@ function viewToLonLat(spec: MapSpec) {
 }
 const fmtLon = (v: number) => `${Math.abs(Math.round(v))}°${v < 0 ? "W" : "E"}`;
 const fmtLat = (v: number) => `${Math.abs(Math.round(v))}°${v < 0 ? "S" : "N"}`;
+
+/** 경위도를 숫자로 적어 점을 찍는다(예: 37.5°N 127°E). 남위·서경은 음수. */
+function LonLatDot({ onAdd }: { onAdd: (lon: number, lat: number, label: string) => void }) {
+  const [lat, setLat] = useState("");
+  const [lon, setLon] = useState("");
+  const [lb, setLb] = useState("");
+  const la = Number(lat), lo = Number(lon);
+  const ok = lat.trim() !== "" && lon.trim() !== "" && Math.abs(la) <= 90 && Math.abs(lo) <= 180;
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-semibold text-slate-600">경위도로 점 찍기</span>
+      <div className="flex items-center gap-1 text-xs">
+        <input className="w-16 rounded border border-slate-300 px-1" placeholder="위도" value={lat} onChange={(e) => setLat(e.target.value)} />
+        <input className="w-16 rounded border border-slate-300 px-1" placeholder="경도" value={lon} onChange={(e) => setLon(e.target.value)} />
+        <input className="w-12 rounded border border-slate-300 px-1" placeholder="글자" value={lb} onChange={(e) => setLb(e.target.value.slice(0, 8))} />
+        <Button type="button" size="xs" variant="outline" disabled={!ok} onClick={() => { onAdd(lo, la, lb); setLb(""); }}>
+          찍기
+        </Button>
+      </div>
+      <span className="text-[11px] text-slate-400">남위·서경은 음수로(예: 위도 -33.9, 경도 151.2)</span>
+    </div>
+  );
+}

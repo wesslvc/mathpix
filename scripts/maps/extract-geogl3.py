@@ -14,24 +14,33 @@ def slim(d):
     d = num.sub(lambda m: f"{float(m.group()):.1f}".rstrip("0").rstrip("."), d)
     return re.sub(r"\s+", " ", d).strip()
 
-# 세계: landxx 경로, 클래스의 마지막 2글자 = ISO 3166-1 alpha-2
+# 세계: 원본 svg 가 </svg> 없이 끝나서(주석 뒤 바로 HTML) 마지막 </g> 까지만 잘라 닫아 XML 로 읽는다.
+# path 의 나라 코드는 자기 class 나 가장 가까운 조상 <g>(class 의 2글자 토큰, 없으면 id)에서 고른다.
+import xml.etree.ElementTree as ET
 w = svg_block('id="world-svg"')
+w = w[: w.find("Territories without ISO")]
+w = w[: w.rfind("</g>") + 4] + "</svg>"
+w = re.sub(r"&(?!amp;|lt;|gt;|quot;|apos;|#)\w+;", " ", w)
+root = ET.fromstring(w)
+def code_of(el):
+    c = el.get("class") or ""
+    toks = c.split()
+    if "oceanxx" in toks or "circlexx" in toks: return False
+    codes = [t for t in toks if re.fullmatch(r"[a-z]{2}", t) and t != "eu"]
+    if codes: return codes[0].upper()
+    i = el.get("id") or ""
+    if re.fullmatch(r"[a-z]{2}", i): return i.upper()
+    return None
 countries = defaultdict(list)
-for m in re.finditer(r"<path\b([^>]*)>", w):
-    attrs = m.group(1)
-    c = re.search(r'class="([^"]+)"', attrs); d = re.search(r'\sd="([^"]+)"', attrs)
-    if not c or not d or "landxx" not in c.group(1): continue
-    codes = [t for t in c.group(1).split() if re.fullmatch(r"[a-z]{2}", t) and t not in ("eu",)]
-    if not codes: continue
-    countries[codes[-1].upper()].append(slim(d.group(1)))
-# 무리 안의 경로(<g class="landxx .. xx"> 아래 class 없는 path)
-for g in re.finditer(r'<g\b[^>]*class="([^"]*landxx[^"]*)"[^>]*>(.*?)</g>', w, re.S):
-    codes = [t for t in g.group(1).split() if re.fullmatch(r"[a-z]{2}", t) and t != "eu"]
-    if not codes: continue
-    for d in re.findall(r'<path\b[^>]*\sd="([^"]+)"', g.group(2)):
-        sd = slim(d)
-        if sd not in countries[codes[-1].upper()]:
-            countries[codes[-1].upper()].append(sd)
+def walk(el, inherited):
+    tag = el.tag.split("}")[-1]
+    own = code_of(el)
+    if own is False: return
+    code = own or inherited
+    if tag == "path" and el.get("d") and code:
+        countries[code].append(slim(el.get("d")))
+    for ch in el: walk(ch, code)
+walk(root, None)
 json.dump({"viewBox": [0, 0, 2754, 1398], "projection": "equirectangular", "shapes": countries},
           open("public/maps/world.json", "w"), ensure_ascii=False, separators=(",", ":"))
 
