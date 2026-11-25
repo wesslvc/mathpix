@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { BOGI_LABELS, CIRCLED, newDoc, type QDoc, type QIndexRow } from "@/lib/editor/doc";
+import { BOGI_LABELS, CIRCLED, newDoc, pointsLabel, readDoc, type QDoc, type QIndexRow } from "@/lib/editor/doc";
+import { BlocksEditor, type UploadFn } from "./BlockEditor";
+import { restoreMedia, stripMedia } from "@/lib/editor/blocks";
+import { createClient } from "@/lib/supabase/client";
+import { putBlob } from "@/lib/blobClient";
+import { cardUrl } from "@/lib/cardUrl";
 import { docHtml } from "@/lib/editor/render";
 import { KICE_AREAS } from "@/lib/kiceSubjects";
 import dynamic from "next/dynamic";
@@ -37,6 +42,40 @@ function download(bytes: Uint8Array, name: string, type: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+/** 자료 그림 올리기 — R2 `<uid>/_editor/img/…` 에 두고 `/api/card/…` 주소로 쓴다. 큰 사진은 긴 변 1600 으로 줄인다. */
+const uploadImage: UploadFn = async (file) => {
+  const supabase = createClient();
+  const { data } = await supabase.auth.getUser();
+  if (!data.user) return null;
+  let blob: Blob = file;
+  let type = file.type || "image/png";
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    if (k < 1 || file.size > 1_500_000) {
+      const c = document.createElement("canvas");
+      c.width = Math.round(bmp.width * k);
+      c.height = Math.round(bmp.height * k);
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#fff";
+      g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(bmp, 0, 0, c.width, c.height);
+      blob = await new Promise<Blob>((res) => c.toBlob((b) => res(b!), "image/jpeg", 0.9));
+      type = "image/jpeg";
+    }
+  } catch {
+    /* 못 열면 그대로 올린다 */
+  }
+  const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : "jpg";
+  const path = `${data.user.id}/_editor/img/${crypto.randomUUID()}.${ext}`;
+  const r = await putBlob(supabase, path, blob, type);
+  if (!r.ok) {
+    window.alert(`그림을 올리지 못했어요: ${r.error}`);
+    return null;
+  }
+  return cardUrl(path);
+};
 
 export default function EditorApp() {
   const [list, setList] = useState<QIndexRow[]>([]);
@@ -129,6 +168,13 @@ export default function EditorApp() {
 
   const applyItem = (r: Record<string, unknown>) => {
     const s = (v: unknown) => (typeof v === "string" ? v : "");
+    const cur = docRef.current;
+    const extra: Partial<QDoc> = {};
+    if (Array.isArray(r.blocks) && cur) {
+      const media = stripMedia(cur.blocks ?? []).media;
+      extra.blocks = readDoc({ blocks: restoreMedia(r.blocks, media) }, cur.id).blocks;
+    }
+    if (r.choiceTable && typeof r.choiceTable === "object" && cur) extra.choiceTable = readDoc({ choiceTable: r.choiceTable }, cur.id).choiceTable;
     const choices = Array.isArray(r.choices) ? r.choices.slice(0, 5).map(s) : undefined;
     patch({
       ...(s(r.title) ? { title: s(r.title) } : {}),
@@ -138,6 +184,7 @@ export default function EditorApp() {
       ...(choices ? { choices: [...choices, "", "", "", "", ""].slice(0, 5) } : {}),
       ...(Number(r.answer) >= 1 && Number(r.answer) <= 5 ? { answer: Number(r.answer) } : {}),
       ...(typeof r.solution === "string" ? { solution: r.solution } : {}),
+      ...extra,
     });
   };
 
@@ -246,10 +293,16 @@ function AiPanel({ doc, busy, ai, applyItem }: { doc: QDoc; busy: boolean; ai: (
     if (r?.result) applyItem(r.result as Record<string, unknown>);
   }
   async function check() {
+    // 검수에는 문항 전체를 인쇄될 모양 그대로 찍어 보낸다(그래프·표·지도까지 sol 이 보게).
     let figurePng: string | undefined;
-    if (doc.figure) {
-      const { svgToPngDataUrl } = await import("@/lib/editor/exportHwpx");
-      figurePng = (await svgToPngDataUrl(doc.figure.svg)) ?? undefined;
+    try {
+      const { captureHtml } = await import("@/lib/editor/exportPdf");
+      const png = await captureHtml(docHtml(doc), 640);
+      let bin = "";
+      for (let i = 0; i < png.length; i += 0x8000) bin += String.fromCharCode(...png.subarray(i, i + 0x8000));
+      figurePng = `data:image/png;base64,${btoa(bin)}`;
+    } catch {
+      figurePng = undefined;
     }
     const r = await ai({ action: "review", doc, figurePng }, "검수");
     const o = r?.result as { solved_answer?: number; issues?: ReviewIssue[] } | undefined;
@@ -338,21 +391,30 @@ function DocForm({ doc, patch, busy, ai }: { doc: QDoc; patch: (p: Partial<QDoc>
           <label className="flex flex-1 flex-col gap-1">
             <span className="text-xs text-slate-500">배점</span>
             <select className={inputCls} value={doc.points} onChange={(e) => patch({ points: Number(e.target.value) })}>
-              {[2, 3, 4].map((p) => (
+              {[1, 1.5, 2, 2.5, 3, 3.5, 4].map((p) => (
                 <option key={p} value={p}>
-                  {p}점
+                  {pointsLabel(p)}
                 </option>
               ))}
             </select>
           </label>
         </div>
       </div>
-      <p className="text-xs text-slate-400">표기: 빈 줄 = 문단 · $수식$ · **굵게** · __밑줄__</p>
+      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+        <span>표기: 빈 줄 = 문단 · $수식$ · **굵게** · __밑줄__ · [[네모 칸]] · 줄 앞 ○ • 1. = 내어쓰기</span>
+        <label className="flex items-center gap-1 text-slate-600">
+          <input type="checkbox" checked={!!doc.showPoints} onChange={(e) => patch({ showPoints: e.target.checked || undefined })} /> 2점 이하도 [배점] 표시
+        </label>
+      </div>
       <label className="flex flex-col gap-1">
         <span className="text-xs text-slate-500">발문·자료 글</span>
         <textarea className={areaCls} rows={4} value={doc.stem} onChange={(e) => patch({ stem: e.target.value })} />
       </label>
       <FigureEditor doc={doc} patch={patch} busy={busy} ai={ai} />
+      <div className="flex flex-col gap-1 rounded-md border border-slate-200 p-2.5">
+        <span className="text-xs font-semibold text-slate-600">자료 (상자·표·대화·그래프·백지도·말풍선·나란히·(가)(나)) — 그림 다음, 묻는 문장 앞</span>
+        <BlocksEditor blocks={doc.blocks ?? []} onChange={(blocks) => patch({ blocks })} upload={uploadImage} />
+      </div>
       <label className="flex flex-col gap-1">
         <span className="text-xs text-slate-500">묻는 문장</span>
         <input className={`${inputCls} font-serif`} value={doc.question} placeholder="이에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은?" onChange={(e) => patch({ question: e.target.value })} />
@@ -375,7 +437,25 @@ function DocForm({ doc, patch, busy, ai }: { doc: QDoc; patch: (p: Partial<QDoc>
         )}
       </div>
       <div className="flex flex-col gap-1">
-        <span className="text-xs text-slate-500">선지 (동그라미를 눌러 정답 표시)</span>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <span>선지 (동그라미를 눌러 정답 표시)</span>
+          <select className="rounded border border-slate-300 px-1 py-0.5" value={String(doc.choiceLayout ?? "auto")} onChange={(e) => patch({ choiceLayout: e.target.value === "auto" ? "auto" : (Number(e.target.value) as 1) })}>
+            <option value="auto">배치: 자동</option>
+            <option value="5">한 줄 5개</option>
+            <option value="3">한 줄 3개</option>
+            <option value="2">한 줄 2개</option>
+            <option value="1">한 줄 1개</option>
+          </select>
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={!!doc.choiceTable}
+              onChange={(e) => patch({ choiceTable: e.target.checked ? { header: ["(가)", "(나)"], rows: Array.from({ length: 5 }, () => ["", ""]) } : undefined })}
+            />
+            표 꼴 선지(열 머리 + 칸)
+          </label>
+        </div>
+        {doc.choiceTable && <ChoiceTableForm doc={doc} patch={patch} />}
         {doc.choices.map((c, i) => (
           <div key={i} className="flex items-center gap-2">
             <button
@@ -394,6 +474,55 @@ function DocForm({ doc, patch, busy, ai }: { doc: QDoc; patch: (p: Partial<QDoc>
         <span className="text-xs text-slate-500">해설</span>
         <textarea className={areaCls} rows={4} value={doc.solution} onChange={(e) => patch({ solution: e.target.value })} />
       </label>
+    </div>
+  );
+}
+
+function ChoiceTableForm({ doc, patch }: { doc: QDoc; patch: (p: Partial<QDoc>) => void }) {
+  const t = doc.choiceTable!;
+  const set = (nt: NonNullable<QDoc["choiceTable"]>) => patch({ choiceTable: nt });
+  return (
+    <div className="overflow-x-auto rounded border border-slate-200 p-1.5">
+      <table className="text-xs">
+        <tbody>
+          <tr>
+            <td />
+            {t.header.map((h, i) => (
+              <td key={i} className="p-0.5">
+                <input className={`${inputCls} min-w-[4rem] bg-slate-100 font-serif`} value={h} onChange={(e) => set({ ...t, header: t.header.map((x, k) => (k === i ? e.target.value : x)) })} />
+              </td>
+            ))}
+          </tr>
+          {t.rows.map((r, ri) => (
+            <tr key={ri}>
+              <td className="pr-1">
+                <button
+                  type="button"
+                  onClick={() => patch({ answer: doc.answer === ri + 1 ? 0 : ri + 1 })}
+                  className={`h-6 w-6 rounded-full border font-serif ${doc.answer === ri + 1 ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300"}`}
+                >
+                  {CIRCLED[ri]}
+                </button>
+              </td>
+              {r.map((c, ci) => (
+                <td key={ci} className="p-0.5">
+                  <input className={`${inputCls} min-w-[4rem] font-serif`} value={c} onChange={(e) => set({ ...t, rows: t.rows.map((x, k) => (k === ri ? x.map((y, j) => (j === ci ? e.target.value : y)) : x)) })} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="mt-1 flex gap-2 text-xs">
+        <button type="button" className="underline" onClick={() => set({ header: [...t.header, ""], rows: t.rows.map((r) => [...r, ""]) })}>
+          + 열
+        </button>
+        {t.header.length > 1 && (
+          <button type="button" className="underline" onClick={() => set({ header: t.header.slice(0, -1), rows: t.rows.map((r) => r.slice(0, -1)) })}>
+            − 끝 열
+          </button>
+        )}
+      </div>
     </div>
   );
 }

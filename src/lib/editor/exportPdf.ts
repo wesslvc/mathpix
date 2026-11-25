@@ -7,10 +7,15 @@ import { CIRCLED, type QDoc } from "./doc";
 import { docHtml } from "./render";
 
 /** 문항 하나를 미리보기와 같은 모양으로 화면 밖에서 찍어 PNG 로(평가원 틀의 단 폭에 맞춰 놓인다). */
-async function capture(doc: QDoc): Promise<Uint8Array> {
+export async function capture(doc: QDoc): Promise<Uint8Array> {
+  return captureHtml(docHtml(doc), 640);
+}
+
+/** HTML 조각을 화면 밖에서 찍어 PNG 로(폭 px, 배율 2). */
+export async function captureHtml(html: string, widthPx: number): Promise<Uint8Array> {
   const host = document.createElement("div");
-  host.style.cssText = "position:fixed;left:-10000px;top:0;width:640px;background:#fff";
-  host.innerHTML = docHtml(doc);
+  host.style.cssText = `position:fixed;left:-10000px;top:0;width:${widthPx}px;background:#fff`;
+  host.innerHTML = html;
   document.body.appendChild(host);
   try {
     await document.fonts.ready;

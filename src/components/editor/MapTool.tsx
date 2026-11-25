@@ -13,6 +13,8 @@ import {
   type MapData,
   type MapKind,
   type MapSpec,
+  pathD,
+  type MapPath,
 } from "@/lib/editor/mapFigure";
 
 /**
@@ -51,7 +53,11 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
   const [spec, setSpec] = useState<MapSpec>(initial ?? defaultSpec("world"));
   const [data, setData] = useState<MapData | null>(null);
   const [bboxes, setBboxes] = useState<Map<string, [number, number, number, number]> | null>(null);
-  const [mode, setMode] = useState<"paint" | "dot" | "mark">("paint");
+  const [mode, setMode] = useState<"paint" | "dot" | "mark" | "line" | "area" | "text">("paint");
+  /** 긋는 중인 선·영역의 점들. */
+  const [draft, setDraft] = useState<[number, number][]>([]);
+  const [pathOpt, setPathOpt] = useState({ dash: false, arrow: true, fill: 0, smooth: true });
+  const [textLabel, setTextLabel] = useState("사하라 사막");
   const [brush, setBrush] = useState(2);
   const [label, setLabel] = useState("A");
   const [query, setQuery] = useState("");
@@ -126,7 +132,26 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
     return series.find((l) => !used.has(l) && l !== label) ?? label;
   }
 
+  function finishPath() {
+    const closed = mode === "area";
+    if (draft.length >= (closed ? 3 : 2)) {
+      const p: MapPath = { pts: draft, closed, dash: pathOpt.dash, arrow: !closed && pathOpt.arrow, fill: closed ? pathOpt.fill : 0, smooth: pathOpt.smooth };
+      setSpec((s) => ({ ...s, paths: [...(s.paths ?? []), p] }));
+    }
+    setDraft([]);
+  }
+
   function onMapClick(e: React.MouseEvent, code: string | null) {
+    if (mode === "line" || mode === "area") {
+      const p = toXY(e);
+      if (p) setDraft((d) => [...d, p]);
+      return;
+    }
+    if (mode === "text") {
+      const p = toXY(e);
+      if (p && textLabel.trim()) setSpec((s) => ({ ...s, markers: [...s.markers, { x: p[0], y: p[1], label: textLabel.trim(), dot: false }] }));
+      return;
+    }
     if (mode === "dot") {
       const p = toXY(e);
       if (p) setSpec((s) => ({ ...s, markers: [...s.markers, { x: p[0], y: p[1], label: "", dot: true }] }));
@@ -185,7 +210,51 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
               <Button type="button" size="xs" variant={mode === "mark" ? "dark" : "outline"} onClick={() => setMode("mark")}>
                 표지 찍기 (점+글자)
               </Button>
-              {mode === "dot" ? (
+              <Button type="button" size="xs" variant={mode === "text" ? "dark" : "outline"} onClick={() => setMode("text")}>
+                글자
+              </Button>
+              <Button type="button" size="xs" variant={mode === "line" ? "dark" : "outline"} onClick={() => { setDraft([]); setMode("line"); }}>
+                선 긋기
+              </Button>
+              <Button type="button" size="xs" variant={mode === "area" ? "dark" : "outline"} onClick={() => { setDraft([]); setMode("area"); }}>
+                영역 그리기
+              </Button>
+              {mode === "line" || mode === "area" ? (
+                <>
+                  <span className="text-slate-500">지도를 차례로 눌러 점을 찍고 &lsquo;끝내기&rsquo; ({draft.length}점)</span>
+                  <Button type="button" size="xs" onClick={finishPath} disabled={draft.length < (mode === "area" ? 3 : 2)}>
+                    끝내기
+                  </Button>
+                  <button type="button" className="underline" onClick={() => setDraft((d) => d.slice(0, -1))}>
+                    한 점 취소
+                  </button>
+                  <label className="flex items-center gap-0.5">
+                    <input type="checkbox" checked={pathOpt.smooth} onChange={(e) => setPathOpt((o) => ({ ...o, smooth: e.target.checked }))} />곡선
+                  </label>
+                  <label className="flex items-center gap-0.5">
+                    <input type="checkbox" checked={pathOpt.dash} onChange={(e) => setPathOpt((o) => ({ ...o, dash: e.target.checked }))} />점선
+                  </label>
+                  {mode === "line" ? (
+                    <label className="flex items-center gap-0.5">
+                      <input type="checkbox" checked={pathOpt.arrow} onChange={(e) => setPathOpt((o) => ({ ...o, arrow: e.target.checked }))} />화살표
+                    </label>
+                  ) : (
+                    <select className="rounded border border-slate-300 px-1 py-0.5" value={pathOpt.fill} onChange={(e) => setPathOpt((o) => ({ ...o, fill: Number(e.target.value) }))}>
+                      <option value={0}>칠하지 않음</option>
+                      {SHADE_LABELS.slice(1).map((l, i) => (
+                        <option key={l} value={i + 1}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </>
+              ) : mode === "text" ? (
+                <>
+                  <span className="text-slate-500">누른 자리에 글자(점 없이)</span>
+                  <input className="w-32 rounded border border-slate-300 px-1 py-0.5" value={textLabel} onChange={(e) => setTextLabel(e.target.value.slice(0, 20))} />
+                </>
+              ) : mode === "dot" ? (
                 <span className="text-slate-500">지도를 누르면 그 자리에 점이 찍혀요(나라 위도 돼요). 글자는 아래 목록에서 붙일 수 있어요.</span>
               ) : mode === "paint" ? (
                 SHADE_LABELS.slice(1).map((l, i) => (
@@ -241,6 +310,15 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
                       </g>
                     );
                   })}
+                  {(spec.paths ?? []).map((p, i) => (
+                    <path key={`p${i}`} d={pathD(p)} fill={p.closed && p.fill ? "rgba(200,0,0,0.15)" : "none"} stroke="#d00" strokeWidth={sw * 1.6} strokeDasharray={p.dash ? `${sw * 5} ${sw * 3}` : undefined} />
+                  ))}
+                  {draft.length > 0 && (
+                    <path d={pathD({ pts: draft.length === 1 ? [draft[0], draft[0]] : draft, closed: false, dash: false, arrow: false, fill: 0, smooth: pathOpt.smooth })} fill="none" stroke="#06c" strokeWidth={sw * 1.6} />
+                  )}
+                  {draft.map(([x, y], i) => (
+                    <circle key={`d${i}`} cx={x} cy={y} r={sw * 2.5} fill="#06c" />
+                  ))}
                   {spec.markers.map((m, i) => (
                     <g key={i}>
                       {m.dot && <circle cx={m.x} cy={m.y} r={sw * 3.2} fill="#d00" />}
@@ -329,6 +407,22 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
                       {nameOf(spec.kind, c)} · {SHADE_LABELS[lv]}
                     </span>
                     <button type="button" className="text-red-600" onClick={() => setFill(c, 0)}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(spec.paths ?? []).length > 0 && (
+              <div className="flex flex-col gap-0.5 text-xs">
+                <span className="font-semibold text-slate-600">선·영역</span>
+                {spec.paths!.map((p, i) => (
+                  <div key={i} className="flex items-center gap-1">
+                    <span className="flex-1">
+                      {p.closed ? "영역" : "선"} {i + 1} · {p.pts.length}점{p.dash ? " · 점선" : ""}
+                      {p.arrow ? " · 화살표" : ""}
+                    </span>
+                    <button type="button" className="text-red-600" onClick={() => setSpec((s) => ({ ...s, paths: (s.paths ?? []).filter((_, k) => k !== i) }))}>
                       ×
                     </button>
                   </div>

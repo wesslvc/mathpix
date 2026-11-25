@@ -5,21 +5,37 @@ const STYLE = `write in the register of the Korean national exam (평가원 수�
 ("~일 때, ~의 값은?", "이에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은?", "그림은 ~을 나타낸 것이다.", "다음 자료는 ~이다.").
 stay strictly inside the Korean national curriculum of the given subject; exactly one correct choice.
 TEXT FORMAT for every text field: blank line = new paragraph, $...$ = math (LaTeX), **bold**, __underline__ (e.g. 밑줄 친 __㉠__).
+[[x]] = a boxed blank/term (e.g. [[㉠]]). lines starting with ○, •, 1. get a hanging indent.
 <보기> statements: one per array item WITHOUT the "ㄱ." label. choices: five strings WITHOUT the circled number; for <보기> questions use the standard sets (e.g. "ㄱ", "ㄷ", "ㄱ, ㄴ", "ㄴ, ㄷ", "ㄱ, ㄴ, ㄷ"), letters inside a choice ascending.`;
+
+const BLOCKS = `MATERIALS ("blocks", array, placed after the figure and before the question) — use them for every 자료 the item needs, exactly like 평가원 통합사회·탐구 papers:
+{"kind":"text","text":"…","font":"serif|gothic"}  (gothic for 자료 내용 inside boxes/tables when the paper would use 고딕)
+{"kind":"box","title":"<보 기>|자료|…","titlePos":"border|top|none","frame":"plain|round|dash|double|window","blocks":[…]}
+{"kind":"dialog","lines":[{"who":"갑","text":"…"},{"who":"을","text":"…"}]}
+{"kind":"table","rows":[["구분","A","B"],["…","…","…"]],"header":1}  (cell "<" merges with the left cell, "^" with the cell above)
+{"kind":"figure","chart":{"type":"bar|stacked|hbar100|line|area|dotrange|radar|bubble|venn","title":"","yLabel":"(%)","categories":["…"],"series":[{"name":"…","values":[1,2]}]},"widthPct":80}  (charts are drawn from data — give real, consistent numbers)
+{"kind":"bubble","who":"교사","text":"…","side":"left|right"}  (speech bubble with a person)
+{"kind":"row","cols":[[…blocks…],[…blocks…]]}  (side by side)
+{"kind":"labeled","label":"(가)","blocks":[…]}
+a map or a free drawing cannot be a block from you: describe it in "figure_brief". keep "stem" short (the lead sentence, e.g. "다음 자료에 대한 설명으로 옳은 것은?" goes in "question"). use "blocks": [] when not needed.
+"choiceTable" (optional): {"header":["(가)","(나)"],"rows":[["…","…"],…5 rows]} for choices that pick one value per column; then "choices" may be [].`;
 
 export const DRAFT_PROMPT = `task: you are a Korean exam item writer. write ONE new multiple-choice exam item from the request after this text.
 ${STYLE}
+${BLOCKS}
 if the item needs a figure (map, graph, diagram, table drawn as figure), describe it precisely in "figure_brief" (every element, label, value and position, so that an SVG can be drawn from it); otherwise "".
 SOLVE your item and make sure exactly one choice is correct; write the 해설 in "solution" (Korean, one step per paragraph, $math$, last line "정답: ③").
-reply ONLY JSON: {"title":"짧은 제목","stem":"발문·자료 글","question":"묻는 문장","bogi":["ㄱ 진술","ㄴ 진술","ㄷ 진술"],"choices":["…","…","…","…","…"],"answer":1-5,"figure_brief":"","solution":"…"}
+reply ONLY JSON: {"title":"짧은 제목","stem":"발문 첫 문장","blocks":[…],"question":"묻는 문장","bogi":["ㄱ 진술","ㄴ 진술","ㄷ 진술"],"choices":["…","…","…","…","…"],"answer":1-5,"figure_brief":"","solution":"…"}
 ("bogi" may be [] when the item has no <보기>.)`;
 
 export const REVISE_PROMPT = `task: you are a Korean exam item editor. the CURRENT ITEM (JSON) and the author's INSTRUCTION follow. revise the item as instructed, change nothing else.
 ${STYLE}
+${BLOCKS}
+figure blocks whose "svg"/"src" is a placeholder like "keep:3" must be returned with that SAME placeholder unchanged (you cannot see those pictures).
 SOLVE the revised item; update "answer" and "solution" if needed.
-reply ONLY JSON with the same keys: {"title","stem","question","bogi","choices","answer","solution"}`;
+reply ONLY JSON with the same keys: {"title","stem","blocks","question","bogi","choices","choiceTable","answer","solution"}`;
 
-export const REVIEW_PROMPT = `task: you are a strict reviewer of Korean national-exam (평가원) items. the ITEM (JSON) follows; if a figure is attached it is image 1.
+export const REVIEW_PROMPT = `task: you are a strict reviewer of Korean national-exam (평가원) items. the ITEM (JSON) follows; image 1 (if attached) is the WHOLE rendered item exactly as it will be printed — read figures, charts, maps and tables from it.
 check: (1) SOLVE it — is exactly one choice correct and does it equal "answer"? (2) is everything inside the national curriculum of the subject? (3) wording: ambiguous, wrong terms, typos, non-exam style? (4) figure consistent with the text? (5) <보기>/choice set format (letters ascending inside a choice).
 reply ONLY JSON: {"solved_answer":1-5 or 0,"ok":true|false,"issues":[{"where":"위치","problem":"무엇이 문제인지(한국어)","fix":"고칠 문장·값(한국어)"}]}
 empty issues if nothing is wrong. do not invent issues.`;

@@ -4,6 +4,7 @@ import { askSol } from "@/lib/problemLoopRun";
 import { parseJsonObject } from "@/lib/problemCompare";
 import { logAiCost, solTokens } from "@/lib/costLog";
 import { cleanSvg, readDoc } from "@/lib/editor/doc";
+import { stripMedia } from "@/lib/editor/blocks";
 import { DRAFT_PROMPT, REVIEW_PROMPT, REVISE_PROMPT, SVG_PROMPT } from "@/lib/editor/prompts";
 import { requireEditor } from "../auth";
 
@@ -39,10 +40,10 @@ export async function POST(req: NextRequest) {
   const images: string[] = [];
   const docJson = (d: unknown) => {
     const x = readDoc(d, "tmp-0000-0000");
-    const { id: _id, updatedAt: _u, figure, ...rest } = x;
+    const { id: _id, updatedAt: _u, figure, blocks, ...rest } = x;
     void _id;
     void _u;
-    return JSON.stringify({ ...rest, hasFigure: !!figure, figureCaption: figure?.caption ?? "" });
+    return JSON.stringify({ ...rest, blocks: stripMedia(blocks).blocks, hasFigure: !!figure, figureCaption: figure?.caption ?? "" });
   };
   if (action === "draft") {
     prompt = DRAFT_PROMPT;
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
     tail = `\n\nCURRENT ITEM\n${docJson(body?.doc)}\n\nINSTRUCTION\n${String(body?.instruction ?? "").slice(0, 3000)}`;
   } else if (action === "review") {
     prompt = REVIEW_PROMPT;
-    if (typeof body?.figurePng === "string" && body.figurePng.startsWith("data:image/png;base64,") && body.figurePng.length < 6_000_000) images.push(body.figurePng);
+    if (typeof body?.figurePng === "string" && body.figurePng.startsWith("data:image/png;base64,") && body.figurePng.length < 8_000_000) images.push(body.figurePng);
     tail = `\n\nITEM\n${docJson(body?.doc)}`;
   } else if (action === "svg") {
     prompt = SVG_PROMPT;

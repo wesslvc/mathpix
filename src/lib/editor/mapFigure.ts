@@ -28,6 +28,22 @@ export type MapSpec = {
   markers: MapMarker[];
   /** 경위선(세계만, 도 단위 간격, 0 이면 없음). */
   grid: number;
+  /** 손으로 그은 선(이동 경로·하천)·영역(문화권 범위). */
+  paths?: MapPath[];
+};
+
+export type MapPath = {
+  pts: [number, number][];
+  /** 닫힌 영역이면 true. */
+  closed: boolean;
+  /** 점선. */
+  dash: boolean;
+  /** 끝에 화살촉(열린 선만). */
+  arrow: boolean;
+  /** 영역 칠하기(0 = 없음, 1~5 = SHADES/빗금). */
+  fill: number;
+  /** 부드럽게(곡선). */
+  smooth: boolean;
 };
 
 export type MapData = { viewBox: number[]; shapes: Record<string, string[]> };
@@ -121,11 +137,22 @@ export function readMapSpec(raw: unknown): MapSpec | null {
         const r = (m ?? {}) as Record<string, unknown>;
         const x = Number(r.x), y = Number(r.y);
         if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
-        return [{ x, y, label: String(r.label ?? "").slice(0, 8), dot: r.dot !== false }];
+        return [{ x, y, label: String(r.label ?? "").slice(0, 20), dot: r.dot !== false }];
       })
     : [];
   const grid = [0, 10, 15, 20, 30].includes(Number(o.grid)) ? Number(o.grid) : 0;
-  return { kind: o.kind, view: v, fills, markers, grid };
+  const paths: MapPath[] = Array.isArray(o.paths)
+    ? o.paths.slice(0, 30).flatMap((p) => {
+        const q = (p ?? {}) as Record<string, unknown>;
+        const pts = Array.isArray(q.pts)
+          ? q.pts.slice(0, 200).flatMap((pt) => (Array.isArray(pt) && pt.length === 2 && pt.every((n) => Number.isFinite(Number(n))) ? [[Number(pt[0]), Number(pt[1])] as [number, number]] : []))
+          : [];
+        if (pts.length < 2) return [];
+        const f = Math.round(Number(q.fill));
+        return [{ pts, closed: q.closed === true, dash: q.dash === true, arrow: q.arrow === true, fill: f >= 1 && f <= 5 ? f : 0, smooth: q.smooth === true }];
+      })
+    : [];
+  return { kind: o.kind, view: v, fills, markers, grid, ...(paths.length ? { paths } : {}) };
 }
 
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -177,6 +204,7 @@ export function buildMapSvg(spec: MapSpec, data: MapData, bboxes?: Map<string, [
     if (g.length) out.push(`<path fill="none" stroke="#000" stroke-width="${r(sw * 0.6)}" stroke-dasharray="${r(sw * 4)} ${r(sw * 3)}" d="${g.join("")}"/>`);
   }
   out.push(`</g>`);
+  for (const p of spec.paths ?? []) out.push(pathSvg(p, sw));
   for (const m of spec.markers) {
     if (m.dot) out.push(`<circle cx="${r(m.x)}" cy="${r(m.y)}" r="${r(sw * 3.2)}" fill="#000"/>`);
     if (m.label) {
@@ -189,6 +217,38 @@ export function buildMapSvg(spec: MapSpec, data: MapData, bboxes?: Map<string, [
   out.push(`<rect x="${r(vx)}" y="${r(vy)}" width="${r(vw)}" height="${r(vh)}" fill="none" stroke="#000" stroke-width="${r(sw * 1.5)}"/>`);
   out.push(`</svg>`);
   return out.join("");
+}
+
+/** 점들 → SVG 경로 글(부드럽게면 캣멀롬 곡선). */
+export function pathD(p: MapPath): string {
+  const pts = p.pts;
+  if (!p.smooth || pts.length < 3) return `M${pts.map(([x, y]) => `${r(x)} ${r(y)}`).join("L")}${p.closed ? "Z" : ""}`;
+  const n = pts.length;
+  const at = (i: number) => (p.closed ? pts[(i + n) % n] : pts[Math.max(0, Math.min(n - 1, i))]);
+  let d = `M${r(pts[0][0])} ${r(pts[0][1])}`;
+  const last = p.closed ? n : n - 1;
+  for (let i = 0; i < last; i++) {
+    const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += `C${r(c1[0])} ${r(c1[1])} ${r(c2[0])} ${r(c2[1])} ${r(p2[0])} ${r(p2[1])}`;
+  }
+  return d + (p.closed ? "Z" : "");
+}
+
+function pathSvg(p: MapPath, sw: number): string {
+  const fill = p.closed && p.fill ? (p.fill === 5 ? "url(#hatch)" : SHADES[Math.min(p.fill, 4)]) : "none";
+  const dash = p.dash ? ` stroke-dasharray="${r(sw * 5)} ${r(sw * 3)}"` : "";
+  let out = `<path d="${pathD(p)}" fill="${fill}"${p.closed && p.fill ? ' fill-opacity="0.85"' : ""} stroke="#000" stroke-width="${r(sw * 1.6)}" stroke-linejoin="round" stroke-linecap="round"${dash}/>`;
+  if (p.arrow && !p.closed && p.pts.length >= 2) {
+    const [x1, y1] = p.pts[p.pts.length - 2];
+    const [x2, y2] = p.pts[p.pts.length - 1];
+    const a = Math.atan2(y2 - y1, x2 - x1);
+    const L = sw * 9;
+    const pt = (t: number) => `${r(x2 - L * Math.cos(a + t))} ${r(y2 - L * Math.sin(a + t))}`;
+    out += `<path d="M${r(x2)} ${r(y2)}L${pt(0.45)}L${pt(-0.45)}Z" fill="#000"/>`;
+  }
+  return out;
 }
 
 function r(n: number) {

@@ -20,16 +20,25 @@ export type QDoc = {
   /** 과목(자유 글 — 예: 세계지리, 지구과학Ⅰ, 수학). */
   subject: string;
   number: number;
+  /** 배점(0.5 단위). */
   points: number;
+  /** 2점도 [2점] 으로 적기(예시문항처럼). */
+  showPoints?: boolean;
   /** 발문(+ 자료 글). */
   stem: string;
   figure: QFigure | null;
+  /** 자료 블록(상자·표·대화·그래프·말풍선…) — 그림 다음, 묻는 문장 앞에 놓인다. */
+  blocks: Block[];
   /** 발문 뒤 묻는 문장(예: "이에 대한 설명으로 옳은 것만을 <보기>에서 있는 대로 고른 것은?"). */
   question: string;
   /** <보기> ㄱ·ㄴ·ㄷ 진술. 비면 상자를 안 그린다. */
   bogi: string[];
   /** 선지 다섯 개. */
   choices: string[];
+  /** 선지 배치: auto = 길이에 맞춰, 1·2·3·5 = 한 줄 칸 수. */
+  choiceLayout?: "auto" | 1 | 2 | 3 | 5;
+  /** 표 꼴 선지(예: 열 머리 "(가) (나) (다)" + 선지마다 칸). 있으면 choices 대신 이걸 그린다. */
+  choiceTable?: { header: string[]; rows: string[][] };
   /** 정답 1~5(0 = 안 정함). */
   answer: number;
   solution: string;
@@ -47,6 +56,7 @@ export function newDoc(id: string): QDoc {
     points: 2,
     stem: "",
     figure: null,
+    blocks: [],
     question: "",
     bogi: [],
     choices: ["", "", "", "", ""],
@@ -74,6 +84,13 @@ export function cleanSvg(raw: string): string | null {
 
 /** 저장·받기 전에 모양을 맞춘다(모르는 값은 버린다). */
 import { readMapSpec } from "./mapFigure";
+import { readBlocks, type Block } from "./blocks";
+export type { Block } from "./blocks";
+
+const half = (v: unknown, d: number) => {
+  const x = Number(v);
+  return Number.isFinite(x) ? Math.min(9, Math.max(0.5, Math.round(x * 2) / 2)) : d;
+};
 
 export function readDoc(raw: unknown, id: string): QDoc {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -87,12 +104,16 @@ export function readDoc(raw: unknown, id: string): QDoc {
     title: str(o.title, 120) || d.title,
     subject: str(o.subject, 40),
     number: num(o.number, 1, 99, 1),
-    points: num(o.points, 1, 9, 2),
+    points: half(o.points, 2),
+    showPoints: o.showPoints === true || undefined,
     stem: str(o.stem, 8000),
     figure: svg ? { svg, widthPct: num(f!.widthPct, 20, 100, 80), caption: str(f!.caption, 60) || undefined, ...(readMapSpec(f!.map) ? { map: readMapSpec(f!.map)! } : {}) } : null,
+    blocks: readBlocks(o.blocks, cleanSvg),
     question: str(o.question, 600),
     bogi: Array.isArray(o.bogi) ? o.bogi.slice(0, 6).map((b) => str(b, 600)) : [],
     choices,
+    choiceLayout: [1, 2, 3, 5].includes(Number(o.choiceLayout)) ? (Number(o.choiceLayout) as 1 | 2 | 3 | 5) : "auto",
+    choiceTable: readChoiceTable(o.choiceTable),
     answer: num(o.answer, 0, 5, 0),
     solution: str(o.solution, 8000),
     updatedAt: new Date().toISOString(),
@@ -101,3 +122,16 @@ export function readDoc(raw: unknown, id: string): QDoc {
 
 export const BOGI_LABELS = ["ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅁ", "ㅂ"];
 export const CIRCLED = ["①", "②", "③", "④", "⑤"];
+
+function readChoiceTable(raw: unknown): QDoc["choiceTable"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const header = Array.isArray(o.header) ? o.header.slice(0, 8).map((h) => str(h, 60)) : [];
+  if (!header.length) return undefined;
+  const rows = Array.isArray(o.rows) ? o.rows.slice(0, 5).map((r) => (Array.isArray(r) ? r.slice(0, 8).map((c) => str(c, 200)) : [])) : [];
+  while (rows.length < 5) rows.push([]);
+  return { header, rows: rows.map((r) => header.map((_, i) => r[i] ?? "")) };
+}
+
+/** 배점 표기(2 → "2점", 2.5 → "2.5점"). */
+export const pointsLabel = (p: number) => `${Number.isInteger(p) ? p : p.toFixed(1)}점`;

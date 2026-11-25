@@ -1,6 +1,8 @@
 import { HWPXBuilder, write, type StyledSegment } from "hwpx-js";
 import { plainMath } from "@/lib/kice/solutionLayout";
-import { BOGI_LABELS, CIRCLED, type QDoc } from "./doc";
+import { BOGI_LABELS, CIRCLED, pointsLabel, type QDoc } from "./doc";
+import { blockHtml, SERIF, type Block } from "./blocks";
+import { inlineHtml, showPoints } from "./render";
 
 /**
  * **한글(HWPX) 파일로 내보내기**(hwpx-js, Apache-2.0). A4 · 두 단 · 명조.
@@ -59,6 +61,40 @@ export async function svgToPng(svg: string, widthPx = 1200): Promise<{ png: Uint
   }
 }
 
+/**
+ * 자료 블록 넣기: 글·대화·단순한 표는 한글 개체로(고칠 수 있게), 상자·그래프·말풍선·나란히 같은 나머지는
+ * 미리보기와 같은 모양을 **그림으로 찍어** 넣는다(한글에서 모양이 어긋나지 않게).
+ */
+async function addBlock(b: HWPXBuilder, blk: Block) {
+  if (blk.kind === "text") {
+    for (const p of paras(blk.text)) b.addStyledText(segments(p, blk.bold ? { bold: true } : {}));
+    return;
+  }
+  if (blk.kind === "dialog") {
+    for (const l of blk.lines) b.addStyledText([...segments(`${l.who}${l.who ? ": " : ""}`, { bold: true }), ...segments(l.text)]);
+    return;
+  }
+  if (blk.kind === "table" && !blk.rows.some((r) => r.some((c) => c === "<" || c === "^" || c.startsWith("[img:")))) {
+    b.addTable(
+      blk.rows.map((r) => r.map(flat)),
+      { borderStyle: "SOLID", width: (COL_MM * (blk.widthPct ?? 100)) / 100, headerRow: (blk.header ?? 0) > 0 },
+    );
+    return;
+  }
+  const { captureHtml } = await import("./exportPdf");
+  const W = 400;
+  const html = `<div style="font-family:${SERIF};font-size:15px;line-height:1.75;color:#111;background:#fff;padding:2px">${blockHtml(blk, inlineHtml)}</div>`;
+  const png = await captureHtml(html, W);
+  const size = await pngSize(png);
+  const w = COL_MM;
+  b.addImage(png, "png", { width: w, height: (w * size.h) / Math.max(1, size.w) });
+}
+
+async function pngSize(png: Uint8Array): Promise<{ w: number; h: number }> {
+  const v = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  return { w: v.getUint32(16), h: v.getUint32(20) };
+}
+
 export async function docsToHwpx(docs: QDoc[], withSolutions = false): Promise<Uint8Array> {
   const b = new HWPXBuilder()
     .setPageSettings({ width: 210, height: 297, marginLeft: 15, marginRight: 15, marginTop: 18, marginBottom: 15 })
@@ -76,12 +112,16 @@ export async function docsToHwpx(docs: QDoc[], withSolutions = false): Promise<U
       }
       if (doc.figure.caption) b.addStyledText(segments(doc.figure.caption));
     }
-    if (doc.question.trim()) b.addStyledText(segments(`${doc.question.trim()}${doc.points >= 3 ? ` [${doc.points}점]` : ""}`));
+    for (const blk of doc.blocks ?? []) await addBlock(b, blk);
+    if (doc.question.trim()) b.addStyledText(segments(`${doc.question.trim()}${showPoints(doc) ? ` [${pointsLabel(doc.points)}]` : ""}`));
     const bogi = doc.bogi.filter((x) => x.trim());
     if (bogi.length) {
       b.addTable([["<보 기>"], ...bogi.map((x, i) => [`${BOGI_LABELS[i]}. ${flat(x)}`])], { borderStyle: "SOLID", width: COL_MM, headerRow: true });
     }
-    if (doc.choices.some((c) => c.trim())) {
+    if (doc.choiceTable?.header.length) {
+      const t = doc.choiceTable;
+      b.addTable([["", ...t.header.map(flat)], ...t.rows.map((r, i) => [CIRCLED[i], ...r.map(flat)])], { borderStyle: "NONE", width: COL_MM });
+    } else if (doc.choices.some((c) => c.trim())) {
       b.addParagraph(doc.choices.map((c, i) => `${CIRCLED[i]} ${flat(c)}`).join("    "), { fontName: FONT, fontSize: SIZE });
     }
     b.addEmptyParagraph();
