@@ -10,6 +10,7 @@ import {
   mapLonLatToXY,
   SHADE_LABELS,
   SHADES,
+  LAND_GRAY,
   xyToLonLat,
   type MapData,
   type MapKind,
@@ -288,29 +289,50 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
                 <svg ref={svgRef} viewBox={spec.view.join(" ")} className="block h-auto w-full cursor-crosshair select-none" onClick={(e) => mode !== "paint" && onMapClick(e, null)}>
                   {/* 화면용: 경로마다 눌러 칠할 수 있게 따로 그린다 */}
                   <rect x={spec.view[0]} y={spec.view[1]} width={spec.view[2]} height={spec.view[3]} fill="#fff" />
-                  {Object.entries(data.shapes).map(([code, ds]) => {
-                    const lv = spec.fills[code] ?? 0;
+                  {(() => {
+                    // 미리보기와 같은 선 모드로 그린다: 경계 = 나라마다 선, 해안선만 = 모두 그은 위를 덮기, 선 없음 = 칠만.
+                    const borders = spec.borders ?? spec.kind === "korea";
+                    const land = spec.landGray === false ? "#ffffff" : LAND_GRAY;
+                    const fillOf = (code: string) => {
+                      const lv = spec.fills[code] ?? 0;
+                      return lv === 5 ? "#999" : lv ? SHADES[Math.min(lv, 4)] : land;
+                    };
+                    const entries = Object.entries(data.shapes);
+                    const stroked = !spec.noLines && !borders;
                     return (
-                      <g
-                        key={code}
-                        fill={lv === 5 ? "#999" : SHADES[Math.min(lv, 4)]}
-                        stroke="#000"
-                        strokeWidth={sw}
-                        className="hover:opacity-70"
-                        onClick={(e) => {
-                          if (mode === "paint") {
-                            e.stopPropagation();
-                            onMapClick(e, code);
-                          }
-                        }}
-                      >
-                        <title>{nameOf(spec.kind, code)}</title>
-                        {ds.map((d, k) => (
-                          <path key={k} d={d} />
-                        ))}
-                      </g>
+                      <>
+                        {stroked && (
+                          <g fill="#000" stroke="#000" strokeWidth={sw * 2} pointerEvents="none">
+                            {entries.map(([code, ds]) => ds.map((d, k) => <path key={`${code}${k}`} d={d} />))}
+                          </g>
+                        )}
+                        {entries.map(([code, ds]) => {
+                          const f = fillOf(code);
+                          const line = !spec.noLines && borders;
+                          return (
+                            <g
+                              key={code}
+                              fill={f}
+                              stroke={line ? "#000" : f}
+                              strokeWidth={line ? sw : sw * 0.9}
+                              className="hover:opacity-70"
+                              onClick={(e) => {
+                                if (mode === "paint") {
+                                  e.stopPropagation();
+                                  onMapClick(e, code);
+                                }
+                              }}
+                            >
+                              <title>{nameOf(spec.kind, code)}</title>
+                              {ds.map((d, k) => (
+                                <path key={k} d={d} />
+                              ))}
+                            </g>
+                          );
+                        })}
+                      </>
                     );
-                  })}
+                  })()}
                   {(spec.paths ?? []).map((p, i) => (
                     <path key={`p${i}`} d={pathD(p)} fill={p.closed && p.fill ? "rgba(200,0,0,0.15)" : "none"} stroke="#d00" strokeWidth={sw * 1.6} strokeDasharray={p.dash ? `${sw * 5} ${sw * 3}` : undefined} />
                   ))}
