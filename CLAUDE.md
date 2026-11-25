@@ -6569,4 +6569,8 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
   모양 `QDoc`(`src/lib/editor/doc.ts`): 제목·과목·번호·배점·발문·그림(SVG, 폭 %, 캡션)·묻는 문장·<보기>(ㄱㄴㄷ)·선지 5·정답·해설. 표기는 빈 줄 문단 · `$수식$` · `**굵게**` · `__밑줄__`.
   AI(`/api/editor/ai`, sol, 강도 `EDITOR_SOL_EFFORT` 기본 high): 초안 · 지시대로 고치기 · 검수(직접 풀어 정답 대조 + 문제점) · **SVG 그리기/고치기**(평가원풍 흑백 선화). SVG 는 `cleanSvg` 로 script 등을 걸러 낸다.
   미리보기는 `docHtml`(KaTeX). 내보내기: **PDF** = 카드를 찍어 기존 평가원 틀 파이프라인(`buildKicePdfOffThread`, 자동 배치·짝수 쪽·정답표·해설), **HWPX** = `hwpx-js`(A4 2단, 함초롬바탕, <보기>는 표, 그림은 PNG; **수식은 아직 글자로 바꿔 넣는다** — 한글 수식 개체 아님).
-- **남은 것**: geogl3(`wesslvc/seji`, `geogl3/for2027csat/index.html` 의 `world-svg` 2754×1398, Natural Earth 등장방형) 백지도로 나라 칠하기·표지 찍기 도구, HWPX 수식 개체. 검증은 `tsc`·`build`·HWPX 다시 읽기까지 — **실제 계정으로 에디터를 눌러 본 것은 없다.**
+- **백지도 도구**(`MapTool`, 그림 칸의 "백지도로 만들기"): geogl3(`wesslvc/seji` `geogl3/for2027csat/index.html`)의 세계 백지도(`world-svg`, 2754×1398 등장방형, 나라 243개 — ISO2 코드)와
+  대한민국 시도(17개, 시군구 경계 포함)를 `scripts/maps/extract-geogl3.py` 로 `public/maps/{world,korea}.json` 에 뽑아 두었다(한 번 돌리고 커밋). 나라/시도를 눌러 흰~검정 4단계·빗금으로 칠하고,
+  "표지 찍기"로 누른 자리에 A·(가)·㉠·갑 등을 찍고, 세계는 지역 고르기·경위도로 자르기와 경위선(10~30°)을 넣는다. 나라 이름은 `Intl.DisplayNames('ko')`. `buildMapSvg`(`src/lib/editor/mapFigure.ts`)가
+  흑백 SVG 를 만들고(보이는 영역 밖 경로는 브라우저 getBBox 로 걸러 뺀다), 설정은 `figure.map` 에 남아 다시 열어 고친다. 백지도 그림은 sol 의 "지금 그림 고치기"를 감춘다(SVG 가 커서).
+- **남은 것**: HWPX 수식 개체. 검증은 `tsc`·`build`·HWPX 다시 읽기·백지도 SVG 를 Chromium 으로 그려 보기까지 — **실제 계정으로 에디터를 눌러 본 것은 없다.**

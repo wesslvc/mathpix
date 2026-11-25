@@ -5,6 +5,9 @@ import { Button } from "@/components/ui/button";
 import { BOGI_LABELS, CIRCLED, newDoc, type QDoc, type QIndexRow } from "@/lib/editor/doc";
 import { docHtml } from "@/lib/editor/render";
 import { KICE_AREAS } from "@/lib/kiceSubjects";
+import dynamic from "next/dynamic";
+
+const MapTool = dynamic(() => import("./MapTool"), { ssr: false });
 import type { KiceArea } from "@/lib/kice/frames";
 
 /**
@@ -399,6 +402,7 @@ function FigureEditor({ doc, patch, busy, ai }: { doc: QDoc; patch: (p: Partial<
   const [brief, setBrief] = useState("");
   const [note, setNote] = useState("");
   const [showCode, setShowCode] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   useEffect(() => {
     const on = (e: Event) => setBrief(String((e as CustomEvent).detail ?? ""));
     window.addEventListener("editor:figure-brief", on);
@@ -433,6 +437,9 @@ function FigureEditor({ doc, patch, busy, ai }: { doc: QDoc; patch: (p: Partial<
             </button>
           </>
         )}
+        <button type="button" className="text-xs font-semibold text-blue-700 underline" onClick={() => setMapOpen(true)}>
+          {fig?.map ? "백지도 고치기" : "백지도로 만들기"}
+        </button>
         <label className="cursor-pointer text-xs underline">
           SVG 파일 올리기
           <input
@@ -459,13 +466,23 @@ function FigureEditor({ doc, patch, busy, ai }: { doc: QDoc; patch: (p: Partial<
         <Button type="button" variant="outline" size="sm" disabled={busy || !brief.trim()} onClick={() => void draw(false)}>
           {fig ? "새로 그리기" : "그리기"}
         </Button>
-        {fig && (
+        {fig && !fig.map && (
           <Button type="button" variant="outline" size="sm" disabled={busy || !brief.trim()} onClick={() => void draw(true)}>
             지금 그림 고치기
           </Button>
         )}
       </div>
       {note && <p className="text-xs text-slate-500">sol: {note}</p>}
+      {mapOpen && (
+        <MapTool
+          initial={fig?.map}
+          onClose={() => setMapOpen(false)}
+          onApply={(svg, map) => {
+            patch({ figure: { svg, map, widthPct: fig?.widthPct ?? 90, caption: fig?.caption } });
+            setMapOpen(false);
+          }}
+        />
+      )}
       {fig && (
         <input className={`${inputCls} font-serif`} value={fig.caption ?? ""} placeholder="그림 아래 글(선택)" onChange={(e) => patch({ figure: { ...fig, caption: e.target.value } })} />
       )}

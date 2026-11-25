@@ -10,6 +10,8 @@ export type QFigure = {
   widthPct: number;
   /** 그림 아래 작은 글(예: "(가)"). */
   caption?: string;
+  /** 백지도 도구로 만든 그림이면 그 설정(다시 열어 고칠 수 있게). */
+  map?: import("./mapFigure").MapSpec;
 };
 
 export type QDoc = {
@@ -63,7 +65,7 @@ const num = (v: unknown, lo: number, hi: number, d: number) => {
 /** SVG 원문을 받기 전에 위험한 것을 뺀다(스크립트·외부 참조·이벤트). */
 export function cleanSvg(raw: string): string | null {
   const s = raw.trim();
-  if (!/^<svg[\s>]/i.test(s) || !/<\/svg>\s*$/i.test(s) || s.length > 400_000) return null;
+  if (!/^<svg[\s>]/i.test(s) || !/<\/svg>\s*$/i.test(s) || s.length > 900_000) return null;
   if (/<script|<foreignObject|javascript:|<iframe|<object|<embed/i.test(s)) return null;
   return s
     .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*')/gi, "")
@@ -71,6 +73,8 @@ export function cleanSvg(raw: string): string | null {
 }
 
 /** 저장·받기 전에 모양을 맞춘다(모르는 값은 버린다). */
+import { readMapSpec } from "./mapFigure";
+
 export function readDoc(raw: unknown, id: string): QDoc {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const d = newDoc(id);
@@ -85,7 +89,7 @@ export function readDoc(raw: unknown, id: string): QDoc {
     number: num(o.number, 1, 99, 1),
     points: num(o.points, 1, 9, 2),
     stem: str(o.stem, 8000),
-    figure: svg ? { svg, widthPct: num(f!.widthPct, 20, 100, 80), caption: str(f!.caption, 60) || undefined } : null,
+    figure: svg ? { svg, widthPct: num(f!.widthPct, 20, 100, 80), caption: str(f!.caption, 60) || undefined, ...(readMapSpec(f!.map) ? { map: readMapSpec(f!.map)! } : {}) } : null,
     question: str(o.question, 600),
     bogi: Array.isArray(o.bogi) ? o.bogi.slice(0, 6).map((b) => str(b, 600)) : [],
     choices,
