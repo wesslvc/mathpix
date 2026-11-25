@@ -3,9 +3,12 @@ import { NextResponse } from "next/server";
 import { EDITOR_FONT_FILES, KICE_FONT_FILES } from "@/lib/kice/fonts";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { buildEditorFont } from "@/lib/editor/editorFonts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 const ALLOWED = new Set<string>([...Object.values(KICE_FONT_FILES), ...EDITOR_FONT_FILES]);
 
@@ -70,6 +73,15 @@ export async function GET(req: Request, { params }: { params: { file: string } }
   }
 
   const { data, error } = await supabase.storage.from("kice-fonts").download(params.file);
+  if ((error || !data) && (EDITOR_FONT_FILES as readonly string[]).includes(params.file)) {
+    // 에디터 글꼴은 버킷에 없으면 처음 한 번 원본에서 잘라 올리고 바로 준다.
+    try {
+      const built = await buildEditorFont(params.file, createAdminClient());
+      return new NextResponse(built, { headers: { ...headers, "Cache-Control": "private, no-cache, must-revalidate" } });
+    } catch (err) {
+      console.warn("[editor-font] 만들기 실패", params.file, err);
+    }
+  }
   if (error || !data) {
     return NextResponse.json(
       {

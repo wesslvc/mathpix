@@ -6605,5 +6605,6 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 - 글꼴 네 벌(본문 (한)신명조 · 자료 (환)중고딕 · 굵게 (환)견명조·(환)견고딕)을 **비공개 버킷 `kice-fonts` 에 woff2** 로 둔다(`editor-serif(-bold).woff2`·`editor-gothic(-bold).woff2`,
   배포권이 없어 저장소에 안 넣는다). 받는 길은 기존 `/api/kice/font/<파일>`(로그인 필요, `EDITOR_FONT_FILES`). `globals.css` 의 `@font-face`("KICE Serif"/"KICE Gothic", 700 = 견명조·견고딕)가
   쓰고, 에디터 미리보기·PDF 캡처·그래프가 이 이름을 먼저 찾는다(못 받으면 나눔명조·나눔고딕).
+- **버킷에 없으면 저절로 만든다**: `/api/kice/font/editor-*.woff2` 가 파일이 없으면 그 자리에서 원본을 받아 잘라(`src/lib/editor/editorFonts.ts`) 올리고 바로 준다(처음 한 번 수십 초). Supabase MCP 가 권한 오류로 막혀 프로브를 못 불러서 이렇게 했다.
 - **올리는 법**: Edge Function 배포가 막혀 있어 일꾼 라우트 `probe: "editor-fonts"`(`/api/figure-jobs/run`)가 원본을 `cm99521/mcc` 에서 받아 한글 전체+기호만 woff2 로 잘라 올린다(`model` 에 파일 이름을 주면 그것만). DB `http` 확장이 Vault 토큰을 실어 부른다.
 - **HWPX** 는 한글에 깔린 진짜 글꼴 이름을 쓴다: 본문 `HY신명조`, 고딕 글 블록 `HY중고딕`.
