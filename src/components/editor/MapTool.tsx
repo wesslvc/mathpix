@@ -389,8 +389,19 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
                 육지 회색
               </label>
               <label className="flex items-center gap-1">
-                <input type="checkbox" checked={spec.borders ?? spec.kind === "korea"} onChange={(e) => setSpec((s) => ({ ...s, borders: e.target.checked }))} />
-                {spec.kind === "world" ? "나라 경계선" : "시도 경계선"}
+                선
+                <select
+                  className="rounded border border-border bg-background px-1 py-0.5 text-xs"
+                  value={spec.noLines ? "none" : (spec.borders ?? spec.kind === "korea") ? "borders" : "coast"}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSpec((s) => ({ ...s, noLines: v === "none" ? true : undefined, borders: v === "borders" }));
+                  }}
+                >
+                  <option value="borders">{spec.kind === "world" ? "나라 경계 + 해안선" : "시도 경계 + 해안선"}</option>
+                  <option value="coast">해안선만</option>
+                  <option value="none">선 없음 (땅 모양만)</option>
+                </select>
               </label>
               <label className="flex items-center gap-1">
                 <input type="checkbox" checked={spec.dotStyle === "ring"} onChange={(e) => setSpec((s) => ({ ...s, dotStyle: e.target.checked ? "ring" : "solid" }))} />

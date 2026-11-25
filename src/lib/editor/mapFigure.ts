@@ -36,6 +36,8 @@ export type MapSpec = {
   proj?: "mercator";
   /** 나라(시도) 경계선을 그릴지 — 없으면 해안선만(평가원 세계 지도처럼). 기본: 세계는 끔, 대한민국은 켬. */
   borders?: boolean;
+  /** 선 없음 — 경계선·해안선을 하나도 긋지 않고 땅 모양(칠)만. borders 보다 앞선다. */
+  noLines?: boolean;
   /** 육지를 옅은 회색으로(평가원 지도처럼, 기본 켬). 끄면 흰 육지. */
   landGray?: boolean;
   /** 점 모양: 까만 점(평가원, 기본) / 속이 빈 고리. */
@@ -163,6 +165,7 @@ export function readMapSpec(raw: unknown): MapSpec | null {
   const style = {
     ...(typeof o.borders === "boolean" ? { borders: o.borders } : {}),
     ...(o.landGray === false ? { landGray: false } : {}),
+    ...(o.noLines === true ? { noLines: true } : {}),
     ...(o.dotStyle === "ring" || o.dotStyle === "solid" ? { dotStyle: o.dotStyle as "ring" | "solid" } : {}),
   };
   const spec: MapSpec = { kind: o.kind, view: v, fills, markers, grid, ...(paths.length ? { paths } : {}), ...style };
@@ -232,7 +235,10 @@ export function buildMapSvg(spec: MapSpec, data: MapData, bboxes?: Map<string, [
   // 덮는 층은 제 색으로 얇게 테두리를 둘러 이음매(안티에일리어싱 실금)까지 덮는다.
   const cover = (x: { fill: string; ds: string[] }) => `<g fill="${x.fill}" stroke="${x.fill}" stroke-width="${r(sw * 0.9)}">${paths(x.ds)}</g>`;
   out.push(`<g clip-path="url(#${uid}c)" stroke-linejoin="round">`);
-  if (borders) {
+  if (spec.noLines) {
+    // 선 없음: 제 색으로만 칠한다(이음매는 제 색 테두리로 덮인다).
+    out.push(`<g>${shapes.map(cover).join("")}</g>`);
+  } else if (borders) {
     /*
      * 나라(시도) 경계만: 나라마다 "굵게 긋고 → 선 없이 덮기"를 차례로 하면 그 나라 안쪽 선(대한민국 자료의 시군구 경계)은 덮이고
      * 이웃과의 경계는 뒤에 그린 쪽이 덮지 못한 절반이 남는다.
