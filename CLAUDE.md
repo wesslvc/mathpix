@@ -6557,3 +6557,16 @@ high 다시 그리기는 같은 창에서 두 번째 칸으로 고르면 된다.
 - 고친 것: `handleOpBatch`(variantOps.ts)가 batch 결과 줄의 오류가 **일시 오류**(429·5xx·overloaded·rate limit·timeout·capacity·unavailable, batch 가 expired)이면 `failOp` 로 닫지 않고 **같은 단계를 그대로 다시 건다**(`batch_id` 비움 + `state.tries`+1, 최대 6번 — `VARIANT_OP_RETRIES`). pg_cron 이 `updated_at` 30초 뒤부터 깨우므로 자연히 간격이 벌어진다. 모두 실패하면 예전처럼 지적을 살려 승인 대기(이유에 "N번 다시 시도함"). draw·check·overlay 셋 다 해당.
 - 안 한 것: 최초 생성(`variantBatch.ts` 의 plan·image·review 줄)의 일시 오류 재시도는 안 건드렸다 — 같은 증상이 나오면 같은 식으로 넣을 것.
 - 검증: `tsc` 만. 실제 503 으로 재시도가 이어지는지는 못 봤다.
+
+#### 수능 뒤 개편 — 기존 데이터 받기 · 문항 제작 에디터 (2026-11-25)
+
+사용자 — "수능이 끝나서 이제 이게 필요 없어 … 기존 데이터 다운받기, 평가원 스타일 문항제작 에디터로, AI SVG, geogl3 백지도로 지리문항, hwpx 내보내기, 무제한 계정만".
+- **기존 데이터 받기**: 로그인하면 위에 "27수능 수고하셨습니다 🎉 · 기존 데이터 받기" 배너(`ArchiveBanner`, 닫으면 localStorage). `POST /api/archive` 가 사용자 세션(RLS)으로 폴더·실모·문제·채점을 읽어
+  ZIP(`문제/<폴더>/<실모>/NN_N번.png`, `변형문제/<묶음>/…`, `성적_문제목록.xlsx`(성적·문항별·문제 목록), `읽어 주세요.txt`)을 **R2 multipart 로 흘려 쓰고**(`<uid>/_export/…zip`, 8MB 조각) 7일짜리 받기 주소를 준다.
+  엑셀은 `src/lib/xlsx.ts`(fflate 로 손수 만든 최소 xlsx).
+- **메뉴**: 옛 메뉴(실모·채점·성적·정답표·변형문제)는 **메뉴에서만 감췄다** — 주소로는 다 열리고 코드·데이터 그대로. 메뉴는 "문항 제작"(무제한만) + 프로필, 로고는 무제한이면 `/editor`.
+- **문항 제작 에디터 `/editor`**(무제한 전용, 서버도 `requireEditor` 로 막음): 문항은 R2 JSON(`<uid>/_editor/<id>.json` + `index.json`, `/api/editor`)으로 저장(1.2초 뒤 자동).
+  모양 `QDoc`(`src/lib/editor/doc.ts`): 제목·과목·번호·배점·발문·그림(SVG, 폭 %, 캡션)·묻는 문장·<보기>(ㄱㄴㄷ)·선지 5·정답·해설. 표기는 빈 줄 문단 · `$수식$` · `**굵게**` · `__밑줄__`.
+  AI(`/api/editor/ai`, sol, 강도 `EDITOR_SOL_EFFORT` 기본 high): 초안 · 지시대로 고치기 · 검수(직접 풀어 정답 대조 + 문제점) · **SVG 그리기/고치기**(평가원풍 흑백 선화). SVG 는 `cleanSvg` 로 script 등을 걸러 낸다.
+  미리보기는 `docHtml`(KaTeX). 내보내기: **PDF** = 카드를 찍어 기존 평가원 틀 파이프라인(`buildKicePdfOffThread`, 자동 배치·짝수 쪽·정답표·해설), **HWPX** = `hwpx-js`(A4 2단, 함초롬바탕, <보기>는 표, 그림은 PNG; **수식은 아직 글자로 바꿔 넣는다** — 한글 수식 개체 아님).
+- **남은 것**: geogl3(`wesslvc/seji`, `geogl3/for2027csat/index.html` 의 `world-svg` 2754×1398, Natural Earth 등장방형) 백지도로 나라 칠하기·표지 찍기 도구, HWPX 수식 개체. 검증은 `tsc`·`build`·HWPX 다시 읽기까지 — **실제 계정으로 에디터를 눌러 본 것은 없다.**

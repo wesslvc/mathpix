@@ -1,0 +1,88 @@
+import katex from "katex";
+import { plainMath } from "@/lib/kice/solutionLayout";
+import { BOGI_LABELS, CIRCLED, type QDoc } from "./doc";
+
+/**
+ * 문항을 **평가원 문제지 모양의 HTML** 로 만든다. 화면 미리보기와 PDF 용 캡처가 같은 함수를 쓴다(둘이 어긋나면 안 된다).
+ * 글 칸 표기: 빈 줄 = 문단, `$…$` 수식, `**굵게**`, `__밑줄__`.
+ */
+const SERIF = "'Nanum Myeongjo', 'Noto Serif KR', serif";
+
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** 한 문단 안 글(수식·굵게·밑줄)을 HTML 로. */
+export function inlineHtml(src: string): string {
+  const parts = src.split(/(\$[^$]+\$)/g);
+  return parts
+    .map((p) => {
+      if (/^\$[^$]+\$$/.test(p)) {
+        try {
+          return katex.renderToString(p.slice(1, -1), { throwOnError: false, output: "html" });
+        } catch {
+          return esc(p);
+        }
+      }
+      return esc(p)
+        .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+        .replace(/__(.+?)__/g, '<u style="text-underline-offset:3px">$1</u>')
+        .replace(/\n/g, "<br/>");
+    })
+    .join("");
+}
+
+const paras = (src: string) => src.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
+
+/** 선지 배치: 모두 짧으면 한 줄 다섯 칸, 중간이면 3+2, 길면 한 줄에 하나. */
+function choicesHtml(choices: string[]): string {
+  const len = Math.max(...choices.map((c) => c.replace(/\$[^$]+\$/g, "xx").length));
+  const cols = len <= 8 ? 5 : len <= 18 ? 3 : 1;
+  const cells = choices
+    .map((c, i) => `<div style="display:flex;gap:6px;align-items:baseline"><span>${CIRCLED[i]}</span><span>${inlineHtml(c)}</span></div>`)
+    .join("");
+  return `<div style="display:grid;grid-template-columns:repeat(${cols},minmax(0,1fr));column-gap:12px;row-gap:6px;margin-top:14px">${cells}</div>`;
+}
+
+export function docHtml(doc: QDoc): string {
+  const stem = paras(doc.stem);
+  const first = stem.shift() ?? "";
+  const out: string[] = [];
+  out.push(
+    `<p style="margin:0 0 8px;text-align:justify"><b style="font-size:1.15em;margin-right:6px">${doc.number}.</b>${inlineHtml(first)}</p>`,
+  );
+  for (const p of stem) out.push(`<p style="margin:0 0 8px;text-align:justify;text-indent:0.5em">${inlineHtml(p)}</p>`);
+  if (doc.figure) {
+    out.push(
+      `<div style="margin:10px auto 8px;width:${doc.figure.widthPct}%">${doc.figure.svg.replace(/<svg/i, '<svg style="width:100%;height:auto;display:block"')}</div>`,
+    );
+    if (doc.figure.caption) out.push(`<p style="margin:0 0 8px;text-align:center">${inlineHtml(doc.figure.caption)}</p>`);
+  }
+  if (doc.question.trim()) {
+    out.push(
+      `<p style="margin:4px 0 8px;text-align:justify">${inlineHtml(doc.question.trim())}${doc.points >= 3 ? ` [${doc.points}점]` : ""}</p>`,
+    );
+  }
+  const bogi = doc.bogi.filter((b) => b.trim());
+  if (bogi.length) {
+    out.push(
+      `<div style="position:relative;border:1px solid #111;padding:16px 12px 8px;margin:14px 0 4px">` +
+        `<div style="position:absolute;top:-0.75em;left:0;right:0;text-align:center"><span style="background:#fff;padding:0 8px">&lt;보 기&gt;</span></div>` +
+        bogi
+          .map(
+            (b, i) =>
+              `<div style="display:flex;gap:6px;margin:0 0 6px;text-align:justify"><span style="flex:none">${BOGI_LABELS[i]}.</span><span>${inlineHtml(b)}</span></div>`,
+          )
+          .join("") +
+        `</div>`,
+    );
+  }
+  if (doc.choices.some((c) => c.trim())) out.push(choicesHtml(doc.choices));
+  return `<div style="font-family:${SERIF};font-size:15px;line-height:1.75;color:#111;background:#fff;padding:8px 6px">${out.join("")}</div>`;
+}
+
+/** HWPX·검색용: 표기를 떼고 수식은 읽을 수 있는 글자로. */
+export function plainText(src: string): string {
+  return src
+    .replace(/\$([^$]+)\$/g, (_, t: string) => plainMath(t))
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1");
+}

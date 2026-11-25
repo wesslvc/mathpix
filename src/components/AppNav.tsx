@@ -21,13 +21,11 @@ import Logo from "./Logo";
  * **로그인 화면에서는 안 보인다.** 아직 들어오지 않은 사람에게 앱 안쪽으로
  * 가는 링크를 늘어놓아 봐야 전부 로그인으로 되돌아온다.
  */
-const LINKS = [
-  { href: "/", label: "실모" },
-  { href: "/grade", label: "채점" },
-  { href: "/scores", label: "성적" },
-  { href: "/profile", label: "프로필 및 설정" },
-  { href: "/answer-sheet", label: "정답표" },
-] as const;
+/*
+ * 2027 수능이 끝나 오답프린트 메뉴(실모·채점·성적·정답표·변형문제)는 메뉴에서만 감췄다(2026-11-25).
+ * 주소로는 그대로 열리고 코드·데이터도 그대로다. 지금 메뉴는 문항 제작 에디터(무제한 전용) + 프로필.
+ */
+const LINKS = [{ href: "/profile", label: "프로필 및 설정" }] as const;
 
 export default function AppNav({ showVariants = false }: { showVariants?: boolean }) {
   const pathname = usePathname();
@@ -44,7 +42,7 @@ export default function AppNav({ showVariants = false }: { showVariants?: boolea
       className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/80 backdrop-blur-md backdrop-saturate-150"
     >
       <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-2.5">
-        <Link href="/" className="mr-1 shrink-0" aria-label="ReprintOCR 홈">
+        <Link href={showVariants ? "/editor" : "/"} className="mr-1 shrink-0" aria-label="ReprintOCR 홈">
           {/* 좁은 화면에서는 마크만 — 워드마크까지 두면 링크가 밀려 잘린다. */}
           <span className="hidden sm:inline-flex">
             <Logo size={26} />
@@ -56,7 +54,7 @@ export default function AppNav({ showVariants = false }: { showVariants?: boolea
 
         {/* 링크가 많아지면 좁은 화면에서 가로로 민다(잘리지 않는다). */}
         <div className="flex flex-1 gap-1 overflow-x-auto">
-          {[...LINKS, ...(showVariants ? [{ href: "/variants", label: "변형문제" } as const] : [])].map((l) => (
+          {[...(showVariants ? [{ href: "/editor", label: "문항 제작" } as const] : []), ...LINKS].map((l) => (
             <Link
               key={l.href}
               href={l.href}
