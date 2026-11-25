@@ -28,15 +28,19 @@ const LAYOUT = `LAYOUT (조판) — the item is typeset exactly like a 평가원
 order and nesting of "blocks" (row = side by side, labeled = (가)(나) 표지, box frame/titlePos, text font serif|gothic and align).
 follow 평가원 conventions: 발문 → 자료 → 묻는 문장 → <보 기> → 선지; <보 기> title centered on the box border; 자료 상자 글 in 고딕; short choices on one line.`;
 
+const OBEY = `FOLLOW THE AUTHOR EXACTLY: build only what the request/instruction asks for. do NOT add extra 제시문, 자료, 대화, 표, 그래프, 상자, <보기>, 그림 or decorative text the author did not ask for, and do not pad the stem. if the author names a format (e.g. "<보기> ㄱㄴㄷ", "표 하나", "자료 없이"), use exactly that; if they do not mention 자료, add one only when the item cannot be solved without it, and then the smallest one. keep stem and question as short as the 평가원 style allows.`;
+
 export const DRAFT_PROMPT = `task: you are a Korean exam item writer. write ONE new multiple-choice exam item from the request after this text.
+${OBEY}
 ${STYLE}
 ${BLOCKS}
-if the item needs a figure (map, graph, diagram, table drawn as figure), describe it precisely in "figure_brief" (every element, label, value and position, so that an SVG can be drawn from it); otherwise "".
+if the request asks for a figure or the item truly needs one (map, graph, diagram), describe it precisely in "figure_brief" (every element, label, value and position, so that an SVG can be drawn from it); otherwise "".
 SOLVE your item and make sure exactly one choice is correct; write the 해설 in "solution" (Korean, one step per paragraph, $math$, last line "정답: ③").
 reply ONLY JSON: {"title":"짧은 제목","stem":"발문 첫 문장","blocks":[…],"question":"묻는 문장","bogi":["ㄱ 진술","ㄴ 진술","ㄷ 진술"],"choices":["…","…","…","…","…"],"answer":1-5,"figure_brief":"","solution":"…"}
 ("bogi" may be [] when the item has no <보기>.)`;
 
 export const REVISE_PROMPT = `task: you are a Korean exam item editor and typesetter. the CURRENT ITEM (JSON) and the author's INSTRUCTION follow. revise the item (content and/or layout) exactly as instructed, change nothing else.
+${OBEY}
 ${STYLE}
 ${BLOCKS}
 ${LAYOUT}
@@ -54,3 +58,10 @@ export const SVG_PROMPT = `task: draw ONE exam figure as clean SVG code, in the 
 rules: a single <svg> root with xmlns and a viewBox (width ~ 520–700), no <script>, no external images/fonts/links, no CSS animations; compute every coordinate so that values, scales, ticks and positions are mathematically correct; all labels inside the viewBox and not overlapping lines.
 if a BASE SVG is given, edit it as instructed and keep everything else. the description/instruction follows.
 reply ONLY JSON: {"svg":"<svg …>…</svg>","note":"한국어 한 줄(그린 내용)"}`;
+
+export const MAP_PROMPT = `task: you place markers on a blank map for a Korean geography exam figure (평가원 style). the MAP (kind, visible area, existing markers and shaded regions) and the author's INSTRUCTION follow.
+put each requested place at its REAL geographic position: give latitude/longitude in decimal degrees (south and west negative) as precisely as you know it (city centre, the middle of a desert/plain/region, a river mouth, a mountain peak …).
+only place what the instruction asks for — do not add extra markers. labels exactly as the author wants (A, B, (가), ㉠, 갑 …; "" for a bare dot). keep every marker inside the visible area.
+if the instruction also asks to shade countries (world: ISO 3166-1 alpha-2 codes like "BR") or provinces (korea: full names like "강원도"), give "fills" with levels 1 연회색 · 2 회색 · 3 진회색 · 4 검정 · 5 빗금.
+"replace": true when the instruction means to redo the markers from scratch, otherwise false (markers are added).
+reply ONLY JSON: {"markers":[{"label":"A","lat":0,"lon":0,"dot":true,"place":"한국어 장소 이름"}],"fills":{},"replace":false,"note":"한국어 한 줄"}`;

@@ -7,6 +7,7 @@ import {
   defaultSpec,
   lonLatBox,
   lonLatToXY,
+  mapLonLatToXY,
   SHADE_LABELS,
   SHADES,
   xyToLonLat,
@@ -382,6 +383,7 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
                 </label>
               </div>
             )}
+            <AiMapBox spec={spec} codes={codes} onResult={(r) => setSpec(r)} />
             {spec.kind === "world" && <LonLatDot onAdd={(lon, lat, lb) => {
               const [x, y] = lonLatToXY(lon, lat);
               setSpec((s) => ({ ...s, markers: [...s.markers, { x, y, label: lb, dot: true }] }));
@@ -498,6 +500,77 @@ function LonLatDot({ onAdd }: { onAdd: (lon: number, lat: number, label: string)
         </Button>
       </div>
       <span className="text-[11px] text-slate-400">남위·서경은 음수로(예: 위도 -33.9, 경도 151.2)</span>
+    </div>
+  );
+}
+
+/** **AI로 점 찍기**: "A 사하라 사막, B 아마존 분지, C 파리" 처럼 적으면 sol 이 실제 위경도로 자리를 짚고, 여기서 지도 좌표로 바꿔 찍는다. */
+function AiMapBox({ spec, codes, onResult }: { spec: MapSpec; codes: string[]; onResult: (s: MapSpec) => void }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  async function run() {
+    setBusy(true);
+    setMsg("");
+    try {
+      const area = spec.kind === "world" ? viewToLonLat(spec) : { lon: [124.5, 130.0], lat: [33.0, 38.7] };
+      const map = {
+        kind: spec.kind === "world" ? "world (Robinson)" : "korea (South Korea, provinces)",
+        visible: { lon: area.lon.map((v) => Math.round(v)), lat: area.lat.map((v) => Math.round(v)) },
+        markers: spec.markers.map((m) => {
+          if (spec.kind !== "world") return { label: m.label };
+          const [lon, lat] = xyToLonLat(m.x, m.y);
+          return { label: m.label, lat: Math.round(lat * 10) / 10, lon: Math.round(lon * 10) / 10 };
+        }),
+        fills: spec.fills,
+      };
+      const r = await fetch("/api/editor/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "map", map, instruction: text }) });
+      const j = (await r.json().catch(() => ({}))) as { result?: Record<string, unknown>; error?: string };
+      if (!r.ok || !j.result) throw new Error(j.error || `요청 실패 (${r.status})`);
+      const o = j.result;
+      const [vx, vy, vw, vh] = spec.view;
+      const out: MapSpec["markers"] = [];
+      let outside = 0;
+      for (const m of Array.isArray(o.markers) ? (o.markers as Record<string, unknown>[]) : []) {
+        const lat = Number(m.lat), lon = Number(m.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
+        const [x, y] = mapLonLatToXY(spec.kind, lon, lat);
+        if (x < vx || x > vx + vw || y < vy || y > vy + vh) outside++;
+        out.push({ x, y, label: String(m.label ?? "").slice(0, 8), dot: m.dot !== false });
+      }
+      const fills = { ...spec.fills };
+      const valid = new Set(codes);
+      if (o.fills && typeof o.fills === "object")
+        for (const [k, v] of Object.entries(o.fills as Record<string, unknown>)) {
+          const lv = Number(v);
+          if (valid.has(k) && lv >= 0 && lv <= 5) {
+            if (lv === 0) delete fills[k];
+            else fills[k] = lv;
+          }
+        }
+      onResult({ ...spec, markers: o.replace === true ? out : [...spec.markers, ...out], fills });
+      const places = (Array.isArray(o.markers) ? (o.markers as Record<string, unknown>[]) : []).map((m) => `${m.label ? `${m.label} ` : ""}${m.place ?? ""}`.trim()).filter(Boolean);
+      setMsg(`${out.length}곳 찍었어요${places.length ? `: ${places.join(", ")}` : ""}${outside ? ` · ${outside}곳은 지금 보이는 영역 밖이에요` : ""}. 자리가 어긋나면 표지 목록에서 지우고 다시 찍으세요.`);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border border-slate-200 bg-slate-50 p-2">
+      <span className="text-xs font-semibold text-slate-600">AI로 점 찍기 (sol)</span>
+      <textarea
+        className="rounded border border-slate-300 px-2 py-1 text-xs"
+        rows={3}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={spec.kind === "world" ? "예: A 사하라 사막 중앙, B 아마존 분지, C 파리, D 몽골 고원 / 브라질은 회색으로" : "예: A 대관령, B 김해평야, C 제주 한라산 / 강원도 빗금"}
+      />
+      <Button type="button" size="xs" variant="outline" disabled={busy || !text.trim()} onClick={() => void run()}>
+        {busy ? "sol 이 자리를 찾는 중…" : "지시대로 찍기"}
+      </Button>
+      {msg && <span className="text-[11px] text-slate-500">{msg}</span>}
     </div>
   );
 }

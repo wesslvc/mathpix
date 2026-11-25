@@ -5,7 +5,7 @@ import { parseJsonObject } from "@/lib/problemCompare";
 import { logAiCost, solTokens } from "@/lib/costLog";
 import { cleanSvg, readDoc } from "@/lib/editor/doc";
 import { stripMedia } from "@/lib/editor/blocks";
-import { DRAFT_PROMPT, REVIEW_PROMPT, REVISE_PROMPT, SVG_PROMPT } from "@/lib/editor/prompts";
+import { DRAFT_PROMPT, MAP_PROMPT, REVIEW_PROMPT, REVISE_PROMPT, SVG_PROMPT } from "@/lib/editor/prompts";
 import { requireEditor } from "../auth";
 
 export const runtime = "nodejs";
@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     brief?: string;
     baseSvg?: string;
     figurePng?: string;
+    map?: unknown;
   } | null;
   const action = String(body?.action ?? "");
   const ctx = { modelIds: [] as string[], deadlineMs: 270_000, tag: "editor" };
@@ -59,6 +60,9 @@ export async function POST(req: NextRequest) {
     prompt = SVG_PROMPT;
     const base = typeof body?.baseSvg === "string" ? cleanSvg(body.baseSvg) : null;
     tail = `${base ? `\n\nBASE SVG\n${base.slice(0, 120_000)}` : ""}\n\nDESCRIPTION / INSTRUCTION\n${String(body?.brief ?? "").slice(0, 4000)}`;
+  } else if (action === "map") {
+    prompt = MAP_PROMPT;
+    tail = `\n\nMAP\n${JSON.stringify(body?.map ?? {}).slice(0, 8000)}\n\nINSTRUCTION\n${String(body?.instruction ?? "").slice(0, 3000)}`;
   } else {
     return NextResponse.json({ error: "알 수 없는 작업" }, { status: 400 });
   }

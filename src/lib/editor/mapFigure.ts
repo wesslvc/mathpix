@@ -254,3 +254,19 @@ function pathSvg(p: MapPath, sw: number): string {
 function r(n: number) {
   return Math.round(n * 10) / 10;
 }
+
+/*
+ * 대한민국 백지도 좌표(509×716 그림)는 위경도가 아니다. 시도 외곽 상자(서울·대전·광주·부산·울산·세종)로 1차식을 맞췄다
+ * (2026-11-25, 오차 가로 4px·세로 12px 안). 제주는 그림 오른쪽 아래로 옮겨 그린 인셋이라 따로 맞췄다. 울릉도·독도는 그림에 없다.
+ */
+export function koreaLonLatToXY(lon: number, lat: number): [number, number] {
+  if (lat < 33.7 && lon < 127.2) {
+    // 제주 인셋(한라산 33.36N 126.53E ≈ 그림 433,672)
+    return [380.7 + (lon - 126.15) * 128.26, 710.6 - (lat - 33.11) * 154.1];
+  }
+  return [-16097.69 + 128.2598 * lon - 0.95936 * lat, 6134.696 - 1.40263 * lon - 154.089 * lat];
+}
+/** 지도 종류에 맞춰 위경도 → 그림 좌표. */
+export function mapLonLatToXY(kind: MapKind, lon: number, lat: number): [number, number] {
+  return kind === "korea" ? koreaLonLatToXY(lon, lat) : lonLatToXY(lon, lat);
+}

@@ -8,16 +8,10 @@
  */
 function buildVersion() {
   if (process.env.APP_VERSION) return process.env.APP_VERSION;
-  const exam = Date.UTC(2026, 10, 18, 23, 40, 0); // 2026-11-19 08:40 KST
-  let diff = Math.floor((exam - Date.now()) / 1000);
-  const sign = diff >= 0 ? "V-" : "V+";
-  diff = Math.abs(diff);
-  const d = Math.floor(diff / 86400);
-  const h = Math.floor((diff % 86400) / 3600);
-  const m = Math.floor((diff % 3600) / 60);
-  const sec = diff % 60;
+  // 빌드한 한국 시각(날짜·시·분·초)
+  const k = new Date(Date.now() + 9 * 3600 * 1000);
   const p = (n) => String(n).padStart(2, "0");
-  return `${sign}${d}-${p(h)}:${p(m)}:${p(sec)}`;
+  return `${k.getUTCFullYear()}.${p(k.getUTCMonth() + 1)}.${p(k.getUTCDate())} ${p(k.getUTCHours())}:${p(k.getUTCMinutes())}:${p(k.getUTCSeconds())}`;
 }
 
 /** @type {import('next').NextConfig} */
