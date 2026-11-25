@@ -26,6 +26,12 @@ export const KICE_FONT_FILES: Record<string, string> = {
  * WASM 을 브라우저 번들에 넣으려다 실패한다("WebAssembly module... not
  * flagged"). 자르는 일은 서버 라우트에서만 하고 화면은 이름만 안다.
  */
+/**
+ * 문항 제작 에디터 글꼴(2028 예시문항과 같은 계열 — 본문 HY신명조 ≈ (한)신명조, 자료 HY중고딕 ≈ (환)중고딕, 굵게는 HY견명조·HY견고딕 ≈ (환)견명조·(환)견고딕).
+ * 평가원 글꼴처럼 비공개 버킷에 woff2 로 두고 `/api/kice/font/<파일>` 로 받는다(로그인 필요). CSS `@font-face` 가 이 주소를 쓴다.
+ */
+export const EDITOR_FONT_FILES = ["editor-serif.woff2", "editor-gothic.woff2", "editor-serif-bold.woff2", "editor-gothic-bold.woff2"] as const;
+
 export const KICE_FONT_NAMES = Object.keys(KICE_FONT_FILES);
 
 let cached: Promise<Record<string, Uint8Array>> | null = null;

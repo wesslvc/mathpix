@@ -125,6 +125,41 @@ export async function POST(req: NextRequest) {
     // 본문이 없어도 된다(pg_cron 은 빈 객체를 보낸다).
   }
 
+  // **문항 제작 에디터 글꼴 올리기**(2026-11-25, 한 번 쓰는 것). 2028 예시문항의 본문(HY신명조)·자료(HY중고딕)와 같은 계열인
+  // (한)신명조·(환)중고딕 원본을 받아 한글 전체+기호만 woff2 로 잘라 비공개 버킷 `kice-fonts` 에 올린다(배포권이 없어 저장소에 안 둔다).
+  if (probe === "editor-fonts") {
+    const { default: subsetFont } = await import("subset-font");
+    const only = probeModel; // 비우면 넷 다, 파일 이름을 주면 그것만
+    const jobs: [string, string][] = ([
+      ["(한)신명조.TTF", "editor-serif.woff2"],
+      ["(환)중고딕.TTF", "editor-gothic.woff2"],
+      ["(환)견명조.TTF", "editor-serif-bold.woff2"],
+      ["(환)견고딕.TTF", "editor-gothic-bold.woff2"],
+    ] as [string, string][]).filter(([, d]) => !only || d === only);
+    const ranges: [number, number][] = [
+      [0x20, 0x7e], [0xa1, 0xff], [0x2000, 0x206f], [0x2150, 0x218f], [0x2190, 0x21ff], [0x2200, 0x22ff],
+      [0x2460, 0x24ff], [0x2500, 0x257f], [0x25a0, 0x25ff], [0x2600, 0x26ff], [0x3000, 0x303f], [0x3131, 0x318e],
+      [0x3200, 0x32ff], [0xac00, 0xd7a3], [0xff01, 0xff65],
+    ];
+    let text = "";
+    for (const [a, b] of ranges) for (let c = a; c <= b; c++) text += String.fromCodePoint(c);
+    // 마지막 글리프가 깨지는 harfbuzz 버릇을 피하는 미끼(fontSubset.ts 의 HANGUL_PADDING 과 같다)
+    text += "一二三四五六七八九十百千萬億東西南北中上下左右大小年月日時分秒";
+    const out: Record<string, unknown>[] = [];
+    for (const [src, dest] of jobs) {
+      const r = await fetch(`https://raw.githubusercontent.com/cm99521/mcc/HEAD/${encodeURIComponent(src)}`);
+      if (!r.ok) {
+        out.push({ src, error: `fetch ${r.status}` });
+        continue;
+      }
+      const orig = Buffer.from(await r.arrayBuffer());
+      const woff2 = await subsetFont(orig, text, { targetFormat: "woff2" });
+      const { error } = await admin.storage.from("kice-fonts").upload(dest, woff2, { contentType: "font/woff2", upsert: true });
+      out.push({ src, dest, orig: orig.length, size: woff2.length, error: error?.message ?? null });
+    }
+    return NextResponse.json({ probe, out });
+  }
+
   // **OpenRouter 모델 확인용**(2026-10-09). 목록(무료)과, 모델 하나에 사진 + JSON 요청을 실제로 보내 본 결과(시간·글). `path` 를 주면 저장소의
   // 그 그림(예: 문제 카드)으로, 없으면 64×64 그림으로 보낸다. 키는 내보내지 않는다.
   if (probe === "openrouter-models") {

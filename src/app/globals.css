@@ -5,6 +5,13 @@
 @import "@fontsource/nanum-gothic/korean-800.css";
 @import "katex/dist/katex.min.css";
 
+/* 문항 제작 에디터 글꼴 — 2028 예시문항과 같은 계열(HY신명조·HY중고딕 ≈ (한)신명조·(환)중고딕, 굵게는 견명조·견고딕).
+   배포권이 없어 비공개 버킷에 두고 로그인한 사용자만 받는다(`/api/kice/font`). 실제로 쓰일 때만 내려받는다. */
+@font-face { font-family: "KICE Serif"; font-weight: 400; font-display: swap; src: url("/api/kice/font/editor-serif.woff2") format("woff2"); }
+@font-face { font-family: "KICE Serif"; font-weight: 700; font-display: swap; src: url("/api/kice/font/editor-serif-bold.woff2") format("woff2"); }
+@font-face { font-family: "KICE Gothic"; font-weight: 400; font-display: swap; src: url("/api/kice/font/editor-gothic.woff2") format("woff2"); }
+@font-face { font-family: "KICE Gothic"; font-weight: 700; font-display: swap; src: url("/api/kice/font/editor-gothic-bold.woff2") format("woff2"); }
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

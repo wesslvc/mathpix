@@ -66,7 +66,7 @@ export type ChartSpec = {
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const r = (n: number) => Math.round(n * 10) / 10;
-const FONT = "'Nanum Gothic','Noto Sans KR',sans-serif";
+const FONT = "'KICE Gothic','Nanum Gothic','Noto Sans KR',sans-serif";
 
 function defs(): string {
   return `<defs>

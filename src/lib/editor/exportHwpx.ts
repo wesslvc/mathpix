@@ -2,7 +2,7 @@ import { HWPXBuilder, write, type StyledSegment } from "hwpx-js";
 import { plainMath } from "@/lib/kice/solutionLayout";
 import { BOGI_LABELS, CIRCLED, pointsLabel, type QDoc } from "./doc";
 import { blockHtml, SERIF, type Block } from "./blocks";
-import { inlineHtml, showPoints } from "./render";
+import { inlineHtml, LETTER, showPoints } from "./render";
 
 /**
  * **한글(HWPX) 파일로 내보내기**(hwpx-js, Apache-2.0). A4 · 두 단 · 명조.
@@ -10,7 +10,9 @@ import { inlineHtml, showPoints } from "./render";
  * 한계(첫 버전): 수식은 한글 수식 개체가 아니라 **읽을 수 있는 글자**로 넣는다(√, 분수는 (a)/(b)).
  * 그림은 SVG 를 PNG 로 바꿔 넣는다. <보기> 상자는 표로 넣는다.
  */
-const FONT = "함초롬바탕";
+/** 한글에 함께 깔리는 실제 평가원 글꼴(2028 예시문항이 쓴 것). */
+const FONT = "HY신명조";
+const GOTHIC_FONT = "HY중고딕";
 const SIZE = 10;
 const COL_MM = (210 - 15 * 2 - 8) / 2; // 단 폭
 
@@ -67,7 +69,8 @@ export async function svgToPng(svg: string, widthPx = 1200): Promise<{ png: Uint
  */
 async function addBlock(b: HWPXBuilder, blk: Block) {
   if (blk.kind === "text") {
-    for (const p of paras(blk.text)) b.addStyledText(segments(p, blk.bold ? { bold: true } : {}));
+    const base = { ...(blk.bold ? { bold: true } : {}), ...(blk.font === "gothic" ? { fontName: GOTHIC_FONT } : {}) };
+    for (const p of paras(blk.text)) b.addStyledText(segments(p, base));
     return;
   }
   if (blk.kind === "dialog") {
@@ -83,7 +86,7 @@ async function addBlock(b: HWPXBuilder, blk: Block) {
   }
   const { captureHtml } = await import("./exportPdf");
   const W = 400;
-  const html = `<div style="font-family:${SERIF};font-size:15px;line-height:1.75;color:#111;background:#fff;padding:2px">${blockHtml(blk, inlineHtml)}</div>`;
+  const html = `<div style="font-family:${SERIF};font-size:15px;line-height:1.75;letter-spacing:${LETTER};color:#111;background:#fff;padding:2px">${blockHtml(blk, inlineHtml)}</div>`;
   const png = await captureHtml(html, W);
   const size = await pngSize(png);
   const w = COL_MM;

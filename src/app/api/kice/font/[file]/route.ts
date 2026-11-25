@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { KICE_FONT_FILES } from "@/lib/kice/fonts";
+import { EDITOR_FONT_FILES, KICE_FONT_FILES } from "@/lib/kice/fonts";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ALLOWED = new Set(Object.values(KICE_FONT_FILES));
+const ALLOWED = new Set<string>([...Object.values(KICE_FONT_FILES), ...EDITOR_FONT_FILES]);
 
 /**
  * 평가원 양식 글꼴을 내려 준다.
@@ -58,7 +58,7 @@ export async function GET(req: Request, { params }: { params: { file: string } }
   // 저장소가 주는 eTag 는 따옴표가 붙어 오기도 한다 — 한 겹으로 맞춘다.
   const etag = rawTag ? `"${String(rawTag).replace(/^"|"$/g, "")}"` : null;
   const headers = {
-    "Content-Type": "font/ttf",
+    "Content-Type": params.file.endsWith(".woff2") ? "font/woff2" : "font/ttf",
     // 사용자마다 같은 파일이지만 로그인이 있어야 받을 수 있으므로 private.
     // `must-revalidate` 로 "쓰기 전에 반드시 물어보라"를 못박는다.
     "Cache-Control": "private, no-cache, must-revalidate",

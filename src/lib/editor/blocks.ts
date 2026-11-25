@@ -155,8 +155,8 @@ function readBlock(raw: unknown, clean: (svg: string) => string | null, depth: n
 
 /* ---------------- 그리기(HTML) ---------------- */
 
-export const SERIF = "'Nanum Myeongjo', 'Noto Serif KR', serif";
-export const GOTHIC = "'Nanum Gothic', 'Noto Sans KR', sans-serif";
+export const SERIF = "'KICE Serif', 'Nanum Myeongjo', 'Noto Serif KR', serif";
+export const GOTHIC = "'KICE Gothic', 'Nanum Gothic', 'Noto Sans KR', sans-serif";
 const fontCss = (f?: Font) => (f === "gothic" ? `font-family:${GOTHIC};` : "");
 
 /** 글 칸 → HTML. `inline` 은 한 문단 안 글(수식·굵게·밑줄·네모)을 그리는 함수. */

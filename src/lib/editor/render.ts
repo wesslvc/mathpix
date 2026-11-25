@@ -7,7 +7,9 @@ import { blocksHtml, textHtml } from "./blocks";
  * 문항을 **평가원 문제지 모양의 HTML** 로 만든다. 화면 미리보기와 PDF 용 캡처가 같은 함수를 쓴다(둘이 어긋나면 안 된다).
  * 글 칸 표기: 빈 줄 = 문단, `$…$` 수식, `**굵게**`, `__밑줄__`.
  */
-const SERIF = "'Nanum Myeongjo', 'Noto Serif KR', serif";
+/** 평가원 문제지처럼 글자를 촘촘히(원본은 장평 95%·자간 음수 — 한글 한 글자가 0.88em 간격). */
+export const LETTER = "-0.1em";
+const SERIF = "'KICE Serif', 'Nanum Myeongjo', 'Noto Serif KR', serif";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -18,7 +20,7 @@ export function inlineHtml(src: string): string {
     .map((p) => {
       if (/^\$[^$]+\$$/.test(p)) {
         try {
-          return katex.renderToString(p.slice(1, -1), { throwOnError: false, output: "html" });
+          return `<span style="letter-spacing:normal">${katex.renderToString(p.slice(1, -1), { throwOnError: false, output: "html" })}</span>`;
         } catch {
           return esc(p);
         }
@@ -89,7 +91,7 @@ export function docHtml(doc: QDoc): string {
   }
   if (doc.choiceTable?.header.length) out.push(choiceTableHtml(doc.choiceTable));
   else if (doc.choices.some((c) => c.trim())) out.push(choicesHtml(doc.choices, doc.choiceLayout));
-  return `<div style="font-family:${SERIF};font-size:15px;line-height:1.75;color:#111;background:#fff;padding:8px 6px">${out.join("")}</div>`;
+  return `<div style="font-family:${SERIF};font-size:15px;line-height:1.75;letter-spacing:${LETTER};color:#111;background:#fff;padding:8px 6px">${out.join("")}</div>`;
 }
 
 /** HWPX·검색용: 표기를 떼고 수식은 읽을 수 있는 글자로. */
