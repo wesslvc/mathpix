@@ -66,7 +66,8 @@ export type ChartSpec = {
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const r = (n: number) => Math.round(n * 10) / 10;
-const FONT = "'KICE Gothic','Nanum Gothic','Noto Sans KR',sans-serif";
+/** 평가원 그래프의 눈금·범주·범례 글자는 명조(신명조)다 — 2028 예시문항을 떠서 확인했다. */
+const FONT = "'KICE Serif','Nanum Myeongjo','Noto Serif KR',serif";
 
 function defs(): string {
   return `<defs>
@@ -113,8 +114,10 @@ function marker(m: Marker | undefined, x: number, y: number, s = 4): string {
       return `<circle cx="${r(x)}" cy="${r(y)}" r="${s * 0.85}" fill="#111"/>`;
   }
 }
+/** 글자 크기 배율 — 평가원 그래프 눈금 글자는 본문의 0.75배쯤이다(카드 15px 기준 ≈ 11px). */
+const TEXT_SCALE = 1.1;
 const text = (x: number, y: number, s: string, o: { size?: number; anchor?: string; weight?: number; base?: string } = {}) =>
-  `<text x="${r(x)}" y="${r(y)}" font-family="${FONT}" font-size="${o.size ?? 11}" text-anchor="${o.anchor ?? "middle"}"${o.weight ? ` font-weight="${o.weight}"` : ""}${o.base ? ` dominant-baseline="${o.base}"` : ""} fill="#111">${esc(s)}</text>`;
+  `<text x="${r(x)}" y="${r(y)}" font-family="${FONT}" font-size="${r((o.size ?? 11) * TEXT_SCALE)}" text-anchor="${o.anchor ?? "middle"}"${o.weight ? ` font-weight="${o.weight}"` : ""}${o.base ? ` dominant-baseline="${o.base}"` : ""} fill="#111">${esc(s)}</text>`;
 
 function niceStep(span: number, count = 5): number {
   const raw = span / count;
@@ -135,18 +138,23 @@ function axisRange(vals: number[], min?: number, max?: number, step?: number, ze
   for (let v = lo; v <= hi + st / 1e6; v += st) ticks.push(Math.round(v * 1e6) / 1e6);
   return { lo, hi, ticks };
 }
-const fmt = (v: number) => (Math.abs(v) >= 1000 ? v.toLocaleString("en-US") : String(Math.round(v * 100) / 100));
+// 음수는 하이픈이 아니라 빼기 기호(−)로 — 인쇄물처럼.
+const fmt = (v: number) => (Math.abs(v) >= 1000 ? v.toLocaleString("en-US") : String(Math.round(v * 100) / 100)).replace(/^-/, "−");
 
 function legendSvg(items: { name: string; fill?: Fill; marker?: Marker; line?: boolean }[], x: number, y: number, maxW: number): { svg: string; h: number } {
   const out: string[] = [];
-  let cx = x;
-  let cy = y;
   const rowH = 16;
-  out.push(`<rect x="${r(x - 4)}" y="${r(y - 11)}" width="0" height="0"/>`);
-  for (const it of items) {
-    const w = 22 + it.name.length * 11;
-    if (cx + w > x + maxW && cx > x) {
-      cx = x;
+  const widths = items.map((it) => 20 + it.name.length * 10.5);
+  const total = widths.reduce((a, b) => a + b, 0);
+  // 한 줄에 들어가면 가운데에 놓는다(평가원 범례처럼).
+  const x0 = total <= maxW ? x + (maxW - total) / 2 : x;
+  let cx = x0;
+  let cy = y;
+  let right = x0;
+  items.forEach((it, k) => {
+    const w = widths[k];
+    if (cx + w > x + maxW && cx > x0) {
+      cx = x0;
       cy += rowH;
     }
     if (it.marker) out.push(marker(it.marker, cx + 5, cy - 4, 3.5));
@@ -154,12 +162,25 @@ function legendSvg(items: { name: string; fill?: Fill; marker?: Marker; line?: b
     else out.push(`<rect x="${cx}" y="${cy - 9}" width="11" height="9" fill="${fillPaint(it.fill)}" stroke="#000" stroke-width="0.8"/>`);
     out.push(text(cx + 15, cy, it.name, { size: 10.5, anchor: "start" }));
     cx += w;
-  }
+    right = Math.max(right, cx);
+  });
+  // 평가원 범례는 얇은 테두리 상자 안에 든다.
+  out.push(`<rect x="${r(x0 - 5)}" y="${r(y - 12)}" width="${r(right - x0 + 2)}" height="${r(cy - y + rowH - 1)}" fill="none" stroke="#000" stroke-width="0.7"/>`);
   return { svg: out.join(""), h: cy - y + rowH };
 }
 
 /** 데이터 → SVG. 크기는 viewBox 기준(카드에서 폭 % 로 줄어든다). */
-export function buildChartSvg(spec: ChartSpec): string {
+export function buildChartSvg(spec0: ChartSpec, px?: number): string {
+  /*
+   * 그래프를 **실제로 놓일 폭(px)** 으로 그린다. viewBox 를 크게 잡고 좁은 칸에 줄여 넣으면 글자가 5~6px 로 쪼그라든다
+   * (나란히 셋이면 특히). 놓일 폭을 알면 그 폭을 그대로 viewBox 폭으로 써서 글자가 본문의 0.7배쯤으로 남는다.
+   */
+  let spec = spec0;
+  if (px && !spec0.width) {
+    const w = Math.round(Math.max(150, Math.min(640, px)));
+    const ratio = spec0.type === "venn" || spec0.type === "radar" ? 0 : w < 260 ? 0.9 : 0.7;
+    spec = { ...spec0, width: w, ...(ratio && !spec0.height ? { height: Math.round(w * ratio) } : {}) };
+  }
   switch (spec.type) {
     case "radar":
       return radarSvg(spec);
@@ -190,8 +211,10 @@ function xySvg(spec: ChartSpec): string {
     : left.flatMap((s) => s.values.filter((v): v is number => v != null));
   const ya = axisRange(leftVals, spec.yMin, spec.yMax, spec.yStep);
   const y2 = right.length ? axisRange(right.flatMap((s) => s.values.filter((v): v is number => v != null)), spec.y2Min, spec.y2Max, spec.y2Step) : null;
-  const PL = 44;
-  const PR = y2 ? 44 : 14;
+  // 눈금 글자 길이에 맞춰 여백을 잡는다(좁은 그래프에서 그림 칸이 너무 작아지지 않게).
+  const tickW = (ts: number[]) => Math.max(...ts.map((t) => fmt(t).length)) * 6.2 + 10;
+  const PL = Math.max(24, tickW(ya.ticks), spec.yLabel ? spec.yLabel.length * 5 : 0);
+  const PR = Math.max(y2 ? Math.max(24, tickW(y2.ticks)) : 12, spec.y2Label ? spec.y2Label.length * 3.8 + 8 : 0);
   const PT = 26;
   const hasGroups = !!spec.groups?.some(Boolean);
   const legendItems = series.map((s) => ({ name: s.name, fill: s.fill, marker: s.as === "dot" ? s.marker ?? "dot" : undefined, line: s.as === "line" || (spec.type === "line" && s.as !== "bar") }));
@@ -290,7 +313,12 @@ function xySvg(spec: ChartSpec): string {
   let y = PT + ph + 14;
   if (hasGroups) {
     // 두 범주씩 묶는 아래 줄(예: 1월 7월 → (가))
-    const groups = spec.groups!;
+    // 묶음 이름을 묶음 수만큼만 줬으면(예: 범주 6개에 (가)(나)(다)) 범주마다 펼친다.
+    let groups = spec.groups!;
+    if (groups.length < cats.length && groups.length > 0 && cats.length % groups.length === 0) {
+      const k = cats.length / groups.length;
+      groups = cats.map((_, i) => (i % k === 0 ? groups[i / k] : ""));
+    }
     let i = 0;
     while (i < groups.length) {
       let j = i;
@@ -298,6 +326,8 @@ function xySvg(spec: ChartSpec): string {
       const xA = PL + band * i;
       const xB = PL + band * (j + 1);
       if (groups[i]) out.push(text((xA + xB) / 2, y + 14, groups[i], { size: 10.5 }));
+      // 묶음 사이 세로 구분선(평가원 기후 그래프처럼)
+      if (j + 1 < groups.length) out.push(`<line x1="${r(xB)}" y1="${PT}" x2="${r(xB)}" y2="${PT + ph}" stroke="#000" stroke-width="0.8"/>`);
       i = j + 1;
     }
     y += 14;

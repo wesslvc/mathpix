@@ -178,7 +178,7 @@ export function textHtml(src: string, inline: (s: string) => string, o: { align?
           })
           .join("");
       }
-      return `<p style="margin:0 0 6px;text-align:${align}">${inline(p.trim())}</p>`;
+      return `<p style="margin:0 0 4px;text-align:${align}${o.indentFirst ? ";text-indent:0.6em" : ""}">${inline(p.trim())}</p>`;
     })
     .join("");
 }
@@ -234,23 +234,31 @@ function tableHtml(t: TableBlock, inline: (s: string) => string): string {
 /** 사람 그림이 없을 때 쓰는 단순한 사람 모양(평가원 삽화 대신). */
 const PERSON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 48" style="width:100%;height:auto;display:block"><circle cx="20" cy="13" r="9" fill="#fff" stroke="#111" stroke-width="1.4"/><path d="M4 46c1-12 7-18 16-18s15 6 16 18" fill="#fff" stroke="#111" stroke-width="1.4"/></svg>`;
 
-export function figureInner(f: FigureBlock): string {
+export function figureInner(f: FigureBlock, px?: number): string {
   if (f.src) return `<img src="${f.src}" style="width:100%;height:auto;display:block"/>`;
-  const svg = f.chart ? buildChartSvg(f.chart) : f.svg;
+  const svg = f.chart ? buildChartSvg(f.chart, px) : f.svg;
   if (!svg) return `<div style="border:1px dashed #999;color:#999;text-align:center;padding:18px 0;font-size:12px">(그림 없음)</div>`;
   return svg.replace(/<svg/i, '<svg style="width:100%;height:auto;display:block"');
 }
 
-export function blocksHtml(blocks: Block[], inline: (s: string) => string): string {
-  return blocks.map((b) => blockHtml(b, inline)).join("");
+/** 그리는 자리의 사정: 쓸 수 있는 폭(px, 그래프 글자 크기를 맞추는 데 쓴다)·상자 안인지·고딕 안인지. */
+export type BlockCtx = { avail: number; inBox?: boolean; gothic?: boolean };
+/** 문항 카드 안쪽 폭(캡처 640 − 여백). */
+export const CARD_INNER = 600;
+/** 평가원 자료 상자 글(고딕)은 본문보다 작고 줄 간격이 좁다. */
+const GOTHIC_TEXT = "font-size:0.9em;line-height:1.6;";
+
+export function blocksHtml(blocks: Block[], inline: (s: string) => string, ctx: BlockCtx = { avail: CARD_INNER }): string {
+  return blocks.map((b) => blockHtml(b, inline, ctx)).join("");
 }
 
-export function blockHtml(b: Block, inline: (s: string) => string): string {
+export function blockHtml(b: Block, inline: (s: string) => string, ctx: BlockCtx = { avail: CARD_INNER }): string {
   switch (b.kind) {
     case "text": {
       const size = b.size === "s" ? "font-size:0.88em;" : b.size === "l" ? "font-size:1.12em;" : "";
-      const inner = textHtml(b.text, inline, { align: b.align });
-      return `<div style="${fontCss(b.font)}${size}${b.bold ? "font-weight:700;" : ""}">${inner}</div>`;
+      const inner = textHtml(b.text, inline, { align: b.align, indentFirst: ctx.inBox && (b.align ?? "justify") === "justify" });
+      const g = b.font === "gothic" && !ctx.gothic ? GOTHIC_TEXT : "";
+      return `<div style="${fontCss(b.font)}${g}${size}${b.bold ? "font-weight:700;" : ""}">${inner}</div>`;
     }
     case "box": {
       const title = b.title?.trim() ? inline(b.title.trim()) : "";
@@ -262,10 +270,12 @@ export function blockHtml(b: Block, inline: (s: string) => string): string {
           : pos === "top"
             ? `<div style="text-align:center;font-weight:700;margin:0 0 6px;${b.frame === "window" ? "border-bottom:1px solid #111;padding-bottom:4px;margin:-8px -10px 8px;background:#f0f0f0;padding-top:4px" : ""}">${title}</div>`
             : "";
-      return `<div style="position:relative;${frameCss(b.frame)}padding:${top} 10px 6px;margin:${pos === "border" ? "14px" : "8px"} 0 8px;${fontCss(b.font)}">${head}${blocksHtml(b.blocks, inline)}</div>`;
+      const g = b.font === "gothic" && !ctx.gothic ? GOTHIC_TEXT : "";
+      const inner = { avail: ctx.avail - 22, inBox: true, gothic: ctx.gothic || b.font === "gothic" };
+      return `<div style="position:relative;${frameCss(b.frame)}padding:${top} 10px 6px;margin:${pos === "border" ? "14px" : "8px"} 0 8px;${fontCss(b.font)}${g}">${head}${blocksHtml(b.blocks, inline, inner)}</div>`;
     }
     case "dialog":
-      return `<div style="margin:4px 0 6px;${fontCss(b.font)}">${b.lines
+      return `<div style="margin:4px 0 6px;${fontCss(b.font)}${b.font === "gothic" && !ctx.gothic ? GOTHIC_TEXT : ""}">${b.lines
         .map(
           (l) =>
             `<div style="display:flex;gap:4px;margin:0 0 4px;text-align:justify"><span style="flex:none;font-weight:700">${inline(l.who)}${l.who ? ":" : ""}</span><span style="flex:1;min-width:0">${inline(l.text)}</span></div>`,
@@ -275,7 +285,7 @@ export function blockHtml(b: Block, inline: (s: string) => string): string {
       return tableHtml(b, inline);
     case "figure": {
       const m = b.align === "left" ? "6px 0" : b.align === "right" ? "6px 0 6px auto" : "6px auto";
-      return `<div style="margin:${m};width:${b.widthPct}%">${figureInner(b)}${b.caption ? `<div style="text-align:center;margin-top:3px;font-size:0.92em">${inline(b.caption)}</div>` : ""}</div>`;
+      return `<div style="margin:${m};width:${b.widthPct}%">${figureInner(b, (ctx.avail * b.widthPct) / 100)}${b.caption ? `<div style="text-align:center;margin-top:3px;font-size:0.92em">${inline(b.caption)}</div>` : ""}</div>`;
     }
     case "bubble": {
       const face = `<div style="flex:none;width:44px;text-align:center">${b.src ? `<img src="${b.src}" style="width:100%;height:auto;display:block"/>` : PERSON_SVG}${b.who ? `<div style="font-size:0.85em;margin-top:2px">${inline(b.who)}</div>` : ""}</div>`;
@@ -284,11 +294,11 @@ export function blockHtml(b: Block, inline: (s: string) => string): string {
       return `<div style="display:flex;gap:10px;align-items:flex-start;margin:6px 0">${b.side === "right" ? bubble + face : face + bubble}</div>`;
     }
     case "row":
-      return `<div style="display:flex;gap:${b.gap ?? 10}px;align-items:flex-start;margin:6px 0">${b.cols.map((c) => `<div style="flex:1;min-width:0">${blocksHtml(c, inline)}</div>`).join("")}</div>`;
+      return `<div style="display:flex;gap:${b.gap ?? 10}px;align-items:flex-start;margin:6px 0">${b.cols.map((c) => `<div style="flex:1;min-width:0">${blocksHtml(c, inline, { ...ctx, avail: (ctx.avail - (b.gap ?? 10) * (b.cols.length - 1)) / Math.max(1, b.cols.length) })}</div>`).join("")}</div>`;
     case "labeled":
       return b.pos === "top"
-        ? `<div style="margin:6px 0"><div style="text-align:center;margin-bottom:3px">${inline(b.label)}</div>${blocksHtml(b.blocks, inline)}</div>`
-        : `<div style="display:flex;gap:6px;align-items:flex-start;margin:6px 0"><span style="flex:none">${inline(b.label)}</span><div style="flex:1;min-width:0">${blocksHtml(b.blocks, inline)}</div></div>`;
+        ? `<div style="margin:6px 0"><div style="text-align:center;margin-bottom:3px">${inline(b.label)}</div>${blocksHtml(b.blocks, inline, ctx)}</div>`
+        : `<div style="display:flex;gap:6px;align-items:flex-start;margin:6px 0"><span style="flex:none">${inline(b.label)}</span><div style="flex:1;min-width:0">${blocksHtml(b.blocks, inline, { ...ctx, avail: ctx.avail - 34 })}</div></div>`;
   }
 }
 

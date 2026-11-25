@@ -383,6 +383,20 @@ export default function MapTool({ initial, onApply, onClose }: { initial?: MapSp
                 </label>
               </div>
             )}
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+              <label className="flex items-center gap-1">
+                <input type="checkbox" checked={spec.landGray !== false} onChange={(e) => setSpec((s) => ({ ...s, landGray: e.target.checked }))} />
+                육지 회색
+              </label>
+              <label className="flex items-center gap-1">
+                <input type="checkbox" checked={spec.borders ?? spec.kind === "korea"} onChange={(e) => setSpec((s) => ({ ...s, borders: e.target.checked }))} />
+                {spec.kind === "world" ? "나라 경계선" : "시도 경계선"}
+              </label>
+              <label className="flex items-center gap-1">
+                <input type="checkbox" checked={spec.dotStyle === "ring"} onChange={(e) => setSpec((s) => ({ ...s, dotStyle: e.target.checked ? "ring" : "solid" }))} />
+                점을 빈 고리(○)로
+              </label>
+            </div>
             <AiMapBox spec={spec} codes={codes} onResult={(r) => setSpec(r)} />
             {spec.kind === "world" && <LonLatDot onAdd={(lon, lat, lb) => {
               const [x, y] = lonLatToXY(lon, lat);

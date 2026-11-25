@@ -43,7 +43,7 @@ function choicesHtml(choices: string[], layout: QDoc["choiceLayout"]): string {
   const cells = choices
     .map((c, i) => `<div style="display:flex;gap:6px;align-items:baseline"><span>${CIRCLED[i]}</span><span>${inlineHtml(c)}</span></div>`)
     .join("");
-  return `<div style="display:grid;grid-template-columns:repeat(${cols},minmax(0,1fr));column-gap:12px;row-gap:6px;margin-top:14px">${cells}</div>`;
+  return `<div style="display:grid;grid-template-columns:repeat(${cols},minmax(0,1fr));column-gap:12px;row-gap:1px;margin-top:10px">${cells}</div>`;
 }
 
 /** 표 꼴 선지: 첫 줄은 머리(빈 칸 + 열 이름), 다음 줄마다 ①~⑤. */
@@ -61,10 +61,15 @@ export function docHtml(doc: QDoc): string {
   const stem = paras(doc.stem);
   const first = stem.shift() ?? "";
   const out: string[] = [];
+  // 묻는 문장이 따로 없으면 배점은 발문 끝에 붙는다(평가원 문제지처럼).
+  const pts = showPoints(doc) ? ` [${pointsLabel(doc.points)}]` : "";
+  const ptsOnStem = !doc.question.trim() && pts;
+  const stemTail = (i: number, n: number) => (ptsOnStem && i === n - 1 ? pts : "");
+  // 문항 번호는 평가원처럼 굵은 고딕.
   out.push(
-    `<p style="margin:0 0 8px;text-align:justify"><b style="font-size:1.15em;margin-right:6px">${doc.number}.</b>${inlineHtml(first)}</p>`,
+    `<p style="margin:0 0 6px;text-align:justify"><b style="font-family:'KICE Gothic','Nanum Gothic',sans-serif;font-size:1.12em;margin-right:5px;letter-spacing:0">${doc.number}.</b>${inlineHtml(first)}${stemTail(0, stem.length + 1)}</p>`,
   );
-  if (stem.length) out.push(textHtml(stem.join("\n\n"), inlineHtml));
+  if (stem.length) out.push(textHtml(stem.map((p, i) => p + stemTail(i + 1, stem.length + 1)).join("\n\n"), inlineHtml));
   if (doc.figure) {
     out.push(
       `<div style="margin:10px auto 8px;width:${doc.figure.widthPct}%">${doc.figure.svg.replace(/<svg/i, '<svg style="width:100%;height:auto;display:block"')}</div>`,
@@ -73,7 +78,7 @@ export function docHtml(doc: QDoc): string {
   }
   if (doc.blocks?.length) out.push(blocksHtml(doc.blocks, inlineHtml));
   if (doc.question.trim()) {
-    out.push(`<p style="margin:4px 0 8px;text-align:justify">${inlineHtml(doc.question.trim())}${showPoints(doc) ? ` [${pointsLabel(doc.points)}]` : ""}</p>`);
+    out.push(`<p style="margin:4px 0 6px;text-align:justify">${inlineHtml(doc.question.trim())}${pts}</p>`);
   }
   const bogi = doc.bogi.filter((b) => b.trim());
   if (bogi.length) {
@@ -91,7 +96,7 @@ export function docHtml(doc: QDoc): string {
   }
   if (doc.choiceTable?.header.length) out.push(choiceTableHtml(doc.choiceTable));
   else if (doc.choices.some((c) => c.trim())) out.push(choicesHtml(doc.choices, doc.choiceLayout));
-  return `<div style="font-family:${SERIF};font-size:15px;line-height:1.75;letter-spacing:${LETTER};color:#111;background:#fff;padding:8px 6px">${out.join("")}</div>`;
+  return `<div style="font-family:${SERIF};font-size:15px;line-height:1.62;letter-spacing:${LETTER};color:#111;background:#fff;padding:8px 6px">${out.join("")}</div>`;
 }
 
 /** HWPX·검색용: 표기를 떼고 수식은 읽을 수 있는 글자로. */

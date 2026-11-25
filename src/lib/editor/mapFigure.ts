@@ -6,6 +6,8 @@
  */
 
 export type MapKind = "world" | "korea";
+/** 평가원 지도의 육지 회색. */
+export const LAND_GRAY = "#e4e4e4";
 /** 칠하기 단계: 0 흰색(기본) … 4 검정, 5 빗금. */
 export const SHADES = ["#ffffff", "#e3e3e3", "#b5b5b5", "#7a7a7a", "#2b2b2b"] as const;
 export const SHADE_LABELS = ["흰색", "연회색", "회색", "진회색", "검정", "빗금"] as const;
@@ -30,6 +32,12 @@ export type MapSpec = {
   grid: number;
   /** 손으로 그은 선(이동 경로·하천)·영역(문화권 범위). */
   paths?: MapPath[];
+  /** 나라(시도) 경계선을 그릴지 — 없으면 해안선만(평가원 세계 지도처럼). 기본: 세계는 끔, 대한민국은 켬. */
+  borders?: boolean;
+  /** 육지를 옅은 회색으로(평가원 지도처럼, 기본 켬). 끄면 흰 육지. */
+  landGray?: boolean;
+  /** 점 모양: 까만 점(평가원, 기본) / 속이 빈 고리. */
+  dotStyle?: "ring" | "solid";
 };
 
 export type MapPath = {
@@ -168,19 +176,44 @@ export function buildMapSvg(spec: MapSpec, data: MapData, bboxes?: Map<string, [
     return b[0] < vx + vw && b[0] + b[2] > vx && b[1] < vy + vh && b[1] + b[3] > vy;
   };
   const out: string[] = [];
+  /*
+   * 정의(빗금·자르기) id 는 지도마다 달라야 한다 — 한 화면에 지도가 둘이면(세계 + 대한민국) 같은 id 를 서로 집어
+   * 둘째 지도가 첫째 지도의 자르기 상자로 잘려 통째로 사라졌다. 보이는 영역으로 이름을 짓는다(같은 영역이면 같은 정의라 무해).
+   */
+  let hh = 0;
+  for (const ch of `${spec.kind}${spec.view.join(",")}`) hh = (hh * 31 + ch.charCodeAt(0)) | 0;
+  const uid = `m${(hh >>> 0).toString(36)}`;
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${r(vx)} ${r(vy)} ${r(vw)} ${r(vh)}">`);
   out.push(
-    `<defs><pattern id="hatch" patternUnits="userSpaceOnUse" width="${r(sw * 6)}" height="${r(sw * 6)}" patternTransform="rotate(45)"><rect width="${r(sw * 6)}" height="${r(sw * 6)}" fill="#fff"/><line x1="0" y1="0" x2="0" y2="${r(sw * 6)}" stroke="#000" stroke-width="${r(sw * 1.2)}"/></pattern><clipPath id="clip"><rect x="${r(vx)}" y="${r(vy)}" width="${r(vw)}" height="${r(vh)}"/></clipPath></defs>`,
+    `<defs><pattern id="${uid}h" patternUnits="userSpaceOnUse" width="${r(sw * 6)}" height="${r(sw * 6)}" patternTransform="rotate(45)"><rect width="${r(sw * 6)}" height="${r(sw * 6)}" fill="#fff"/><line x1="0" y1="0" x2="0" y2="${r(sw * 6)}" stroke="#000" stroke-width="${r(sw * 1.2)}"/></pattern><clipPath id="${uid}c"><rect x="${r(vx)}" y="${r(vy)}" width="${r(vw)}" height="${r(vh)}"/></clipPath></defs>`,
   );
   out.push(`<rect x="${r(vx)}" y="${r(vy)}" width="${r(vw)}" height="${r(vh)}" fill="#fff"/>`);
-  out.push(`<g clip-path="url(#clip)" stroke="#000" stroke-width="${r(sw)}" stroke-linejoin="round">`);
+  const borders = spec.borders ?? spec.kind === "korea";
+  const land = spec.landGray === false ? "#ffffff" : LAND_GRAY;
+  const shapes: { fill: string; ds: string[] }[] = [];
   for (const [code, ds] of Object.entries(data.shapes)) {
     const lv = spec.fills[code] ?? 0;
-    const fill = lv === 5 ? "url(#hatch)" : SHADES[Math.min(lv, 4)];
     const shown = ds.filter(vis);
-    if (!shown.length) continue;
-    // 경로를 이어 붙이면 안 된다 — 원본 경로가 소문자 m(상대)으로 시작해 앞 경로 끝에서 이어져 버린다.
-    out.push(shown.length === 1 ? `<path fill="${fill}" d="${shown[0]}"/>` : `<g fill="${fill}">${shown.map((d) => `<path d="${d}"/>`).join("")}</g>`);
+    if (shown.length) shapes.push({ fill: lv === 5 ? `url(#${uid}h)` : lv ? SHADES[Math.min(lv, 4)] : land, ds: shown });
+  }
+  // 경로를 이어 붙이면 안 된다 — 원본 경로가 소문자 m(상대)으로 시작해 앞 경로 끝에서 이어져 버린다.
+  const paths = (ds: string[]) => ds.map((d) => `<path d="${d}"/>`).join("");
+  const stroked = (x: { fill: string; ds: string[] }) => `<g fill="${x.fill}" stroke="#000" stroke-width="${r(sw * 2.6)}">${paths(x.ds)}</g>`;
+  // 덮는 층은 제 색으로 얇게 테두리를 둘러 이음매(안티에일리어싱 실금)까지 덮는다.
+  const cover = (x: { fill: string; ds: string[] }) => `<g fill="${x.fill}" stroke="${x.fill}" stroke-width="${r(sw * 0.9)}">${paths(x.ds)}</g>`;
+  out.push(`<g clip-path="url(#${uid}c)" stroke-linejoin="round">`);
+  if (borders) {
+    /*
+     * 나라(시도) 경계만: 나라마다 "굵게 긋고 → 선 없이 덮기"를 차례로 하면 그 나라 안쪽 선(대한민국 자료의 시군구 경계)은 덮이고
+     * 이웃과의 경계는 뒤에 그린 쪽이 덮지 못한 절반이 남는다.
+     */
+    for (const x of shapes) out.push(stroked(x) + cover(x));
+  } else {
+    // 해안선만: 모두 굵게 그은 위에 모두 덮으면 나라 사이 선은 가려지고 바다 쪽 절반만 남는다.
+    out.push(`<g>${shapes.map(stroked).join("")}</g><g>${shapes.map(cover).join("")}</g>`);
+    // 칠한 나라는 테두리를 다시 그어 둘레가 보이게(평가원 지도에서 칠한 나라는 윤곽이 있다).
+    const filled = shapes.filter((x) => x.fill !== land);
+    if (filled.length) out.push(`<g fill="none" stroke="#000" stroke-width="${r(sw * 1.1)}">${filled.map((x) => paths(x.ds)).join("")}</g>`);
   }
   if (spec.kind === "world" && spec.grid > 0) {
     const g: string[] = [];
@@ -204,13 +237,18 @@ export function buildMapSvg(spec: MapSpec, data: MapData, bboxes?: Map<string, [
     if (g.length) out.push(`<path fill="none" stroke="#000" stroke-width="${r(sw * 0.6)}" stroke-dasharray="${r(sw * 4)} ${r(sw * 3)}" d="${g.join("")}"/>`);
   }
   out.push(`</g>`);
-  for (const p of spec.paths ?? []) out.push(pathSvg(p, sw));
+  for (const p of spec.paths ?? []) out.push(pathSvg(p, sw, uid));
   for (const m of spec.markers) {
-    if (m.dot) out.push(`<circle cx="${r(m.x)}" cy="${r(m.y)}" r="${r(sw * 3.2)}" fill="#000"/>`);
+    if (m.dot)
+      out.push(
+        spec.dotStyle !== "ring"
+          ? `<circle cx="${r(m.x)}" cy="${r(m.y)}" r="${r(sw * 3.8)}" fill="#000"/>`
+          : `<circle cx="${r(m.x)}" cy="${r(m.y)}" r="${r(sw * 3.6)}" fill="#fff" stroke="#000" stroke-width="${r(sw * 2)}"/>`,
+      );
     if (m.label) {
       const tx = m.dot ? m.x + sw * 5 : m.x;
       out.push(
-        `<text x="${r(tx)}" y="${r(m.y)}" font-family="'Nanum Myeongjo','Batang',serif" font-size="${r(font)}" font-weight="700" dominant-baseline="middle" text-anchor="${m.dot ? "start" : "middle"}" stroke="#fff" stroke-width="${r(font / 6)}" paint-order="stroke">${esc(m.label)}</text>`,
+        `<text x="${r(tx)}" y="${r(m.y)}" font-family="'KICE Serif','Nanum Myeongjo','Batang',serif" font-size="${r(font)}" font-weight="700" dominant-baseline="middle" text-anchor="${m.dot ? "start" : "middle"}" stroke="#fff" stroke-width="${r(font / 6)}" paint-order="stroke">${esc(m.label)}</text>`,
       );
     }
   }
@@ -236,8 +274,8 @@ export function pathD(p: MapPath): string {
   return d + (p.closed ? "Z" : "");
 }
 
-function pathSvg(p: MapPath, sw: number): string {
-  const fill = p.closed && p.fill ? (p.fill === 5 ? "url(#hatch)" : SHADES[Math.min(p.fill, 4)]) : "none";
+function pathSvg(p: MapPath, sw: number, uid: string): string {
+  const fill = p.closed && p.fill ? (p.fill === 5 ? `url(#${uid}h)` : SHADES[Math.min(p.fill, 4)]) : "none";
   const dash = p.dash ? ` stroke-dasharray="${r(sw * 5)} ${r(sw * 3)}"` : "";
   let out = `<path d="${pathD(p)}" fill="${fill}"${p.closed && p.fill ? ' fill-opacity="0.85"' : ""} stroke="#000" stroke-width="${r(sw * 1.6)}" stroke-linejoin="round" stroke-linecap="round"${dash}/>`;
   if (p.arrow && !p.closed && p.pts.length >= 2) {
