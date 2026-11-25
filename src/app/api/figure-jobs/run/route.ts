@@ -263,7 +263,7 @@ export async function POST(req: NextRequest) {
       const got = await loadAsDataUrl(createAdminClient(), probeId);
       if (got) image = got;
     }
-    const sol = probeModel || "gpt-6.1-sol";
+    const sol = probeModel || "gpt-6.2-sol";
     const img = probePrompt || "gpt-image-2.6-sunburst";
     const jsonl = [
       { custom_id: "sol", method: "POST", url: "/v1/responses", body: { model: sol, input: [{ role: "user", content: [{ type: "input_text", text: 'reply ONLY JSON {"ok":true,"color":"<main color of the picture>"}' }, { type: "input_image", image_url: image, detail: "low" }] }], text: { format: { type: "json_object" } }, reasoning: { effort: "low" } } },

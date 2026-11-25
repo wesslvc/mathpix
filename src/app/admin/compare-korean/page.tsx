@@ -51,7 +51,7 @@ import { cn } from "@/lib/utils";
  */
 
 /** 운영 지문 인식 모델(`OPENAI_TEXT_MODEL` 기본값과 같다). */
-const READ_MODEL = "gpt-6.1-sol";
+const READ_MODEL = "gpt-6.2-sol";
 
 /** 눌러서 고르는 추론 강도 — 2026-09-25 probe 로 받는 값을 확인했다. */
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -60,7 +60,7 @@ const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
  * 지문 위치 찾기 칸에서 눌러 고르는 OpenAI 모델. 둘 다 이 계정의 `/v1/models`
  * 에 있고 사진 요청이 실제로 통한 것만 둔다(2026-09-25 probe).
  */
-const OPENAI_PRESETS = ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"];
+const OPENAI_PRESETS = ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.2-sol"];
 
 type Reader = { key: "a" | "b"; provider: "openai" | "openrouter"; model: string; effort: string };
 
@@ -69,7 +69,7 @@ type Reader = { key: "a" | "b"; provider: "openai" | "openrouter"; model: string
  * 에서 확인했고(단가 입력 $2 · 출력 $10 — sol 과 같다), 사진 + JSON 요청이 통하는 것까지 봤다.
  */
 const READER_MODELS: { label: string; provider: Reader["provider"]; model: string }[] = [
-  { label: "gpt-6.1-sol", provider: "openai", model: READ_MODEL },
+  { label: "gpt-6.2-sol", provider: "openai", model: READ_MODEL },
   { label: "gemini-4-argon (OpenRouter)", provider: "openrouter", model: "google/gemini-4-argon" },
 ];
 

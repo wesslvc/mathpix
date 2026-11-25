@@ -67,7 +67,7 @@ export function modelFromWhat(what: string): string | null {
   if (what.startsWith("하이쿠")) return HAIKU_MODEL;
   if (what.startsWith("그림") || what.startsWith("지문 그림")) return (process.env.OPENAI_FIGURE_IMAGE_MODELS?.split(",")[0]?.trim()) || "gpt-image-2.6-sunburst";
   if (what.startsWith("sol ") || what === "지문 읽기" || what === "서식 검수" || what.startsWith("지문 읽기(") || what.startsWith("서식 검수(")) {
-    return process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-6.1-sol";
+    return process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-6.2-sol";
   }
   if (what.startsWith("luna ") || what === "자동채점" || what === "답지 읽기" || what === "지문 제목 짓기") {
     return process.env.OPENAI_DETECT_MODEL ?? "gpt-6-luna";

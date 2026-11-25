@@ -749,7 +749,7 @@ function parseAnswerKey(text: string): AnswerKeyItem[] {
  * `default` 를 적는다(모델 기본값으로 부른다). OpenAI 하나뿐이다 — 예전의
  * Gemini Flash 먼저 시도하기는 걷어냈다(같은 지시).
  */
-export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-6.1-sol";
+export const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL?.trim() || "gpt-6.2-sol";
 const TEXT_EFFORT_ENV = process.env.OPENAI_TEXT_EFFORT?.trim() || "medium";
 export const OPENAI_TEXT_EFFORT: string | undefined =
   TEXT_EFFORT_ENV === "default" ? undefined : TEXT_EFFORT_ENV;

@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     const { id: _id, updatedAt: _u, figure, blocks, ...rest } = x;
     void _id;
     void _u;
-    return JSON.stringify({ ...rest, blocks: stripMedia(blocks).blocks, hasFigure: !!figure, figureCaption: figure?.caption ?? "" });
+    return JSON.stringify({ ...rest, blocks: stripMedia(blocks).blocks, figure: figure ? { widthPct: figure.widthPct, caption: figure.caption ?? "" } : null });
   };
   if (action === "draft") {
     prompt = DRAFT_PROMPT;

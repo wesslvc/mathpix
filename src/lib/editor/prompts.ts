@@ -20,6 +20,14 @@ const BLOCKS = `MATERIALS ("blocks", array, placed after the figure and before t
 a map or a free drawing cannot be a block from you: describe it in "figure_brief". keep "stem" short (the lead sentence, e.g. "다음 자료에 대한 설명으로 옳은 것은?" goes in "question"). use "blocks": [] when not needed.
 "choiceTable" (optional): {"header":["(가)","(나)"],"rows":[["…","…"],…5 rows]} for choices that pick one value per column; then "choices" may be [].`;
 
+const LAYOUT = `LAYOUT (조판) — the item is typeset exactly like a 평가원 paper by our renderer; you control it with these fields:
+"points": 2|2.5|3 (배점, 0.5 steps), "showPoints": true to print [2점] too (2점 is normally not printed), "number": item number,
+"choiceLayout": "auto"|5|3|2|1 (choices per line: 5 = all on one line, 1 = one per line; auto picks by length),
+"choiceTable": {"header":[…],"rows":[…5 rows]} or null to remove it,
+"figure": {"widthPct": 30-100, "caption": "(가)"} (size/caption of the existing figure only),
+order and nesting of "blocks" (row = side by side, labeled = (가)(나) 표지, box frame/titlePos, text font serif|gothic and align).
+follow 평가원 conventions: 발문 → 자료 → 묻는 문장 → <보 기> → 선지; <보 기> title centered on the box border; 자료 상자 글 in 고딕; short choices on one line.`;
+
 export const DRAFT_PROMPT = `task: you are a Korean exam item writer. write ONE new multiple-choice exam item from the request after this text.
 ${STYLE}
 ${BLOCKS}
@@ -28,12 +36,14 @@ SOLVE your item and make sure exactly one choice is correct; write the 해설 in
 reply ONLY JSON: {"title":"짧은 제목","stem":"발문 첫 문장","blocks":[…],"question":"묻는 문장","bogi":["ㄱ 진술","ㄴ 진술","ㄷ 진술"],"choices":["…","…","…","…","…"],"answer":1-5,"figure_brief":"","solution":"…"}
 ("bogi" may be [] when the item has no <보기>.)`;
 
-export const REVISE_PROMPT = `task: you are a Korean exam item editor. the CURRENT ITEM (JSON) and the author's INSTRUCTION follow. revise the item as instructed, change nothing else.
+export const REVISE_PROMPT = `task: you are a Korean exam item editor and typesetter. the CURRENT ITEM (JSON) and the author's INSTRUCTION follow. revise the item (content and/or layout) exactly as instructed, change nothing else.
 ${STYLE}
 ${BLOCKS}
+${LAYOUT}
 figure blocks whose "svg"/"src" is a placeholder like "keep:3" must be returned with that SAME placeholder unchanged (you cannot see those pictures).
 SOLVE the revised item; update "answer" and "solution" if needed.
-reply ONLY JSON with the same keys: {"title","stem","blocks","question","bogi","choices","choiceTable","answer","solution"}`;
+reply ONLY JSON with the same keys: {"title","number","points","showPoints","stem","figure","blocks","question","bogi","choices","choiceLayout","choiceTable","answer","solution"}
+("figure" only when the item has one; omit a key you did not change.)`;
 
 export const REVIEW_PROMPT = `task: you are a strict reviewer of Korean national-exam (평가원) items. the ITEM (JSON) follows; image 1 (if attached) is the WHOLE rendered item exactly as it will be printed — read figures, charts, maps and tables from it.
 check: (1) SOLVE it — is exactly one choice correct and does it equal "answer"? (2) is everything inside the national curriculum of the subject? (3) wording: ambiguous, wrong terms, typos, non-exam style? (4) figure consistent with the text? (5) <보기>/choice set format (letters ascending inside a choice).

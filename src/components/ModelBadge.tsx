@@ -9,7 +9,7 @@ export type ModelKey = "haiku" | "luna" | "sol" | "sunburst";
 const MODELS: Record<ModelKey, { logo: string; name: string; maker: string }> = {
   haiku: { logo: "/brand/ai/claude.png", name: "claude-haiku-5.5", maker: "Anthropic" },
   luna: { logo: "/brand/ai/openai.png", name: "gpt-6-luna", maker: "OpenAI" },
-  sol: { logo: "/brand/ai/openai.png", name: "gpt-6.1-sol", maker: "OpenAI" },
+  sol: { logo: "/brand/ai/openai.png", name: "gpt-6.2-sol", maker: "OpenAI" },
   sunburst: { logo: "/brand/ai/openai.png", name: "gpt-image-2.6-sunburst", maker: "OpenAI" },
 };
 

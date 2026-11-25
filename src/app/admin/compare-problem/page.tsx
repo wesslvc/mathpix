@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
  * 토큰은 차감하지 않는다. (운영·① 단독·③ 조판과 견주던 예전 비교 화면은 git 이력에 있다.)
  */
 
-const SOL_MODEL = "gpt-6.1-sol";
+const SOL_MODEL = "gpt-6.2-sol";
 const EFFORTS = ["low", "medium", "high"];
 /**
  * sunburst 출력 품질 사다리 — **low → medium → max 세 단계로 고정**이다(사용자 — "low min max

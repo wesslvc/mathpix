@@ -175,6 +175,24 @@ export default function EditorApp() {
       extra.blocks = readDoc({ blocks: restoreMedia(r.blocks, media) }, cur.id).blocks;
     }
     if (r.choiceTable && typeof r.choiceTable === "object" && cur) extra.choiceTable = readDoc({ choiceTable: r.choiceTable }, cur.id).choiceTable;
+    else if (r.choiceTable === null && "choiceTable" in r) extra.choiceTable = undefined;
+    // 조판 설정(배점·번호·선지 배치·그림 크기) — 준 것만 바꾼다.
+    if (cur) {
+      const t = readDoc({ ...cur, ...("points" in r ? { points: r.points } : {}), ...("showPoints" in r ? { showPoints: r.showPoints } : {}), ...("number" in r ? { number: r.number } : {}), ...("choiceLayout" in r ? { choiceLayout: r.choiceLayout } : {}) }, cur.id);
+      if ("points" in r) extra.points = t.points;
+      if ("showPoints" in r) extra.showPoints = t.showPoints;
+      if ("number" in r) extra.number = t.number;
+      if ("choiceLayout" in r) extra.choiceLayout = t.choiceLayout;
+      const f = r.figure as { widthPct?: unknown; caption?: unknown } | null | undefined;
+      if (cur.figure && f && typeof f === "object") {
+        const w = Number(f.widthPct);
+        extra.figure = {
+          ...cur.figure,
+          ...(Number.isFinite(w) ? { widthPct: Math.max(20, Math.min(100, Math.round(w))) } : {}),
+          ...(typeof f.caption === "string" ? { caption: f.caption } : {}),
+        };
+      }
+    }
     const choices = Array.isArray(r.choices) ? r.choices.slice(0, 5).map(s) : undefined;
     patch({
       ...(s(r.title) ? { title: s(r.title) } : {}),
